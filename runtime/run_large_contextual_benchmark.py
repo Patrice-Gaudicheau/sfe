@@ -2027,7 +2027,7 @@ def run_benchmark(
             },
             "final_phase_conclusion": FINAL_PHASE_CONCLUSION,
         },
-        "summary": summarize_runs(runs),
+        "summary": summarize_runs(runs, task_tier=task_tier),
         "per_task": summarize_per_task(runs),
         "tasks": [task_to_dict(task) for task in tasks],
         "runs": runs,
@@ -2845,7 +2845,9 @@ def validate_output(task: LargeContextualTask, output: str) -> dict[str, Any]:
     }
 
 
-def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_runs(
+    runs: list[dict[str, Any]], task_tier: str | None = None
+) -> dict[str, Any]:
     if not runs:
         raise ValueError("At least one run is required for summary reporting.")
 
@@ -2885,6 +2887,10 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     summary["router_selection"] = summarize_router_selection(router_runs)
     summary["output_validation"] = summarize_output_validation(runs)
     summary["output_repair"] = summarize_output_repair(runs)
+    if task_tier is not None and normalize_task_tier(task_tier) == TASK_TIER_STRUCTURAL:
+        summary["structural_reliability_cost"] = (
+            summarize_structural_reliability_cost(runs)
+        )
     summary["final_phase_conclusion"] = FINAL_PHASE_CONCLUSION
     return summary
 
@@ -3003,6 +3009,80 @@ def summarize_output_repair(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "disabled_count": len(disabled),
         "added_total_tokens": sum(added_tokens),
         "added_latency_ms": sum(added_latency_ms),
+    }
+
+
+def summarize_structural_reliability_cost(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    baseline_runs = [run for run in runs if run["mode"] == "baseline"]
+    router_runs = [run for run in runs if run["mode"] == "spatial_router"]
+    baseline_total_tokens = _optional_average(
+        run.get("total_tokens") for run in baseline_runs
+    )
+    spatial_router_router_tokens = _optional_average(
+        run.get("router_total_tokens") for run in router_runs
+    )
+    spatial_router_executor_tokens = _optional_average(
+        run.get("total_tokens") for run in router_runs
+    )
+    spatial_router_total_tokens = _optional_average(
+        run.get("router_end_to_end_total_tokens") for run in router_runs
+    )
+    output_repair_added_tokens = _optional_average(
+        run.get("output_repair_added_tokens") for run in router_runs
+    )
+    spatial_router_total_tokens_after_repair = _optional_sum(
+        spatial_router_total_tokens,
+        output_repair_added_tokens,
+    )
+    tokens_saved_before_repair_vs_baseline = _optional_difference(
+        baseline_total_tokens,
+        spatial_router_total_tokens,
+    )
+    tokens_saved_after_repair_vs_baseline = _optional_difference(
+        baseline_total_tokens,
+        spatial_router_total_tokens_after_repair,
+    )
+    return {
+        "run_count": len(router_runs),
+        "baseline_total_tokens": baseline_total_tokens,
+        "spatial_router_total_tokens": spatial_router_total_tokens,
+        "spatial_router_router_tokens": spatial_router_router_tokens,
+        "spatial_router_executor_tokens": spatial_router_executor_tokens,
+        "output_repair_added_tokens": output_repair_added_tokens,
+        "spatial_router_total_tokens_after_repair": (
+            spatial_router_total_tokens_after_repair
+        ),
+        "tokens_saved_before_repair_vs_baseline": (
+            tokens_saved_before_repair_vs_baseline
+        ),
+        "tokens_saved_after_repair_vs_baseline": (
+            tokens_saved_after_repair_vs_baseline
+        ),
+        "token_reduction_before_repair_vs_baseline_pct": (
+            _optional_percent_reduction(
+                baseline_total_tokens,
+                spatial_router_total_tokens,
+            )
+        ),
+        "token_reduction_after_repair_vs_baseline_pct": (
+            _optional_percent_reduction(
+                baseline_total_tokens,
+                spatial_router_total_tokens_after_repair,
+            )
+        ),
+        "repair_token_tax": output_repair_added_tokens,
+        "repair_token_tax_pct_of_router_executor": _optional_ratio_percent(
+            output_repair_added_tokens,
+            spatial_router_total_tokens,
+        ),
+        "success": all(bool(run.get("success")) for run in router_runs)
+        if router_runs
+        else None,
+        "success_after_output_repair": all(
+            bool(run.get("success_after_output_repair")) for run in router_runs
+        )
+        if router_runs
+        else None,
     }
 
 
@@ -3143,6 +3223,39 @@ def _optional_int(value: Any) -> int | None:
     return int(value)
 
 
+def _optional_average(values: Any) -> float | None:
+    numbers = [float(value) for value in values if value is not None]
+    return average(numbers) if numbers else None
+
+
+def _optional_sum(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left + right
+
+
+def _optional_difference(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left - right
+
+
+def _optional_percent_reduction(
+    baseline: float | None, reduced: float | None
+) -> float | None:
+    if baseline is None or reduced is None:
+        return None
+    return percent_reduction(baseline, reduced)
+
+
+def _optional_ratio_percent(
+    numerator: float | None, denominator: float | None
+) -> float | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return (numerator / denominator) * 100.0
+
+
 def deterministic_latency_ms(task_label: str, mode: str, input_tokens: int) -> int:
     mode_offset = 45 if mode == "spatial" else 90
     label_offset = sum(ord(char) for char in task_label) % 37
@@ -3211,6 +3324,35 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"Output repair disabled runs: {report['summary']['output_repair']['disabled_count']}",
             f"Output repair added total tokens: {report['summary']['output_repair']['added_total_tokens']}",
             f"Output repair added latency ms: {report['summary']['output_repair']['added_latency_ms']}",
+        ]
+    )
+    structural_cost = report["summary"].get("structural_reliability_cost")
+    if structural_cost is not None:
+        lines.extend(
+            [
+                "",
+                "## Structural Reliability Cost",
+                "",
+                "| Metric | Value |",
+                "| --- | ---: |",
+                f"| Baseline total tokens | {_format_optional_number(structural_cost['baseline_total_tokens'])} |",
+                f"| Spatial router total tokens | {_format_optional_number(structural_cost['spatial_router_total_tokens'])} |",
+                f"| Spatial router router tokens | {_format_optional_number(structural_cost['spatial_router_router_tokens'])} |",
+                f"| Spatial router executor tokens | {_format_optional_number(structural_cost['spatial_router_executor_tokens'])} |",
+                f"| Output repair added tokens | {_format_optional_number(structural_cost['output_repair_added_tokens'])} |",
+                f"| Spatial router total tokens after repair | {_format_optional_number(structural_cost['spatial_router_total_tokens_after_repair'])} |",
+                f"| Tokens saved before repair vs baseline | {_format_optional_number(structural_cost['tokens_saved_before_repair_vs_baseline'])} |",
+                f"| Tokens saved after repair vs baseline | {_format_optional_number(structural_cost['tokens_saved_after_repair_vs_baseline'])} |",
+                f"| Token reduction before repair vs baseline | {_format_optional_percent_value(structural_cost['token_reduction_before_repair_vs_baseline_pct'])} |",
+                f"| Token reduction after repair vs baseline | {_format_optional_percent_value(structural_cost['token_reduction_after_repair_vs_baseline_pct'])} |",
+                f"| Repair token tax | {_format_optional_number(structural_cost['repair_token_tax'])} |",
+                f"| Repair token tax pct of router+executor | {_format_optional_percent_value(structural_cost['repair_token_tax_pct_of_router_executor'])} |",
+                f"| Success | {_format_optional_bool(structural_cost['success'])} |",
+                f"| Success after output repair | {_format_optional_bool(structural_cost['success_after_output_repair'])} |",
+            ]
+        )
+    lines.extend(
+        [
             "",
             "## Router Selection",
             "",
@@ -3352,6 +3494,18 @@ def _format_optional_number(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.2f}"
+
+
+def _format_optional_percent_value(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.2f}%"
+
+
+def _format_optional_bool(value: bool | None) -> str:
+    if value is None:
+        return "n/a"
+    return str(bool(value))
 
 
 def _markdown_cell(value: object) -> str:

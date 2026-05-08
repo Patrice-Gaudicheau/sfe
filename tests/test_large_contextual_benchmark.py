@@ -668,6 +668,7 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
                 0,
             )
             self.assertEqual(report["summary"]["output_validation"]["required_count"], 0)
+            self.assertNotIn("structural_reliability_cost", report["summary"])
             router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
             self.assertIsNone(router_run["selection_verification_required"])
             self.assertIsNone(router_run["selection_verification_status"])
@@ -1062,6 +1063,39 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["summary"]["output_repair"]["completed_count"], 1)
         self.assertEqual(report["summary"]["output_repair"]["incomplete_count"], 0)
         self.assertEqual(report["summary"]["output_repair"]["added_total_tokens"], 28)
+        reliability_cost = report["summary"]["structural_reliability_cost"]
+        self.assertEqual(reliability_cost["baseline_total_tokens"], 24.0)
+        self.assertEqual(reliability_cost["spatial_router_total_tokens"], 29.0)
+        self.assertEqual(reliability_cost["spatial_router_router_tokens"], 3.0)
+        self.assertEqual(reliability_cost["spatial_router_executor_tokens"], 26.0)
+        self.assertEqual(reliability_cost["output_repair_added_tokens"], 28.0)
+        self.assertEqual(
+            reliability_cost["spatial_router_total_tokens_after_repair"],
+            57.0,
+        )
+        self.assertEqual(
+            reliability_cost["tokens_saved_before_repair_vs_baseline"],
+            -5.0,
+        )
+        self.assertEqual(
+            reliability_cost["tokens_saved_after_repair_vs_baseline"],
+            -33.0,
+        )
+        self.assertAlmostEqual(
+            reliability_cost["token_reduction_before_repair_vs_baseline_pct"],
+            -20.8333333333,
+        )
+        self.assertEqual(
+            reliability_cost["token_reduction_after_repair_vs_baseline_pct"],
+            -137.5,
+        )
+        self.assertEqual(reliability_cost["repair_token_tax"], 28.0)
+        self.assertAlmostEqual(
+            reliability_cost["repair_token_tax_pct_of_router_executor"],
+            96.5517241379,
+        )
+        self.assertFalse(reliability_cost["success"])
+        self.assertTrue(reliability_cost["success_after_output_repair"])
 
     def test_long_alias_dry_run_reports_practical_tier(self) -> None:
         report = run_benchmark(
@@ -1305,6 +1339,31 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertIn("| False | False | True | n/a | n/a | n/a | n/a |", markdown)
         self.assertIn("router unavailable", markdown)
         self.assertIn("Router failed; fell back to fixture-selected block", markdown)
+        self.assertNotIn("## Structural Reliability Cost", markdown)
+
+    def test_structural_markdown_report_includes_reliability_cost(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="both",
+            task_tier=TASK_TIER_STRUCTURAL,
+        )
+
+        from runtime.run_large_contextual_benchmark import write_markdown
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.md"
+            write_markdown(path, report)
+            markdown = path.read_text(encoding="utf-8")
+
+        self.assertIn("## Structural Reliability Cost", markdown)
+        self.assertIn("| Baseline total tokens |", markdown)
+        self.assertIn("| Spatial router total tokens |", markdown)
+        self.assertIn("| Spatial router total tokens after repair |", markdown)
+        self.assertIn("| Repair token tax pct of router+executor |", markdown)
+        self.assertIn("| Success after output repair |", markdown)
 
     def test_empty_task_set_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "At least one"):
