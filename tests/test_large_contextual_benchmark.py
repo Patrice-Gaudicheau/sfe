@@ -29,6 +29,7 @@ from runtime.run_large_contextual_benchmark import (
     build_prompt,
     build_selector_prompt,
     estimate_tokens,
+    filter_tasks_by_label,
     get_large_contextual_tasks,
     normalize_task_tier,
     parse_selector_output,
@@ -164,6 +165,60 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             [task.task_label for task in alias_tasks],
             [task.task_label for task in practical_tasks],
+        )
+
+    def test_task_label_filter_selects_exact_existing_task(self) -> None:
+        tasks = get_large_contextual_tasks(TASK_TIER_HIGH_CONTEXT)
+        selected = filter_tasks_by_label(
+            tasks,
+            "large_contextual_high_context_boreal_eval_release_gate",
+            TASK_TIER_HIGH_CONTEXT,
+        )
+
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(
+            selected[0].task_label,
+            "large_contextual_high_context_boreal_eval_release_gate",
+        )
+
+    def test_task_label_filter_rejects_unknown_label_clearly(self) -> None:
+        tasks = get_large_contextual_tasks(TASK_TIER_HIGH_CONTEXT)
+
+        with self.assertRaisesRegex(ValueError, "not found in task tier 'high_context'") as raised:
+            filter_tasks_by_label(tasks, "missing-task", TASK_TIER_HIGH_CONTEXT)
+
+        self.assertIn("large_contextual_high_context_orion_router_budget_gate", str(raised.exception))
+        self.assertIn("large_contextual_high_context_boreal_eval_release_gate", str(raised.exception))
+
+    def test_cli_accepts_task_label_without_changing_default_tier(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_large_contextual_benchmark.py",
+                "--task-label",
+                "large_contextual_payments_failover",
+                "--dry-run",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.task_tier, TASK_TIER_STANDARD)
+        self.assertEqual(args.task_label, "large_contextual_payments_failover")
+
+    def test_task_label_filter_is_applied_before_limit(self) -> None:
+        tasks = get_large_contextual_tasks(TASK_TIER_HIGH_CONTEXT)
+        selected = filter_tasks_by_label(
+            tasks,
+            "large_contextual_high_context_boreal_eval_release_gate",
+            TASK_TIER_HIGH_CONTEXT,
+        )
+        limited = selected[:1]
+
+        self.assertEqual(len(limited), 1)
+        self.assertEqual(
+            limited[0].task_label,
+            "large_contextual_high_context_boreal_eval_release_gate",
         )
 
     def test_tasks_have_multiple_blocks_and_large_context(self) -> None:

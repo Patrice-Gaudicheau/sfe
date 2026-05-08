@@ -131,6 +131,7 @@ def main() -> None:
     load_repo_env()
     args = _parse_args()
     tasks = get_large_contextual_tasks(args.task_tier)
+    tasks = filter_tasks_by_label(tasks, args.task_label, args.task_tier)
     if args.limit is not None:
         if args.limit < 1:
             raise ValueError("--limit must be at least 1 when provided.")
@@ -161,6 +162,10 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--repeat", "--repeats", type=int, default=1)
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--task-label",
+        help="Exact task label to run after task-tier selection and before --limit.",
+    )
     parser.add_argument(
         "--executor",
         choices=EXECUTORS,
@@ -271,6 +276,25 @@ def get_large_contextual_tasks(
     if task_tier == TASK_TIER_HIGH_CONTEXT:
         return _high_context_large_contextual_tasks()
     raise ValueError(f"Unknown task tier: {task_tier}")
+
+
+def filter_tasks_by_label(
+    tasks: list[LargeContextualTask],
+    task_label: str | None,
+    task_tier: str,
+) -> list[LargeContextualTask]:
+    """Filter an existing tier task list by exact label without changing fixtures."""
+    if not task_label:
+        return tasks
+    matches = [task for task in tasks if task.task_label == task_label]
+    if matches:
+        return matches
+    available = ", ".join(task.task_label for task in tasks)
+    normalized_tier = normalize_task_tier(task_tier)
+    raise ValueError(
+        f"Task label {task_label!r} was not found in task tier {normalized_tier!r}. "
+        f"Available task labels: {available}"
+    )
 
 
 def normalize_task_tier(task_tier: str) -> str:
