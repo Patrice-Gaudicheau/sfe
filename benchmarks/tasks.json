@@ -1,0 +1,215 @@
+[
+  {
+    "id": "writing_update",
+    "task_type_expected": "writing",
+    "prompt": "Write a concise project update about the spatial field engine experiment. Mention progress, the next step, and one risk. Keep it under 90 words.",
+    "evaluation_criteria": [
+      "Mentions spatial field engine progress",
+      "Includes a next step",
+      "Includes one risk",
+      "Stays concise"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["spatial", "engine", "progress", "next", "risk"],
+      "forbidden_patterns": ["I cannot", "As an AI"],
+      "min_words": 30,
+      "max_words": 90
+    },
+    "difficulty": "easy",
+    "requires_code": false,
+    "requires_reasoning": false,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "writing_edit",
+    "task_type_expected": "writing",
+    "prompt": "Rewrite this sentence for a research engineering audience: The router thing sort of picks a model and makes the prompt smaller. Keep the rewrite to one sentence.",
+    "evaluation_criteria": [
+      "Uses clear technical language",
+      "Preserves the meaning",
+      "Outputs one sentence"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["router", "model", "prompt"],
+      "forbidden_patterns": ["thing", "sort of", "As an AI"],
+      "min_words": 10,
+      "max_words": 35
+    },
+    "difficulty": "easy",
+    "requires_code": false,
+    "requires_reasoning": false,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "coding_validator",
+    "task_type_expected": "coding",
+    "prompt": "Write a Python function that validates a routing decision dictionary. It should require task_type, role, provider, model, and confidence. Return only a code block.",
+    "evaluation_criteria": [
+      "Provides Python code",
+      "Checks required fields",
+      "Checks confidence",
+      "Returns only a code block"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["def", "task_type", "role", "provider", "model", "confidence"],
+      "forbidden_patterns": ["I cannot", "As an AI"],
+      "min_words": 20,
+      "requires_code_block": true,
+      "requires_python_code": true
+    },
+    "difficulty": "easy",
+    "requires_code": true,
+    "requires_reasoning": false,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "coding_zero_division",
+    "task_type_expected": "multi_context",
+    "prompt": "Fix this Python bug: a function divides total_tokens by run_count, but run_count can be zero. Explain the minimal code change and include a corrected code snippet.",
+    "evaluation_criteria": [
+      "Identifies the zero-division risk",
+      "Provides a minimal guard or fallback",
+      "Includes corrected Python code",
+      "Explains the change briefly"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["run_count", "zero", "total_tokens", "if", "return"],
+      "forbidden_patterns": ["As an AI"],
+      "min_words": 35,
+      "max_words": 180,
+      "requires_code_block": true,
+      "requires_python_code": true
+    },
+    "difficulty": "medium",
+    "requires_code": true,
+    "requires_reasoning": true,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "analysis_methods",
+    "task_type_expected": "analysis",
+    "prompt": "Compare baseline prompting and spatial prompting as experimental methods for reducing token usage in local LLM systems. Give three concise bullets.",
+    "evaluation_criteria": [
+      "Compares both methods",
+      "Discusses token usage",
+      "Mentions experimental tradeoffs",
+      "Uses three bullets"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["baseline", "spatial", "token", "local"],
+      "forbidden_patterns": ["I cannot", "As an AI"],
+      "min_words": 35,
+      "max_words": 160
+    },
+    "difficulty": "medium",
+    "requires_code": false,
+    "requires_reasoning": true,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "planning_roadmap",
+    "task_type_expected": "planning",
+    "prompt": "Plan the next three milestones for turning the spatial field engine prototype into a repeatable experiment. Use a numbered list with exactly three items.",
+    "evaluation_criteria": [
+      "Includes exactly three milestones",
+      "Focuses on repeatable experimentation",
+      "Mentions measurement or reporting"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["milestone", "experiment", "measure", "report"],
+      "forbidden_patterns": ["As an AI"],
+      "min_words": 35,
+      "max_words": 160,
+      "expected_numbered_items": 3
+    },
+    "difficulty": "medium",
+    "requires_code": false,
+    "requires_reasoning": true,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "architecture_router",
+    "task_type_expected": "analysis",
+    "prompt": "Explain whether routing decisions should live in the provider layer or in a separate router layer. Answer in two short paragraphs.",
+    "evaluation_criteria": [
+      "Makes a clear architectural recommendation",
+      "Compares provider and router responsibilities",
+      "Mentions separation of concerns"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["router", "provider", "separate", "responsibility"],
+      "forbidden_patterns": ["As an AI"],
+      "min_words": 45,
+      "max_words": 180
+    },
+    "difficulty": "medium",
+    "requires_code": false,
+    "requires_reasoning": true,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "review_report",
+    "task_type_expected": "review",
+    "prompt": "Review this benchmark claim for correctness, clarity, and completeness: Spatial routing is better because it always uses fewer tokens. Return three findings.",
+    "evaluation_criteria": [
+      "Challenges the absolute claim",
+      "Addresses correctness",
+      "Addresses clarity",
+      "Addresses completeness"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["correctness", "clarity", "completeness", "always", "tokens"],
+      "forbidden_patterns": ["As an AI"],
+      "min_words": 45,
+      "max_words": 180,
+      "expected_numbered_items": 3
+    },
+    "difficulty": "medium",
+    "requires_code": false,
+    "requires_reasoning": true,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "json_metrics",
+    "task_type_expected": "writing",
+    "prompt": "Return compact JSON with keys metric, target, and rationale. The metric is total_tokens, the target is reduce by 15 percent, and the rationale is efficiency.",
+    "evaluation_criteria": [
+      "Returns valid JSON",
+      "Includes the requested keys",
+      "Preserves the metric, target, and rationale values"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["total_tokens", "15", "efficiency"],
+      "forbidden_patterns": ["```", "As an AI"],
+      "requires_json": true,
+      "required_json_keys": ["metric", "target", "rationale"],
+      "factual_keywords": ["total_tokens", "15", "efficiency"],
+      "max_words": 60
+    },
+    "difficulty": "easy",
+    "requires_code": false,
+    "requires_reasoning": false,
+    "scoring_mode": "heuristic"
+  },
+  {
+    "id": "multi_context_eval",
+    "task_type_expected": "multi_context",
+    "prompt": "Design an evaluation plan that includes routing accuracy, prompt token savings, latency measurements, and a short write-up format. Keep it actionable.",
+    "evaluation_criteria": [
+      "Covers routing accuracy",
+      "Covers prompt token savings",
+      "Covers latency",
+      "Includes reporting format"
+    ],
+    "expected_constraints": {
+      "required_keywords": ["routing", "accuracy", "token", "latency", "write-up"],
+      "forbidden_patterns": ["As an AI"],
+      "min_words": 60,
+      "max_words": 220
+    },
+    "difficulty": "hard",
+    "requires_code": false,
+    "requires_reasoning": true,
+    "scoring_mode": "heuristic"
+  }
+]

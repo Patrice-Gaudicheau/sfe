@@ -1,0 +1,113 @@
+"""Tests for dependency-free .env configuration handling."""
+
+from __future__ import annotations
+
+import fnmatch
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from sfe.env import load_repo_env
+
+
+class EnvConfigTests(unittest.TestCase):
+    def test_env_loader_loads_simple_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("OPENAI_API_KEY=test-key\nSFE_OPENAI_API_TIMEOUT=60\n", encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                loaded = load_repo_env(env_path)
+                self.assertEqual(os.environ["OPENAI_API_KEY"], "test-key")
+                self.assertEqual(os.environ["SFE_OPENAI_API_TIMEOUT"], "60")
+
+        self.assertEqual(
+            loaded,
+            {"OPENAI_API_KEY": "test-key", "SFE_OPENAI_API_TIMEOUT": "60"},
+        )
+
+    def test_env_loader_does_not_overwrite_existing_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("OPENAI_API_KEY=file-key\n", encoding="utf-8")
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "existing-key"}, clear=True):
+                loaded = load_repo_env(env_path)
+                self.assertEqual(os.environ["OPENAI_API_KEY"], "existing-key")
+
+        self.assertEqual(loaded, {})
+
+    def test_env_loader_ignores_comments_blank_lines_and_invalid_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text(
+                "\n# comment\nNOT_A_PAIR\nSFE_OPENAI_ROUTER_MODEL=example-router-model\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                loaded = load_repo_env(env_path)
+
+        self.assertEqual(loaded, {"SFE_OPENAI_ROUTER_MODEL": "example-router-model"})
+
+    def test_env_loader_strips_simple_quotes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text(
+                'OPENAI_BASE_URL="https://example.test/v1"\nSFE_EXECUTOR_MODEL=\'model-name\'\n',
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                loaded = load_repo_env(env_path)
+
+        self.assertEqual(loaded["OPENAI_BASE_URL"], "https://example.test/v1")
+        self.assertEqual(loaded["SFE_EXECUTOR_MODEL"], "model-name")
+
+    def test_env_example_contains_placeholders_not_obvious_real_secrets(self) -> None:
+        env_example = PROJECT_ROOT / ".env.example"
+        text = env_example.read_text(encoding="utf-8")
+
+        self.assertIn("OPENAI_API_KEY=", text)
+        self.assertIn("SFE_OPENAI_ROUTER_MODEL=", text)
+        self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=", text)
+        self.assertIn("SFE_ROUTER_MODEL=Qwen3-0.6B-GGUF", text)
+        self.assertIn("SFE_EXECUTOR_MODEL=Qwen3.5-35B-A3B-GGUF", text)
+        self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{12,}")
+        for line in text.splitlines():
+            if line.startswith("OPENAI_API_KEY="):
+                self.assertEqual(line, "OPENAI_API_KEY=")
+            if line.startswith("SFE_OPENAI_ROUTER_MODEL="):
+                self.assertEqual(line, "SFE_OPENAI_ROUTER_MODEL=")
+            if line.startswith("SFE_OPENAI_EXECUTOR_MODEL="):
+                self.assertEqual(line, "SFE_OPENAI_EXECUTOR_MODEL=")
+
+    def test_gitignore_ignores_env_but_allows_env_example(self) -> None:
+        gitignore = PROJECT_ROOT / ".gitignore"
+        patterns = [
+            line.strip()
+            for line in gitignore.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        self.assertTrue(_ignored_by_patterns(".env", patterns))
+        self.assertTrue(_ignored_by_patterns(".env.local", patterns))
+        self.assertFalse(_ignored_by_patterns(".env.example", patterns))
+
+
+def _ignored_by_patterns(path: str, patterns: list[str]) -> bool:
+    ignored = False
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        normalized = pattern[1:] if negated else pattern
+        if fnmatch.fnmatch(path, normalized):
+            ignored = not negated
+    return ignored
+
+
+if __name__ == "__main__":
+    unittest.main()
