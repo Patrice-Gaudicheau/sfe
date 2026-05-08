@@ -12,9 +12,11 @@ from typing import Any
 
 
 PROVIDER_NAME = "openai-api"
-# Environment-dependent example defaults retained for compatibility with the
-# existing benchmark tests. Public docs prefer explicit SFE_OPENAI_*_MODEL
-# configuration because model availability varies by account and date.
+# Environment-dependent example defaults retained for compatibility with
+# existing benchmark tests. Model identifiers are configurable through
+# SFE_OPENAI_ROUTER_MODEL and SFE_OPENAI_EXECUTOR_MODEL in the runtime layer.
+# These identifiers may depend on the user's account, provider availability, or
+# date, so public users should explicitly configure their own model IDs.
 DEFAULT_ROUTER_MODEL = "gpt-5.4-nano"
 DEFAULT_EXECUTOR_MODEL = "gpt-5.5"
 DEFAULT_TIMEOUT = 60

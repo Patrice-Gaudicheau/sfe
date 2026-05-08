@@ -6,6 +6,10 @@ SFE does not claim to make a model more intelligent. The current project tests a
 
 The evidence in this repository is early, mostly synthetic, and benchmark-specific. Treat the results as a research signal from a technical prototype, not as proof of general model capability or production readiness.
 
+## Project Status
+
+This repository is currently a technical prototype. It is source-available, not open source. Pull requests are not currently accepted. Forks are allowed for non-commercial research and experimentation under the PolyForm Noncommercial License 1.0.0.
+
 ## License
 
 This repository is source-available, not open source. It is licensed under the PolyForm Noncommercial License 1.0.0; see `LICENSE`.
@@ -149,6 +153,8 @@ The strongest current signal is context reduction on synthetic large/contextual 
 Router-inclusive savings are lower because the router consumes tokens and latency. In the clean high_context Lemonade result, executor input reduction was about 90.98%, while router-plus-executor total token reduction was about 72.8%.
 
 The strict mixed-task effectiveness benchmark in `docs/effectiveness.md` preserves an additional Lemonade result: 27.89% mean total token savings overall, 21.40% mean total token savings on successful pairs only, 100% router success, 100% JSON validity, and 100% routing accuracy on the current small task set.
+
+In the large/contextual benchmark, `spatial_fixture` means oracle-style selection of the known relevant block and should be read as an upper bound on executor context reduction. `spatial_router` means the selector chose the block before execution. Executor context reduction excludes router cost; router-inclusive or end-to-end reduction includes selector overhead.
 
 These numbers are useful for deciding what to test next. They should not be presented as general proof that SFE improves answer quality, reasoning, or model intelligence.
 
