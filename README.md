@@ -152,6 +152,8 @@ The strongest current signal is context reduction on synthetic large/contextual 
 
 Router-inclusive savings are lower because the router consumes tokens and latency. In the clean high_context Lemonade result, executor input reduction was about 90.98%, while router-plus-executor total token reduction was about 72.8%.
 
+A first direct OpenAI API validation reused the same large/contextual fixtures and reporting logic. In four small router-inclusive synthetic runs, executor input reduction ranged from 81.60% to 91.13%, router-inclusive total token reduction ranged from 15.06% on the standard task to about 73.6% on the two high_context tasks, and the router selected the expected block with zero fallbacks. See `docs/openai_validation_report.md`.
+
 The strict mixed-task effectiveness benchmark in `docs/effectiveness.md` preserves an additional Lemonade result: 27.89% mean total token savings overall, 21.40% mean total token savings on successful pairs only, 100% router success, 100% JSON validity, and 100% routing accuracy on the current small task set.
 
 In the large/contextual benchmark, `spatial_fixture` means oracle-style selection of the known relevant block and should be read as an upper bound on executor context reduction. `spatial_router` means the selector chose the block before execution. Executor context reduction excludes router cost; router-inclusive or end-to-end reduction includes selector overhead.
@@ -163,6 +165,7 @@ These numbers are useful for deciding what to test next. They should not be pres
 - `docs/public_release_technical_report.md`: public-facing technical report for the current release-readiness snapshot.
 - `docs/large_contextual_benchmark_report.md`: detailed large/contextual benchmark notes.
 - `docs/effectiveness.md`: preserved strict Lemonade effectiveness result.
+- `docs/openai_validation_report.md`: direct OpenAI API validation summary for the large/contextual benchmark.
 - `docs/openai_api_benchmark.md`: optional OpenAI API benchmark path.
 - `docs/router_contract.md`: router JSON contract.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.
