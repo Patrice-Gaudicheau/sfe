@@ -4,6 +4,9 @@ The `openai-api` backend is the optional direct OpenAI API benchmark path. It
 avoids CodexCLI's agentic context overhead and records the router model
 explicitly in JSON and Markdown reports.
 
+This OpenAI API benchmark path was used to generate the results summarized in
+`docs/openai_validation_report.md`.
+
 Set `SFE_OPENAI_ROUTER_MODEL` and `SFE_OPENAI_EXECUTOR_MODEL` to model ids
 available to your OpenAI account before running these commands.
 

@@ -191,7 +191,3 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp pytest -q
 ```
 
 Under WSL, using a Linux temp directory avoids pytest capture issues when `TMP` or `TEMP` point to `/mnt/c/...`.
-
-## Release Status
-
-This repository is being prepared for a future public GitHub release. Do not treat the current branch as publication approval, and do not push or make the repository public without an explicit release decision.
