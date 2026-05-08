@@ -636,6 +636,12 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             self.assertEqual(run["output_validation_status"], "complete")
             self.assertTrue(run["output_contains_all_targets"])
             self.assertEqual(run["output_missing_targets"], [])
+            self.assertEqual(run["output"], run["output_original"])
+            self.assertEqual(run["output_final"], run["output_original"])
+            self.assertEqual(run["output_final_source"], "original")
+            self.assertEqual(run["output_repair_status"], "disabled")
+            self.assertFalse(run["output_repair_attempted"])
+            self.assertEqual(run["success_after_output_repair"], run["success"])
             if run["mode"] == "spatial_router":
                 self.assertEqual(run["router"], "dry_run_fixture_block_selector")
                 self.assertTrue(run["router_selection_matches_fixture"])
@@ -668,6 +674,66 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             self.assertIsNone(router_run["selection_contains_all_targets"])
             self.assertFalse(router_run["output_validation_required"])
             self.assertIsNone(router_run["output_validation_status"])
+            self.assertEqual(router_run["output_repair_status"], "disabled")
+            self.assertFalse(router_run["output_repair_attempted"])
+
+    def test_non_structural_tiers_do_not_repair_when_enabled(self) -> None:
+        class FixtureSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                return {
+                    **fixture_route,
+                    "router": "fixture_test_selector",
+                    "router_selected_block_id": fixture_route["selected_block_id"],
+                    "selection_source": "test",
+                    "router_success": True,
+                    "router_valid_selection": True,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": True,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "",
+                    "router_confidence": 1.0,
+                    "router_reason": "fixture selection for non-structural repair test",
+                }
+
+        class CountingProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [{"message": {"content": "intentionally incomplete"}}],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 2,
+                        "total_tokens": 12,
+                    },
+                }
+
+        for tier in (TASK_TIER_STANDARD, TASK_TIER_PRACTICAL, TASK_TIER_HIGH_CONTEXT):
+            provider = CountingProvider()
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks(tier)[:1],
+                repeat=1,
+                model="fake-lemonade-model",
+                dry_run=False,
+                selection_mode="router",
+                task_tier=tier,
+                provider=provider,  # type: ignore[arg-type]
+                selector=FixtureSelector(),
+                max_output_repairs=1,
+            )
+
+            router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+            self.assertFalse(report["metadata"]["output_repair"]["enabled"])
+            self.assertEqual(provider.calls, 2)
+            self.assertEqual(router_run["output_repair_status"], "disabled")
+            self.assertFalse(router_run["output_repair_attempted"])
+            self.assertEqual(router_run["output_final"], router_run["output_original"])
+            self.assertEqual(router_run["success_after_output_repair"], router_run["success"])
 
     def test_structural_verifier_exposes_valid_but_incomplete_selection(self) -> None:
         class PartialStructuralSelector:
@@ -721,10 +787,90 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertIn("2026.08-s9", router_run["selection_missing_targets"])
         self.assertEqual(router_run["output_validation_status"], "complete")
         self.assertTrue(router_run["output_contains_all_targets"])
+        self.assertEqual(router_run["output_repair_status"], "disabled")
+        self.assertFalse(router_run["output_repair_attempted"])
         self.assertEqual(summary["verification_required_count"], 1)
         self.assertEqual(summary["verified_complete_count"], 0)
         self.assertEqual(summary["verified_incomplete_count"], 1)
         self.assertEqual(summary["verified_complete_rate"], 0.0)
+
+    def test_structural_does_not_repair_when_selection_is_incomplete(self) -> None:
+        class PartialStructuralSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                partial_block = next(
+                    block for block in task.blocks if block.block_id == "sable-replay-catalog"
+                )
+                return {
+                    **fixture_route,
+                    "router": "partial_structural_selector",
+                    "selected_block_id": partial_block.block_id,
+                    "router_selected_block_id": partial_block.block_id,
+                    "selected_block_title": partial_block.title,
+                    "selection_source": "test",
+                    "router_success": True,
+                    "router_valid_selection": True,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": False,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "",
+                    "router_confidence": 0.7,
+                    "router_reason": "contains replay dataset but not every required value",
+                    "notes": "test selected partial structural block",
+                }
+
+        class MissingVersionProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "42.7 SableReplay-144 ATLAS_OWNER_S9 "
+                                    "mesh_s9_epoch_pin"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 8,
+                        "total_tokens": 18,
+                    },
+                }
+
+        provider = MissingVersionProvider()
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=False,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+            provider=provider,  # type: ignore[arg-type]
+            selector=PartialStructuralSelector(),
+            max_output_repairs=1,
+        )
+
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(router_run["selected_block_id"], "sable-replay-catalog")
+        self.assertEqual(router_run["selection_verification_status"], "incomplete")
+        self.assertEqual(router_run["output_validation_status"], "incomplete")
+        self.assertEqual(
+            router_run["output_repair_status"],
+            "skipped_selection_incomplete",
+        )
+        self.assertFalse(router_run["output_repair_attempted"])
+        self.assertFalse(router_run["executor_used_fallback"])
+        self.assertEqual(router_run["output_final"], router_run["output_original"])
+        self.assertNotEqual(router_run["selected_block_id"], router_run["fixture_selected_block_id"])
 
     def test_structural_complete_output_passes_output_validation(self) -> None:
         report = run_benchmark(
@@ -806,6 +952,13 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertFalse(router_run["output_contains_all_targets"])
         self.assertIn("2026.08-s9", router_run["output_missing_targets"])
         self.assertNotIn("2026.08-s9", router_run["output"])
+        self.assertEqual(router_run["output"], provider.output)
+        self.assertEqual(router_run["output_original"], provider.output)
+        self.assertEqual(router_run["output_final"], provider.output)
+        self.assertEqual(router_run["output_final_source"], "original")
+        self.assertEqual(router_run["output_repair_status"], "disabled")
+        self.assertFalse(router_run["output_repair_attempted"])
+        self.assertFalse(router_run["success_after_output_repair"])
         self.assertEqual(report["summary"]["output_validation"]["required_count"], 2)
         self.assertEqual(report["summary"]["output_validation"]["complete_count"], 0)
         self.assertEqual(report["summary"]["output_validation"]["incomplete_count"], 2)
@@ -813,6 +966,102 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             report["summary"]["output_validation"]["missing_target_counts"]["2026.08-s9"],
             2,
         )
+
+    def test_structural_repairs_complete_selection_missing_version_once(self) -> None:
+        class FixtureSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                return {
+                    **fixture_route,
+                    "router": "fixture_test_selector",
+                    "router_selected_block_id": fixture_route["selected_block_id"],
+                    "selection_source": "test",
+                    "router_success": True,
+                    "router_valid_selection": True,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": True,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "",
+                    "router_confidence": 1.0,
+                    "router_reason": "fixture selection for output repair test",
+                }
+
+        class RepairingProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.prompts: list[str] = []
+                self.original_output = (
+                    "The threshold is 42.7 credits, the excluded dataset is "
+                    "SableReplay-144, final approval is ATLAS_OWNER_S9, and the "
+                    "mitigation label is mesh_s9_epoch_pin."
+                )
+                self.repaired_output = (
+                    "For active version 2026.08-s9, rollback applies at 42.7 "
+                    "credits, SableReplay-144 is excluded, ATLAS_OWNER_S9 owns "
+                    "final approval, and mesh_s9_epoch_pin must ship."
+                )
+
+            def chat(self, messages, *_: object, **__: object) -> dict[str, object]:  # type: ignore[no-untyped-def]
+                self.calls += 1
+                self.prompts.append(messages[0]["content"])
+                content = self.repaired_output if self.calls == 3 else self.original_output
+                return {
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {
+                        "prompt_tokens": 10 + self.calls,
+                        "completion_tokens": 12 + self.calls,
+                        "total_tokens": 22 + (2 * self.calls),
+                    },
+                }
+
+        provider = RepairingProvider()
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=False,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+            provider=provider,  # type: ignore[arg-type]
+            selector=FixtureSelector(),
+            max_output_repairs=1,
+        )
+
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        repair_prompt = provider.prompts[2]
+        self.assertEqual(provider.calls, 3)
+        self.assertEqual(router_run["selection_verification_status"], "complete")
+        self.assertEqual(router_run["output_validation_status"], "incomplete")
+        self.assertFalse(router_run["success"])
+        self.assertTrue(router_run["success_after_output_repair"])
+        self.assertEqual(router_run["output"], provider.original_output)
+        self.assertEqual(router_run["output_original"], provider.original_output)
+        self.assertEqual(router_run["output_repaired_text"], provider.repaired_output)
+        self.assertEqual(router_run["output_final"], provider.repaired_output)
+        self.assertEqual(router_run["output_final_source"], "repaired")
+        self.assertEqual(router_run["output_repair_status"], "attempted_complete")
+        self.assertTrue(router_run["output_repair_attempted"])
+        self.assertEqual(router_run["output_repair_count"], 1)
+        self.assertEqual(router_run["output_repair_missing_targets_before"], ["2026.08-s9"])
+        self.assertEqual(router_run["output_repair_missing_targets_after"], [])
+        self.assertTrue(router_run["output_repair_used_same_context"])
+        self.assertEqual(router_run["output_repair_added_tokens"], 28)
+        self.assertEqual(router_run["output_repair_prompt_tokens"], 13)
+        self.assertEqual(router_run["output_repair_output_tokens"], 15)
+        self.assertIsNone(router_run["output_repair_added_estimated_cost"])
+        self.assertFalse(router_run["executor_used_fallback"])
+        self.assertIn("Missing required targets JSON: [\"2026.08-s9\"]", repair_prompt)
+        self.assertIn("Selected context block id: atlas-mesh-s9-final", repair_prompt)
+        self.assertIn("2026.08-s9", repair_prompt)
+        self.assertNotIn("Candidate blocks", repair_prompt)
+        self.assertNotIn("sable-replay-catalog", repair_prompt)
+        self.assertEqual(report["summary"]["output_repair"]["required_count"], 1)
+        self.assertEqual(report["summary"]["output_repair"]["attempted_count"], 1)
+        self.assertEqual(report["summary"]["output_repair"]["completed_count"], 1)
+        self.assertEqual(report["summary"]["output_repair"]["incomplete_count"], 0)
+        self.assertEqual(report["summary"]["output_repair"]["added_total_tokens"], 28)
 
     def test_long_alias_dry_run_reports_practical_tier(self) -> None:
         report = run_benchmark(

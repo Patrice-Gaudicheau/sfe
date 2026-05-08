@@ -48,6 +48,16 @@ from runtime.metrics import (
     write_json_report,
     write_text_report,
 )
+from runtime.output_repair import (
+    OUTPUT_REPAIR_STATUS_ATTEMPTED_COMPLETE,
+    OUTPUT_REPAIR_STATUS_ATTEMPTED_INCOMPLETE,
+    OUTPUT_REPAIR_STATUS_DISABLED,
+    OUTPUT_REPAIR_STATUS_NOT_REQUIRED,
+    OUTPUT_REPAIR_STATUS_SKIPPED_SELECTION_INCOMPLETE,
+    OutputRepairer,
+    OutputRepairResult,
+    output_repair_not_attempted,
+)
 from runtime.output_validation import OutputValidator
 from runtime.selection_verification import SelectionVerifier
 from sfe.env import load_repo_env
@@ -93,6 +103,7 @@ FINAL_PHASE_CONCLUSION = (
 )
 SELECTION_VERIFICATION_TRIGGER_STRUCTURAL_TIER = "structural_tier"
 OUTPUT_VALIDATION_TRIGGER_STRUCTURAL_TIER = "structural_tier"
+OUTPUT_REPAIR_TRIGGER_STRUCTURAL_TIER = "structural_tier"
 
 
 class ChatProvider(Protocol):
@@ -156,6 +167,7 @@ def main() -> None:
         router_model=args.router_model,
         task_tier=args.task_tier,
         executor=args.executor,
+        max_output_repairs=args.max_output_repairs,
     )
 
     write_json(args.json, report)
@@ -200,6 +212,15 @@ def _parse_args() -> argparse.Namespace:
         help="Lemonade request timeout.",
     )
     parser.add_argument("--max-tokens", type=int, default=160)
+    parser.add_argument(
+        "--max-output-repairs",
+        type=int,
+        default=0,
+        help=(
+            "Maximum structural output repair attempts per eligible spatial_router run. "
+            "Defaults to 0; repair is disabled unless explicitly enabled."
+        ),
+    )
     parser.add_argument(
         "--selection-mode",
         choices=SELECTION_MODES,
@@ -1885,6 +1906,7 @@ def run_benchmark(
     selector: BlockSelector | None = None,
     task_tier: str = TASK_TIER_STANDARD,
     executor: str = LEMONADE_EXECUTOR,
+    max_output_repairs: int = 0,
 ) -> dict[str, Any]:
     if repeat < 1:
         raise ValueError("--repeat must be at least 1.")
@@ -1892,6 +1914,8 @@ def run_benchmark(
         raise ValueError("--timeout-seconds must be greater than 0.")
     if max_tokens < 1:
         raise ValueError("--max-tokens must be at least 1.")
+    if max_output_repairs < 0:
+        raise ValueError("--max-output-repairs must be at least 0.")
     if not tasks:
         raise ValueError("At least one large/contextual task is required.")
     if selection_mode not in SELECTION_MODES:
@@ -1915,6 +1939,8 @@ def run_benchmark(
     selection_verification_enabled = _selection_verification_enabled(task_tier)
     output_validator = OutputValidator()
     output_validation_enabled = _output_validation_enabled(task_tier)
+    output_repairer = OutputRepairer(output_validator)
+    output_repair_enabled = _output_repair_enabled(task_tier)
     runs = []
     for task in tasks:
         fixture_route = select_relevant_block(task)
@@ -1943,6 +1969,9 @@ def run_benchmark(
                         executor=executor,
                         output_validator=output_validator,
                         output_validation_required=output_validation_enabled,
+                        output_repairer=output_repairer,
+                        output_repair_enabled=output_repair_enabled,
+                        max_output_repairs=max_output_repairs,
                     )
                 )
 
@@ -1982,6 +2011,18 @@ def run_benchmark(
                 ),
                 "applies_to_modes": (
                     list(_execution_modes(selection_mode)) if output_validation_enabled else []
+                ),
+            },
+            "output_repair": {
+                "enabled": output_repair_enabled and max_output_repairs > 0,
+                "trigger": (
+                    OUTPUT_REPAIR_TRIGGER_STRUCTURAL_TIER
+                    if output_repair_enabled
+                    else None
+                ),
+                "max_output_repairs": max_output_repairs,
+                "applies_to_modes": (
+                    ["spatial_router"] if output_repair_enabled else []
                 ),
             },
             "final_phase_conclusion": FINAL_PHASE_CONCLUSION,
@@ -2052,6 +2093,10 @@ def _selection_verification_enabled(task_tier: str) -> bool:
 
 
 def _output_validation_enabled(task_tier: str) -> bool:
+    return normalize_task_tier(task_tier) == TASK_TIER_STRUCTURAL
+
+
+def _output_repair_enabled(task_tier: str) -> bool:
     return normalize_task_tier(task_tier) == TASK_TIER_STRUCTURAL
 
 
@@ -2448,6 +2493,88 @@ def _coerce_confidence(value: Any) -> float:
     return min(1.0, max(0.0, confidence))
 
 
+def _maybe_repair_output(
+    *,
+    task: LargeContextualTask,
+    mode: str,
+    route: dict[str, Any],
+    output: str,
+    output_validation: Any,
+    output_repairer: OutputRepairer,
+    output_repair_enabled: bool,
+    max_output_repairs: int,
+    dry_run: bool,
+    execution_error: str,
+    provider: ChatProvider | None,
+    model: str,
+    max_tokens: int,
+) -> tuple[OutputRepairResult, bool]:
+    output_missing_targets = tuple(
+        output_validation.missing_targets if output_validation is not None else ()
+    )
+    in_repair_scope = output_repair_enabled and mode == "spatial_router"
+    selection_status = route.get("selection_verification_status")
+    repair_required = bool(
+        in_repair_scope
+        and not dry_run
+        and not execution_error
+        and selection_status == "complete"
+        and output_validation is not None
+        and output_validation.status == "incomplete"
+        and output_missing_targets
+    )
+    if not in_repair_scope or dry_run:
+        return (
+            output_repair_not_attempted(
+                status=OUTPUT_REPAIR_STATUS_DISABLED,
+                missing_targets_before=output_missing_targets,
+                missing_targets_after=output_missing_targets,
+            ),
+            repair_required,
+        )
+    if selection_status == "incomplete":
+        return (
+            output_repair_not_attempted(
+                status=OUTPUT_REPAIR_STATUS_SKIPPED_SELECTION_INCOMPLETE,
+                missing_targets_before=output_missing_targets,
+                missing_targets_after=output_missing_targets,
+            ),
+            False,
+        )
+    if not repair_required:
+        return (
+            output_repair_not_attempted(
+                status=OUTPUT_REPAIR_STATUS_NOT_REQUIRED,
+                missing_targets_before=output_missing_targets,
+                missing_targets_after=output_missing_targets,
+            ),
+            False,
+        )
+    if max_output_repairs <= 0 or provider is None:
+        return (
+            output_repair_not_attempted(
+                status=OUTPUT_REPAIR_STATUS_DISABLED,
+                missing_targets_before=output_missing_targets,
+                missing_targets_after=output_missing_targets,
+            ),
+            True,
+        )
+
+    selected_block = _block_by_id(task, str(route["selected_block_id"]))
+    repair = output_repairer.repair(
+        provider=provider,
+        model=model,
+        question=task.question,
+        selected_block_id=selected_block.block_id,
+        selected_context=selected_block.text,
+        original_output=output,
+        missing_targets=output_missing_targets,
+        required_targets=task.validation_targets,
+        max_tokens=max_tokens,
+    )
+    return repair, True
+
+
 def execute_task(
     task: LargeContextualTask,
     mode: str,
@@ -2462,6 +2589,9 @@ def execute_task(
     executor: str = LEMONADE_EXECUTOR,
     output_validator: OutputValidator | None = None,
     output_validation_required: bool = False,
+    output_repairer: OutputRepairer | None = None,
+    output_repair_enabled: bool = False,
+    max_output_repairs: int = 0,
 ) -> dict[str, Any]:
     prompt = build_prompt(task, mode, route)
     prompt_tokens_estimate = estimate_tokens(prompt)
@@ -2495,6 +2625,7 @@ def execute_task(
         tokens = _extract_token_usage(response, prompt, output)
 
     validation = validate_output(task, output)
+    original_success = bool(not error and validation["passed"])
     output_validation = None
     if output_validation_required:
         validator = output_validator or OutputValidator()
@@ -2502,6 +2633,33 @@ def execute_task(
             output=output,
             required_targets=task.validation_targets,
         )
+    repair_result, repair_required = _maybe_repair_output(
+        task=task,
+        mode=mode,
+        route=route,
+        output=output,
+        output_validation=output_validation,
+        output_repairer=output_repairer or OutputRepairer(output_validator),
+        output_repair_enabled=output_repair_enabled,
+        max_output_repairs=max_output_repairs,
+        dry_run=dry_run,
+        execution_error=error,
+        provider=provider,
+        model=model,
+        max_tokens=max_tokens,
+    )
+    repair_complete = repair_result.status == OUTPUT_REPAIR_STATUS_ATTEMPTED_COMPLETE
+    output_final = repair_result.repaired_text if repair_complete else output
+    output_final_source = "repaired" if repair_complete else "original"
+    success_after_output_repair = (
+        True
+        if repair_complete
+        else (
+            False
+            if repair_result.status == OUTPUT_REPAIR_STATUS_ATTEMPTED_INCOMPLETE
+            else original_success
+        )
+    )
     used_blocks = block_ids_for_mode(task, mode, route)
     fixture_selected_block_id = (
         str(fixture_route["selected_block_id"]) if fixture_route else str(route["selected_block_id"])
@@ -2523,7 +2681,8 @@ def execute_task(
         "total_tokens": int(tokens["total_tokens"]),
         "input_tokens_estimate": prompt_tokens_estimate,
         "latency_ms": latency_ms,
-        "success": bool(not error and validation["passed"]),
+        "success": original_success,
+        "success_after_output_repair": success_after_output_repair,
         "error": error,
         "validation": validation,
         "output_validation_required": output_validation_required,
@@ -2545,6 +2704,28 @@ def execute_task(
         "output_missing_target_count": (
             output_validation.missing_target_count if output_validation is not None else None
         ),
+        "output_original": output,
+        "output_final": output_final,
+        "output_final_source": output_final_source,
+        "output_repair_required": repair_required,
+        "output_repair_attempted": repair_result.attempted,
+        "output_repair_count": repair_result.repair_count,
+        "output_repair_status": repair_result.status,
+        "output_repair_missing_targets_before": list(
+            repair_result.missing_targets_before
+        ),
+        "output_repair_missing_targets_after": list(
+            repair_result.missing_targets_after
+        ),
+        "output_repair_used_same_context": repair_result.used_same_context,
+        "output_repair_added_tokens": repair_result.added_tokens,
+        "output_repair_added_latency_ms": repair_result.added_latency_ms,
+        "output_repair_added_estimated_cost": repair_result.added_estimated_cost,
+        "output_repair_error": repair_result.error,
+        "output_repair_prompt_tokens": repair_result.prompt_tokens,
+        "output_repair_output_tokens": repair_result.output_tokens,
+        "output_repair_total_tokens": repair_result.total_tokens,
+        "output_repaired_text": repair_result.repaired_text,
         "question": task.question,
         "selected_block_id": route["selected_block_id"],
         "fixture_selected_block_id": fixture_selected_block_id,
@@ -2703,6 +2884,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     router_runs = [run for run in runs if run["mode"] == "spatial_router"]
     summary["router_selection"] = summarize_router_selection(router_runs)
     summary["output_validation"] = summarize_output_validation(runs)
+    summary["output_repair"] = summarize_output_repair(runs)
     summary["final_phase_conclusion"] = FINAL_PHASE_CONCLUSION
     return summary
 
@@ -2767,9 +2949,61 @@ def summarize_per_task(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "output_missing_targets": (
                     router[0].get("output_missing_targets") if router else None
                 ),
+                "output_repair_status": (
+                    router[0].get("output_repair_status") if router else None
+                ),
+                "success_after_output_repair": (
+                    router[0].get("success_after_output_repair") if router else None
+                ),
             }
         )
     return rows
+
+
+def summarize_output_repair(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    required = [run for run in runs if run.get("output_repair_required") is True]
+    attempted = [run for run in runs if run.get("output_repair_attempted") is True]
+    attempted_complete = [
+        run
+        for run in attempted
+        if run.get("output_repair_status") == OUTPUT_REPAIR_STATUS_ATTEMPTED_COMPLETE
+    ]
+    attempted_incomplete = [
+        run
+        for run in attempted
+        if run.get("output_repair_status") == OUTPUT_REPAIR_STATUS_ATTEMPTED_INCOMPLETE
+    ]
+    skipped_selection_incomplete = [
+        run
+        for run in runs
+        if run.get("output_repair_status")
+        == OUTPUT_REPAIR_STATUS_SKIPPED_SELECTION_INCOMPLETE
+    ]
+    disabled = [
+        run
+        for run in runs
+        if run.get("output_repair_status") == OUTPUT_REPAIR_STATUS_DISABLED
+    ]
+    added_tokens = [
+        int(run["output_repair_added_tokens"])
+        for run in attempted
+        if run.get("output_repair_added_tokens") is not None
+    ]
+    added_latency_ms = [
+        int(run["output_repair_added_latency_ms"])
+        for run in attempted
+        if run.get("output_repair_added_latency_ms") is not None
+    ]
+    return {
+        "required_count": len(required),
+        "attempted_count": len(attempted),
+        "completed_count": len(attempted_complete),
+        "incomplete_count": len(attempted_incomplete),
+        "skipped_selection_incomplete_count": len(skipped_selection_incomplete),
+        "disabled_count": len(disabled),
+        "added_total_tokens": sum(added_tokens),
+        "added_latency_ms": sum(added_latency_ms),
+    }
 
 
 def summarize_output_validation(runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2969,6 +3203,14 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"Output validation complete runs: {report['summary']['output_validation']['complete_count']}",
             f"Output validation incomplete runs: {report['summary']['output_validation']['incomplete_count']}",
             f"Output validation complete rate: {_format_optional_percent(report['summary']['output_validation']['complete_rate'])}",
+            f"Output repair required runs: {report['summary']['output_repair']['required_count']}",
+            f"Output repair attempted runs: {report['summary']['output_repair']['attempted_count']}",
+            f"Output repair completed runs: {report['summary']['output_repair']['completed_count']}",
+            f"Output repair incomplete runs: {report['summary']['output_repair']['incomplete_count']}",
+            f"Output repair skipped selection-incomplete runs: {report['summary']['output_repair']['skipped_selection_incomplete_count']}",
+            f"Output repair disabled runs: {report['summary']['output_repair']['disabled_count']}",
+            f"Output repair added total tokens: {report['summary']['output_repair']['added_total_tokens']}",
+            f"Output repair added latency ms: {report['summary']['output_repair']['added_latency_ms']}",
             "",
             "## Router Selection",
             "",
@@ -3027,8 +3269,8 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
                 "",
                 "## Router Details",
                 "",
-                "| Task | Fixture block | Router block | Valid | Match | Fallback | Selection verification | Selection missing targets | Output validation | Output missing targets | Confidence | Reason | Error |",
-                "| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: | --- | --- |",
+                "| Task | Fixture block | Router block | Valid | Match | Fallback | Selection verification | Selection missing targets | Output validation | Output missing targets | Output repair | Success after repair | Confidence | Reason | Error |",
+                "| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |",
             ]
         )
         for run in router_runs:
@@ -3041,6 +3283,11 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             missing_targets = ", ".join(run.get("selection_missing_targets") or []) or "n/a"
             output_validation_status = run.get("output_validation_status") or "n/a"
             output_missing_targets = ", ".join(run.get("output_missing_targets") or []) or "n/a"
+            output_repair_status = run.get("output_repair_status") or "n/a"
+            success_after_repair = run.get("success_after_output_repair")
+            success_after_repair_text = (
+                "n/a" if success_after_repair is None else str(bool(success_after_repair))
+            )
             lines.append(
                 f"| `{run['task_label']}` | `{run['fixture_selected_block_id']}` | "
                 f"`{router_block}` | {bool(run['router_valid_selection'])} | "
@@ -3049,7 +3296,9 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
                 f"{_markdown_cell(verification_status)} | "
                 f"{_markdown_cell(missing_targets)} | "
                 f"{_markdown_cell(output_validation_status)} | "
-                f"{_markdown_cell(output_missing_targets)} | {confidence_text} | "
+                f"{_markdown_cell(output_missing_targets)} | "
+                f"{_markdown_cell(output_repair_status)} | "
+                f"{success_after_repair_text} | {confidence_text} | "
                 f"{_markdown_cell(run.get('router_reason') or '')} | "
                 f"{_markdown_cell(run.get('router_error') or '')} |"
             )
@@ -3075,6 +3324,10 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
             "output validation complete rate: "
             f"{_format_optional_percent(output_validation['complete_rate'])}"
         )
+    output_repair = report["summary"]["output_repair"]
+    if output_repair["required_count"] or output_repair["attempted_count"]:
+        print(f"output repair attempted runs: {output_repair['attempted_count']}")
+        print(f"output repair completed runs: {output_repair['completed_count']}")
     router_selection = report["summary"]["router_selection"]
     if router_selection["run_count"]:
         print(f"router selection match rate: {_format_optional_percent(router_selection['match_rate'])}")
