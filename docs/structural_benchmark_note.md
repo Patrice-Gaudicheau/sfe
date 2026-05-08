@@ -9,6 +9,14 @@ This tier reuses the same runner, prompt builders, selector contract,
 validation checks, token reporting, and report writers as the existing
 large/contextual benchmark. It is not a separate benchmark family.
 
+It is also not part of the clean amortization curve. The clean curve remains:
+
+- `standard`: 2k-5k token mechanism validation
+- `practical`: 10k-20k token realistic amortization test
+- `high_context`: 20k-50k token strong SFE relevance zone
+
+The `structural` tier is a separate 50k+ token structural necessity zone.
+
 ## Why This Tier Exists
 
 The existing tiers cover:
@@ -48,6 +56,27 @@ The validation targets are:
 
 The task currently has one relevant block and nineteen distractor blocks.
 
+## Route-Then-Verify Behavior
+
+The structural path now includes the first explicit route-then-verify
+mechanism:
+
+- Selection verification checks whether the selected context block contains all
+  required target values.
+- Output validation checks whether the visible executor answer contains all
+  required target values.
+- Optional output repair can ask the executor to produce a corrected visible
+  answer from the same selected context.
+
+The repair path is intentionally narrow. It is structural-only,
+`spatial_router`-only, opt-in, and disabled by default with
+`--max-output-repairs 0`. It runs only when selection verification is complete,
+output validation is incomplete, and missing output targets are known.
+
+This mechanism does not introduce hidden fallback, oracle substitution, a second
+candidate retry, or context expansion. In particular, repair is not allowed to
+fix a routing mistake. If the selected context is incomplete, repair is skipped.
+
 ## Lemonade Findings
 
 Initial Lemonade runs show that structural behavior is backend-sensitive:
@@ -63,6 +92,19 @@ Initial Lemonade runs show that structural behavior is backend-sensitive:
 These results suggest that structural-tier routing depends on router model
 capacity or a stronger verification step. They should not be read as proof that
 a particular model family is generally sufficient or insufficient.
+
+After adding route-then-verify and opt-in output repair, two local Lemonade
+structural runs illustrate the separation between routing failure and output
+failure:
+
+- With `Qwen3-0.6B-GGUF` as router and `Qwen3.5-35B-A3B-GGUF` as executor, the
+  router selected `s9-audit-precheck`. Selection verification marked the block
+  incomplete, and output repair was skipped even with `--max-output-repairs 1`.
+  This is the desired safety behavior: SFE refused to repair from incomplete
+  context.
+- With `Qwen3.5-35B-A3B-GGUF` as both router and executor, the router selected
+  `atlas-mesh-s9-final`. Selection verification was complete, output validation
+  was complete, and repair was not required. No fallback or repair was used.
 
 ## OpenAI Findings
 
@@ -103,11 +145,17 @@ The current structural evidence supports narrower observations:
 - Single-pass routing becomes harder when distractors contain schemas,
   checklists, partial values, and related records.
 - Stronger routers can improve structural selection on this task.
+- The current route-then-verify path can distinguish routing failure from
+  executor-output failure.
 - Very long flat-context execution can be backend-sensitive.
 - Routing correctness alone does not guarantee answer completeness.
 
 It does not establish production readiness, broad real-world validity, or any
 general improvement in model intelligence.
+
+Structural should remain separate from the main publication story unless an
+explicit later decision incorporates it. The current result is an exploratory
+stress-test signal, not production readiness proof.
 
 ## Likely Next Steps
 
@@ -116,10 +164,10 @@ The next useful work is methodological rather than larger one-off runs:
 - Add a value-verification pass after routing.
 - Require executor answers to include all requested fields in a constrained
   format.
-- Compare one-pass routing with route-then-verify selection.
+- Compare one-pass routing with route-then-verify selection across repeated
+  local runs.
 - Repeat structural runs before interpreting stability.
 - Add one or two more structural tasks only after the validation contract is
   tightened.
 - Keep structural results separate from the main validation curve until baseline
   and selected-context executor validation are stable.
-
