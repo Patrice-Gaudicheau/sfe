@@ -120,6 +120,11 @@ Run the high_context 20k-50k tier:
 python runtime/run_large_contextual_benchmark.py --task-tier high_context --selection-mode both --limit 1
 ```
 
+An exploratory `structural` 50k+ stress-test tier is also available. It is
+documented separately because it is intended to expose routing and answer
+completeness limits rather than extend the main validation curve; see
+`docs/structural_benchmark_note.md`.
+
 Build prompts and reports without calling Lemonade:
 
 ```bash
@@ -166,6 +171,7 @@ These numbers are useful for deciding what to test next. They should not be pres
 - `docs/large_contextual_benchmark_report.md`: detailed large/contextual benchmark notes.
 - `docs/effectiveness.md`: preserved strict Lemonade effectiveness result.
 - `docs/openai_validation_report.md`: direct OpenAI API validation summary for the large/contextual benchmark.
+- `docs/structural_benchmark_note.md`: exploratory structural 50k+ stress-test notes.
 - `docs/openai_api_benchmark.md`: optional OpenAI API benchmark path.
 - `docs/router_contract.md`: router JSON contract.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.

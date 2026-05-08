@@ -27,6 +27,11 @@ paths both succeeded before router-inclusive runs were interpreted. The main
 result below focuses on router-inclusive runs, where router cost is included in
 the `spatial_router` end-to-end token and cost comparison.
 
+The exploratory `structural` tier was tested separately as a stress case and is
+documented in `docs/structural_benchmark_note.md`. It is not included in the
+main OpenAI validation table because executor validation was not stable across
+modes.
+
 ## Router-Inclusive Results
 
 Estimated costs use the configured model pricing at the time of testing and are

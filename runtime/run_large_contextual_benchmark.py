@@ -1596,7 +1596,7 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
                         "42.7 credits per thousand governed requests for four consecutive "
                         "fifteen-minute windows. The excluded replay dataset is "
                         "SableReplay-144 because it contains copied gate decisions from the "
-                        "July policy repair board. Final approval owner is Nadia Keene. The "
+                        "July policy repair board. Final approval owner is ATLAS_OWNER_S9. The "
                         "mitigation label that must ship is mesh_s9_epoch_pin. This final "
                         "record overrides the S-8 closeout, the 2026.08-s8 draft, and the "
                         "dashboard examples that still show the older 39.2 credit threshold."
@@ -1611,7 +1611,7 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
                         "The S-8 draft is a plausible obsolete rule. It proposed rollback "
                         "above 39.2 credits per thousand governed requests, excluded "
                         "SableReplay-121, and used mitigation label mesh_s8_window_cap. "
-                        "Nadia Keene appears as a reviewer because the draft was copied into "
+                        "ATLAS_OWNER_S9 appears as a reviewer because the draft was copied into "
                         "the 2026.08 planning folder, but it is not the active S-9 record."
                     ),
                     target_words=block_words,
@@ -1641,10 +1641,10 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
                     target_words=block_words,
                 ),
                 _block(
-                    "nadia-approval-roster",
+                    "atlas-owner-approval-roster",
                     "Atlas Policy Approval Roster",
                     (
-                        "The approval roster names Nadia Keene across S-6, S-7, S-8, and S-9 "
+                        "The approval roster names ATLAS_OWNER_S9 across S-6, S-7, S-8, and S-9 "
                         "policy mesh gates. It is intentionally insufficient by itself: owner "
                         "matching alone cannot identify the active threshold, excluded replay "
                         "dataset, or required mitigation label for 2026.08-s9."
@@ -1692,8 +1692,8 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
                     (
                         "The S-7 closeout uses similar policy mesh terminology, governed "
                         "requests, p99 cost windows, replay datasets, and mitigation labels. "
-                        "It rolled back above 44.1 credits and excluded SableReplay-88. Nadia "
-                        "Keene appears as an escalation reviewer, but S-7 is not S-9."
+                        "It rolled back above 44.1 credits and excluded SableReplay-88. "
+                        "ATLAS_OWNER_S9 appears as an escalation reviewer, but S-7 is not S-9."
                     ),
                     target_words=block_words,
                 ),
@@ -1723,8 +1723,8 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
                     "owner-escalation-thread",
                     "Owner Escalation Thread",
                     (
-                        "The escalation thread contains messages from Nadia Keene, Omar Voss, "
-                        "and Priya Nair about S-9 rollout risk. It discusses approval order and "
+                        "The escalation thread contains messages from ATLAS_OWNER_S9, OWNER_ALT_7, "
+                        "and OWNER_ALT_3 about S-9 rollout risk. It discusses approval order and "
                         "weekend coverage. It is near-relevant for ownership but lacks the "
                         "approved threshold, excluded dataset, and mitigation label."
                     ),
@@ -1790,8 +1790,8 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
                     "Atlas S-9 Changelog",
                     (
                         "The changelog records that S-9 replaced S-8 draft values and switched "
-                        "from window capping toward epoch pinning. It names 2026.08-s9 and Nadia "
-                        "Keene, but it omits the final threshold and replay dataset exclusion."
+                        "from window capping toward epoch pinning. It names 2026.08-s9 and "
+                        "ATLAS_OWNER_S9, but it omits the final threshold and replay dataset exclusion."
                     ),
                     target_words=block_words,
                 ),
@@ -1821,14 +1821,14 @@ def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
             expected_answer_hints=(
                 "42.7 credits",
                 "SableReplay-144",
-                "Nadia Keene",
+                "ATLAS_OWNER_S9",
                 "mesh_s9_epoch_pin",
                 "2026.08-s9",
             ),
             validation_targets=(
                 "42.7",
                 "SableReplay-144",
-                "Nadia Keene",
+                "ATLAS_OWNER_S9",
                 "mesh_s9_epoch_pin",
                 "2026.08-s9",
             ),
@@ -2225,12 +2225,16 @@ def build_selector_prompt(task: LargeContextualTask) -> str:
         "Selection rules:\n"
         "- Distractor blocks may share the same keywords, dates, people, incidents, and domain vocabulary.\n"
         "- Prefer answer sufficiency over topical similarity. Inspect whether the block contains all requested values.\n"
+        "- A block that only lists required field names, schemas, checklists, audit requirements, "
+        "or document completeness rules is not sufficient unless it contains the actual requested values.\n"
+        "- Prefer blocks containing the actual values requested by the question.\n"
         "- Do not choose blocks that only identify the incident, timeline, background, observability, status, "
         "communications, or related context if they lack the exact answer.\n"
         "- Prefer the block with the exact requested fields such as cache scope, guard, owner, threshold, "
         "dataset, version, decision, exception, or mitigation.\n"
         "- Your reason should cite the exact requested values found in the selected block. "
-        "Keep the reason to one short line. If you cannot cite those values from that block, select another block.\n"
+        "Cite at least two exact values when possible. Keep the reason to one short line. "
+        "If you cannot cite those values from that block, select another block.\n"
         "- Copy selected_block_id exactly from the allowed block ID JSON array, byte-for-byte.\n"
         "- The selected_block_id value must be the ID string only, without labels or prefixes. "
         "Return the ID value, not labels such as \"block_id: ...\".\n"
