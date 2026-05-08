@@ -68,17 +68,20 @@ SELECTION_MODES = ("fixture", "router", "both")
 TASK_TIER_STANDARD = "standard"
 TASK_TIER_PRACTICAL = "practical"
 TASK_TIER_HIGH_CONTEXT = "high_context"
+TASK_TIER_STRUCTURAL = "structural"
 TASK_TIER_LONG = "long"
 TASK_TIERS = (
     TASK_TIER_STANDARD,
     TASK_TIER_PRACTICAL,
     TASK_TIER_HIGH_CONTEXT,
+    TASK_TIER_STRUCTURAL,
     TASK_TIER_LONG,
 )
 TASK_TIER_DESCRIPTIONS = {
     TASK_TIER_STANDARD: "standard 2k-5k mechanism validation tier",
     TASK_TIER_PRACTICAL: "practical 10k-20k realistic amortization tier",
     TASK_TIER_HIGH_CONTEXT: "high_context 20k-50k strong SFE relevance zone",
+    TASK_TIER_STRUCTURAL: "structural 50k+ structural necessity zone",
 }
 TASK_TIER_ALIASES = {TASK_TIER_LONG: TASK_TIER_PRACTICAL}
 FINAL_PHASE_CONCLUSION = (
@@ -210,8 +213,8 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Task tier. standard is the existing 7-task 2k-5k reference benchmark; "
             "practical is the 10k-20k realistic amortization tier; high_context "
-            "is the 20k-50k strong SFE relevance tier. long is a backward-compatible "
-            "alias for practical."
+            "is the 20k-50k strong SFE relevance tier; structural is the 50k+ "
+            "structural necessity tier. long is a backward-compatible alias for practical."
         ),
     )
     parser.add_argument(
@@ -275,6 +278,8 @@ def get_large_contextual_tasks(
         return _practical_large_contextual_tasks()
     if task_tier == TASK_TIER_HIGH_CONTEXT:
         return _high_context_large_contextual_tasks()
+    if task_tier == TASK_TIER_STRUCTURAL:
+        return _structural_large_contextual_tasks()
     raise ValueError(f"Unknown task tier: {task_tier}")
 
 
@@ -1563,6 +1568,279 @@ def _high_context_large_contextual_tasks() -> list[LargeContextualTask]:
                 "near_relevant_block",
                 "same_owner_distractor",
                 "obsolete_rule_distractor",
+            ),
+        ),
+    ]
+
+
+def _structural_large_contextual_tasks() -> list[LargeContextualTask]:
+    """Return structural 50k+ large/contextual fixtures."""
+
+    block_words = 2075
+    relevant_block_words = 2250
+    return [
+        LargeContextualTask(
+            task_label="large_contextual_structural_atlas_policy_mesh_gate",
+            question=(
+                "For Atlas policy mesh gate S-9 in active version 2026.08-s9, "
+                "what rollback threshold applies, which replay dataset is excluded, "
+                "who owns final approval, and what mitigation label must ship?"
+            ),
+            blocks=(
+                _block(
+                    "atlas-mesh-s9-final",
+                    "Atlas Policy Mesh Gate S-9 Active Version 2026.08-s9 Final Record",
+                    (
+                        "For Atlas policy mesh gate S-9 in active version 2026.08-s9, "
+                        "rollback applies when policy mesh p99 coordination cost exceeds "
+                        "42.7 credits per thousand governed requests for four consecutive "
+                        "fifteen-minute windows. The excluded replay dataset is "
+                        "SableReplay-144 because it contains copied gate decisions from the "
+                        "July policy repair board. Final approval owner is Nadia Keene. The "
+                        "mitigation label that must ship is mesh_s9_epoch_pin. This final "
+                        "record overrides the S-8 closeout, the 2026.08-s8 draft, and the "
+                        "dashboard examples that still show the older 39.2 credit threshold."
+                    ),
+                    True,
+                    target_words=relevant_block_words,
+                ),
+                _block(
+                    "atlas-mesh-s8-draft",
+                    "Atlas Policy Mesh Gate S-8 Draft Carried Into 2026.08",
+                    (
+                        "The S-8 draft is a plausible obsolete rule. It proposed rollback "
+                        "above 39.2 credits per thousand governed requests, excluded "
+                        "SableReplay-121, and used mitigation label mesh_s8_window_cap. "
+                        "Nadia Keene appears as a reviewer because the draft was copied into "
+                        "the 2026.08 planning folder, but it is not the active S-9 record."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "atlas-mesh-s9-dashboard",
+                    "Atlas Mesh S-9 Dashboard Specification",
+                    (
+                        "The dashboard specification renders p50, p95, and p99 coordination "
+                        "cost, governed request counts, rollback windows, replay dataset tags, "
+                        "and owner acknowledgement. It contains placeholders for 2026.08-s9 "
+                        "and example values copied from S-8, including 39.2 credits and "
+                        "mesh_s8_window_cap, but it does not approve final S-9 values."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "sable-replay-catalog",
+                    "Sable Replay Dataset Catalog",
+                    (
+                        "The catalog lists SableReplay-144, SableReplay-121, SableReplay-88, "
+                        "QuartzHoldout-31, and EmberRepair-17. It explains copied gate "
+                        "decisions, July policy repair board provenance, and replay lineage. "
+                        "It can justify why SableReplay-144 is risky, but it does not state "
+                        "the S-9 rollback threshold, final owner, or mitigation label."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "nadia-approval-roster",
+                    "Atlas Policy Approval Roster",
+                    (
+                        "The approval roster names Nadia Keene across S-6, S-7, S-8, and S-9 "
+                        "policy mesh gates. It is intentionally insufficient by itself: owner "
+                        "matching alone cannot identify the active threshold, excluded replay "
+                        "dataset, or required mitigation label for 2026.08-s9."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "policy-repair-board-july",
+                    "July Policy Repair Board Review",
+                    (
+                        "The July policy repair board describes copied gate decisions entering "
+                        "SableReplay-144 and explains why replay-derived policy examples can "
+                        "inflate mesh stability measurements. It supplies provenance and risk "
+                        "context, but it predates final S-9 approval and does not contain all "
+                        "approved gate fields."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "mesh-epoch-pin-design",
+                    "Mesh Epoch Pin Design Notes",
+                    (
+                        "The design notes define mesh epoch pinning, governed request epochs, "
+                        "policy repair windows, and coordination-cost accounting. They mention "
+                        "mesh_s9_epoch_pin as a candidate mitigation label, but they do not "
+                        "approve the 42.7 credit rollback threshold, dataset exclusion, or "
+                        "final owner."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "mesh-window-cap-plan",
+                    "Mesh Window Cap Mitigation Plan",
+                    (
+                        "The window cap plan argues for mesh_s8_window_cap and uses a 39.2 "
+                        "credit p99 coordination-cost threshold. It is a false-answer "
+                        "distractor because those values belong to the obsolete S-8 draft and "
+                        "were replaced before the active 2026.08-s9 decision."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "atlas-s7-closeout",
+                    "Atlas Policy Mesh Gate S-7 Closeout",
+                    (
+                        "The S-7 closeout uses similar policy mesh terminology, governed "
+                        "requests, p99 cost windows, replay datasets, and mitigation labels. "
+                        "It rolled back above 44.1 credits and excluded SableReplay-88. Nadia "
+                        "Keene appears as an escalation reviewer, but S-7 is not S-9."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "atlas-s9-release-checklist",
+                    "Atlas S-9 Release Checklist",
+                    (
+                        "The release checklist requires confirming active version, rollback "
+                        "threshold, excluded replay dataset, final approval owner, and mitigation "
+                        "label before enabling S-9. It references the 2026.08-s9 final record "
+                        "as the source of truth but intentionally does not restate the values."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "policy-mesh-runbook",
+                    "Policy Mesh Operations Runbook",
+                    (
+                        "The operations runbook explains how to measure p99 coordination cost, "
+                        "count governed requests, detect four-window rollback conditions, and "
+                        "annotate replay dataset exclusions. It describes the measurement "
+                        "process but delegates approved S-9 values to the final policy record."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "owner-escalation-thread",
+                    "Owner Escalation Thread",
+                    (
+                        "The escalation thread contains messages from Nadia Keene, Omar Voss, "
+                        "and Priya Nair about S-9 rollout risk. It discusses approval order and "
+                        "weekend coverage. It is near-relevant for ownership but lacks the "
+                        "approved threshold, excluded dataset, and mitigation label."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "coordination-cost-study",
+                    "Policy Mesh Coordination Cost Study",
+                    (
+                        "The cost study compares thresholds of 39.2, 42.7, and 44.1 credits "
+                        "across historical mesh gates. It explains why p99 cost over four "
+                        "fifteen-minute windows is a stable trigger. It is analysis rather "
+                        "than the active approval record."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "governed-request-ledger",
+                    "Governed Request Ledger Audit",
+                    (
+                        "The ledger audit describes governed request IDs, mesh epochs, policy "
+                        "repair snapshots, and replay checkpoint ordering. It mentions "
+                        "SableReplay-144 in lineage tables and mesh_s9_epoch_pin in audit "
+                        "comments, but it does not approve the gate."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "atlas-s9-comms-draft",
+                    "Atlas S-9 Communications Draft",
+                    (
+                        "The communications draft says Atlas may pause policy mesh rollout when "
+                        "coordination cost exceeds an approved gate and that a named owner will "
+                        "approve customer-facing status language. It removes internal thresholds, "
+                        "replay dataset names, and mitigation labels."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "repair-dataset-holdout",
+                    "Repair Dataset Holdout Memo",
+                    (
+                        "The holdout memo recommends using QuartzHoldout-31 and excluding some "
+                        "SableReplay data from retrospective scoring. It discusses SableReplay-144 "
+                        "and SableReplay-121 together, but it does not identify which dataset the "
+                        "active S-9 gate excludes."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "mesh-stability-dashboard",
+                    "Mesh Stability Dashboard Notes",
+                    (
+                        "The dashboard notes describe charts for coordination cost, policy mesh "
+                        "stability, replay exclusions, mitigation label rollout, and final owner "
+                        "acknowledgement. They show fields operators inspect but point to the "
+                        "final record for approved values."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "atlas-s9-changelog",
+                    "Atlas S-9 Changelog",
+                    (
+                        "The changelog records that S-9 replaced S-8 draft values and switched "
+                        "from window capping toward epoch pinning. It names 2026.08-s9 and Nadia "
+                        "Keene, but it omits the final threshold and replay dataset exclusion."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "mesh-policy-faq",
+                    "Policy Mesh FAQ",
+                    (
+                        "The FAQ explains terms such as policy mesh, governed request, p99 "
+                        "coordination cost, replay dataset, final owner, active version, and "
+                        "mitigation label. It is broad background and intentionally contains no "
+                        "approved S-9 values."
+                    ),
+                    target_words=block_words,
+                ),
+                _block(
+                    "s9-audit-precheck",
+                    "S-9 Audit Precheck",
+                    (
+                        "The audit precheck confirms that the release package must include a "
+                        "rollback threshold, excluded replay dataset, final approval owner, "
+                        "active policy version, and mitigation label. It verifies document "
+                        "completeness but not the actual approved values."
+                    ),
+                    target_words=block_words,
+                ),
+            ),
+            expected_answer_hints=(
+                "42.7 credits",
+                "SableReplay-144",
+                "Nadia Keene",
+                "mesh_s9_epoch_pin",
+                "2026.08-s9",
+            ),
+            validation_targets=(
+                "42.7",
+                "SableReplay-144",
+                "Nadia Keene",
+                "mesh_s9_epoch_pin",
+                "2026.08-s9",
+            ),
+            difficulty_patterns=(
+                "same_keyword_distractor",
+                "false_answer_distractor",
+                "temporal_distractor",
+                "near_relevant_block",
+                "same_owner_distractor",
+                "obsolete_rule_distractor",
+                "structural_record_navigation",
+                "partial_field_distractor",
             ),
         ),
     ]

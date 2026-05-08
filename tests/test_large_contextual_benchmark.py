@@ -25,6 +25,7 @@ from runtime.run_large_contextual_benchmark import (
     TASK_TIER_LONG,
     TASK_TIER_PRACTICAL,
     TASK_TIER_STANDARD,
+    TASK_TIER_STRUCTURAL,
     _parse_args,
     build_prompt,
     build_selector_prompt,
@@ -157,6 +158,41 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
                 <= set(task.difficulty_patterns)
             )
 
+    def test_structural_tier_exists_with_one_50k_plus_context_task(self) -> None:
+        tasks = get_large_contextual_tasks(TASK_TIER_STRUCTURAL)
+
+        self.assertEqual(len(tasks), 1)
+        task = tasks[0]
+        self.assertEqual(
+            task.task_label,
+            "large_contextual_structural_atlas_policy_mesh_gate",
+        )
+        self.assertGreaterEqual(len(task.blocks), 16)
+        self.assertLessEqual(len(task.blocks), 20)
+        relevant_blocks = [block for block in task.blocks if block.relevant]
+        self.assertEqual(len(relevant_blocks), 1)
+        self.assertEqual(relevant_blocks[0].block_id, "atlas-mesh-s9-final")
+        route = select_relevant_block(task)
+        baseline_prompt = build_prompt(task, "baseline", route)
+        spatial_prompt = build_prompt(task, "spatial", route)
+        self.assertGreaterEqual(estimate_tokens(baseline_prompt), 50000)
+        self.assertGreaterEqual(estimate_tokens(spatial_prompt), 4000)
+        self.assertLessEqual(estimate_tokens(spatial_prompt), 8000)
+        self.assertLess(estimate_tokens(spatial_prompt), estimate_tokens(baseline_prompt))
+        self.assertTrue(
+            {
+                "same_keyword_distractor",
+                "false_answer_distractor",
+                "temporal_distractor",
+                "near_relevant_block",
+                "same_owner_distractor",
+                "obsolete_rule_distractor",
+                "structural_record_navigation",
+                "partial_field_distractor",
+            }
+            <= set(task.difficulty_patterns)
+        )
+
     def test_long_tier_alias_maps_to_practical(self) -> None:
         practical_tasks = get_large_contextual_tasks(TASK_TIER_PRACTICAL)
         alias_tasks = get_large_contextual_tasks(TASK_TIER_LONG)
@@ -265,6 +301,14 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             for block in task.blocks:
                 self.assertIn(f"BLOCK {block.block_id}", prompt)
 
+    def test_structural_tier_baseline_prompt_includes_all_blocks(self) -> None:
+        for task in get_large_contextual_tasks(TASK_TIER_STRUCTURAL):
+            route = select_relevant_block(task)
+            prompt = build_prompt(task, "baseline", route)
+
+            for block in task.blocks:
+                self.assertIn(f"BLOCK {block.block_id}", prompt)
+
     def test_spatial_prompt_includes_only_selected_block(self) -> None:
         for task in get_large_contextual_tasks():
             route = select_relevant_block(task)
@@ -291,6 +335,16 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
     def test_high_context_tier_spatial_prompt_includes_only_selected_block(self) -> None:
         for task in get_large_contextual_tasks(TASK_TIER_HIGH_CONTEXT):
+            route = select_relevant_block(task)
+            prompt = build_prompt(task, "spatial", route)
+
+            self.assertIn(f"BLOCK {route['selected_block_id']}", prompt)
+            for block in task.blocks:
+                if block.block_id != route["selected_block_id"]:
+                    self.assertNotIn(f"BLOCK {block.block_id}", prompt)
+
+    def test_structural_tier_spatial_prompt_includes_only_selected_block(self) -> None:
+        for task in get_large_contextual_tasks(TASK_TIER_STRUCTURAL):
             route = select_relevant_block(task)
             prompt = build_prompt(task, "spatial", route)
 
@@ -514,6 +568,44 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             report["summary"]["router_selection"]["run_count"],
             len(get_large_contextual_tasks(TASK_TIER_HIGH_CONTEXT)),
         )
+        self.assertEqual(report["summary"]["router_selection"]["match_rate"], 1.0)
+        for run in report["runs"]:
+            if run["mode"] == "spatial_router":
+                self.assertEqual(run["router"], "dry_run_fixture_block_selector")
+                self.assertTrue(run["router_selection_matches_fixture"])
+
+    def test_structural_tier_dry_run_fixture_report_is_serializable(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            task_tier=TASK_TIER_STRUCTURAL,
+        )
+
+        json.dumps(report, sort_keys=True)
+        self.assertEqual(report["metadata"]["task_tier"], TASK_TIER_STRUCTURAL)
+        self.assertEqual(report["metadata"]["task_count"], 1)
+        self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
+        self.assertTrue(report["summary"]["context_reduction_verified"])
+        self.assertGreater(report["summary"]["token_reduction_percent"], 0)
+
+    def test_structural_tier_dry_run_both_mode_uses_simulated_router(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="both",
+            task_tier=TASK_TIER_STRUCTURAL,
+        )
+
+        self.assertEqual(report["metadata"]["task_tier"], TASK_TIER_STRUCTURAL)
+        self.assertEqual(
+            set(report["summary"]["modes"]),
+            {"baseline", "spatial_fixture", "spatial_router"},
+        )
+        self.assertEqual(report["summary"]["router_selection"]["run_count"], 1)
         self.assertEqual(report["summary"]["router_selection"]["match_rate"], 1.0)
         for run in report["runs"]:
             if run["mode"] == "spatial_router":
