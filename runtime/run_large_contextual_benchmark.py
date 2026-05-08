@@ -1,4 +1,4 @@
-"""Run the large/contextual Lemonade benchmark.
+"""Run the large/contextual benchmark.
 
 This benchmark isolates the case where SFE can pay for routing by reducing a
 large, noisy executor context. Baseline execution receives every context block.
@@ -23,7 +23,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from providers.lemonade import DEFAULT_BASE_URL, DEFAULT_TIMEOUT, LemonadeProvider
+from providers.lemonade import (
+    DEFAULT_BASE_URL as LEMONADE_DEFAULT_BASE_URL,
+    DEFAULT_TIMEOUT,
+    LemonadeProvider,
+)
+from providers.openai_api import (
+    DEFAULT_BASE_URL as OPENAI_API_DEFAULT_BASE_URL,
+    DEFAULT_EXECUTOR_MODEL as OPENAI_API_DEFAULT_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as OPENAI_API_DEFAULT_ROUTER_MODEL,
+    OpenAIAPIProvider,
+)
 from router.llm_router import DEFAULT_ROUTER_MODEL
 from runtime.run_experiment import (
     DEFAULT_EXECUTION_MODEL,
@@ -44,8 +54,15 @@ from sfe.env import load_repo_env
 BENCHMARK_TYPE = "large/contextual"
 DEFAULT_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark.json"
 DEFAULT_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark.md"
+OPENAI_API_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_openai_api.json"
+OPENAI_API_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_openai_api.md"
 FIXTURE_ROUTER_NAME = "fixture_relevance_router"
-REAL_ROUTER_NAME = "lemonade_block_selector"
+LEMONADE_EXECUTOR = "lemonade"
+OPENAI_API_EXECUTOR = "openai-api"
+EXECUTORS = (LEMONADE_EXECUTOR, OPENAI_API_EXECUTOR)
+LEMONADE_BLOCK_SELECTOR_NAME = "lemonade_block_selector"
+OPENAI_API_BLOCK_SELECTOR_NAME = "openai_api_block_selector"
+REAL_ROUTER_NAME = LEMONADE_BLOCK_SELECTOR_NAME
 DRY_RUN_ROUTER_NAME = "dry_run_fixture_block_selector"
 SELECTION_MODES = ("fixture", "router", "both")
 TASK_TIER_STANDARD = "standard"
@@ -130,6 +147,7 @@ def main() -> None:
         selection_mode=args.selection_mode,
         router_model=args.router_model,
         task_tier=args.task_tier,
+        executor=args.executor,
     )
 
     write_json(args.json, report)
@@ -144,14 +162,24 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repeat", "--repeats", type=int, default=1)
     parser.add_argument("--limit", type=int)
     parser.add_argument(
+        "--executor",
+        choices=EXECUTORS,
+        default=LEMONADE_EXECUTOR,
+        help="Provider used for executor and real-router calls.",
+    )
+    parser.add_argument(
         "--model",
-        default=os.getenv("SFE_EXECUTOR_MODEL") or DEFAULT_EXECUTION_MODEL,
-        help="Lemonade executor model id.",
+        help=(
+            "Executor model id. Defaults to SFE_EXECUTOR_MODEL for Lemonade or "
+            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API."
+        ),
     )
     parser.add_argument(
         "--base-url",
-        default=os.getenv("SFE_LEMONADE_BASE_URL") or DEFAULT_BASE_URL,
-        help="Lemonade OpenAI-compatible base URL.",
+        help=(
+            "Provider base URL. Defaults to SFE_LEMONADE_BASE_URL for Lemonade "
+            "or OPENAI_BASE_URL for OpenAI API."
+        ),
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -166,7 +194,8 @@ def _parse_args() -> argparse.Namespace:
         default="fixture",
         help=(
             "Block selection mode. fixture preserves the existing oracle behavior; "
-            "router uses a Lemonade block selector; both runs baseline, oracle, and router modes."
+            "router uses the configured provider block selector; both runs baseline, "
+            "oracle, and router modes."
         ),
     )
     parser.add_argument(
@@ -182,17 +211,51 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--router-model",
-        default=os.getenv("SFE_ROUTER_MODEL") or DEFAULT_ROUTER_MODEL,
-        help="Lemonade model id for --selection-mode router or both.",
+        help=(
+            "Router model id for --selection-mode router or both. Defaults to "
+            "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI API."
+        ),
     )
-    parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
-    parser.add_argument("--md", type=Path, default=DEFAULT_MD_PATH)
+    parser.add_argument("--json", type=Path)
+    parser.add_argument("--md", type=Path)
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Build prompts and deterministic metrics without calling Lemonade.",
+        help="Build prompts and deterministic metrics without calling a provider.",
     )
-    return parser.parse_args()
+    return _resolve_provider_defaults(parser.parse_args())
+
+
+def _resolve_provider_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    if args.model is None:
+        args.model = _default_executor_model(args.executor)
+    if args.base_url is None:
+        args.base_url = _default_base_url(args.executor)
+    if args.router_model is None:
+        args.router_model = _default_router_model(args.executor)
+    if args.json is None:
+        args.json = OPENAI_API_JSON_PATH if args.executor == OPENAI_API_EXECUTOR else DEFAULT_JSON_PATH
+    if args.md is None:
+        args.md = OPENAI_API_MD_PATH if args.executor == OPENAI_API_EXECUTOR else DEFAULT_MD_PATH
+    return args
+
+
+def _default_executor_model(executor: str) -> str:
+    if executor == OPENAI_API_EXECUTOR:
+        return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or OPENAI_API_DEFAULT_EXECUTOR_MODEL
+    return os.getenv("SFE_EXECUTOR_MODEL") or DEFAULT_EXECUTION_MODEL
+
+
+def _default_router_model(executor: str) -> str:
+    if executor == OPENAI_API_EXECUTOR:
+        return os.getenv("SFE_OPENAI_ROUTER_MODEL") or OPENAI_API_DEFAULT_ROUTER_MODEL
+    return os.getenv("SFE_ROUTER_MODEL") or DEFAULT_ROUTER_MODEL
+
+
+def _default_base_url(executor: str) -> str:
+    if executor == OPENAI_API_EXECUTOR:
+        return os.getenv("OPENAI_BASE_URL") or OPENAI_API_DEFAULT_BASE_URL
+    return os.getenv("SFE_LEMONADE_BASE_URL") or LEMONADE_DEFAULT_BASE_URL
 
 
 def get_large_contextual_tasks(
@@ -1506,7 +1569,7 @@ def run_benchmark(
     tasks: list[LargeContextualTask],
     repeat: int,
     model: str,
-    base_url: str = DEFAULT_BASE_URL,
+    base_url: str | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT,
     max_tokens: int = 160,
     dry_run: bool = False,
@@ -1515,6 +1578,7 @@ def run_benchmark(
     router_model: str | None = None,
     selector: BlockSelector | None = None,
     task_tier: str = TASK_TIER_STANDARD,
+    executor: str = LEMONADE_EXECUTOR,
 ) -> dict[str, Any]:
     if repeat < 1:
         raise ValueError("--repeat must be at least 1.")
@@ -1526,13 +1590,17 @@ def run_benchmark(
         raise ValueError("At least one large/contextual task is required.")
     if selection_mode not in SELECTION_MODES:
         raise ValueError(f"Unknown selection mode: {selection_mode}")
+    if executor not in EXECUTORS:
+        raise ValueError(f"Unknown executor: {executor}")
     task_tier = normalize_task_tier(task_tier)
+    base_url = base_url or _default_base_url(executor)
 
-    provider = provider or (None if dry_run else _make_provider(base_url, timeout_seconds))
-    router_model = router_model or DEFAULT_ROUTER_MODEL
+    provider = provider or (None if dry_run else _make_provider(executor, base_url, timeout_seconds))
+    router_model = router_model or _default_router_model(executor)
     selector = selector or _make_selector(
         selection_mode=selection_mode,
         dry_run=dry_run,
+        executor=executor,
         base_url=base_url,
         timeout_seconds=timeout_seconds,
         router_model=router_model,
@@ -1555,6 +1623,7 @@ def run_benchmark(
                         dry_run=dry_run,
                         provider=provider,
                         fixture_route=fixture_route,
+                        executor=executor,
                     )
                 )
 
@@ -1562,8 +1631,8 @@ def run_benchmark(
         "metadata": {
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "benchmark_type": BENCHMARK_TYPE,
-            "router": _router_name_for_selection_mode(selection_mode, dry_run),
-            "executor": "lemonade",
+            "router": _router_name_for_selection_mode(selection_mode, dry_run, executor),
+            "executor": executor,
             "executor_model": model,
             "router_model": router_model if selection_mode in ("router", "both") else None,
             "base_url": base_url,
@@ -1583,7 +1652,9 @@ def run_benchmark(
     }
 
 
-def _make_provider(base_url: str, timeout_seconds: float) -> LemonadeProvider:
+def _make_provider(executor: str, base_url: str, timeout_seconds: float) -> ChatProvider:
+    if executor == OPENAI_API_EXECUTOR:
+        return OpenAIAPIProvider(base_url=base_url, timeout=timeout_seconds)
     provider = LemonadeProvider(base_url=base_url)
     provider.timeout = timeout_seconds
     return provider
@@ -1592,6 +1663,7 @@ def _make_provider(base_url: str, timeout_seconds: float) -> LemonadeProvider:
 def _make_selector(
     selection_mode: str,
     dry_run: bool,
+    executor: str,
     base_url: str,
     timeout_seconds: float,
     router_model: str,
@@ -1600,9 +1672,13 @@ def _make_selector(
         return None
     if dry_run:
         return DryRunBlockSelector()
-    provider = LemonadeProvider(base_url=base_url)
-    provider.timeout = timeout_seconds
-    return LemonadeBlockSelector(provider=provider, model=router_model)
+    provider = _make_provider(executor, base_url, timeout_seconds)
+    return LemonadeBlockSelector(
+        provider=provider,
+        model=router_model,
+        router_name=_block_selector_name(executor),
+        selection_source=_selection_source(executor),
+    )
 
 
 def _execution_modes(selection_mode: str) -> tuple[str, ...]:
@@ -1630,12 +1706,24 @@ def _route_for_mode(
     raise ValueError(f"Unknown mode: {mode}")
 
 
-def _router_name_for_selection_mode(selection_mode: str, dry_run: bool) -> str:
+def _router_name_for_selection_mode(selection_mode: str, dry_run: bool, executor: str) -> str:
     if selection_mode == "fixture":
         return FIXTURE_ROUTER_NAME
     if dry_run:
         return DRY_RUN_ROUTER_NAME
-    return REAL_ROUTER_NAME
+    return _block_selector_name(executor)
+
+
+def _block_selector_name(executor: str) -> str:
+    if executor == OPENAI_API_EXECUTOR:
+        return OPENAI_API_BLOCK_SELECTOR_NAME
+    return LEMONADE_BLOCK_SELECTOR_NAME
+
+
+def _selection_source(executor: str) -> str:
+    if executor == OPENAI_API_EXECUTOR:
+        return "openai_api"
+    return "lemonade"
 
 
 def select_relevant_block(task: LargeContextualTask) -> dict[str, Any]:
@@ -1710,11 +1798,19 @@ class DryRunBlockSelector:
 
 
 class LemonadeBlockSelector:
-    """Lemonade-backed selector for large/contextual block ids."""
+    """Provider-backed selector for large/contextual block ids."""
 
-    def __init__(self, provider: ChatProvider, model: str):
+    def __init__(
+        self,
+        provider: ChatProvider,
+        model: str,
+        router_name: str = LEMONADE_BLOCK_SELECTOR_NAME,
+        selection_source: str = "lemonade",
+    ):
         self.provider = provider
         self.model = model
+        self.router_name = router_name
+        self.selection_source = selection_source
 
     def select(
         self,
@@ -1750,7 +1846,8 @@ class LemonadeBlockSelector:
                 error="",
                 confidence=_coerce_confidence(parsed.get("confidence")),
                 reason=str(parsed.get("reason") or ""),
-                selection_source="lemonade",
+                router_name=self.router_name,
+                selection_source=self.selection_source,
             )
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
@@ -1767,6 +1864,7 @@ class LemonadeBlockSelector:
                 error=str(exc),
                 confidence=0.0,
                 reason="Router failed; fell back to fixture-selected block for safe execution.",
+                router_name=self.router_name,
                 selection_source="fixture_fallback_after_router_error",
             )
 
@@ -1782,12 +1880,13 @@ def _selector_route(
     error: str,
     confidence: float,
     reason: str,
+    router_name: str,
     selection_source: str,
 ) -> dict[str, Any]:
     executor_used_fallback = not bool(success)
     matches_fixture = bool(success) and block.block_id == fixture_route["selected_block_id"]
     return {
-        "router": REAL_ROUTER_NAME if selection_source == "lemonade" else str(selection_source),
+        "router": router_name if success else str(selection_source),
         "selected_block_id": block.block_id,
         "router_selected_block_id": router_selected_block_id if success else router_selected_block_id,
         "selected_block_title": block.title,
@@ -1972,6 +2071,7 @@ def execute_task(
     dry_run: bool,
     provider: ChatProvider | None,
     fixture_route: dict[str, Any] | None = None,
+    executor: str = LEMONADE_EXECUTOR,
 ) -> dict[str, Any]:
     prompt = build_prompt(task, mode, route)
     prompt_tokens_estimate = estimate_tokens(prompt)
@@ -2015,8 +2115,8 @@ def execute_task(
         "task_label": task.task_label,
         "mode": mode,
         "router": str(route["router"]),
-        "executor": "lemonade",
-        "provider": "lemonade",
+        "executor": executor,
+        "provider": executor,
         "model": model,
         "prompt_style": f"{BENCHMARK_TYPE}:{mode}",
         "benchmark_type": BENCHMARK_TYPE,

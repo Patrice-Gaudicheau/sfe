@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +19,13 @@ from runtime.run_large_contextual_benchmark import (
     BENCHMARK_TYPE,
     FINAL_PHASE_CONCLUSION,
     LemonadeBlockSelector,
+    OPENAI_API_EXECUTOR,
+    OPENAI_API_JSON_PATH,
     TASK_TIER_HIGH_CONTEXT,
     TASK_TIER_LONG,
     TASK_TIER_PRACTICAL,
     TASK_TIER_STANDARD,
+    _parse_args,
     build_prompt,
     build_selector_prompt,
     estimate_tokens,
@@ -270,6 +275,110 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             self.assertIn("input_tokens", run)
             self.assertIn("output_tokens", run)
             self.assertIn("total_tokens", run)
+
+    def test_openai_api_dry_run_uses_same_fixture_modes_and_metadata(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks()[:1],
+            repeat=1,
+            model="example-openai-executor",
+            dry_run=True,
+            selection_mode="both",
+            executor=OPENAI_API_EXECUTOR,
+            router_model="example-openai-router",
+        )
+
+        self.assertEqual(report["metadata"]["executor"], "openai-api")
+        self.assertEqual(report["metadata"]["router"], "dry_run_fixture_block_selector")
+        self.assertEqual(report["metadata"]["executor_model"], "example-openai-executor")
+        self.assertEqual(report["metadata"]["router_model"], "example-openai-router")
+        self.assertEqual(
+            [task["task_label"] for task in report["tasks"]],
+            [get_large_contextual_tasks()[0].task_label],
+        )
+        self.assertEqual(
+            set(report["summary"]["modes"]),
+            {"baseline", "spatial_fixture", "spatial_router"},
+        )
+        for run in report["runs"]:
+            self.assertEqual(run["executor"], "openai-api")
+            self.assertEqual(run["provider"], "openai-api")
+
+    def test_openai_api_cli_uses_openai_env_defaults_and_report_paths(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_OPENAI_EXECUTOR_MODEL": "env-openai-executor",
+                "SFE_OPENAI_ROUTER_MODEL": "env-openai-router",
+                "OPENAI_BASE_URL": "https://api.example.test/v1",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            ["run_large_contextual_benchmark.py", "--executor", "openai-api", "--dry-run"],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, "openai-api")
+        self.assertEqual(args.model, "env-openai-executor")
+        self.assertEqual(args.router_model, "env-openai-router")
+        self.assertEqual(args.base_url, "https://api.example.test/v1")
+        self.assertEqual(args.json, OPENAI_API_JSON_PATH)
+
+    def test_openai_api_provider_path_is_constructed_without_network_in_tests(self) -> None:
+        class FakeOpenAIProvider:
+            def __init__(self, base_url: str, timeout: float) -> None:
+                self.base_url = base_url
+                self.timeout = timeout
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "cache key region code Priya Nair pay-ops"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeOpenAIProvider] = []
+
+        def make_provider(base_url: str, timeout: float) -> FakeOpenAIProvider:
+            provider = FakeOpenAIProvider(base_url, timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.OpenAIAPIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="example-openai-executor",
+                base_url="https://api.example.test/v1",
+                timeout_seconds=7,
+                dry_run=False,
+                selection_mode="fixture",
+                executor=OPENAI_API_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].base_url, "https://api.example.test/v1")
+        self.assertEqual(providers[0].timeout, 7)
+        self.assertEqual(providers[0].calls, 2)
+        self.assertEqual(report["metadata"]["executor"], "openai-api")
+        self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
+        for run in report["runs"]:
+            self.assertEqual(run["provider"], "openai-api")
 
     def test_practical_tier_dry_run_fixture_report_is_serializable(self) -> None:
         report = run_benchmark(
