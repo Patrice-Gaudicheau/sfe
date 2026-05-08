@@ -128,6 +128,31 @@ In the router-inclusive run:
 This means the router handled the schema-versus-value selection, but executor
 answer completeness was not stable across modes and runs.
 
+After adding route-then-verify and opt-in output repair, the same structural
+task was rerun with `gpt-5.5` as executor and `gpt-5.4-nano` as router. In both
+router-inclusive runs, the router selected `atlas-mesh-s9-final`; selection
+verification confirmed that the selected context contained all required target
+values; and no fallback was used.
+
+With repair disabled (`--max-output-repairs 0`), baseline, `spatial_fixture`,
+and `spatial_router` all produced non-empty outputs but omitted `2026.08-s9`.
+The `spatial_router` run therefore kept `success=false` and
+`success_after_output_repair=false`. The failure remained visible.
+
+With repair enabled (`--max-output-repairs 1`), baseline still missed
+`2026.08-s9`, while `spatial_fixture` passed. The `spatial_router` original
+output again missed `2026.08-s9`, so output repair ran once from the same
+selected context. The repair status was `attempted_complete`, the missing target
+list became empty, `output_final_source` was `repaired`, and
+`success_after_output_repair` became `true` while the original `success` field
+remained `false`. The repair added 3,105 tokens and about 5.6 seconds of
+latency in that run.
+
+This is a positive check of the route-then-verify-repair design on one
+structural stress case. It remains a small exploratory result, not production
+readiness evidence, broad validation, or evidence of improved model
+intelligence.
+
 ## Interpretation
 
 The structural tier should be treated as a stress test, not as part of the
