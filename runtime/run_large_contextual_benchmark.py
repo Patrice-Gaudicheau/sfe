@@ -48,6 +48,8 @@ from runtime.metrics import (
     write_json_report,
     write_text_report,
 )
+from runtime.output_validation import OutputValidator
+from runtime.selection_verification import SelectionVerifier
 from sfe.env import load_repo_env
 
 
@@ -89,6 +91,8 @@ FINAL_PHASE_CONCLUSION = (
     "selectively on tasks where context reduction or cognitive separation can "
     "amortize that cost."
 )
+SELECTION_VERIFICATION_TRIGGER_STRUCTURAL_TIER = "structural_tier"
+OUTPUT_VALIDATION_TRIGGER_STRUCTURAL_TIER = "structural_tier"
 
 
 class ChatProvider(Protocol):
@@ -1907,12 +1911,23 @@ def run_benchmark(
         timeout_seconds=timeout_seconds,
         router_model=router_model,
     )
+    selection_verifier = SelectionVerifier()
+    selection_verification_enabled = _selection_verification_enabled(task_tier)
+    output_validator = OutputValidator()
+    output_validation_enabled = _output_validation_enabled(task_tier)
     runs = []
     for task in tasks:
         fixture_route = select_relevant_block(task)
         for repeat_index in range(1, repeat + 1):
             for mode in _execution_modes(selection_mode):
                 route = _route_for_mode(task, mode, fixture_route, selector)
+                route = _verify_route_selection(
+                    task=task,
+                    mode=mode,
+                    route=route,
+                    verifier=selection_verifier,
+                    enabled=selection_verification_enabled,
+                )
                 runs.append(
                     execute_task(
                         task=task,
@@ -1926,6 +1941,8 @@ def run_benchmark(
                         provider=provider,
                         fixture_route=fixture_route,
                         executor=executor,
+                        output_validator=output_validator,
+                        output_validation_required=output_validation_enabled,
                     )
                 )
 
@@ -1945,6 +1962,28 @@ def run_benchmark(
             "task_count": len(tasks),
             "run_count": len(runs),
             "dry_run": dry_run,
+            "selection_verification": {
+                "enabled": selection_verification_enabled,
+                "trigger": (
+                    SELECTION_VERIFICATION_TRIGGER_STRUCTURAL_TIER
+                    if selection_verification_enabled
+                    else None
+                ),
+                "applies_to_modes": (
+                    ["spatial_router"] if selection_verification_enabled else []
+                ),
+            },
+            "output_validation": {
+                "enabled": output_validation_enabled,
+                "trigger": (
+                    OUTPUT_VALIDATION_TRIGGER_STRUCTURAL_TIER
+                    if output_validation_enabled
+                    else None
+                ),
+                "applies_to_modes": (
+                    list(_execution_modes(selection_mode)) if output_validation_enabled else []
+                ),
+            },
             "final_phase_conclusion": FINAL_PHASE_CONCLUSION,
         },
         "summary": summarize_runs(runs),
@@ -2006,6 +2045,49 @@ def _route_for_mode(
             raise ValueError("selector is required for spatial_router mode.")
         return selector.select(task, fixture_route)
     raise ValueError(f"Unknown mode: {mode}")
+
+
+def _selection_verification_enabled(task_tier: str) -> bool:
+    return normalize_task_tier(task_tier) == TASK_TIER_STRUCTURAL
+
+
+def _output_validation_enabled(task_tier: str) -> bool:
+    return normalize_task_tier(task_tier) == TASK_TIER_STRUCTURAL
+
+
+def _verify_route_selection(
+    *,
+    task: LargeContextualTask,
+    mode: str,
+    route: dict[str, Any],
+    verifier: SelectionVerifier,
+    enabled: bool,
+) -> dict[str, Any]:
+    if not enabled or mode != "spatial_router":
+        return route
+
+    selected_block = _block_by_id(task, str(route["selected_block_id"]))
+    verification = verifier.verify(
+        selected_context=selected_block.text,
+        required_targets=task.validation_targets,
+    )
+    verified_route = dict(route)
+    verified_route.update(
+        {
+            "selection_verification_required": True,
+            "selection_verification_status": verification.status,
+            "selection_contains_all_targets": verification.contains_all_targets,
+            "selection_present_targets": list(verification.present_targets),
+            "selection_missing_targets": list(verification.missing_targets),
+            "selection_target_count": verification.target_count,
+            "selection_missing_target_count": verification.missing_target_count,
+            "notes": (
+                f"{route['notes']}; selection_verification={verification.status}; "
+                f"missing_targets={','.join(verification.missing_targets) or 'none'}"
+            ),
+        }
+    )
+    return verified_route
 
 
 def _router_name_for_selection_mode(selection_mode: str, dry_run: bool, executor: str) -> str:
@@ -2378,6 +2460,8 @@ def execute_task(
     provider: ChatProvider | None,
     fixture_route: dict[str, Any] | None = None,
     executor: str = LEMONADE_EXECUTOR,
+    output_validator: OutputValidator | None = None,
+    output_validation_required: bool = False,
 ) -> dict[str, Any]:
     prompt = build_prompt(task, mode, route)
     prompt_tokens_estimate = estimate_tokens(prompt)
@@ -2411,6 +2495,13 @@ def execute_task(
         tokens = _extract_token_usage(response, prompt, output)
 
     validation = validate_output(task, output)
+    output_validation = None
+    if output_validation_required:
+        validator = output_validator or OutputValidator()
+        output_validation = validator.validate(
+            output=output,
+            required_targets=task.validation_targets,
+        )
     used_blocks = block_ids_for_mode(task, mode, route)
     fixture_selected_block_id = (
         str(fixture_route["selected_block_id"]) if fixture_route else str(route["selected_block_id"])
@@ -2435,6 +2526,25 @@ def execute_task(
         "success": bool(not error and validation["passed"]),
         "error": error,
         "validation": validation,
+        "output_validation_required": output_validation_required,
+        "output_validation_status": (
+            output_validation.status if output_validation is not None else None
+        ),
+        "output_contains_all_targets": (
+            output_validation.contains_all_targets if output_validation is not None else None
+        ),
+        "output_present_targets": (
+            list(output_validation.present_targets) if output_validation is not None else None
+        ),
+        "output_missing_targets": (
+            list(output_validation.missing_targets) if output_validation is not None else None
+        ),
+        "output_target_count": (
+            output_validation.target_count if output_validation is not None else None
+        ),
+        "output_missing_target_count": (
+            output_validation.missing_target_count if output_validation is not None else None
+        ),
         "question": task.question,
         "selected_block_id": route["selected_block_id"],
         "fixture_selected_block_id": fixture_selected_block_id,
@@ -2474,6 +2584,27 @@ def execute_task(
         "router_error": route.get("router_error") if mode == "spatial_router" else None,
         "router_confidence": route.get("router_confidence") if mode == "spatial_router" else None,
         "router_reason": route.get("router_reason") if mode == "spatial_router" else None,
+        "selection_verification_required": (
+            route.get("selection_verification_required") if mode == "spatial_router" else None
+        ),
+        "selection_verification_status": (
+            route.get("selection_verification_status") if mode == "spatial_router" else None
+        ),
+        "selection_contains_all_targets": (
+            route.get("selection_contains_all_targets") if mode == "spatial_router" else None
+        ),
+        "selection_present_targets": (
+            route.get("selection_present_targets") if mode == "spatial_router" else None
+        ),
+        "selection_missing_targets": (
+            route.get("selection_missing_targets") if mode == "spatial_router" else None
+        ),
+        "selection_target_count": (
+            route.get("selection_target_count") if mode == "spatial_router" else None
+        ),
+        "selection_missing_target_count": (
+            route.get("selection_missing_target_count") if mode == "spatial_router" else None
+        ),
         "selection_source": route.get("selection_source"),
         "used_block_ids": used_blocks,
         "used_block_count": len(used_blocks),
@@ -2571,6 +2702,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     )
     router_runs = [run for run in runs if run["mode"] == "spatial_router"]
     summary["router_selection"] = summarize_router_selection(router_runs)
+    summary["output_validation"] = summarize_output_validation(runs)
     summary["final_phase_conclusion"] = FINAL_PHASE_CONCLUSION
     return summary
 
@@ -2617,9 +2749,56 @@ def summarize_per_task(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "executor_used_fallback": (
                     router[0]["executor_used_fallback"] if router else None
                 ),
+                "selection_verification_status": (
+                    router[0].get("selection_verification_status") if router else None
+                ),
+                "selection_contains_all_targets": (
+                    router[0].get("selection_contains_all_targets") if router else None
+                ),
+                "selection_missing_targets": (
+                    router[0].get("selection_missing_targets") if router else None
+                ),
+                "output_validation_status": (
+                    router[0].get("output_validation_status") if router else None
+                ),
+                "output_contains_all_targets": (
+                    router[0].get("output_contains_all_targets") if router else None
+                ),
+                "output_missing_targets": (
+                    router[0].get("output_missing_targets") if router else None
+                ),
             }
         )
     return rows
+
+
+def summarize_output_validation(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    required = [run for run in runs if run.get("output_validation_required") is True]
+    if not required:
+        return {
+            "required_count": 0,
+            "complete_count": 0,
+            "incomplete_count": 0,
+            "complete_rate": None,
+            "missing_target_counts": {},
+        }
+    complete = [
+        run for run in required if run.get("output_contains_all_targets") is True
+    ]
+    incomplete = [
+        run for run in required if run.get("output_contains_all_targets") is False
+    ]
+    missing_target_counts: dict[str, int] = {}
+    for run in incomplete:
+        for target in run.get("output_missing_targets") or []:
+            missing_target_counts[str(target)] = missing_target_counts.get(str(target), 0) + 1
+    return {
+        "required_count": len(required),
+        "complete_count": len(complete),
+        "incomplete_count": len(incomplete),
+        "complete_rate": len(complete) / len(required),
+        "missing_target_counts": dict(sorted(missing_target_counts.items())),
+    }
 
 
 def summarize_router_selection(router_runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2636,6 +2815,10 @@ def summarize_router_selection(router_runs: list[dict[str, Any]]) -> dict[str, A
             "average_total_tokens": None,
             "average_end_to_end_total_tokens": None,
             "average_end_to_end_latency_ms": None,
+            "verification_required_count": 0,
+            "verified_complete_count": 0,
+            "verified_incomplete_count": 0,
+            "verified_complete_rate": None,
         }
     matched = [
         run for run in router_runs if run.get("router_selection_matches_fixture") is True
@@ -2666,6 +2849,15 @@ def summarize_router_selection(router_runs: list[dict[str, Any]]) -> dict[str, A
         for run in router_runs
         if run.get("router_latency_ms") is not None
     ]
+    verification_required = [
+        run for run in router_runs if run.get("selection_verification_required") is True
+    ]
+    verified_complete = [
+        run for run in verification_required if run.get("selection_contains_all_targets") is True
+    ]
+    verified_incomplete = [
+        run for run in verification_required if run.get("selection_contains_all_targets") is False
+    ]
     return {
         "run_count": len(router_runs),
         "success_rate": len(successful) / len(router_runs),
@@ -2680,6 +2872,14 @@ def summarize_router_selection(router_runs: list[dict[str, Any]]) -> dict[str, A
         "average_total_tokens": average(total_tokens),
         "average_end_to_end_total_tokens": average(end_to_end_tokens),
         "average_end_to_end_latency_ms": average(end_to_end_latencies),
+        "verification_required_count": len(verification_required),
+        "verified_complete_count": len(verified_complete),
+        "verified_incomplete_count": len(verified_incomplete),
+        "verified_complete_rate": (
+            len(verified_complete) / len(verification_required)
+            if verification_required
+            else None
+        ),
     }
 
 
@@ -2765,6 +2965,10 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             "",
             f"Input token reduction: {reduction_text}",
             f"Context reduction verified: `{report['summary']['context_reduction_verified']}`",
+            f"Output validation required runs: {report['summary']['output_validation']['required_count']}",
+            f"Output validation complete runs: {report['summary']['output_validation']['complete_count']}",
+            f"Output validation incomplete runs: {report['summary']['output_validation']['incomplete_count']}",
+            f"Output validation complete rate: {_format_optional_percent(report['summary']['output_validation']['complete_rate'])}",
             "",
             "## Router Selection",
             "",
@@ -2775,6 +2979,10 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"Router match rate among valid selections: {_format_optional_percent(report['summary']['router_selection']['match_rate_valid_selections'])}",
             f"Fallback-assisted executor runs: {report['summary']['router_selection']['fallback_count']}",
             f"Fallback-assisted executor rate: {_format_optional_percent(report['summary']['router_selection']['fallback_rate'])}",
+            f"Selection verification required runs: {report['summary']['router_selection']['verification_required_count']}",
+            f"Verified complete selections: {report['summary']['router_selection']['verified_complete_count']}",
+            f"Verified incomplete selections: {report['summary']['router_selection']['verified_incomplete_count']}",
+            f"Verified complete selection rate: {_format_optional_percent(report['summary']['router_selection']['verified_complete_rate'])}",
             f"Average router latency ms: {_format_optional_number(report['summary']['router_selection']['average_latency_ms'])}",
             f"Average router total tokens: {_format_optional_number(report['summary']['router_selection']['average_total_tokens'])}",
             f"Average router+executor total tokens: {_format_optional_number(report['summary']['router_selection']['average_end_to_end_total_tokens'])}",
@@ -2819,8 +3027,8 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
                 "",
                 "## Router Details",
                 "",
-                "| Task | Fixture block | Router block | Valid | Match | Fallback | Confidence | Reason | Error |",
-                "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
+                "| Task | Fixture block | Router block | Valid | Match | Fallback | Selection verification | Selection missing targets | Output validation | Output missing targets | Confidence | Reason | Error |",
+                "| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: | --- | --- |",
             ]
         )
         for run in router_runs:
@@ -2829,11 +3037,19 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             confidence_text = (
                 "n/a" if confidence is None else f"{float(confidence):.2f}"
             )
+            verification_status = run.get("selection_verification_status") or "n/a"
+            missing_targets = ", ".join(run.get("selection_missing_targets") or []) or "n/a"
+            output_validation_status = run.get("output_validation_status") or "n/a"
+            output_missing_targets = ", ".join(run.get("output_missing_targets") or []) or "n/a"
             lines.append(
                 f"| `{run['task_label']}` | `{run['fixture_selected_block_id']}` | "
                 f"`{router_block}` | {bool(run['router_valid_selection'])} | "
                 f"{bool(run['router_selection_matches_fixture'])} | "
-                f"{bool(run['executor_used_fallback'])} | {confidence_text} | "
+                f"{bool(run['executor_used_fallback'])} | "
+                f"{_markdown_cell(verification_status)} | "
+                f"{_markdown_cell(missing_targets)} | "
+                f"{_markdown_cell(output_validation_status)} | "
+                f"{_markdown_cell(output_missing_targets)} | {confidence_text} | "
                 f"{_markdown_cell(run.get('router_reason') or '')} | "
                 f"{_markdown_cell(run.get('router_error') or '')} |"
             )
@@ -2853,11 +3069,22 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
     print(f"runs: {report['metadata']['run_count']}")
     print(f"context reduction verified: {report['summary']['context_reduction_verified']}")
     print(f"input token reduction: {reduction_text}")
+    output_validation = report["summary"]["output_validation"]
+    if output_validation["required_count"]:
+        print(
+            "output validation complete rate: "
+            f"{_format_optional_percent(output_validation['complete_rate'])}"
+        )
     router_selection = report["summary"]["router_selection"]
     if router_selection["run_count"]:
         print(f"router selection match rate: {_format_optional_percent(router_selection['match_rate'])}")
         print(f"router valid selection rate: {_format_optional_percent(router_selection['valid_selection_rate'])}")
         print(f"fallback-assisted executor runs: {router_selection['fallback_count']}")
+        if router_selection["verification_required_count"]:
+            print(
+                "verified complete selection rate: "
+                f"{_format_optional_percent(router_selection['verified_complete_rate'])}"
+            )
     print(f"json: {json_path}")
     print(f"markdown: {md_path}")
 

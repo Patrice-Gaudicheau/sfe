@@ -531,6 +531,9 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             if run["mode"] == "spatial_router":
                 self.assertEqual(run["router"], "dry_run_fixture_block_selector")
                 self.assertTrue(run["router_selection_matches_fixture"])
+                self.assertIsNone(run["selection_verification_required"])
+                self.assertFalse(run["output_validation_required"])
+                self.assertIsNone(run["output_validation_status"])
 
     def test_high_context_tier_dry_run_fixture_report_is_serializable(self) -> None:
         report = run_benchmark(
@@ -575,6 +578,9 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             if run["mode"] == "spatial_router":
                 self.assertEqual(run["router"], "dry_run_fixture_block_selector")
                 self.assertTrue(run["router_selection_matches_fixture"])
+                self.assertIsNone(run["selection_verification_required"])
+                self.assertFalse(run["output_validation_required"])
+                self.assertIsNone(run["output_validation_status"])
 
     def test_structural_tier_dry_run_fixture_report_is_serializable(self) -> None:
         report = run_benchmark(
@@ -609,10 +615,204 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(report["summary"]["router_selection"]["run_count"], 1)
         self.assertEqual(report["summary"]["router_selection"]["match_rate"], 1.0)
+        self.assertEqual(
+            report["summary"]["router_selection"]["verification_required_count"],
+            1,
+        )
+        self.assertEqual(
+            report["summary"]["router_selection"]["verified_complete_count"],
+            1,
+        )
+        self.assertEqual(
+            report["summary"]["router_selection"]["verified_incomplete_count"],
+            0,
+        )
+        self.assertEqual(report["summary"]["output_validation"]["required_count"], 3)
+        self.assertEqual(report["summary"]["output_validation"]["complete_count"], 3)
+        self.assertEqual(report["summary"]["output_validation"]["incomplete_count"], 0)
+        self.assertEqual(report["summary"]["output_validation"]["complete_rate"], 1.0)
         for run in report["runs"]:
+            self.assertTrue(run["output_validation_required"])
+            self.assertEqual(run["output_validation_status"], "complete")
+            self.assertTrue(run["output_contains_all_targets"])
+            self.assertEqual(run["output_missing_targets"], [])
             if run["mode"] == "spatial_router":
                 self.assertEqual(run["router"], "dry_run_fixture_block_selector")
                 self.assertTrue(run["router_selection_matches_fixture"])
+                self.assertTrue(run["selection_verification_required"])
+                self.assertEqual(run["selection_verification_status"], "complete")
+                self.assertTrue(run["selection_contains_all_targets"])
+                self.assertEqual(run["selection_missing_targets"], [])
+
+    def test_selection_verification_is_disabled_for_non_structural_tiers(self) -> None:
+        for tier in (TASK_TIER_STANDARD, TASK_TIER_PRACTICAL, TASK_TIER_HIGH_CONTEXT):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks(tier)[:1],
+                repeat=1,
+                model="fake-lemonade-model",
+                dry_run=True,
+                selection_mode="both",
+                task_tier=tier,
+            )
+
+            self.assertFalse(report["metadata"]["selection_verification"]["enabled"])
+            self.assertFalse(report["metadata"]["output_validation"]["enabled"])
+            self.assertEqual(
+                report["summary"]["router_selection"]["verification_required_count"],
+                0,
+            )
+            self.assertEqual(report["summary"]["output_validation"]["required_count"], 0)
+            router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+            self.assertIsNone(router_run["selection_verification_required"])
+            self.assertIsNone(router_run["selection_verification_status"])
+            self.assertIsNone(router_run["selection_contains_all_targets"])
+            self.assertFalse(router_run["output_validation_required"])
+            self.assertIsNone(router_run["output_validation_status"])
+
+    def test_structural_verifier_exposes_valid_but_incomplete_selection(self) -> None:
+        class PartialStructuralSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                partial_block = next(
+                    block for block in task.blocks if block.block_id == "sable-replay-catalog"
+                )
+                return {
+                    **fixture_route,
+                    "router": "partial_structural_selector",
+                    "selected_block_id": partial_block.block_id,
+                    "router_selected_block_id": partial_block.block_id,
+                    "selected_block_title": partial_block.title,
+                    "selection_source": "test",
+                    "router_success": True,
+                    "router_valid_selection": True,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": False,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "",
+                    "router_confidence": 0.7,
+                    "router_reason": "contains replay dataset but not every required value",
+                    "notes": "test selected partial structural block",
+                }
+
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+            selector=PartialStructuralSelector(),
+        )
+
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        summary = report["summary"]["router_selection"]
+        self.assertTrue(router_run["router_valid_selection"])
+        self.assertFalse(router_run["router_selection_matches_fixture"])
+        self.assertFalse(router_run["executor_used_fallback"])
+        self.assertTrue(router_run["selection_verification_required"])
+        self.assertEqual(router_run["selection_verification_status"], "incomplete")
+        self.assertFalse(router_run["selection_contains_all_targets"])
+        self.assertIn("SableReplay-144", router_run["selection_present_targets"])
+        self.assertIn("42.7", router_run["selection_missing_targets"])
+        self.assertIn("ATLAS_OWNER_S9", router_run["selection_missing_targets"])
+        self.assertIn("mesh_s9_epoch_pin", router_run["selection_missing_targets"])
+        self.assertIn("2026.08-s9", router_run["selection_missing_targets"])
+        self.assertEqual(router_run["output_validation_status"], "complete")
+        self.assertTrue(router_run["output_contains_all_targets"])
+        self.assertEqual(summary["verification_required_count"], 1)
+        self.assertEqual(summary["verified_complete_count"], 0)
+        self.assertEqual(summary["verified_incomplete_count"], 1)
+        self.assertEqual(summary["verified_complete_rate"], 0.0)
+
+    def test_structural_complete_output_passes_output_validation(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+        )
+
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        self.assertTrue(report["metadata"]["output_validation"]["enabled"])
+        self.assertTrue(router_run["selection_contains_all_targets"])
+        self.assertEqual(router_run["output_validation_status"], "complete")
+        self.assertTrue(router_run["output_contains_all_targets"])
+        self.assertEqual(router_run["output_missing_targets"], [])
+
+    def test_structural_output_missing_version_is_marked_incomplete_without_repair(self) -> None:
+        class FixtureSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                return {
+                    **fixture_route,
+                    "router": "fixture_test_selector",
+                    "router_selected_block_id": fixture_route["selected_block_id"],
+                    "selection_source": "test",
+                    "router_success": True,
+                    "router_valid_selection": True,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": True,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "",
+                    "router_confidence": 1.0,
+                    "router_reason": "fixture selection for output validation test",
+                }
+
+        class MissingVersionProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.output = (
+                    "The threshold is 42.7 credits, the excluded dataset is "
+                    "SableReplay-144, final approval is ATLAS_OWNER_S9, and the "
+                    "mitigation label is mesh_s9_epoch_pin."
+                )
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [{"message": {"content": self.output}}],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 12,
+                        "total_tokens": 22,
+                    },
+                }
+
+        provider = MissingVersionProvider()
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=False,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+            provider=provider,  # type: ignore[arg-type]
+            selector=FixtureSelector(),
+        )
+
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        self.assertEqual(provider.calls, 2)
+        self.assertTrue(router_run["selection_contains_all_targets"])
+        self.assertFalse(router_run["executor_used_fallback"])
+        self.assertFalse(router_run["success"])
+        self.assertEqual(router_run["output"], provider.output)
+        self.assertEqual(router_run["output_validation_status"], "incomplete")
+        self.assertFalse(router_run["output_contains_all_targets"])
+        self.assertIn("2026.08-s9", router_run["output_missing_targets"])
+        self.assertNotIn("2026.08-s9", router_run["output"])
+        self.assertEqual(report["summary"]["output_validation"]["required_count"], 2)
+        self.assertEqual(report["summary"]["output_validation"]["complete_count"], 0)
+        self.assertEqual(report["summary"]["output_validation"]["incomplete_count"], 2)
+        self.assertEqual(
+            report["summary"]["output_validation"]["missing_target_counts"]["2026.08-s9"],
+            2,
+        )
 
     def test_long_alias_dry_run_reports_practical_tier(self) -> None:
         report = run_benchmark(
@@ -848,9 +1048,12 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertIn("Task tier: `standard`", markdown)
         self.assertIn("Fallback-assisted executor runs: 1", markdown)
         self.assertIn("## Router Details", markdown)
-        self.assertIn("| Task | Fixture block | Router block | Valid | Match | Fallback |", markdown)
+        self.assertIn(
+            "| Task | Fixture block | Router block | Valid | Match | Fallback | Selection verification | Selection missing targets | Output validation | Output missing targets |",
+            markdown,
+        )
         self.assertIn("| `large_contextual_payments_failover`", markdown)
-        self.assertIn("| False | False | True |", markdown)
+        self.assertIn("| False | False | True | n/a | n/a | n/a | n/a |", markdown)
         self.assertIn("router unavailable", markdown)
         self.assertIn("Router failed; fell back to fixture-selected block", markdown)
 
