@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Spatial Field Engine for Cognition"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "PolyForm Noncommercial License 1.0.0" }
 dependencies = []
 
 [tool.setuptools]

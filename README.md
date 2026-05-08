@@ -6,6 +6,22 @@ SFE does not claim to make a model more intelligent. The current project tests a
 
 The evidence in this repository is early, mostly synthetic, and benchmark-specific. Treat the results as a research signal from a technical prototype, not as proof of general model capability or production readiness.
 
+## License
+
+This repository is source-available, not open source. It is licensed under the PolyForm Noncommercial License 1.0.0; see `LICENSE`.
+
+Non-commercial use, study, modification, and forking are allowed under the license. Commercial use is not permitted without prior written permission.
+
+Pull requests are not currently accepted.
+
+## Contributions
+
+Public feedback is welcome through issues or other public discussion channels.
+
+Pull requests are not currently accepted.
+
+Forks for non-commercial research and experimentation are allowed under the license.
+
 ## Problem
 
 Large prompts often mix user intent, constraints, background facts, distractors, prior decisions, and execution instructions in one context window. That can make runs harder to audit and can spend tokens on information that is irrelevant to the next model call.
