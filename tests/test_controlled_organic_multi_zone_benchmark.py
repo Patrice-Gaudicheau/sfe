@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -18,10 +19,12 @@ from runtime.run_controlled_organic_multi_zone_benchmark import (
     BENCHMARK_TYPE,
     FixtureOrganicExecutor,
     FixtureOrganicSelector,
+    OpenAIOrganicExecutorSmoke,
     OpenAIOrganicSelectorSmoke,
     _build_executor_from_args,
     _build_selector_from_args,
     _parse_args,
+    build_openai_executor_prompt,
     build_openai_selector_prompt,
     build_selection,
     execute_task,
@@ -86,6 +89,67 @@ class FakeOpenAISelectorProvider:
                 "prompt_tokens": 600,
                 "completion_tokens": 120,
                 "total_tokens": 720,
+            },
+        }
+
+
+def _executor_json(
+    *,
+    omit_field: str | None = None,
+    evidence_source_ids: list[str] | None = None,
+    extra_field: bool = False,
+) -> str:
+    data: dict[str, Any] = {
+        "active_protocol": "Helix Gate 2026.11",
+        "cycle_date": "2026-11-14",
+        "responsible_component": "relay-admission-controller",
+        "owner_id": "COMPONENT_OWNER_RELAY_GATE",
+        "threshold": "error budget burn <= 2.8% over 24h",
+        "required_action": "enable staged admission with rollback monitor",
+        "blocking_condition": "queue replay drift above 0.36",
+        "evidence_source_ids": evidence_source_ids
+        or [
+            "doc-release-notes-helix-2026-11",
+            "doc-policy-thresholds-current",
+            "doc-service-ownership-map",
+            "doc-incident-followup-778",
+        ],
+    }
+    if omit_field:
+        data.pop(omit_field)
+    if extra_field:
+        data["unsupported_note"] = "extra fields must fail strict parsing"
+    return json.dumps(data)
+
+
+class FakeOpenAIExecutorProvider:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls: list[dict[str, Any]] = []
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        max_tokens: int,
+        temperature: float | None,
+        system_instruction: str | None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "system_instruction": system_instruction,
+            }
+        )
+        return {
+            "choices": [{"message": {"content": self.content}}],
+            "usage": {
+                "prompt_tokens": 500,
+                "completion_tokens": 140,
+                "total_tokens": 640,
             },
         }
 
@@ -347,6 +411,7 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
         self.assertIsInstance(selector, FixtureOrganicSelector)
         self.assertIsInstance(executor, FixtureOrganicExecutor)
         self.assertEqual(args.selector, "fixture")
+        self.assertEqual(args.executor, "fixture")
         self.assertEqual(selector.provider, "deterministic_mock")
         self.assertEqual(executor.provider, "deterministic_mock")
 
@@ -363,6 +428,153 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
         self.assertIn("Valid canonical source IDs:", prompt)
         self.assertIn('"doc-release-notes-helix-2026-11"', prompt)
         self.assertIn("Do not generate the final answer", prompt)
+
+    def test_openai_executor_prompt_uses_selected_sources_and_schema(self) -> None:
+        selected_source_ids = self.task.required_source_ids
+        composed_context = "\n".join(
+            source_by_id(self.task, source_id).text for source_id in selected_source_ids
+        )
+        prompt = build_openai_executor_prompt(
+            self.task,
+            selected_source_ids,
+            composed_context,
+        )
+
+        self.assertIn("source documents", prompt)
+        self.assertIn("Return only strict JSON", prompt)
+        self.assertIn('"active_protocol"', prompt)
+        self.assertIn('"evidence_source_ids"', prompt)
+        self.assertIn("Do not include markdown fences", prompt)
+        self.assertIn("Allowed evidence source IDs", prompt)
+        self.assertIn("doc-release-notes-helix-2026-11", prompt)
+
+    def test_fixture_selector_fixture_executor_still_passes(self) -> None:
+        report = run_benchmark([self.task])
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertEqual(organic_run["executor_mode"], "deterministic_fixture")
+        self.assertEqual(organic_run["executor_provider"], "deterministic_mock")
+        self.assertTrue(organic_run["honest_controlled_organic_pass"])
+
+    def test_fixture_selector_mocked_openai_executor_valid_json_passes(self) -> None:
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(_executor_json()),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], executor=executor)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertEqual(organic_run["selector"], "fixture_controlled_organic_selector")
+        self.assertEqual(organic_run["executor_mode"], "openai_executor_smoke")
+        self.assertEqual(organic_run["executor_provider"], "openai-api")
+        self.assertTrue(organic_run["executor_output_parse_success"])
+        self.assertTrue(organic_run["output_validation_before_repair"])
+        self.assertTrue(organic_run["honest_controlled_organic_pass"])
+        self.assertEqual(
+            report["summary"]["openai_executor_actual_usage"]["total_tokens"],
+            640,
+        )
+
+    def test_mocked_openai_executor_missing_field_fails(self) -> None:
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(
+                _executor_json(omit_field="owner_id")
+            ),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], executor=executor)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertFalse(organic_run["executor_output_parse_success"])
+        self.assertIn("missing required fields", organic_run["executor_output_parse_error"])
+        self.assertFalse(organic_run["output_validation_before_repair"])
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
+
+    def test_mocked_openai_executor_wrong_evidence_source_ids_fails(self) -> None:
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(
+                _executor_json(
+                    evidence_source_ids=[
+                        "doc-release-notes-helix-2026-11",
+                        "doc-policy-thresholds-current",
+                        "doc-incident-followup-778",
+                        "doc-policy-thresholds-previous",
+                    ]
+                )
+            ),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], executor=executor)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertTrue(organic_run["executor_output_parse_success"])
+        self.assertFalse(organic_run["output_validation_before_repair"])
+        self.assertEqual(
+            organic_run["output_validation"]["evidence_reference_validation"][
+                "missing_source_ids"
+            ],
+            ["doc-service-ownership-map"],
+        )
+        self.assertEqual(
+            organic_run["output_validation"]["evidence_reference_validation"][
+                "unexpected_source_ids"
+            ],
+            ["doc-policy-thresholds-previous"],
+        )
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
+
+    def test_mocked_openai_executor_malformed_json_fails(self) -> None:
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider("{not json"),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], executor=executor)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertFalse(organic_run["executor_output_parse_success"])
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
+
+    def test_mocked_openai_executor_extra_text_fails(self) -> None:
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(
+                "Here is the answer:\n" + _executor_json()
+            ),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], executor=executor)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertFalse(organic_run["executor_output_parse_success"])
+        self.assertFalse(organic_run["output_validation_before_repair"])
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
+
+    def test_mocked_openai_executor_extra_field_fails(self) -> None:
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(
+                _executor_json(extra_field=True)
+            ),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], executor=executor)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertFalse(organic_run["executor_output_parse_success"])
+        self.assertIn("unexpected fields", organic_run["executor_output_parse_error"])
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
 
     def test_mocked_openai_selector_exact_canonical_ids_passes(self) -> None:
         selector = OpenAIOrganicSelectorSmoke(
@@ -473,6 +685,8 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
             "output_validation_complete_rate",
             "output_validation_after_repair_rate",
             "average_token_reduction_percent",
+            "openai_selector_actual_usage",
+            "openai_executor_actual_usage",
             "actual_usage",
         ):
             self.assertIn(field, summary)
@@ -501,6 +715,7 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
         self.assertIn("Selected sources", markdown)
         self.assertIn("Suppressed sources", markdown)
         self.assertIn("Composed context", markdown)
+        self.assertIn("OpenAI Executor Usage", markdown)
 
 
 if __name__ == "__main__":

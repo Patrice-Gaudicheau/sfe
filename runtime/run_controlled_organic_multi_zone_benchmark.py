@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.openai_api import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_EXECUTOR_MODEL,
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
     PROVIDER_NAME as OPENAI_API_PROVIDER,
     OpenAIAPIProvider,
@@ -39,6 +40,9 @@ FIXTURE_EXECUTOR_NAME = "fixture_controlled_organic_executor"
 OPENAI_SELECTOR_NAME = "openai_controlled_organic_selector_smoke"
 OPENAI_SELECTOR_API_PATH = "/v1/responses"
 DEFAULT_OPENAI_SELECTOR_MAX_TOKENS = 800
+OPENAI_EXECUTOR_NAME = "openai_controlled_organic_executor_smoke"
+OPENAI_EXECUTOR_API_PATH = "/v1/responses"
+DEFAULT_OPENAI_EXECUTOR_MAX_TOKENS = 1000
 
 
 @dataclass(frozen=True)
@@ -127,6 +131,25 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_OPENAI_SELECTOR_MAX_TOKENS,
         help="Maximum selector response tokens for --selector openai.",
     )
+    parser.add_argument(
+        "--executor",
+        choices=("fixture", "openai"),
+        default="fixture",
+        help="Executor path to use. Default fixture mode makes no provider calls.",
+    )
+    parser.add_argument(
+        "--executor-model",
+        help=(
+            "OpenAI executor model for --executor openai. Defaults to "
+            "SFE_OPENAI_EXECUTOR_MODEL, then the provider executor default."
+        ),
+    )
+    parser.add_argument(
+        "--executor-max-output-tokens",
+        type=int,
+        default=DEFAULT_OPENAI_EXECUTOR_MAX_TOKENS,
+        help="Maximum executor response tokens for --executor openai.",
+    )
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
     parser.add_argument("--md", type=Path, default=DEFAULT_MD_PATH)
     return parser.parse_args()
@@ -144,7 +167,19 @@ def _build_selector_from_args(args: argparse.Namespace) -> OrganicSelector:
     )
 
 def _build_executor_from_args(args: argparse.Namespace) -> OrganicExecutor:
-    return FixtureOrganicExecutor()
+    if args.executor == "fixture":
+        return FixtureOrganicExecutor()
+    load_repo_env()
+    model = (
+        args.executor_model
+        or os.getenv("SFE_OPENAI_EXECUTOR_MODEL")
+        or DEFAULT_OPENAI_EXECUTOR_MODEL
+    )
+    return OpenAIOrganicExecutorSmoke(
+        model=model,
+        timeout=args.timeout,
+        max_output_tokens=args.executor_max_output_tokens,
+    )
 
 
 def get_controlled_organic_tasks() -> list[ControlledOrganicTask]:
@@ -429,6 +464,80 @@ class FixtureOrganicExecutor:
         }
 
 
+class OpenAIOrganicExecutorSmoke:
+    """OpenAI-backed executor smoke path over selected source context only."""
+
+    provider = OPENAI_API_PROVIDER
+    executor_mode = "openai_executor_smoke"
+    api_path = OPENAI_EXECUTOR_API_PATH
+
+    def __init__(
+        self,
+        model: str,
+        timeout: float | None = None,
+        max_output_tokens: int = DEFAULT_OPENAI_EXECUTOR_MAX_TOKENS,
+        provider: OpenAIAPIProvider | None = None,
+    ) -> None:
+        if not model:
+            raise ValueError("OpenAI executor model is required.")
+        if max_output_tokens < 1:
+            raise ValueError("executor max_output_tokens must be at least 1.")
+        self.model = model
+        self.timeout = timeout
+        self.max_output_tokens = max_output_tokens
+        self._provider = provider
+
+    def execute(
+        self,
+        task: ControlledOrganicTask,
+        selected_source_ids: tuple[str, ...],
+        composed_context: str,
+    ) -> dict[str, Any]:
+        provider = self._provider or OpenAIAPIProvider(timeout=self.timeout)
+        prompt = build_openai_executor_prompt(task, selected_source_ids, composed_context)
+        response = provider.chat(
+            [{"role": "user", "content": prompt}],
+            model=self.model,
+            max_tokens=self.max_output_tokens,
+            temperature=None,
+            system_instruction=(
+                "You synthesize benchmark answers from selected source documents only. "
+                "Return only strict JSON matching the requested schema."
+            ),
+        )
+        response_text = _extract_response_text(response)
+        usage = _extract_usage(response)
+        try:
+            output = parse_openai_executor_output(task, response_text)
+            output_parse_success = True
+            output_parse_error = ""
+        except Exception as exc:
+            output = ""
+            output_parse_success = False
+            output_parse_error = _safe_error_message(exc)
+        return {
+            "executor": OPENAI_EXECUTOR_NAME,
+            "executor_mode": self.executor_mode,
+            "provider": OPENAI_API_PROVIDER,
+            "model": self.model,
+            "api_path": OPENAI_EXECUTOR_API_PATH,
+            "output": output,
+            "output_parse_success": output_parse_success,
+            "output_parse_error": output_parse_error,
+            "actual_usage": None,
+            "openai_executor": {
+                "provider": OPENAI_API_PROVIDER,
+                "model": self.model,
+                "api_path": OPENAI_EXECUTOR_API_PATH,
+                "max_output_tokens": self.max_output_tokens,
+                "raw_response_text": response_text,
+                "usage": usage,
+                "output_parse_success": output_parse_success,
+                "output_parse_error": output_parse_error,
+            },
+        }
+
+
 def run_benchmark(
     tasks: list[ControlledOrganicTask],
     repeat: int = 1,
@@ -488,6 +597,7 @@ def run_benchmark(
             "executor_provider": getattr(executor, "provider", "deterministic_mock"),
             "executor_model": getattr(executor, "model", None),
             "executor_api_path": getattr(executor, "api_path", None),
+            "executor": getattr(executor, "executor_mode", executor.__class__.__name__),
         },
         "summary": summarize_runs(runs),
         "tasks": [task_to_dict(task) for task in tasks],
@@ -674,6 +784,7 @@ def execute_task(
         "executor_output_parse_error": executor_result["output_parse_error"],
         "actual_usage": executor_result.get("actual_usage"),
         "openai_selector": selection.get("openai_selector"),
+        "openai_executor": executor_result.get("openai_executor"),
         "honest_controlled_organic_pass": honest_pass,
         "success": success,
         "output": output,
@@ -812,6 +923,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             if run["token_reduction_percent"] is not None
         ),
         "openai_selector_actual_usage": _sum_openai_selector_usage(organic_runs),
+        "openai_executor_actual_usage": _sum_openai_executor_usage(organic_runs),
         "actual_usage": {"input_tokens": None, "output_tokens": None, "total_tokens": None},
         "fixtures": _summarize_fixtures(organic_runs),
     }
@@ -875,6 +987,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Executor mode: `{report['metadata']['executor_mode']}`",
         f"Executor provider: `{report['metadata']['executor_provider']}`",
         f"Executor model: `{report['metadata']['executor_model'] or 'n/a'}`",
+        f"Executor API path: `{report['metadata']['executor_api_path'] or 'n/a'}`",
         f"Runs: {summary['run_count']}",
         "",
         "## Summary",
@@ -905,6 +1018,14 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"| Input | {_format_optional_int(summary['openai_selector_actual_usage']['input_tokens'])} |",
         f"| Output | {_format_optional_int(summary['openai_selector_actual_usage']['output_tokens'])} |",
         f"| Total | {_format_optional_int(summary['openai_selector_actual_usage']['total_tokens'])} |",
+        "",
+        "## OpenAI Executor Usage",
+        "",
+        "| Metric | Actual tokens |",
+        "| --- | ---: |",
+        f"| Input | {_format_optional_int(summary['openai_executor_actual_usage']['input_tokens'])} |",
+        f"| Output | {_format_optional_int(summary['openai_executor_actual_usage']['output_tokens'])} |",
+        f"| Total | {_format_optional_int(summary['openai_executor_actual_usage']['total_tokens'])} |",
         "",
         "## Fixtures",
         "",
@@ -952,6 +1073,8 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
         print(f"selector model: {report['metadata']['selector_model']}")
     print(f"executor mode: {report['metadata']['executor_mode']}")
     print(f"executor provider: {report['metadata']['executor_provider']}")
+    if report["metadata"].get("executor_model"):
+        print(f"executor model: {report['metadata']['executor_model']}")
     print(f"runs: {summary['run_count']}")
     print(
         "honest controlled-organic pass rate: "
@@ -1027,6 +1150,82 @@ def parse_openai_selector_output(response_text: str) -> dict[str, Any]:
         "evidence_rationale": str(data.get("evidence_rationale") or ""),
         "fallback_used": bool(data.get("fallback_used")),
     }
+
+
+def build_openai_executor_prompt(
+    task: ControlledOrganicTask,
+    selected_source_ids: tuple[str, ...],
+    composed_context: str,
+) -> str:
+    expected_fields = ", ".join(_expected_answer_fields(task))
+    evidence_source_ids = ", ".join(f'"{source_id}"' for source_id in selected_source_ids)
+    return (
+        "Synthesize the controlled organic benchmark answer using only the selected "
+        "source documents below.\n"
+        "Return only strict JSON. Do not include markdown fences, extra prose, comments, "
+        "or explanatory text outside the JSON object.\n\n"
+        "Required JSON schema:\n"
+        "{\n"
+        '  "active_protocol": "string",\n'
+        '  "cycle_date": "string",\n'
+        '  "responsible_component": "string",\n'
+        '  "owner_id": "string",\n'
+        '  "threshold": "string",\n'
+        '  "required_action": "string",\n'
+        '  "blocking_condition": "string",\n'
+        '  "evidence_source_ids": ["source-id", "..."]\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Use exact values from the selected source documents.\n"
+        "- Include every required field exactly once.\n"
+        "- evidence_source_ids must be a JSON array of exact canonical source IDs only.\n"
+        "- Do not decorate source IDs, prefix them with SOURCE or DOC, or append roles in parentheses.\n"
+        "- If a value is not supported by the selected source documents, still return JSON; validation will fail.\n\n"
+        f"Required fields: {expected_fields}\n"
+        f"Allowed evidence source IDs for this selected context: {evidence_source_ids}\n\n"
+        f"Task:\n{task.question}\n\n"
+        f"Selected source documents:\n{composed_context}"
+    )
+
+
+def parse_openai_executor_output(task: ControlledOrganicTask, response_text: str) -> str:
+    data = _loads_strict_json_object(response_text)
+    expected_fields = _expected_answer_fields(task)
+    missing_fields = [field for field in expected_fields if field not in data]
+    if missing_fields:
+        raise ValueError(
+            "OpenAI executor response is missing required fields: "
+            + ", ".join(missing_fields)
+        )
+    unexpected_fields = [
+        field for field in data if field not in set(expected_fields)
+    ]
+    if unexpected_fields:
+        raise ValueError(
+            "OpenAI executor response included unexpected fields: "
+            + ", ".join(unexpected_fields)
+        )
+    evidence_refs = data.get("evidence_source_ids")
+    if not isinstance(evidence_refs, list):
+        raise ValueError("OpenAI executor evidence_source_ids must be a JSON array.")
+    lines: list[str] = []
+    for field in expected_fields:
+        value = data[field]
+        if field == "evidence_source_ids":
+            value_text = ", ".join(str(item).strip() for item in value if str(item).strip())
+        else:
+            value_text = str(value).strip()
+        lines.append(f"{field}: {value_text}")
+    return "\n".join(lines)
+
+
+def _expected_answer_fields(task: ControlledOrganicTask) -> list[str]:
+    fields: list[str] = []
+    for line in task.expected_answer.splitlines():
+        label, separator, _value = line.partition(":")
+        if separator:
+            fields.append(label.strip())
+    return fields
 
 
 def _validate_openai_selected_source_ids(
@@ -1123,6 +1322,10 @@ def _safe_error_message(exc: Exception) -> str:
 
 def _sum_openai_selector_usage(runs: list[dict[str, Any]]) -> dict[str, int | None]:
     return _sum_usage_metadata(run.get("openai_selector") for run in runs)
+
+
+def _sum_openai_executor_usage(runs: list[dict[str, Any]]) -> dict[str, int | None]:
+    return _sum_usage_metadata(run.get("openai_executor") for run in runs)
 
 
 def _sum_usage_metadata(items: Any) -> dict[str, int | None]:
