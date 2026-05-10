@@ -18,9 +18,11 @@ from runtime.run_controlled_organic_multi_zone_benchmark import (
     BENCHMARK_TYPE,
     FixtureOrganicExecutor,
     FixtureOrganicSelector,
+    OpenAIOrganicSelectorSmoke,
     _build_executor_from_args,
     _build_selector_from_args,
     _parse_args,
+    build_openai_selector_prompt,
     build_selection,
     execute_task,
     get_controlled_organic_tasks,
@@ -30,6 +32,62 @@ from runtime.run_controlled_organic_multi_zone_benchmark import (
     validate_selection,
     write_markdown,
 )
+
+
+def _selector_json(selected_source_ids: list[str], roles: dict[str, str] | None = None) -> str:
+    role_map = roles or {
+        "doc-release-notes-helix-2026-11": "release_notes",
+        "doc-policy-thresholds-current": "policy_thresholds",
+        "doc-service-ownership-map": "ownership_map",
+        "doc-incident-followup-778": "evidence_record",
+        "doc-policy-thresholds-previous": "previous_policy",
+        "doc-ops-note-local-override": "ops_note",
+        "doc-release-notes-draft": "draft_release_notes",
+    }
+    selected_roles = {
+        source_id: role_map.get(source_id, "unknown") for source_id in selected_source_ids
+    }
+    return (
+        "{"
+        f'"selected_source_ids": {selected_source_ids!r}, '
+        f'"source_roles": {selected_roles!r}, '
+        '"confidence": 0.93, '
+        '"evidence_rationale": "Selected the complete controlled organic source set.", '
+        '"fallback_used": false'
+        "}"
+    ).replace("'", '"')
+
+
+class FakeOpenAISelectorProvider:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls: list[dict[str, Any]] = []
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        max_tokens: int,
+        temperature: float | None,
+        system_instruction: str | None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "system_instruction": system_instruction,
+            }
+        )
+        return {
+            "choices": [{"message": {"content": self.content}}],
+            "usage": {
+                "prompt_tokens": 600,
+                "completion_tokens": 120,
+                "total_tokens": 720,
+            },
+        }
 
 
 class FailingSelector:
@@ -288,8 +346,115 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
 
         self.assertIsInstance(selector, FixtureOrganicSelector)
         self.assertIsInstance(executor, FixtureOrganicExecutor)
+        self.assertEqual(args.selector, "fixture")
         self.assertEqual(selector.provider, "deterministic_mock")
         self.assertEqual(executor.provider, "deterministic_mock")
+
+    def test_openai_selector_prompt_uses_source_document_schema(self) -> None:
+        prompt = build_openai_selector_prompt(self.task)
+
+        self.assertIn("source documents", prompt)
+        self.assertIn('"selected_source_ids"', prompt)
+        self.assertIn('"source_roles"', prompt)
+        self.assertIn("selected_source_ids must contain exact canonical source IDs only", prompt)
+        self.assertIn('Do not prefix IDs with "DOC" or "SOURCE"', prompt)
+        self.assertIn("Do not append roles in parentheses", prompt)
+        self.assertIn("Do not include labels, explanations, markdown", prompt)
+        self.assertIn("Valid canonical source IDs:", prompt)
+        self.assertIn('"doc-release-notes-helix-2026-11"', prompt)
+        self.assertIn("Do not generate the final answer", prompt)
+
+    def test_mocked_openai_selector_exact_canonical_ids_passes(self) -> None:
+        selector = OpenAIOrganicSelectorSmoke(
+            model="example-openai-router",
+            provider=FakeOpenAISelectorProvider(
+                _selector_json(list(self.task.required_source_ids))
+            ),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], selector=selector)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertEqual(organic_run["selector"], "openai_controlled_organic_selector_smoke")
+        self.assertFalse(organic_run["selector_used_fallback"])
+        self.assertEqual(organic_run["selector_validation_result"], "complete")
+        self.assertTrue(organic_run["honest_controlled_organic_pass"])
+        self.assertEqual(report["summary"]["fallback_count"], 0)
+        self.assertEqual(
+            report["summary"]["openai_selector_actual_usage"]["total_tokens"],
+            720,
+        )
+
+    def test_decorated_source_ids_fail_and_trigger_fallback(self) -> None:
+        decorated_ids = [
+            "SOURCE doc-release-notes-helix-2026-11 (release_notes)",
+            "SOURCE doc-policy-thresholds-current (policy_thresholds)",
+            "SOURCE doc-service-ownership-map (ownership_map)",
+            "SOURCE doc-incident-followup-778 (evidence_record)",
+        ]
+        selector = OpenAIOrganicSelectorSmoke(
+            model="example-openai-router",
+            provider=FakeOpenAISelectorProvider(_selector_json(decorated_ids)),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], selector=selector)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertTrue(organic_run["selector_used_fallback"])
+        self.assertFalse(organic_run["selector_success"])
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
+        self.assertEqual(report["summary"]["fallback_count"], 1)
+        metadata = organic_run["openai_selector"]
+        self.assertEqual(metadata["provider"], "openai-api")
+        self.assertEqual(metadata["model"], "example-openai-router")
+        self.assertEqual(metadata["api_path"], "/v1/responses")
+        self.assertEqual(metadata["raw_selected_source_ids"], decorated_ids)
+        self.assertIn("non-canonical source IDs", metadata["error"])
+        self.assertEqual(metadata["usage"]["total_tokens"], 720)
+
+    def test_mocked_openai_selector_missing_required_source_fails(self) -> None:
+        selected = [
+            source_id
+            for source_id in self.task.required_source_ids
+            if source_id != "doc-service-ownership-map"
+        ]
+        selector = OpenAIOrganicSelectorSmoke(
+            model="example-openai-router",
+            provider=FakeOpenAISelectorProvider(_selector_json(selected)),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], selector=selector)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertFalse(organic_run["selector_used_fallback"])
+        self.assertFalse(organic_run["required_source_complete"])
+        self.assertIn("doc-service-ownership-map", organic_run["missing_required_source_ids"])
+        self.assertEqual(organic_run["selector_validation_result"], "incomplete")
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
+
+    def test_mocked_openai_selector_selected_distractor_fails(self) -> None:
+        selected = list(self.task.required_source_ids) + ["doc-policy-thresholds-previous"]
+        selector = OpenAIOrganicSelectorSmoke(
+            model="example-openai-router",
+            provider=FakeOpenAISelectorProvider(_selector_json(selected)),  # type: ignore[arg-type]
+        )
+        report = run_benchmark([self.task], selector=selector)
+        organic_run = [
+            run for run in report["runs"] if run["mode"] == "controlled_organic_multi_zone"
+        ][0]
+
+        self.assertFalse(organic_run["selector_used_fallback"])
+        self.assertTrue(organic_run["required_source_complete"])
+        self.assertFalse(organic_run["distractors_omitted"])
+        self.assertEqual(
+            organic_run["unexpected_distractor_source_ids"],
+            ["doc-policy-thresholds-previous"],
+        )
+        self.assertEqual(organic_run["selector_validation_result"], "incomplete")
+        self.assertFalse(organic_run["honest_controlled_organic_pass"])
 
     def test_report_includes_honest_fields_and_token_estimates(self) -> None:
         report = run_benchmark(self.tasks)
@@ -331,6 +496,7 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
         self.assertIn("Required source completeness rate:", markdown)
         self.assertIn("Distractor rejection rate:", markdown)
         self.assertIn("Output repair status: not_supported", markdown)
+        self.assertIn("Selector validation", markdown)
         self.assertIn("Full-context baseline", markdown)
         self.assertIn("Selected sources", markdown)
         self.assertIn("Suppressed sources", markdown)

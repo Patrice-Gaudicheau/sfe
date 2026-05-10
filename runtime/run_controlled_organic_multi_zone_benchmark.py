@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -19,7 +20,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from providers.openai_api import (
+    DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
+    PROVIDER_NAME as OPENAI_API_PROVIDER,
+    OpenAIAPIProvider,
+)
 from runtime.metrics import estimate_text_tokens, percent_reduction, write_json_report, write_text_report
+from sfe.env import load_repo_env
 
 
 BENCHMARK_TYPE = "multi_zone/controlled_organic"
@@ -29,6 +36,9 @@ DEFAULT_MD_PATH = PROJECT_ROOT / "logs" / "controlled_organic_multi_zone_benchma
 FIXTURE_SELECTOR_NAME = "fixture_controlled_organic_selector"
 FALLBACK_SELECTOR_NAME = "fixture_fallback_after_selector_error"
 FIXTURE_EXECUTOR_NAME = "fixture_controlled_organic_executor"
+OPENAI_SELECTOR_NAME = "openai_controlled_organic_selector_smoke"
+OPENAI_SELECTOR_API_PATH = "/v1/responses"
+DEFAULT_OPENAI_SELECTOR_MAX_TOKENS = 800
 
 
 @dataclass(frozen=True)
@@ -93,14 +103,45 @@ def _parse_args() -> argparse.Namespace:
         description="Run the deterministic controlled organic multi-zone benchmark."
     )
     parser.add_argument("--repeat", "--repeats", type=int, default=1)
+    parser.add_argument(
+        "--selector",
+        choices=("fixture", "openai"),
+        default="fixture",
+        help="Selector path to use. Default fixture mode makes no provider calls.",
+    )
+    parser.add_argument(
+        "--model",
+        help=(
+            "OpenAI selector model for --selector openai. Defaults to "
+            "SFE_OPENAI_ROUTER_MODEL, then the provider router default."
+        ),
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="OpenAI API timeout in seconds for --selector openai.",
+    )
+    parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=DEFAULT_OPENAI_SELECTOR_MAX_TOKENS,
+        help="Maximum selector response tokens for --selector openai.",
+    )
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
     parser.add_argument("--md", type=Path, default=DEFAULT_MD_PATH)
     return parser.parse_args()
 
 
 def _build_selector_from_args(args: argparse.Namespace) -> OrganicSelector:
-    return FixtureOrganicSelector()
-
+    if args.selector == "fixture":
+        return FixtureOrganicSelector()
+    load_repo_env()
+    model = args.model or os.getenv("SFE_OPENAI_ROUTER_MODEL") or DEFAULT_OPENAI_ROUTER_MODEL
+    return OpenAIOrganicSelectorSmoke(
+        model=model,
+        timeout=args.timeout,
+        max_output_tokens=args.max_output_tokens,
+    )
 
 def _build_executor_from_args(args: argparse.Namespace) -> OrganicExecutor:
     return FixtureOrganicExecutor()
@@ -267,6 +308,102 @@ class FixtureOrganicSelector:
         )
 
 
+class OpenAIOrganicSelectorSmoke:
+    """OpenAI-backed source selector smoke path; executor stays deterministic."""
+
+    provider = OPENAI_API_PROVIDER
+    selector_mode = "openai_selector_smoke"
+    api_path = OPENAI_SELECTOR_API_PATH
+
+    def __init__(
+        self,
+        model: str,
+        timeout: float | None = None,
+        max_output_tokens: int = DEFAULT_OPENAI_SELECTOR_MAX_TOKENS,
+        provider: OpenAIAPIProvider | None = None,
+    ) -> None:
+        if not model:
+            raise ValueError("OpenAI selector model is required.")
+        if max_output_tokens < 1:
+            raise ValueError("max_output_tokens must be at least 1.")
+        self.model = model
+        self.timeout = timeout
+        self.max_output_tokens = max_output_tokens
+        self._provider = provider
+
+    def select(self, task: ControlledOrganicTask, fixture_selection: dict[str, Any]) -> dict[str, Any]:
+        provider = self._provider or OpenAIAPIProvider(timeout=self.timeout)
+        prompt = build_openai_selector_prompt(task)
+        response = provider.chat(
+            [{"role": "user", "content": prompt}],
+            model=self.model,
+            max_tokens=self.max_output_tokens,
+            temperature=None,
+            system_instruction=(
+                "You select relevant source documents for a controlled organic benchmark. "
+                "Return only strict JSON matching the requested schema."
+            ),
+        )
+        response_text = _extract_response_text(response)
+        usage = _extract_usage(response)
+        try:
+            parsed = parse_openai_selector_output(response_text)
+            _validate_openai_selected_source_ids(task, parsed["selected_source_ids"])
+        except Exception as exc:
+            raise OpenAISelectorError(
+                str(exc),
+                metadata={
+                    "provider": OPENAI_API_PROVIDER,
+                    "model": self.model,
+                    "api_path": OPENAI_SELECTOR_API_PATH,
+                    "max_output_tokens": self.max_output_tokens,
+                    "raw_response_text": response_text,
+                    "raw_selected_source_ids": _extract_raw_selected_source_ids(
+                        response_text
+                    ),
+                    "usage": usage,
+                    "error": _safe_error_message(exc),
+                },
+            ) from exc
+
+        selected_source_ids = tuple(str(source_id) for source_id in parsed["selected_source_ids"])
+        selected_sources = [source_by_id(task, source_id) for source_id in selected_source_ids]
+        selection = build_selection(
+            task=task,
+            selected_sources=selected_sources,
+            selector_name=OPENAI_SELECTOR_NAME,
+            selector_success=True,
+            selector_used_fallback=bool(parsed["fallback_used"]),
+            confidence=float(parsed["confidence"]),
+            rationale=str(parsed["evidence_rationale"]),
+        )
+        selection["source_roles"] = {
+            source_id: str(
+                parsed["source_roles"].get(source_id)
+                or selection["source_roles"].get(source_id)
+            )
+            for source_id in selection["selected_source_ids"]
+        }
+        selection["openai_selector"] = {
+            "provider": OPENAI_API_PROVIDER,
+            "model": self.model,
+            "api_path": OPENAI_SELECTOR_API_PATH,
+            "max_output_tokens": self.max_output_tokens,
+            "raw_response_text": response_text,
+            "raw_selected_source_ids": list(parsed["selected_source_ids"]),
+            "usage": usage,
+        }
+        return selection
+
+
+class OpenAISelectorError(RuntimeError):
+    """Selector failure with non-secret OpenAI response metadata."""
+
+    def __init__(self, message: str, metadata: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.metadata = dict(metadata)
+
+
 class FixtureOrganicExecutor:
     provider = "deterministic_mock"
     executor_mode = "deterministic_fixture"
@@ -375,6 +512,7 @@ def _select_with_fallback(
                 "selector_error": str(exc),
                 "confidence": 0.0,
                 "evidence_rationale": "Selector failed; fixture sources used for safe execution.",
+                "openai_selector": _selector_error_metadata(selector, exc),
             }
         )
         return fallback
@@ -429,6 +567,7 @@ def build_selection(
         "selector_success": bool(selector_success),
         "selector_used_fallback": bool(selector_used_fallback),
         "selector_error": selector_error,
+        "openai_selector": None,
         "selected_source_token_estimates": selected_source_tokens,
         "suppressed_source_token_estimates": suppressed_source_tokens,
         "selected_source_token_estimate": sum(selected_source_tokens.values()),
@@ -508,6 +647,12 @@ def execute_task(
         "required_source_ids": list(task.required_source_ids),
         "distractor_source_ids": list(task.distractor_source_ids),
         "selection_validation": selection_validation,
+        "selector_validation_result": (
+            "complete"
+            if selection_validation["required_source_complete"]
+            and selection_validation["distractors_omitted"]
+            else "incomplete"
+        ),
         "required_source_complete": selection_validation["required_source_complete"],
         "missing_required_source_ids": selection_validation["missing_required_source_ids"],
         "unexpected_distractor_source_ids": selection_validation[
@@ -528,6 +673,7 @@ def execute_task(
         "executor_output_parse_success": executor_result["output_parse_success"],
         "executor_output_parse_error": executor_result["output_parse_error"],
         "actual_usage": executor_result.get("actual_usage"),
+        "openai_selector": selection.get("openai_selector"),
         "honest_controlled_organic_pass": honest_pass,
         "success": success,
         "output": output,
@@ -665,6 +811,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             run["token_reduction_percent"] for run in organic_runs
             if run["token_reduction_percent"] is not None
         ),
+        "openai_selector_actual_usage": _sum_openai_selector_usage(organic_runs),
         "actual_usage": {"input_tokens": None, "output_tokens": None, "total_tokens": None},
         "fixtures": _summarize_fixtures(organic_runs),
     }
@@ -724,6 +871,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Selector mode: `{report['metadata']['selector_mode']}`",
         f"Selector provider: `{report['metadata']['selector_provider']}`",
         f"Selector model: `{report['metadata']['selector_model'] or 'n/a'}`",
+        f"Selector API path: `{report['metadata']['selector_api_path'] or 'n/a'}`",
         f"Executor mode: `{report['metadata']['executor_mode']}`",
         f"Executor provider: `{report['metadata']['executor_provider']}`",
         f"Executor model: `{report['metadata']['executor_model'] or 'n/a'}`",
@@ -750,13 +898,13 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"| Suppressed sources | {summary['average_suppressed_source_tokens']:.2f} |",
         f"| Composed context | {summary['average_composed_context_tokens']:.2f} |",
         "",
-        "## Provider Usage",
+        "## OpenAI Selector Usage",
         "",
         "| Metric | Actual tokens |",
         "| --- | ---: |",
-        "| Input | n/a |",
-        "| Output | n/a |",
-        "| Total | n/a |",
+        f"| Input | {_format_optional_int(summary['openai_selector_actual_usage']['input_tokens'])} |",
+        f"| Output | {_format_optional_int(summary['openai_selector_actual_usage']['output_tokens'])} |",
+        f"| Total | {_format_optional_int(summary['openai_selector_actual_usage']['total_tokens'])} |",
         "",
         "## Fixtures",
         "",
@@ -778,13 +926,14 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             "",
             "## Runs",
             "",
-            "| Fixture | Mode | Honest pass | Selected sources | Missing required | Distractors selected | Token reduction |",
-            "| --- | --- | ---: | --- | --- | --- | ---: |",
+            "| Fixture | Mode | Selector validation | Honest pass | Selected sources | Missing required | Distractors selected | Token reduction |",
+            "| --- | --- | --- | ---: | --- | --- | --- | ---: |",
         ]
     )
     for run in report["runs"]:
         lines.append(
             f"| `{run['fixture_id']}` | `{run['mode']}` | "
+            f"{run['selector_validation_result']} | "
             f"{run['honest_controlled_organic_pass']} | "
             f"{', '.join(run['selected_source_ids'])} | "
             f"{', '.join(run['missing_required_source_ids']) or 'none'} | "
@@ -799,6 +948,8 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
     print("Controlled organic multi-zone benchmark")
     print(f"selector mode: {report['metadata']['selector_mode']}")
     print(f"selector provider: {report['metadata']['selector_provider']}")
+    if report["metadata"].get("selector_model"):
+        print(f"selector model: {report['metadata']['selector_model']}")
     print(f"executor mode: {report['metadata']['executor_mode']}")
     print(f"executor provider: {report['metadata']['executor_provider']}")
     print(f"runs: {summary['run_count']}")
@@ -817,6 +968,178 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
     )
     print(f"json: {json_path}")
     print(f"markdown: {md_path}")
+
+
+def build_openai_selector_prompt(task: ControlledOrganicTask) -> str:
+    source_catalog = "\n\n".join(format_source(source) for source in task.sources)
+    valid_source_ids = ", ".join(f'"{source.source_id}"' for source in task.sources)
+    example_source = task.sources[0]
+    return (
+        "Select the minimal complete set of source documents needed to answer the task.\n"
+        "Return only strict JSON with this schema:\n"
+        "{\n"
+        '  "selected_source_ids": ["source-id", "..."],\n'
+        '  "source_roles": {"source-id": "role"},\n'
+        '  "confidence": 0.0,\n'
+        '  "evidence_rationale": "short rationale",\n'
+        '  "fallback_used": false\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Select every source document required to answer all requested fields.\n"
+        "- Do not select previous-version, draft, local-override, partial, or merely plausible distractor documents.\n"
+        "- selected_source_ids must contain exact canonical source IDs only.\n"
+        '- Do not prefix IDs with "DOC" or "SOURCE".\n'
+        "- Do not append roles in parentheses.\n"
+        "- Do not include labels, explanations, markdown, or decorated strings inside selected_source_ids.\n"
+        "- Valid IDs are exactly the provided IDs and must be copied verbatim.\n"
+        "- No single source document contains the full answer.\n"
+        "- Set fallback_used to false unless you could not perform selection.\n"
+        "- Do not generate the final answer; only select source documents.\n\n"
+        f"Valid canonical source IDs: {valid_source_ids}\n\n"
+        "Valid JSON format example using canonical IDs only:\n"
+        "{\n"
+        f'  "selected_source_ids": ["{example_source.source_id}"],\n'
+        f'  "source_roles": {{"{example_source.source_id}": "{example_source.role}"}},\n'
+        '  "confidence": 0.42,\n'
+        '  "evidence_rationale": "Short reason for selected sources.",\n'
+        '  "fallback_used": false\n'
+        "}\n\n"
+        f"Task:\n{task.question}\n\n"
+        f"Available source documents:\n{source_catalog}"
+    )
+
+
+def parse_openai_selector_output(response_text: str) -> dict[str, Any]:
+    data = _loads_strict_json_object(response_text)
+    selected_source_ids = data.get("selected_source_ids")
+    source_roles = data.get("source_roles")
+    if not isinstance(selected_source_ids, list) or not selected_source_ids:
+        raise ValueError("OpenAI selector response must include selected_source_ids.")
+    if not isinstance(source_roles, dict):
+        raise ValueError("OpenAI selector response must include source_roles.")
+    confidence = data.get("confidence", 0.0)
+    return {
+        "selected_source_ids": [
+            str(source_id).strip() for source_id in selected_source_ids
+        ],
+        "source_roles": {str(key): str(value) for key, value in source_roles.items()},
+        "confidence": float(confidence),
+        "evidence_rationale": str(data.get("evidence_rationale") or ""),
+        "fallback_used": bool(data.get("fallback_used")),
+    }
+
+
+def _validate_openai_selected_source_ids(
+    task: ControlledOrganicTask,
+    selected_source_ids: list[str],
+) -> None:
+    valid_source_ids = {source.source_id for source in task.sources}
+    invalid_source_ids = [
+        source_id for source_id in selected_source_ids if source_id not in valid_source_ids
+    ]
+    if invalid_source_ids:
+        raise ValueError(
+            "OpenAI selector returned non-canonical source IDs: "
+            + ", ".join(repr(source_id) for source_id in invalid_source_ids)
+        )
+
+
+def _loads_strict_json_object(response_text: str) -> dict[str, Any]:
+    data = json.loads(response_text.strip())
+    if not isinstance(data, dict):
+        raise ValueError("OpenAI selector response must be a strict JSON object.")
+    return data
+
+
+def _extract_raw_selected_source_ids(response_text: str) -> list[str]:
+    try:
+        data = _loads_strict_json_object(response_text)
+    except Exception:
+        return []
+    selected_source_ids = data.get("selected_source_ids")
+    if not isinstance(selected_source_ids, list):
+        return []
+    return [str(source_id) for source_id in selected_source_ids]
+
+
+def _extract_response_text(response: dict[str, Any]) -> str:
+    choices = response.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return ""
+    message = first_choice.get("message", {})
+    if isinstance(message, dict) and message.get("content") is not None:
+        return str(message["content"]).strip()
+    if first_choice.get("text") is not None:
+        return str(first_choice["text"]).strip()
+    return ""
+
+
+def _extract_usage(response: dict[str, Any]) -> dict[str, int | None]:
+    usage = response.get("usage", {})
+    if not isinstance(usage, dict):
+        usage = {}
+    input_tokens = _optional_int(usage.get("prompt_tokens"))
+    output_tokens = _optional_int(usage.get("completion_tokens"))
+    total_tokens = _optional_int(usage.get("total_tokens"))
+    if total_tokens is None and input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _selector_error_metadata(selector: OrganicSelector, exc: Exception) -> dict[str, Any] | None:
+    if isinstance(exc, OpenAISelectorError):
+        return dict(exc.metadata)
+    if not isinstance(selector, OpenAIOrganicSelectorSmoke):
+        return None
+    return {
+        "provider": OPENAI_API_PROVIDER,
+        "model": selector.model,
+        "api_path": OPENAI_SELECTOR_API_PATH,
+        "max_output_tokens": selector.max_output_tokens,
+        "error": _safe_error_message(exc),
+    }
+
+
+def _safe_error_message(exc: Exception) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        message = message.replace(api_key, "[REDACTED]")
+    return message
+
+
+def _sum_openai_selector_usage(runs: list[dict[str, Any]]) -> dict[str, int | None]:
+    return _sum_usage_metadata(run.get("openai_selector") for run in runs)
+
+
+def _sum_usage_metadata(items: Any) -> dict[str, int | None]:
+    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    seen = {key: False for key in totals}
+    for metadata in items:
+        if not isinstance(metadata, dict):
+            continue
+        usage = metadata.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for key in totals:
+            value = usage.get(key)
+            if value is not None:
+                totals[key] += int(value)
+                seen[key] = True
+    return {key: totals[key] if seen[key] else None for key in totals}
 
 
 def compose_context(task: ControlledOrganicTask, source_ids: tuple[str, ...]) -> str:
@@ -901,6 +1224,12 @@ def _format_optional_percent(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.2f}%"
+
+
+def _format_optional_int(value: int | None) -> str:
+    if value is None:
+        return "n/a"
+    return str(value)
 
 
 if __name__ == "__main__":
