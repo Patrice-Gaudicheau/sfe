@@ -173,6 +173,36 @@ class FakeOpenAIExecutorProvider:
         }
 
 
+class SequencedExecutor:
+    executor_mode = "sequenced_executor"
+    provider = "deterministic_test"
+    model: str | None = None
+    api_path: str | None = None
+
+    def __init__(self, outputs: list[str]) -> None:
+        self.outputs = list(outputs)
+        self.calls = 0
+
+    def execute(
+        self,
+        task: Any,
+        selected_zone_ids: tuple[str, ...],
+        composed_context: str,
+    ) -> dict[str, Any]:
+        output = self.outputs[self.calls]
+        self.calls += 1
+        return {
+            "executor": "sequenced_executor",
+            "executor_mode": self.executor_mode,
+            "provider": self.provider,
+            "model": self.model,
+            "api_path": self.api_path,
+            "output": output,
+            "output_parse_success": True,
+            "output_parse_error": "",
+        }
+
+
 class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tasks = get_multi_zone_synthetic_tasks()
@@ -609,6 +639,107 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.selector, "fixture")
         self.assertEqual(args.executor, "fixture")
         self.assertEqual(executor.executor_mode, "deterministic_fixture")
+
+    def test_repeat_openai_smoke_cli_sets_openai_selector_executor_and_repeat(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            ["run_multi_zone_synthetic_benchmark.py", "--repeat-openai-smoke", "3"],
+        ):
+            args = _parse_args()
+
+        with patch("runtime.run_multi_zone_synthetic_benchmark.load_repo_env"):
+            from runtime import run_multi_zone_synthetic_benchmark as runner
+
+            runner._apply_openai_smoke_repeat_args(args)
+
+        self.assertEqual(args.repeat, 3)
+        self.assertEqual(args.selector, "openai")
+        self.assertEqual(args.executor, "openai")
+
+    def test_repeated_deterministic_fixture_runs_aggregate_correctly(self) -> None:
+        report = run_benchmark(self.tasks, repeat=3)
+        summary = report["summary"]
+        stability = summary["stability"]
+
+        self.assertEqual(stability["repeat_count"], 3)
+        self.assertEqual(stability["total_fixture_executions"], 6)
+        self.assertTrue(stability["all_repeats_passed"])
+        self.assertTrue(stability["all_fixtures_passed"])
+        self.assertEqual(summary["honest_multi_zone_pass_count"], 6)
+        self.assertEqual(summary["honest_multi_zone_pass_rate"], 1.0)
+        self.assertEqual(len(stability["per_run"]), 3)
+        for result in stability["per_run"]:
+            self.assertTrue(result["honest_multi_zone_pass"])
+            self.assertEqual(result["fixture_execution_count"], 2)
+            self.assertEqual(result["honest_multi_zone_pass_count"], 2)
+            self.assertEqual(result["selector_fallback_count"], 0)
+        for result in stability["per_fixture"]:
+            self.assertTrue(result["honest_multi_zone_pass"])
+            self.assertEqual(result["repeat_count"], 3)
+            self.assertEqual(result["honest_multi_zone_pass_count"], 3)
+
+    def test_one_failed_repeated_run_lowers_aggregate_pass_rate(self) -> None:
+        bad_output = self.task.expected_answer.replace("AURORA_OWNER_MZ2", "")
+        executor = SequencedExecutor([self.task.expected_answer, bad_output])
+
+        report = run_benchmark([self.task], repeat=2, executor=executor)  # type: ignore[arg-type]
+        summary = report["summary"]
+
+        self.assertEqual(summary["honest_multi_zone_pass_count"], 1)
+        self.assertEqual(summary["honest_multi_zone_pass_rate"], 0.5)
+        self.assertFalse(summary["stability"]["all_repeats_passed"])
+        self.assertFalse(summary["stability"]["all_fixtures_passed"])
+        self.assertTrue(summary["stability"]["per_run"][0]["honest_multi_zone_pass"])
+        self.assertFalse(summary["stability"]["per_run"][1]["honest_multi_zone_pass"])
+        self.assertEqual(
+            summary["stability"]["per_fixture"][0]["output_validation_complete_rate"],
+            0.5,
+        )
+
+    def test_fallback_in_any_repeat_is_visible(self) -> None:
+        report = run_benchmark([self.task], repeat=2, selector=FailingSelector())
+        summary = report["summary"]
+
+        self.assertEqual(summary["fallback_count"], 2)
+        self.assertEqual(summary["fallback_rate"], 1.0)
+        self.assertEqual(summary["honest_multi_zone_pass_count"], 0)
+        self.assertFalse(summary["stability"]["all_repeats_passed"])
+        for result in summary["stability"]["per_run"]:
+            self.assertEqual(result["selector_fallback_count"], 1)
+            self.assertFalse(result["honest_multi_zone_pass"])
+
+    def test_mocked_token_usage_aggregates_across_repeats(self) -> None:
+        selector = OpenAISelectorSmoke(
+            model="example-openai-router",
+            provider=FakeOpenAIProvider(),  # type: ignore[arg-type]
+        )
+        executor = OpenAIExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(
+                "{"
+                '"active_version": "AUR-2026.09-mz2", '
+                '"rollback_threshold": "27.4 credits per thousand governed requests for three consecutive ten-minute windows", '
+                '"excluded_dataset": "RavenReplay-204", '
+                '"launch_approval_owner": "AURORA_OWNER_MZ2", '
+                '"mitigation_label": "aurora_mz2_epoch_lock", '
+                '"governed_request_class": "customer-visible writes", '
+                '"evidence_zone_ids": ["intent-aurora-gate", "constraints-aurora-active", '
+                '"domain-aurora-governance", "evidence-aurora-final"]'
+                "}"
+            ),  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], repeat=2, selector=selector, executor=executor)
+
+        self.assertEqual(report["summary"]["openai_selector_actual_usage"]["total_tokens"], 820)
+        self.assertEqual(report["summary"]["openai_executor_actual_usage"]["total_tokens"], 1110)
+        self.assertEqual(report["summary"]["stability"]["repeat_count"], 2)
+        self.assertEqual(report["summary"]["stability"]["selector_total_tokens"], 820)
+        self.assertEqual(report["summary"]["stability"]["executor_total_tokens"], 1110)
+        for result in report["summary"]["stability"]["per_run"]:
+            self.assertEqual(result["selector_total_tokens"], 410)
+            self.assertEqual(result["executor_total_tokens"], 555)
 
     def test_openai_selector_prompt_requests_schema_only(self) -> None:
         prompt = build_openai_selector_prompt(self.task)

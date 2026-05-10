@@ -89,6 +89,7 @@ class MultiZoneExecutor(Protocol):
 
 def main() -> None:
     args = _parse_args()
+    _apply_openai_smoke_repeat_args(args)
     selector = _build_selector_from_args(args)
     executor = _build_executor_from_args(args)
     tasks = get_multi_zone_synthetic_tasks()
@@ -107,6 +108,14 @@ def _parse_args() -> argparse.Namespace:
         description="Run the deterministic multi-zone synthetic benchmark."
     )
     parser.add_argument("--repeat", "--repeats", type=int, default=1)
+    parser.add_argument(
+        "--repeat-openai-smoke",
+        type=int,
+        help=(
+            "Run repeated combined OpenAI selector+executor smoke iterations. "
+            "This sets selector=openai, executor=openai, and repeat to the provided count."
+        ),
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument(
         "--selector",
@@ -154,6 +163,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
     parser.add_argument("--md", type=Path, default=DEFAULT_MD_PATH)
     return parser.parse_args()
+
+
+def _apply_openai_smoke_repeat_args(args: argparse.Namespace) -> None:
+    if args.repeat_openai_smoke is None:
+        return
+    if args.repeat_openai_smoke < 1:
+        raise ValueError("--repeat-openai-smoke must be at least 1.")
+    args.selector = "openai"
+    args.executor = "openai"
+    args.repeat = args.repeat_openai_smoke
 
 
 def _build_selector_from_args(args: argparse.Namespace) -> MultiZoneSelector:
@@ -1354,6 +1373,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "openai_selector_actual_usage": _sum_openai_selector_usage(spatial_runs),
         "openai_executor_actual_usage": _sum_openai_executor_usage(spatial_runs),
         "fixtures": _summarize_fixtures(spatial_runs),
+        "stability": _summarize_stability(spatial_runs),
     }
 
 
@@ -1399,6 +1419,82 @@ def _summarize_fixtures(spatial_runs: list[dict[str, Any]]) -> list[dict[str, An
     return summaries
 
 
+def _summarize_stability(spatial_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    repeat_indices = sorted({int(run["repeat_index"]) for run in spatial_runs})
+    fixture_ids = sorted({run["task_label"] for run in spatial_runs})
+    repeat_results: list[dict[str, Any]] = []
+    for repeat_index in repeat_indices:
+        runs = [run for run in spatial_runs if int(run["repeat_index"]) == repeat_index]
+        repeat_results.append(
+            {
+                "repeat_index": repeat_index,
+                "fixture_execution_count": len(runs),
+                "honest_multi_zone_pass": bool(runs)
+                and all(run["honest_multi_zone_pass"] for run in runs),
+                "honest_multi_zone_pass_count": sum(
+                    1 for run in runs if run["honest_multi_zone_pass"]
+                ),
+                "selector_fallback_count": sum(
+                    1 for run in runs if run["selector_used_fallback"]
+                ),
+                "executor_parse_success_count": sum(
+                    1 for run in runs if run["executor_output_parse_success"]
+                ),
+                "output_validation_complete_count": sum(
+                    1 for run in runs if run["output_validation_before_repair"]
+                ),
+                "selector_total_tokens": _sum_openai_selector_usage(runs)[
+                    "total_tokens"
+                ],
+                "executor_total_tokens": _sum_openai_executor_usage(runs)[
+                    "total_tokens"
+                ],
+            }
+        )
+
+    fixture_results: list[dict[str, Any]] = []
+    for fixture_id in fixture_ids:
+        runs = [run for run in spatial_runs if run["task_label"] == fixture_id]
+        fixture_results.append(
+            {
+                "fixture_id": fixture_id,
+                "repeat_count": len(runs),
+                "honest_multi_zone_pass": bool(runs)
+                and all(run["honest_multi_zone_pass"] for run in runs),
+                "honest_multi_zone_pass_count": sum(
+                    1 for run in runs if run["honest_multi_zone_pass"]
+                ),
+                "selected_zone_completeness_rate": _rate(
+                    run["selected_zone_complete"] is True for run in runs
+                ),
+                "output_validation_complete_rate": _rate(
+                    run["output_validation_before_repair"] is True for run in runs
+                ),
+                "fallback_count": sum(1 for run in runs if run["selector_used_fallback"]),
+                "executor_parse_success_rate": _rate(
+                    run["executor_output_parse_success"] is True for run in runs
+                ),
+            }
+        )
+
+    return {
+        "repeat_count": len(repeat_indices),
+        "total_fixture_executions": len(spatial_runs),
+        "per_run": repeat_results,
+        "per_fixture": fixture_results,
+        "all_repeats_passed": bool(repeat_results)
+        and all(result["honest_multi_zone_pass"] for result in repeat_results),
+        "all_fixtures_passed": bool(fixture_results)
+        and all(result["honest_multi_zone_pass"] for result in fixture_results),
+        "selector_total_tokens": _sum_openai_selector_usage(spatial_runs)[
+            "total_tokens"
+        ],
+        "executor_total_tokens": _sum_openai_executor_usage(spatial_runs)[
+            "total_tokens"
+        ],
+    }
+
+
 def write_markdown(path: Path, report: dict[str, Any]) -> None:
     summary = report["summary"]
     lines = [
@@ -1428,6 +1524,10 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Executor output parse success rate: {_format_percent(summary['executor_output_parse_success_rate'])}",
         "Output repair status: not_supported",
         f"Average token reduction: {_format_optional_percent(summary['average_token_reduction_percent'])}",
+        f"Stability repeat count: {summary['stability']['repeat_count']}",
+        f"Stability fixture executions: {summary['stability']['total_fixture_executions']}",
+        f"Stability all repeats passed: {summary['stability']['all_repeats_passed']}",
+        f"Stability all fixtures passed: {summary['stability']['all_fixtures_passed']}",
         "",
         "## Estimated Token Accounting",
         "",
@@ -1468,6 +1568,47 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"{fixture['fallback_used']} | "
             f"{_format_percent(fixture['honest_multi_zone_pass_rate'])} | "
             f"{_format_optional_percent(fixture['average_token_reduction_percent'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Stability Runs",
+            "",
+            "| Repeat | Fixture executions | Honest pass | Honest pass count | Fallback count | Executor parse success count | Output validation complete count | Selector tokens | Executor tokens |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in summary["stability"]["per_run"]:
+        lines.append(
+            f"| {result['repeat_index']} | "
+            f"{result['fixture_execution_count']} | "
+            f"{result['honest_multi_zone_pass']} | "
+            f"{result['honest_multi_zone_pass_count']} | "
+            f"{result['selector_fallback_count']} | "
+            f"{result['executor_parse_success_count']} | "
+            f"{result['output_validation_complete_count']} | "
+            f"{_format_optional_int(result['selector_total_tokens'])} | "
+            f"{_format_optional_int(result['executor_total_tokens'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Stability Fixtures",
+            "",
+            "| Fixture ID | Repeats | Honest pass | Honest pass count | Selected complete rate | Output validation rate | Fallback count | Executor parse success rate |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in summary["stability"]["per_fixture"]:
+        lines.append(
+            f"| `{result['fixture_id']}` | "
+            f"{result['repeat_count']} | "
+            f"{result['honest_multi_zone_pass']} | "
+            f"{result['honest_multi_zone_pass_count']} | "
+            f"{_format_percent(result['selected_zone_completeness_rate'])} | "
+            f"{_format_percent(result['output_validation_complete_rate'])} | "
+            f"{result['fallback_count']} | "
+            f"{_format_percent(result['executor_parse_success_rate'])} |"
         )
     lines.extend(
         [
