@@ -23,6 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from runtime.metrics import estimate_text_tokens, percent_reduction, write_json_report, write_text_report
 from providers.openai_api import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_EXECUTOR_MODEL,
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
     PROVIDER_NAME as OPENAI_API_PROVIDER,
     OpenAIAPIProvider,
@@ -38,6 +39,10 @@ FALLBACK_SELECTOR_NAME = "fixture_fallback_after_selector_error"
 OPENAI_SELECTOR_NAME = "openai_selector_smoke"
 OPENAI_SELECTOR_API_PATH = "/v1/responses"
 DEFAULT_OPENAI_SELECTOR_MAX_TOKENS = 800
+FIXTURE_EXECUTOR_NAME = "fixture_executor"
+OPENAI_EXECUTOR_NAME = "openai_executor_smoke"
+OPENAI_EXECUTOR_API_PATH = "/v1/responses"
+DEFAULT_OPENAI_EXECUTOR_MAX_TOKENS = 1000
 
 
 @dataclass(frozen=True)
@@ -67,15 +72,31 @@ class MultiZoneSelector(Protocol):
         ...
 
 
+class MultiZoneExecutor(Protocol):
+    executor_mode: str
+    provider: str
+    model: str | None
+    api_path: str | None
+
+    def execute(
+        self,
+        task: MultiZoneTask,
+        selected_zone_ids: tuple[str, ...],
+        composed_context: str,
+    ) -> dict[str, Any]:
+        ...
+
+
 def main() -> None:
     args = _parse_args()
     selector = _build_selector_from_args(args)
+    executor = _build_executor_from_args(args)
     tasks = get_multi_zone_synthetic_tasks()
     if args.limit is not None:
         if args.limit < 1:
             raise ValueError("--limit must be at least 1 when provided.")
         tasks = tasks[: args.limit]
-    report = run_benchmark(tasks=tasks, repeat=args.repeat, selector=selector)
+    report = run_benchmark(tasks=tasks, repeat=args.repeat, selector=selector, executor=executor)
     write_json_report(args.json, report)
     write_markdown(args.md, report)
     print_report(report, args.json, args.md)
@@ -111,6 +132,25 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_OPENAI_SELECTOR_MAX_TOKENS,
         help="Maximum selector response tokens for --selector openai.",
     )
+    parser.add_argument(
+        "--executor",
+        choices=("fixture", "openai"),
+        default="fixture",
+        help="Executor path to use. Default fixture mode makes no provider calls.",
+    )
+    parser.add_argument(
+        "--executor-model",
+        help=(
+            "OpenAI executor model for --executor openai. Defaults to "
+            "SFE_OPENAI_EXECUTOR_MODEL, then the provider executor default."
+        ),
+    )
+    parser.add_argument(
+        "--executor-max-output-tokens",
+        type=int,
+        default=DEFAULT_OPENAI_EXECUTOR_MAX_TOKENS,
+        help="Maximum executor response tokens for --executor openai.",
+    )
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
     parser.add_argument("--md", type=Path, default=DEFAULT_MD_PATH)
     return parser.parse_args()
@@ -125,6 +165,22 @@ def _build_selector_from_args(args: argparse.Namespace) -> MultiZoneSelector:
         model=model,
         timeout=args.timeout,
         max_output_tokens=args.max_output_tokens,
+    )
+
+
+def _build_executor_from_args(args: argparse.Namespace) -> MultiZoneExecutor:
+    if args.executor == "fixture":
+        return FixtureMultiZoneExecutor()
+    load_repo_env()
+    model = (
+        args.executor_model
+        or os.getenv("SFE_OPENAI_EXECUTOR_MODEL")
+        or DEFAULT_OPENAI_EXECUTOR_MODEL
+    )
+    return OpenAIExecutorSmoke(
+        model=model,
+        timeout=args.timeout,
+        max_output_tokens=args.executor_max_output_tokens,
     )
 
 
@@ -415,6 +471,7 @@ def run_benchmark(
     tasks: list[MultiZoneTask],
     repeat: int = 1,
     selector: MultiZoneSelector | None = None,
+    executor: MultiZoneExecutor | None = None,
 ) -> dict[str, Any]:
     if repeat < 1:
         raise ValueError("--repeat must be at least 1.")
@@ -423,6 +480,8 @@ def run_benchmark(
 
     runs: list[dict[str, Any]] = []
     selector = selector or FixtureMultiZoneSelector()
+    executor = executor or FixtureMultiZoneExecutor()
+    baseline_executor = FixtureMultiZoneExecutor()
     for task in tasks:
         fixture_selection = fixture_zone_selection(task)
         for repeat_index in range(1, repeat + 1):
@@ -433,6 +492,7 @@ def run_benchmark(
                     selection=all_zone_selection(task),
                     fixture_selection=fixture_selection,
                     repeat_index=repeat_index,
+                    executor=baseline_executor,
                 )
             )
             selection = _select_with_fallback(task, selector, fixture_selection)
@@ -443,6 +503,7 @@ def run_benchmark(
                     selection=selection,
                     fixture_selection=fixture_selection,
                     repeat_index=repeat_index,
+                    executor=executor,
                 )
             )
 
@@ -455,10 +516,17 @@ def run_benchmark(
             "run_count": len(runs),
             "selector": selector.__class__.__name__,
             "selector_mode": getattr(selector, "selector_mode", selector.__class__.__name__),
+            "selector_provider": getattr(selector, "provider", "deterministic_mock"),
+            "selector_model": getattr(selector, "model", None),
+            "selector_api_path": getattr(selector, "api_path", None),
             "provider": getattr(selector, "provider", "deterministic_mock"),
             "model": getattr(selector, "model", None),
             "api_path": getattr(selector, "api_path", None),
-            "executor": "deterministic_fixture",
+            "executor": getattr(executor, "executor_mode", executor.__class__.__name__),
+            "executor_mode": getattr(executor, "executor_mode", executor.__class__.__name__),
+            "executor_provider": getattr(executor, "provider", "deterministic_mock"),
+            "executor_model": getattr(executor, "model", None),
+            "executor_api_path": getattr(executor, "api_path", None),
         },
         "summary": summarize_runs(runs),
         "tasks": [task_to_dict(task) for task in tasks],
@@ -580,6 +648,97 @@ class OpenAISelectorError(RuntimeError):
         self.metadata = dict(metadata)
 
 
+class FixtureMultiZoneExecutor:
+    """Deterministic executor that returns the fixture oracle answer."""
+
+    executor_mode = "deterministic_fixture"
+    provider = "deterministic_mock"
+    model: str | None = None
+    api_path: str | None = None
+
+    def execute(
+        self,
+        task: MultiZoneTask,
+        selected_zone_ids: tuple[str, ...],
+        composed_context: str,
+    ) -> dict[str, Any]:
+        return build_executor_result(
+            executor_name=FIXTURE_EXECUTOR_NAME,
+            executor_mode=self.executor_mode,
+            provider=self.provider,
+            model=self.model,
+            api_path=self.api_path,
+            output=task.expected_answer,
+            output_parse_success=True,
+        )
+
+
+class OpenAIExecutorSmoke:
+    """OpenAI-backed executor smoke path over composed selected-zone context only."""
+
+    executor_mode = "openai_executor_smoke"
+    provider = OPENAI_API_PROVIDER
+    api_path = OPENAI_EXECUTOR_API_PATH
+
+    def __init__(
+        self,
+        model: str,
+        timeout: float | None = None,
+        max_output_tokens: int = DEFAULT_OPENAI_EXECUTOR_MAX_TOKENS,
+        provider: OpenAIAPIProvider | None = None,
+    ) -> None:
+        if not model:
+            raise ValueError("OpenAI executor model is required.")
+        if max_output_tokens < 1:
+            raise ValueError("executor max_output_tokens must be at least 1.")
+        self.model = model
+        self.timeout = timeout
+        self.max_output_tokens = max_output_tokens
+        self._provider = provider
+
+    def execute(
+        self,
+        task: MultiZoneTask,
+        selected_zone_ids: tuple[str, ...],
+        composed_context: str,
+    ) -> dict[str, Any]:
+        provider = self._provider or OpenAIAPIProvider(timeout=self.timeout)
+        prompt = build_openai_executor_prompt(task, selected_zone_ids, composed_context)
+        response = provider.chat(
+            [{"role": "user", "content": prompt}],
+            model=self.model,
+            max_tokens=self.max_output_tokens,
+            temperature=None,
+            system_instruction=(
+                "You synthesize benchmark answers from the provided selected zones only. "
+                "Return only valid JSON matching the requested schema."
+            ),
+        )
+        response_text = _extract_response_text(response)
+        usage = _extract_usage(response)
+        try:
+            output = parse_openai_executor_output(task, response_text)
+            output_parse_success = True
+            output_parse_error = ""
+        except Exception as exc:
+            output = ""
+            output_parse_success = False
+            output_parse_error = _safe_error_message(exc)
+        return build_executor_result(
+            executor_name=OPENAI_EXECUTOR_NAME,
+            executor_mode=self.executor_mode,
+            provider=OPENAI_API_PROVIDER,
+            model=self.model,
+            api_path=OPENAI_EXECUTOR_API_PATH,
+            output=output,
+            output_parse_success=output_parse_success,
+            output_parse_error=output_parse_error,
+            raw_response_text=response_text,
+            usage=usage,
+            max_output_tokens=self.max_output_tokens,
+        )
+
+
 def _select_with_fallback(
     task: MultiZoneTask,
     selector: MultiZoneSelector,
@@ -662,12 +821,26 @@ def execute_task(
     selection: dict[str, Any],
     fixture_selection: dict[str, Any],
     repeat_index: int,
+    executor: MultiZoneExecutor | None = None,
     output_override: str | None = None,
 ) -> dict[str, Any]:
     selected_zone_ids = tuple(str(zone_id) for zone_id in selection["selected_zone_ids"])
     composed_context = compose_context(task, selected_zone_ids)
     baseline_context = compose_context(task, tuple(zone.zone_id for zone in task.zones))
-    output = output_override if output_override is not None else task.expected_answer
+    executor = executor or FixtureMultiZoneExecutor()
+    if output_override is not None:
+        executor_result = build_executor_result(
+            executor_name="test_output_override",
+            executor_mode="test_override",
+            provider="deterministic_test",
+            model=None,
+            api_path=None,
+            output=output_override,
+            output_parse_success=True,
+        )
+    else:
+        executor_result = executor.execute(task, selected_zone_ids, composed_context)
+    output = str(executor_result["output"])
     selection_validation = validate_selection(task, selection)
     output_validation = validate_output(task, output)
     full_context_tokens = estimate_tokens(baseline_context)
@@ -679,10 +852,12 @@ def execute_task(
         and selection.get("selector_used_fallback") is False
         and selection_validation["selected_zone_complete"] is True
         and selection_validation["distractors_omitted"] is True
+        and executor_result["output_parse_success"] is True
         and output_validation["passed"] is True
     )
     success = bool(
         output_validation["passed"]
+        and executor_result["output_parse_success"]
         and (
             mode == "baseline"
             or (
@@ -725,6 +900,14 @@ def execute_task(
         "output_repair_attempted": False,
         "output_repair_status": "not_supported",
         "honest_multi_zone_pass_after_repair": None,
+        "executor": executor_result["executor"],
+        "executor_mode": executor_result["executor_mode"],
+        "executor_provider": executor_result["provider"],
+        "executor_model": executor_result["model"],
+        "executor_api_path": executor_result["api_path"],
+        "executor_output_parse_success": executor_result["output_parse_success"],
+        "executor_output_parse_error": executor_result["output_parse_error"],
+        "openai_executor": executor_result.get("openai_executor"),
         "honest_multi_zone_pass": honest_multi_zone_pass,
         "success": success,
         "output": output,
@@ -746,6 +929,41 @@ def compose_context(task: MultiZoneTask, selected_zone_ids: tuple[str, ...]) -> 
         for zone in zones
     ]
     return "\n\n".join(parts)
+
+
+def build_openai_executor_prompt(
+    task: MultiZoneTask,
+    selected_zone_ids: tuple[str, ...],
+    composed_context: str,
+) -> str:
+    expected_fields = _expected_answer_fields(task)
+    example = {
+        field: "copy exact value from selected zones"
+        for field in expected_fields
+        if field != "evidence_zone_ids"
+    }
+    example["evidence_zone_ids"] = list(selected_zone_ids)
+    schema_lines = "\n".join(f'- "{field}"' for field in expected_fields)
+    return (
+        "Synthesize the final answer using only the selected-zone context below.\n"
+        "Return only one strict JSON object. Do not include markdown, commentary, or code fences.\n"
+        "Every required field must be present exactly once.\n\n"
+        "Required JSON fields:\n"
+        f"{schema_lines}\n\n"
+        "Rules:\n"
+        "- Use exact identifiers and labels from the selected zones.\n"
+        "- evidence_zone_ids must be a JSON array of exact canonical selected zone IDs.\n"
+        '- Do not prefix evidence IDs with "ZONE".\n'
+        "- Do not append roles in parentheses.\n"
+        "- Do not include distractor zone IDs or unselected zone IDs.\n"
+        "- If a value is unavailable from the selected context, leave it empty rather than guessing.\n\n"
+        "Valid evidence zone IDs for this answer:\n"
+        f"{', '.join(selected_zone_ids)}\n\n"
+        "JSON shape example:\n"
+        f"{json.dumps(example, indent=2)}\n\n"
+        f"Task:\n{task.question}\n\n"
+        f"Selected-zone context:\n{composed_context}"
+    )
 
 
 def build_openai_selector_prompt(task: MultiZoneTask) -> str:
@@ -874,6 +1092,87 @@ def validate_output(task: MultiZoneTask, output: str) -> dict[str, Any]:
         "evidence_reference_validation": evidence_reference_validation,
         "missing_targets": [check["target"] for check in checks if not check["passed"]],
     }
+
+
+def parse_openai_executor_output(task: MultiZoneTask, response_text: str) -> str:
+    data = _loads_strict_json_object(response_text)
+    expected_fields = _expected_answer_fields(task)
+    missing_fields = [field for field in expected_fields if field not in data]
+    if missing_fields:
+        raise ValueError(
+            "OpenAI executor response is missing required fields: "
+            + ", ".join(missing_fields)
+        )
+    evidence_refs = data.get("evidence_zone_ids")
+    if not isinstance(evidence_refs, list):
+        raise ValueError("OpenAI executor evidence_zone_ids must be a JSON array.")
+    lines: list[str] = []
+    for field in expected_fields:
+        value = data[field]
+        if field == "evidence_zone_ids":
+            value_text = ", ".join(str(item).strip() for item in value if str(item).strip())
+        else:
+            value_text = str(value).strip()
+        lines.append(f"{field}: {value_text}")
+    return "\n".join(lines)
+
+
+def _loads_strict_json_object(response_text: str) -> dict[str, Any]:
+    data = json.loads(response_text.strip())
+    if not isinstance(data, dict):
+        raise ValueError("OpenAI executor response must be a strict JSON object.")
+    return data
+
+
+def build_executor_result(
+    *,
+    executor_name: str,
+    executor_mode: str,
+    provider: str,
+    model: str | None,
+    api_path: str | None,
+    output: str,
+    output_parse_success: bool,
+    output_parse_error: str = "",
+    raw_response_text: str = "",
+    usage: dict[str, int | None] | None = None,
+    max_output_tokens: int | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "executor": executor_name,
+        "executor_mode": executor_mode,
+        "provider": provider,
+        "model": model,
+        "api_path": api_path,
+        "output": output,
+        "output_parse_success": bool(output_parse_success),
+        "output_parse_error": output_parse_error,
+    }
+    if provider == OPENAI_API_PROVIDER:
+        result["openai_executor"] = {
+            "provider": provider,
+            "model": model,
+            "api_path": api_path,
+            "max_output_tokens": max_output_tokens,
+            "raw_response_text": raw_response_text,
+            "usage": usage or {
+                "input_tokens": None,
+                "output_tokens": None,
+                "total_tokens": None,
+            },
+            "output_parse_success": bool(output_parse_success),
+            "output_parse_error": output_parse_error,
+        }
+    return result
+
+
+def _expected_answer_fields(task: MultiZoneTask) -> list[str]:
+    fields: list[str] = []
+    for line in task.expected_answer.splitlines():
+        label, separator, _value = line.partition(":")
+        if separator:
+            fields.append(label.strip())
+    return fields
 
 
 def _extract_csv_field(output: str, field_name: str) -> list[str]:
@@ -1027,6 +1326,9 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             run["output_validation_before_repair"] is True for run in spatial_runs
         ),
         "output_validation_after_repair_rate": None,
+        "executor_output_parse_success_rate": _rate(
+            run["executor_output_parse_success"] is True for run in spatial_runs
+        ),
         "honest_multi_zone_pass_count": sum(
             1 for run in spatial_runs if run["honest_multi_zone_pass"]
         ),
@@ -1050,6 +1352,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             if run["token_reduction_percent"] is not None
         ),
         "openai_selector_actual_usage": _sum_openai_selector_usage(spatial_runs),
+        "openai_executor_actual_usage": _sum_openai_executor_usage(spatial_runs),
         "fixtures": _summarize_fixtures(spatial_runs),
     }
 
@@ -1104,9 +1407,14 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Benchmark type: `{report['metadata']['benchmark_type']}`",
         f"Provider: `{report['metadata']['provider']}`",
         f"Selector mode: `{report['metadata']['selector_mode']}`",
-        f"Model: `{report['metadata']['model'] or 'n/a'}`",
-        f"API path: `{report['metadata']['api_path'] or 'n/a'}`",
+        f"Selector provider: `{report['metadata']['selector_provider']}`",
+        f"Selector model: `{report['metadata']['selector_model'] or 'n/a'}`",
+        f"Selector API path: `{report['metadata']['selector_api_path'] or 'n/a'}`",
         f"Executor: `{report['metadata']['executor']}`",
+        f"Executor mode: `{report['metadata']['executor_mode']}`",
+        f"Executor provider: `{report['metadata']['executor_provider']}`",
+        f"Executor model: `{report['metadata']['executor_model'] or 'n/a'}`",
+        f"Executor API path: `{report['metadata']['executor_api_path'] or 'n/a'}`",
         f"Runs: {summary['run_count']}",
         "",
         "## Summary",
@@ -1117,6 +1425,8 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Distractor rejection rate: {_format_percent(summary['distractor_rejection_rate'])}",
         f"Fallback count: {summary['fallback_count']}",
         f"Output validation complete rate: {_format_percent(summary['output_validation_complete_rate'])}",
+        f"Executor output parse success rate: {_format_percent(summary['executor_output_parse_success_rate'])}",
+        "Output repair status: not_supported",
         f"Average token reduction: {_format_optional_percent(summary['average_token_reduction_percent'])}",
         "",
         "## Estimated Token Accounting",
@@ -1135,6 +1445,14 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"| Input | {_format_optional_int(summary['openai_selector_actual_usage']['input_tokens'])} |",
         f"| Output | {_format_optional_int(summary['openai_selector_actual_usage']['output_tokens'])} |",
         f"| Total | {_format_optional_int(summary['openai_selector_actual_usage']['total_tokens'])} |",
+        "",
+        "## OpenAI Executor Usage",
+        "",
+        "| Metric | Actual tokens |",
+        "| --- | ---: |",
+        f"| Input | {_format_optional_int(summary['openai_executor_actual_usage']['input_tokens'])} |",
+        f"| Output | {_format_optional_int(summary['openai_executor_actual_usage']['output_tokens'])} |",
+        f"| Total | {_format_optional_int(summary['openai_executor_actual_usage']['total_tokens'])} |",
         "",
         "## Fixtures",
         "",
@@ -1176,9 +1494,13 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
     summary = report["summary"]
     print("Multi-zone synthetic benchmark")
     print(f"selector mode: {report['metadata']['selector_mode']}")
-    print(f"provider: {report['metadata']['provider']}")
-    if report["metadata"].get("model"):
-        print(f"model: {report['metadata']['model']}")
+    print(f"selector provider: {report['metadata']['selector_provider']}")
+    if report["metadata"].get("selector_model"):
+        print(f"selector model: {report['metadata']['selector_model']}")
+    print(f"executor mode: {report['metadata']['executor_mode']}")
+    print(f"executor provider: {report['metadata']['executor_provider']}")
+    if report["metadata"].get("executor_model"):
+        print(f"executor model: {report['metadata']['executor_model']}")
     print(f"runs: {summary['run_count']}")
     print(
         "honest multi-zone pass rate: "
@@ -1216,6 +1538,14 @@ def _average(values: Any) -> float:
 
 
 def _sum_openai_selector_usage(runs: list[dict[str, Any]]) -> dict[str, int | None]:
+    return _sum_openai_usage(runs, "openai_selector")
+
+
+def _sum_openai_executor_usage(runs: list[dict[str, Any]]) -> dict[str, int | None]:
+    return _sum_openai_usage(runs, "openai_executor")
+
+
+def _sum_openai_usage(runs: list[dict[str, Any]], metadata_key: str) -> dict[str, int | None]:
     totals: dict[str, int] = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -1223,10 +1553,10 @@ def _sum_openai_selector_usage(runs: list[dict[str, Any]]) -> dict[str, int | No
     }
     seen: dict[str, bool] = {key: False for key in totals}
     for run in runs:
-        selector_metadata = run.get("openai_selector")
-        if not isinstance(selector_metadata, dict):
+        metadata = run.get(metadata_key)
+        if not isinstance(metadata, dict):
             continue
-        usage = selector_metadata.get("usage")
+        usage = metadata.get("usage")
         if not isinstance(usage, dict):
             continue
         for key in totals:

@@ -18,10 +18,13 @@ from runtime.run_multi_zone_synthetic_benchmark import (
     BENCHMARK_TYPE,
     FixtureMultiZoneSelector,
     OPENAI_SELECTOR_API_PATH,
+    OpenAIExecutorSmoke,
     OpenAISelectorSmoke,
     _build_selector_from_args,
+    _build_executor_from_args,
     _parse_args,
     build_selection,
+    build_openai_executor_prompt,
     build_openai_selector_prompt,
     compose_context,
     execute_task,
@@ -134,6 +137,38 @@ class DecoratedIDOpenAIProvider:
                 "prompt_tokens": 222,
                 "completion_tokens": 77,
                 "total_tokens": 299,
+            },
+        }
+
+
+class FakeOpenAIExecutorProvider:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls: list[dict[str, Any]] = []
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        max_tokens: int,
+        temperature: float | None,
+        system_instruction: str | None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "system_instruction": system_instruction,
+            }
+        )
+        return {
+            "choices": [{"message": {"content": self.content}}],
+            "usage": {
+                "prompt_tokens": 444,
+                "completion_tokens": 111,
+                "total_tokens": 555,
             },
         }
 
@@ -346,6 +381,8 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertTrue(run["output_validation_before_repair"])
         self.assertTrue(run["honest_multi_zone_pass"])
         self.assertIsNone(run["output_validation_after_repair"])
+        self.assertEqual(run["executor_mode"], "deterministic_fixture")
+        self.assertTrue(run["executor_output_parse_success"])
 
     def test_composed_context_groups_selected_content_by_zone_role(self) -> None:
         context = compose_context(self.task, self.task.required_zone_ids)
@@ -508,6 +545,8 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
             "honest_multi_zone_pass_rate",
             "average_token_reduction_percent",
             "openai_selector_actual_usage",
+            "openai_executor_actual_usage",
+            "executor_output_parse_success_rate",
         ):
             self.assertIn(field, summary)
 
@@ -522,6 +561,7 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertGreater(spatial_run["token_reduction_percent"], 0)
         self.assertIsNone(summary["output_validation_after_repair_rate"])
         self.assertIsNone(summary["openai_selector_actual_usage"]["total_tokens"])
+        self.assertIsNone(summary["openai_executor_actual_usage"]["total_tokens"])
 
     def test_multi_fixture_aggregate_report_is_correct(self) -> None:
         report = run_benchmark(self.tasks)
@@ -563,9 +603,12 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
             args = _parse_args()
 
         selector = _build_selector_from_args(args)
+        executor = _build_executor_from_args(args)
 
         self.assertIsInstance(selector, FixtureMultiZoneSelector)
         self.assertEqual(args.selector, "fixture")
+        self.assertEqual(args.executor, "fixture")
+        self.assertEqual(executor.executor_mode, "deterministic_fixture")
 
     def test_openai_selector_prompt_requests_schema_only(self) -> None:
         prompt = build_openai_selector_prompt(self.task)
@@ -582,6 +625,148 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertIn('"intent-aurora-gate"', prompt)
         self.assertIn("Do not generate the final answer", prompt)
         self.assertIn("distractor-aurora-mz1-draft", prompt)
+
+    def test_openai_executor_prompt_uses_selected_context_and_schema(self) -> None:
+        context = compose_context(self.task, self.task.required_zone_ids)
+        prompt = build_openai_executor_prompt(self.task, self.task.required_zone_ids, context)
+
+        self.assertIn("Return only one strict JSON object", prompt)
+        self.assertIn('"active_version"', prompt)
+        self.assertIn('"evidence_zone_ids"', prompt)
+        self.assertIn("Valid evidence zone IDs", prompt)
+        self.assertIn("intent-aurora-gate", prompt)
+        self.assertNotIn("distractor-aurora-mz1-draft", prompt)
+
+    def test_fixture_selector_and_mocked_openai_executor_valid_json_passes(self) -> None:
+        provider = FakeOpenAIExecutorProvider(
+            "{"
+            '"active_version": "AUR-2026.09-mz2", '
+            '"rollback_threshold": "27.4 credits per thousand governed requests for three consecutive ten-minute windows", '
+            '"excluded_dataset": "RavenReplay-204", '
+            '"launch_approval_owner": "AURORA_OWNER_MZ2", '
+            '"mitigation_label": "aurora_mz2_epoch_lock", '
+            '"governed_request_class": "customer-visible writes", '
+            '"evidence_zone_ids": ["intent-aurora-gate", "constraints-aurora-active", '
+            '"domain-aurora-governance", "evidence-aurora-final"]'
+            "}"
+        )
+        executor = OpenAIExecutorSmoke(
+            model="example-openai-executor",
+            max_output_tokens=600,
+            provider=provider,  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], executor=executor)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+
+        self.assertEqual(report["metadata"]["executor_mode"], "openai_executor_smoke")
+        self.assertEqual(report["metadata"]["executor_provider"], "openai-api")
+        self.assertEqual(report["metadata"]["executor_model"], "example-openai-executor")
+        self.assertEqual(spatial_run["executor"], "openai_executor_smoke")
+        self.assertTrue(spatial_run["executor_output_parse_success"])
+        self.assertTrue(spatial_run["output_validation_before_repair"])
+        self.assertTrue(spatial_run["honest_multi_zone_pass"])
+        self.assertEqual(spatial_run["openai_executor"]["usage"]["total_tokens"], 555)
+        self.assertEqual(report["summary"]["openai_executor_actual_usage"]["total_tokens"], 555)
+        self.assertEqual(len(provider.calls), 1)
+        self.assertIn("Selected-zone context:", provider.calls[0]["messages"][0]["content"])
+        self.assertNotIn("distractor-aurora-mz1-draft", provider.calls[0]["messages"][0]["content"])
+
+    def test_mocked_openai_executor_missing_required_field_fails(self) -> None:
+        provider = FakeOpenAIExecutorProvider(
+            "{"
+            '"active_version": "AUR-2026.09-mz2", '
+            '"rollback_threshold": "27.4 credits per thousand governed requests for three consecutive ten-minute windows", '
+            '"excluded_dataset": "RavenReplay-204", '
+            '"launch_approval_owner": "AURORA_OWNER_MZ2", '
+            '"governed_request_class": "customer-visible writes", '
+            '"evidence_zone_ids": ["intent-aurora-gate", "constraints-aurora-active", '
+            '"domain-aurora-governance", "evidence-aurora-final"]'
+            "}"
+        )
+        executor = OpenAIExecutorSmoke(
+            model="example-openai-executor",
+            provider=provider,  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], executor=executor)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+
+        self.assertFalse(spatial_run["executor_output_parse_success"])
+        self.assertIn("missing required fields", spatial_run["executor_output_parse_error"])
+        self.assertFalse(spatial_run["output_validation_before_repair"])
+        self.assertFalse(spatial_run["honest_multi_zone_pass"])
+
+    def test_mocked_openai_executor_wrong_evidence_zone_ids_fails(self) -> None:
+        provider = FakeOpenAIExecutorProvider(
+            "{"
+            '"active_version": "AUR-2026.09-mz2", '
+            '"rollback_threshold": "27.4 credits per thousand governed requests for three consecutive ten-minute windows", '
+            '"excluded_dataset": "RavenReplay-204", '
+            '"launch_approval_owner": "AURORA_OWNER_MZ2", '
+            '"mitigation_label": "aurora_mz2_epoch_lock", '
+            '"governed_request_class": "customer-visible writes", '
+            '"evidence_zone_ids": ["intent-aurora-gate", "constraints-aurora-active", '
+            '"evidence-aurora-final", "distractor-aurora-dashboard"]'
+            "}"
+        )
+        executor = OpenAIExecutorSmoke(
+            model="example-openai-executor",
+            provider=provider,  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], executor=executor)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+
+        self.assertTrue(spatial_run["executor_output_parse_success"])
+        self.assertFalse(spatial_run["output_validation_before_repair"])
+        self.assertFalse(spatial_run["honest_multi_zone_pass"])
+        self.assertEqual(
+            spatial_run["output_validation"]["evidence_reference_validation"]["missing_zone_ids"],
+            ["domain-aurora-governance"],
+        )
+        self.assertEqual(
+            spatial_run["output_validation"]["evidence_reference_validation"]["unexpected_zone_ids"],
+            ["distractor-aurora-dashboard"],
+        )
+
+    def test_mocked_openai_executor_malformed_json_fails(self) -> None:
+        executor = OpenAIExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider("not-json"),  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], executor=executor)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+
+        self.assertFalse(spatial_run["executor_output_parse_success"])
+        self.assertTrue(spatial_run["executor_output_parse_error"])
+        self.assertFalse(spatial_run["output_validation_before_repair"])
+        self.assertFalse(spatial_run["honest_multi_zone_pass"])
+
+    def test_mocked_openai_executor_json_with_extra_text_fails(self) -> None:
+        executor = OpenAIExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(
+                "Here is the answer: {\"active_version\": \"AUR-2026.09-mz2\"}"
+            ),  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], executor=executor)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+
+        self.assertFalse(spatial_run["executor_output_parse_success"])
+        self.assertFalse(spatial_run["honest_multi_zone_pass"])
 
     def test_parse_openai_selector_output_accepts_json_fence(self) -> None:
         parsed = parse_openai_selector_output(
