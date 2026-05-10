@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,10 +17,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from runtime.run_multi_zone_synthetic_benchmark import (
     BENCHMARK_TYPE,
     FixtureMultiZoneSelector,
+    OPENAI_SELECTOR_API_PATH,
+    OpenAISelectorSmoke,
+    _build_selector_from_args,
+    _parse_args,
     build_selection,
+    build_openai_selector_prompt,
     compose_context,
     execute_task,
     get_multi_zone_synthetic_tasks,
+    parse_openai_selector_output,
     run_benchmark,
     validate_output,
     validate_selection,
@@ -31,6 +38,104 @@ from runtime.run_multi_zone_synthetic_benchmark import (
 class FailingSelector:
     def select(self, task: Any, fixture_selection: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("selector failed")
+
+
+class FakeOpenAIProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        max_tokens: int,
+        temperature: float | None,
+        system_instruction: str | None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "system_instruction": system_instruction,
+            }
+        )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "{"
+                            '"selected_zone_ids": ['
+                            '"intent-aurora-gate", '
+                            '"constraints-aurora-active", '
+                            '"domain-aurora-governance", '
+                            '"evidence-aurora-final"'
+                            "], "
+                            '"zone_roles": {'
+                            '"intent-aurora-gate": "task_intent", '
+                            '"constraints-aurora-active": "hard_constraints", '
+                            '"domain-aurora-governance": "domain_context", '
+                            '"evidence-aurora-final": "evidence_records"'
+                            "}, "
+                            '"confidence": 0.93, '
+                            '"evidence_rationale": "Intent, constraints, domain, and final evidence are all needed.", '
+                            '"fallback_used": false'
+                            "}"
+                        )
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 321,
+                "completion_tokens": 89,
+                "total_tokens": 410,
+            },
+        }
+
+
+class DecoratedIDOpenAIProvider:
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        max_tokens: int,
+        temperature: float | None,
+        system_instruction: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "{"
+                            '"selected_zone_ids": ['
+                            '"ZONE intent-aurora-gate (task_intent)", '
+                            '"ZONE constraints-aurora-active (hard_constraints)", '
+                            '"ZONE domain-aurora-governance (domain_context)", '
+                            '"ZONE evidence-aurora-final (evidence_records)"'
+                            "], "
+                            '"zone_roles": {'
+                            '"ZONE intent-aurora-gate (task_intent)": "task_intent", '
+                            '"ZONE constraints-aurora-active (hard_constraints)": "hard_constraints", '
+                            '"ZONE domain-aurora-governance (domain_context)": "domain_context", '
+                            '"ZONE evidence-aurora-final (evidence_records)": "evidence_records"'
+                            "}, "
+                            '"confidence": 0.91, '
+                            '"evidence_rationale": "Selected the logical zones but used decorated IDs.", '
+                            '"fallback_used": false'
+                            "}"
+                        )
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 222,
+                "completion_tokens": 77,
+                "total_tokens": 299,
+            },
+        }
 
 
 class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
@@ -260,6 +365,7 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
             "honest_multi_zone_pass_count",
             "honest_multi_zone_pass_rate",
             "average_token_reduction_percent",
+            "openai_selector_actual_usage",
         ):
             self.assertIn(field, summary)
 
@@ -273,6 +379,7 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         )
         self.assertGreater(spatial_run["token_reduction_percent"], 0)
         self.assertIsNone(summary["output_validation_after_repair_rate"])
+        self.assertIsNone(summary["openai_selector_actual_usage"]["total_tokens"])
 
     def test_markdown_report_includes_honest_pass_line(self) -> None:
         report = run_benchmark([self.task])
@@ -285,6 +392,129 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertIn("Zone selection success rate:", markdown)
         self.assertIn("Selected-zone completeness rate:", markdown)
         self.assertIn("Average token reduction:", markdown)
+
+    def test_default_cli_selector_remains_fixture_without_provider(self) -> None:
+        with patch.object(sys, "argv", ["run_multi_zone_synthetic_benchmark.py"]):
+            args = _parse_args()
+
+        selector = _build_selector_from_args(args)
+
+        self.assertIsInstance(selector, FixtureMultiZoneSelector)
+        self.assertEqual(args.selector, "fixture")
+
+    def test_openai_selector_prompt_requests_schema_only(self) -> None:
+        prompt = build_openai_selector_prompt(self.task)
+
+        self.assertIn('"selected_zone_ids"', prompt)
+        self.assertIn('"zone_roles"', prompt)
+        self.assertIn('"confidence"', prompt)
+        self.assertIn('"evidence_rationale"', prompt)
+        self.assertIn('"fallback_used"', prompt)
+        self.assertIn("selected_zone_ids must contain exact canonical zone IDs only", prompt)
+        self.assertIn('Do not prefix IDs with "ZONE"', prompt)
+        self.assertIn("Do not append roles in parentheses", prompt)
+        self.assertIn("Valid canonical zone IDs:", prompt)
+        self.assertIn('"intent-aurora-gate"', prompt)
+        self.assertIn("Do not generate the final answer", prompt)
+        self.assertIn("distractor-aurora-mz1-draft", prompt)
+
+    def test_parse_openai_selector_output_accepts_json_fence(self) -> None:
+        parsed = parse_openai_selector_output(
+            "```json\n"
+            "{"
+            '"selected_zone_ids": ["intent-aurora-gate"], '
+            '"zone_roles": {"intent-aurora-gate": "task_intent"}, '
+            '"confidence": 0.5, '
+            '"evidence_rationale": "intent", '
+            '"fallback_used": false'
+            "}\n```"
+        )
+
+        self.assertEqual(parsed["selected_zone_ids"], ["intent-aurora-gate"])
+        self.assertEqual(parsed["zone_roles"], {"intent-aurora-gate": "task_intent"})
+        self.assertEqual(parsed["confidence"], 0.5)
+        self.assertFalse(parsed["fallback_used"])
+
+    def test_openai_selector_smoke_uses_real_selector_with_deterministic_executor(self) -> None:
+        fake_provider = FakeOpenAIProvider()
+        selector = OpenAISelectorSmoke(
+            model="example-openai-router",
+            max_output_tokens=500,
+            provider=fake_provider,  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], selector=selector)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+
+        self.assertEqual(report["metadata"]["selector_mode"], "openai_selector_smoke")
+        self.assertEqual(report["metadata"]["provider"], "openai-api")
+        self.assertEqual(report["metadata"]["model"], "example-openai-router")
+        self.assertEqual(report["metadata"]["api_path"], OPENAI_SELECTOR_API_PATH)
+        self.assertEqual(report["metadata"]["executor"], "deterministic_fixture")
+        self.assertEqual(spatial_run["selector"], "openai_selector_smoke")
+        self.assertEqual(spatial_run["selector_validation_result"], "complete")
+        self.assertTrue(spatial_run["honest_multi_zone_pass"])
+        self.assertEqual(spatial_run["openai_selector"]["usage"]["total_tokens"], 410)
+        self.assertEqual(report["summary"]["openai_selector_actual_usage"]["total_tokens"], 410)
+        self.assertEqual(len(fake_provider.calls), 1)
+        self.assertEqual(fake_provider.calls[0]["model"], "example-openai-router")
+        self.assertEqual(fake_provider.calls[0]["max_tokens"], 500)
+        self.assertIsNone(fake_provider.calls[0]["temperature"])
+
+    def test_openai_selector_decorated_ids_are_rejected_and_metadata_preserved(self) -> None:
+        selector = OpenAISelectorSmoke(
+            model="example-openai-router",
+            provider=DecoratedIDOpenAIProvider(),  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark([self.task], selector=selector)
+        spatial_run = [
+            run for run in report["runs"] if run["mode"] == "spatial_multi_zone"
+        ][0]
+        openai_metadata = spatial_run["openai_selector"]
+
+        self.assertEqual(spatial_run["selector"], "fixture_fallback_after_selector_error")
+        self.assertFalse(spatial_run["selector_success"])
+        self.assertTrue(spatial_run["selector_used_fallback"])
+        self.assertFalse(spatial_run["honest_multi_zone_pass"])
+        self.assertEqual(spatial_run["selector_validation_result"], "complete")
+        self.assertIn("non-canonical zone IDs", spatial_run["selector_error"])
+        self.assertEqual(openai_metadata["provider"], "openai-api")
+        self.assertEqual(openai_metadata["model"], "example-openai-router")
+        self.assertEqual(openai_metadata["api_path"], OPENAI_SELECTOR_API_PATH)
+        self.assertEqual(openai_metadata["usage"]["total_tokens"], 299)
+        self.assertEqual(
+            openai_metadata["raw_selected_zone_ids"],
+            [
+                "ZONE intent-aurora-gate (task_intent)",
+                "ZONE constraints-aurora-active (hard_constraints)",
+                "ZONE domain-aurora-governance (domain_context)",
+                "ZONE evidence-aurora-final (evidence_records)",
+            ],
+        )
+        self.assertEqual(report["summary"]["fallback_count"], 1)
+        self.assertEqual(report["summary"]["honest_multi_zone_pass_count"], 0)
+        self.assertEqual(report["summary"]["openai_selector_actual_usage"]["total_tokens"], 299)
+
+    def test_openai_selector_wrong_role_fails_selector_validation(self) -> None:
+        selection = dict(self.fixture_selection)
+        selection["selector"] = "openai_selector_smoke"
+        selection["zone_roles"] = dict(selection["zone_roles"])
+        selection["zone_roles"]["domain-aurora-governance"] = "evidence_records"
+        run = execute_task(
+            task=self.task,
+            mode="spatial_multi_zone",
+            selection=selection,
+            fixture_selection=self.fixture_selection,
+            repeat_index=1,
+        )
+
+        self.assertFalse(run["selected_zone_complete"])
+        self.assertFalse(run["selection_validation"]["zone_roles_valid"])
+        self.assertEqual(run["selector_validation_result"], "incomplete")
+        self.assertFalse(run["honest_multi_zone_pass"])
 
 
 if __name__ == "__main__":
