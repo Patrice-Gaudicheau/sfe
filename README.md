@@ -10,13 +10,15 @@ The evidence in this repository is early, mostly synthetic, and benchmark-specif
 
 This repository is currently a technical prototype. It is source-available, not open source. Pull requests are not currently accepted. Forks are allowed for non-commercial research and experimentation under the PolyForm Noncommercial License 1.0.0.
 
-## License
+## Licensing
 
-This repository is source-available, not open source. It is licensed under the PolyForm Noncommercial License 1.0.0; see `LICENSE`.
+SFE is published as a source-visible project under the PolyForm Noncommercial License 1.0.0.
 
-Non-commercial use, study, modification, and forking are allowed under the license. Commercial use is not permitted without prior written permission.
+SFE encourages exploration, research, evaluation, learning, and small-scale experimentation by individuals, researchers, and small teams under its non-commercial terms.
 
-Pull requests are not currently accepted.
+Commercial deployment, hosted services, enterprise integration, API cost optimization at scale, or incorporation into commercial products requires a separate commercial license.
+
+For details, see `COMMERCIAL_LICENSE.md`.
 
 ## Contributions
 
