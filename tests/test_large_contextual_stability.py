@@ -181,6 +181,41 @@ class LargeContextualStabilityTests(unittest.TestCase):
         self.assertIn("| `task_b` | 2 | 1 | 1 | 1 | 1 |", markdown)
         self.assertIn("## Per Iteration", markdown)
 
+    def test_structural_honesty_is_aggregated_when_present(self) -> None:
+        report = build_stability_report(
+            iteration_reports=[
+                _structural_iteration_report(1, honest=True, honest_after_repair=False),
+                _structural_iteration_report(2, honest=False, honest_after_repair=True),
+            ],
+            selection_mode="both",
+            model="fake-lemonade-model",
+            task_tier="structural",
+            dry_run=True,
+        )
+
+        structural_honesty = report["summary"]["structural_honesty"]
+        self.assertEqual(structural_honesty["iteration_count"], 2)
+        self.assertEqual(structural_honesty["honest_structural_pass_count"], 1)
+        self.assertEqual(structural_honesty["honest_structural_pass_rate"], 0.5)
+        self.assertEqual(
+            structural_honesty["honest_structural_pass_after_repair_count"],
+            1,
+        )
+        self.assertEqual(
+            structural_honesty["honest_structural_pass_after_repair_rate"],
+            0.5,
+        )
+        self.assertEqual(structural_honesty["publication_gate"], "honest_structural_pass")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "stability.md"
+            write_markdown(path, report)
+            markdown = path.read_text(encoding="utf-8")
+
+        self.assertIn("## Structural Honesty", markdown)
+        self.assertIn("Publication gate: `honest_structural_pass`", markdown)
+        self.assertIn("Honest structural pass rate: 50.00%", markdown)
+
 
 def _iteration_report(
     iteration: int, task_b_match: bool, task_b_fallback: bool
@@ -260,6 +295,20 @@ def _iteration_report(
         "per_task": [],
         "runs": runs,
     }
+
+
+def _structural_iteration_report(
+    iteration: int,
+    honest: bool,
+    honest_after_repair: bool,
+) -> dict[str, object]:
+    report = _iteration_report(iteration, task_b_match=True, task_b_fallback=False)
+    report["summary"]["structural_reliability_cost"] = {
+        "honest_structural_pass": honest,
+        "honest_structural_pass_after_repair": honest_after_repair,
+        "selector_fallback_used": False,
+    }
+    return report
 
 
 def _run(

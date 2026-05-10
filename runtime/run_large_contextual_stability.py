@@ -246,7 +246,7 @@ def summarize_stability(
         if run.get("router_end_to_end_total_tokens") is not None
     )
     per_task = summarize_per_task_stability(runs)
-    return {
+    summary = {
         "iteration_count": len(iteration_reports),
         "task_count": len({run["task_label"] for run in runs}),
         "total_runs": len(runs),
@@ -303,6 +303,40 @@ def summarize_stability(
         "average_iteration_input_token_reduction": average(
             report["summary"]["token_reduction_percent"] for report in iteration_reports
         ),
+    }
+    structural_honesty = summarize_structural_honesty(iteration_reports)
+    if structural_honesty is not None:
+        summary["structural_honesty"] = structural_honesty
+    return summary
+
+
+def summarize_structural_honesty(
+    iteration_reports: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    costs = [
+        report.get("summary", {}).get("structural_reliability_cost")
+        for report in iteration_reports
+        if report.get("summary", {}).get("structural_reliability_cost") is not None
+    ]
+    if not costs:
+        return None
+    honest = [cost for cost in costs if cost.get("honest_structural_pass") is True]
+    honest_after_repair = [
+        cost
+        for cost in costs
+        if cost.get("honest_structural_pass_after_repair") is True
+    ]
+    fallback = [cost for cost in costs if cost.get("selector_fallback_used") is True]
+    return {
+        "iteration_count": len(costs),
+        "honest_structural_pass_count": len(honest),
+        "honest_structural_pass_rate": len(honest) / len(costs),
+        "honest_structural_pass_after_repair_count": len(honest_after_repair),
+        "honest_structural_pass_after_repair_rate": (
+            len(honest_after_repair) / len(costs)
+        ),
+        "selector_fallback_used_count": len(fallback),
+        "publication_gate": "honest_structural_pass",
     }
 
 
@@ -397,12 +431,31 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Router-inclusive token reduction vs baseline: {_format_optional_reduction(summary['router_inclusive_token_reduction_vs_baseline'])}",
         f"Router-inclusive latency reduction vs baseline: {_format_optional_reduction(summary['router_inclusive_latency_reduction_vs_baseline'])}",
         f"Average input token reduction: {_format_optional_reduction(summary['average_input_token_reduction'])}",
-        "",
-        "## Per Task Stability",
-        "",
-        "| Task | Router runs | Valid | Matches | Mismatches | Fallbacks | Avg router latency ms | Avg router tokens | Selected block counts |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
+    structural_honesty = summary.get("structural_honesty")
+    if structural_honesty is not None:
+        lines.extend(
+            [
+                "",
+                "## Structural Honesty",
+                "",
+                f"Publication gate: `{structural_honesty['publication_gate']}`",
+                f"Honest structural pass rate: {_format_optional_percent(structural_honesty['honest_structural_pass_rate'])}",
+                f"Honest structural pass count: {structural_honesty['honest_structural_pass_count']}",
+                f"Honest structural pass after repair rate: {_format_optional_percent(structural_honesty['honest_structural_pass_after_repair_rate'])}",
+                f"Honest structural pass after repair count: {structural_honesty['honest_structural_pass_after_repair_count']}",
+                f"Selector fallback used count: {structural_honesty['selector_fallback_used_count']}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Per Task Stability",
+            "",
+            "| Task | Router runs | Valid | Matches | Mismatches | Fallbacks | Avg router latency ms | Avg router tokens | Selected block counts |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
     for row in report["per_task"]:
         lines.append(
             f"| `{row['task_label']}` | {row['router_run_count']} | "
@@ -453,6 +506,12 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
     print(f"router valid selection rate: {_format_optional_percent(summary['router_valid_selection_rate'])}")
     print(f"fallback count: {summary['fallback_count']}")
     print(f"fallback rate: {_format_optional_percent(summary['fallback_rate'])}")
+    structural_honesty = summary.get("structural_honesty")
+    if structural_honesty is not None:
+        print(
+            "honest structural pass rate: "
+            f"{_format_optional_percent(structural_honesty['honest_structural_pass_rate'])}"
+        )
     print(f"average input token reduction: {_format_optional_reduction(summary['average_input_token_reduction'])}")
     print(f"json: {json_path}")
     print(f"markdown: {md_path}")

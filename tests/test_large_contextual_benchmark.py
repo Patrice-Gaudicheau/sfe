@@ -631,6 +631,17 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["summary"]["output_validation"]["complete_count"], 3)
         self.assertEqual(report["summary"]["output_validation"]["incomplete_count"], 0)
         self.assertEqual(report["summary"]["output_validation"]["complete_rate"], 1.0)
+        reliability_cost = report["summary"]["structural_reliability_cost"]
+        self.assertTrue(reliability_cost["raw_executor_success"])
+        self.assertTrue(reliability_cost["repaired_success"])
+        self.assertTrue(reliability_cost["router_success"])
+        self.assertFalse(reliability_cost["selector_fallback_used"])
+        self.assertTrue(reliability_cost["verified_selection_complete"])
+        self.assertTrue(reliability_cost["output_validation_complete"])
+        self.assertFalse(reliability_cost["output_repair_required"])
+        self.assertTrue(reliability_cost["honest_structural_pass"])
+        self.assertFalse(reliability_cost["honest_structural_pass_after_repair"])
+        self.assertEqual(reliability_cost["publication_gate"], "honest_structural_pass")
         for run in report["runs"]:
             self.assertTrue(run["output_validation_required"])
             self.assertEqual(run["output_validation_status"], "complete")
@@ -649,6 +660,33 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
                 self.assertEqual(run["selection_verification_status"], "complete")
                 self.assertTrue(run["selection_contains_all_targets"])
                 self.assertEqual(run["selection_missing_targets"], [])
+
+    def test_structural_executor_prompt_is_schema_first(self) -> None:
+        task = get_large_contextual_tasks(TASK_TIER_STRUCTURAL)[0]
+        route = select_relevant_block(task)
+        prompt = build_prompt(
+            task,
+            "spatial_router",
+            route,
+            task_tier=TASK_TIER_STRUCTURAL,
+        )
+
+        self.assertIn("Structural answer format", prompt)
+        self.assertIn("active_version", prompt)
+        self.assertIn("rollback_threshold", prompt)
+        self.assertIn("excluded_dataset", prompt)
+        self.assertIn("final_approval_owner", prompt)
+        self.assertIn("mitigation_label", prompt)
+        self.assertIn("evidence_block_id", prompt)
+        self.assertNotIn("validation target", prompt.lower())
+
+    def test_non_structural_executor_prompt_does_not_use_structural_schema(self) -> None:
+        task = get_large_contextual_tasks(TASK_TIER_STANDARD)[0]
+        route = select_relevant_block(task)
+        prompt = build_prompt(task, "spatial_router", route, task_tier=TASK_TIER_STANDARD)
+
+        self.assertNotIn("Structural answer format", prompt)
+        self.assertNotIn("active_version", prompt)
 
     def test_selection_verification_is_disabled_for_non_structural_tiers(self) -> None:
         for tier in (TASK_TIER_STANDARD, TASK_TIER_PRACTICAL, TASK_TIER_HIGH_CONTEXT):
@@ -873,6 +911,112 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(router_run["output_final"], router_run["output_original"])
         self.assertNotEqual(router_run["selected_block_id"], router_run["fixture_selected_block_id"])
 
+    def test_structural_honest_pass_is_false_when_selector_fallback_is_used(self) -> None:
+        class FallbackSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                return {
+                    **fixture_route,
+                    "router": "fixture_fallback_after_router_error",
+                    "router_selected_block_id": None,
+                    "selection_source": "fixture_fallback_after_router_error",
+                    "router_success": False,
+                    "router_valid_selection": False,
+                    "executor_used_fallback": True,
+                    "router_selection_matches_fixture": False,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "selector failed",
+                    "router_confidence": 0.0,
+                    "router_reason": "Router failed; fell back to fixture-selected block.",
+                    "notes": "test selector fallback",
+                }
+
+        class CompleteProvider:
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "active_version: 2026.08-s9\n"
+                                    "rollback_threshold: 42.7 credits\n"
+                                    "excluded_dataset: SableReplay-144\n"
+                                    "final_approval_owner: ATLAS_OWNER_S9\n"
+                                    "mitigation_label: mesh_s9_epoch_pin\n"
+                                    "evidence_block_id: atlas-mesh-s9-final"
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 20,
+                        "total_tokens": 30,
+                    },
+                }
+
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=False,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+            provider=CompleteProvider(),  # type: ignore[arg-type]
+            selector=FallbackSelector(),
+        )
+
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        reliability_cost = report["summary"]["structural_reliability_cost"]
+        self.assertTrue(router_run["success"])
+        self.assertTrue(router_run["selection_contains_all_targets"])
+        self.assertEqual(router_run["output_validation_status"], "complete")
+        self.assertFalse(reliability_cost["router_success"])
+        self.assertTrue(reliability_cost["selector_fallback_used"])
+        self.assertFalse(reliability_cost["honest_structural_pass"])
+        self.assertFalse(reliability_cost["honest_structural_pass_after_repair"])
+
+    def test_structural_honest_pass_is_false_when_router_fails_without_fallback(self) -> None:
+        class FailedSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                return {
+                    **fixture_route,
+                    "router": "failed_test_selector",
+                    "router_selected_block_id": fixture_route["selected_block_id"],
+                    "selection_source": "test",
+                    "router_success": False,
+                    "router_valid_selection": False,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": False,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 2,
+                    "router_output_tokens": 1,
+                    "router_total_tokens": 3,
+                    "router_error": "selector failed",
+                    "router_confidence": 0.0,
+                    "router_reason": "test selector failure",
+                    "notes": "test failed selector without fallback",
+                }
+
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="router",
+            task_tier=TASK_TIER_STRUCTURAL,
+            selector=FailedSelector(),
+        )
+
+        reliability_cost = report["summary"]["structural_reliability_cost"]
+        self.assertFalse(reliability_cost["router_success"])
+        self.assertFalse(reliability_cost["selector_fallback_used"])
+        self.assertTrue(reliability_cost["verified_selection_complete"])
+        self.assertTrue(reliability_cost["output_validation_complete"])
+        self.assertFalse(reliability_cost["honest_structural_pass"])
+
     def test_structural_complete_output_passes_output_validation(self) -> None:
         report = run_benchmark(
             tasks=get_large_contextual_tasks(TASK_TIER_STRUCTURAL),
@@ -967,6 +1111,13 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             report["summary"]["output_validation"]["missing_target_counts"]["2026.08-s9"],
             2,
         )
+        reliability_cost = report["summary"]["structural_reliability_cost"]
+        self.assertTrue(reliability_cost["router_success"])
+        self.assertFalse(reliability_cost["selector_fallback_used"])
+        self.assertTrue(reliability_cost["verified_selection_complete"])
+        self.assertFalse(reliability_cost["output_validation_complete"])
+        self.assertFalse(reliability_cost["honest_structural_pass"])
+        self.assertFalse(reliability_cost["honest_structural_pass_after_repair"])
 
     def test_structural_repairs_complete_selection_missing_version_once(self) -> None:
         class FixtureSelector:
@@ -1096,6 +1247,9 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         )
         self.assertFalse(reliability_cost["success"])
         self.assertTrue(reliability_cost["success_after_output_repair"])
+        self.assertFalse(reliability_cost["honest_structural_pass"])
+        self.assertTrue(reliability_cost["honest_structural_pass_after_repair"])
+        self.assertTrue(reliability_cost["output_repair_required"])
 
     def test_long_alias_dry_run_reports_practical_tier(self) -> None:
         report = run_benchmark(
@@ -1363,6 +1517,9 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertIn("| Spatial router total tokens |", markdown)
         self.assertIn("| Spatial router total tokens after repair |", markdown)
         self.assertIn("| Repair token tax pct of router+executor |", markdown)
+        self.assertIn("| Honest structural pass | True |", markdown)
+        self.assertIn("| Honest structural pass after repair | False |", markdown)
+        self.assertIn("| Publication gate | `honest_structural_pass` |", markdown)
         self.assertIn("| Success after output repair |", markdown)
 
     def test_empty_task_set_is_rejected(self) -> None:

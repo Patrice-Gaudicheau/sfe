@@ -1972,6 +1972,7 @@ def run_benchmark(
                         output_repairer=output_repairer,
                         output_repair_enabled=output_repair_enabled,
                         max_output_repairs=max_output_repairs,
+                        task_tier=task_tier,
                     )
                 )
 
@@ -2592,8 +2593,9 @@ def execute_task(
     output_repairer: OutputRepairer | None = None,
     output_repair_enabled: bool = False,
     max_output_repairs: int = 0,
+    task_tier: str | None = None,
 ) -> dict[str, Any]:
-    prompt = build_prompt(task, mode, route)
+    prompt = build_prompt(task, mode, route, task_tier=task_tier)
     prompt_tokens_estimate = estimate_tokens(prompt)
     started = time.perf_counter()
     error = ""
@@ -2799,14 +2801,21 @@ def execute_task(
     }
 
 
-def build_prompt(task: LargeContextualTask, mode: str, route: dict[str, Any]) -> str:
+def build_prompt(
+    task: LargeContextualTask,
+    mode: str,
+    route: dict[str, Any],
+    task_tier: str | None = None,
+) -> str:
     block_ids = block_ids_for_mode(task, mode, route)
     blocks = [block for block in task.blocks if block.block_id in block_ids]
     context = "\n\n".join(format_block(block) for block in blocks)
+    structural_schema = _structural_executor_schema(task, task_tier)
     return (
         "/no_think\n"
         "Answer using only the provided context blocks. Do not use outside facts. "
         "Return a concise final answer and include the block id that supports it.\n\n"
+        f"{structural_schema}"
         f"Benchmark: {BENCHMARK_TYPE}\n"
         f"Mode: {mode}\n"
         f"Question: {task.question}\n\n"
@@ -2814,6 +2823,32 @@ def build_prompt(task: LargeContextualTask, mode: str, route: dict[str, Any]) ->
         f"{context}\n\n"
         "Final answer:"
     )
+
+
+def _structural_executor_schema(
+    task: LargeContextualTask,
+    task_tier: str | None,
+) -> str:
+    if not _uses_structural_executor_schema(task, task_tier):
+        return ""
+    return (
+        "Structural answer format:\n"
+        "- Return the answer as explicit field lines using these field names: "
+        "active_version, rollback_threshold, excluded_dataset, "
+        "final_approval_owner, mitigation_label, evidence_block_id.\n"
+        "- Fill every field from the selected context block. Do not omit the active version "
+        "when the question names one.\n"
+        "- The evidence_block_id value must be the BLOCK id that contains the values.\n\n"
+    )
+
+
+def _uses_structural_executor_schema(
+    task: LargeContextualTask,
+    task_tier: str | None,
+) -> bool:
+    if task_tier is not None:
+        return normalize_task_tier(task_tier) == TASK_TIER_STRUCTURAL
+    return "structural_record_navigation" in task.difficulty_patterns
 
 
 def block_ids_for_mode(
@@ -3015,6 +3050,60 @@ def summarize_output_repair(runs: list[dict[str, Any]]) -> dict[str, Any]:
 def summarize_structural_reliability_cost(runs: list[dict[str, Any]]) -> dict[str, Any]:
     baseline_runs = [run for run in runs if run["mode"] == "baseline"]
     router_runs = [run for run in runs if run["mode"] == "spatial_router"]
+    router_success = (
+        all(run.get("router_success") is True for run in router_runs)
+        if router_runs
+        else None
+    )
+    selector_fallback_used = (
+        any(run.get("executor_used_fallback") is True for run in router_runs)
+        if router_runs
+        else None
+    )
+    verified_selection_complete = (
+        all(run.get("selection_verification_status") == "complete" for run in router_runs)
+        if router_runs
+        else None
+    )
+    output_validation_complete = (
+        all(run.get("output_validation_status") == "complete" for run in router_runs)
+        if router_runs
+        else None
+    )
+    route_honesty_conditions_met = bool(
+        router_runs
+        and router_success is True
+        and selector_fallback_used is False
+        and verified_selection_complete is True
+    )
+    honest_structural_pass = bool(
+        route_honesty_conditions_met
+        and output_validation_complete is True
+        and all(bool(run.get("success")) for run in router_runs)
+    )
+    repair_required = (
+        any(run.get("output_repair_required") is True for run in router_runs)
+        if router_runs
+        else None
+    )
+    attempted_repairs_complete = bool(
+        router_runs
+        and repair_required is True
+        and all(
+            run.get("output_repair_status")
+            in (
+                OUTPUT_REPAIR_STATUS_ATTEMPTED_COMPLETE,
+                OUTPUT_REPAIR_STATUS_NOT_REQUIRED,
+            )
+            for run in router_runs
+        )
+    )
+    honest_structural_pass_after_repair = bool(
+        route_honesty_conditions_met
+        and not honest_structural_pass
+        and attempted_repairs_complete
+        and all(bool(run.get("success_after_output_repair")) for run in router_runs)
+    )
     baseline_total_tokens = _optional_average(
         run.get("total_tokens") for run in baseline_runs
     )
@@ -3075,6 +3164,24 @@ def summarize_structural_reliability_cost(runs: list[dict[str, Any]]) -> dict[st
             output_repair_added_tokens,
             spatial_router_total_tokens,
         ),
+        "raw_executor_success": all(bool(run.get("success")) for run in router_runs)
+        if router_runs
+        else None,
+        "repaired_success": all(
+            bool(run.get("success_after_output_repair")) for run in router_runs
+        )
+        if router_runs
+        else None,
+        "router_success": router_success,
+        "selector_fallback_used": selector_fallback_used,
+        "verified_selection_complete": verified_selection_complete,
+        "output_validation_complete": output_validation_complete,
+        "output_repair_required": repair_required,
+        "honest_structural_pass": honest_structural_pass if router_runs else None,
+        "honest_structural_pass_after_repair": (
+            honest_structural_pass_after_repair if router_runs else None
+        ),
+        "publication_gate": "honest_structural_pass",
         "success": all(bool(run.get("success")) for run in router_runs)
         if router_runs
         else None,
@@ -3347,6 +3454,16 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
                 f"| Token reduction after repair vs baseline | {_format_optional_percent_value(structural_cost['token_reduction_after_repair_vs_baseline_pct'])} |",
                 f"| Repair token tax | {_format_optional_number(structural_cost['repair_token_tax'])} |",
                 f"| Repair token tax pct of router+executor | {_format_optional_percent_value(structural_cost['repair_token_tax_pct_of_router_executor'])} |",
+                f"| Raw executor success | {_format_optional_bool(structural_cost['raw_executor_success'])} |",
+                f"| Repaired success | {_format_optional_bool(structural_cost['repaired_success'])} |",
+                f"| Router success | {_format_optional_bool(structural_cost['router_success'])} |",
+                f"| Selector fallback used | {_format_optional_bool(structural_cost['selector_fallback_used'])} |",
+                f"| Verified selection complete | {_format_optional_bool(structural_cost['verified_selection_complete'])} |",
+                f"| Output validation complete before repair | {_format_optional_bool(structural_cost['output_validation_complete'])} |",
+                f"| Output repair required | {_format_optional_bool(structural_cost['output_repair_required'])} |",
+                f"| Honest structural pass | {_format_optional_bool(structural_cost['honest_structural_pass'])} |",
+                f"| Honest structural pass after repair | {_format_optional_bool(structural_cost['honest_structural_pass_after_repair'])} |",
+                f"| Publication gate | `{structural_cost['publication_gate']}` |",
                 f"| Success | {_format_optional_bool(structural_cost['success'])} |",
                 f"| Success after output repair | {_format_optional_bool(structural_cost['success_after_output_repair'])} |",
             ]
@@ -3470,6 +3587,16 @@ def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None
     if output_repair["required_count"] or output_repair["attempted_count"]:
         print(f"output repair attempted runs: {output_repair['attempted_count']}")
         print(f"output repair completed runs: {output_repair['completed_count']}")
+    structural_cost = report["summary"].get("structural_reliability_cost")
+    if structural_cost is not None:
+        print(
+            "honest structural pass: "
+            f"{_format_optional_bool(structural_cost['honest_structural_pass'])}"
+        )
+        print(
+            "honest structural pass after repair: "
+            f"{_format_optional_bool(structural_cost['honest_structural_pass_after_repair'])}"
+        )
     router_selection = report["summary"]["router_selection"]
     if router_selection["run_count"]:
         print(f"router selection match rate: {_format_optional_percent(router_selection['match_rate'])}")
