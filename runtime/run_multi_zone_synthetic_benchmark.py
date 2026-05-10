@@ -255,7 +255,141 @@ def get_multi_zone_synthetic_tasks() -> list[MultiZoneTask]:
                 "governed_request_class": ("domain-aurora-governance",),
                 "requested_fields": ("intent-aurora-gate",),
             },
-        )
+        ),
+        MultiZoneTask(
+            task_label="multi_zone_synthetic_quartz_relay_gate",
+            question=(
+                "For Quartz Relay, produce the active protocol decision: which protocol "
+                "version is active, what threshold is allowed, which action is required, "
+                "what blocking condition prevents release, which evidence record supports "
+                "the decision, and which cycle label applies?"
+            ),
+            zones=(
+                _zone(
+                    "intent-quartz-relay",
+                    "task_intent",
+                    "Quartz Relay Decision Intent",
+                    (
+                        "The requested answer is the active Quartz Relay protocol decision. "
+                        "The final answer must include active protocol version, allowed threshold, "
+                        "required action, blocking condition, evidence record ID, cycle label, and "
+                        "evidence zone references. This zone defines the requested fields but not "
+                        "the approved values."
+                    ),
+                    required=True,
+                ),
+                _zone(
+                    "constraints-quartz-global",
+                    "hard_constraints",
+                    "Quartz Relay Global Constraint",
+                    (
+                        "Use the globally active protocol QR-2026.10-hx4. Local test passes and "
+                        "previous protocol notes are not sufficient evidence for the active decision. "
+                        "The applicable cycle label is quartz-cycle-2026-10-18, and final evidence "
+                        "must be tied to the global gate."
+                    ),
+                    required=True,
+                ),
+                _zone(
+                    "domain-quartz-threshold",
+                    "domain_context",
+                    "Quartz Relay Threshold Domain Context",
+                    (
+                        "Quartz Relay evaluates phase drift across guarded relay windows. The allowed "
+                        "threshold for the active global gate is 18.6 phase units. A release is blocked "
+                        "when the Beacon Matrix drift vector exceeds 0.42 during the guarded window."
+                    ),
+                    required=True,
+                ),
+                _zone(
+                    "evidence-quartz-final",
+                    "evidence_records",
+                    "Quartz Relay Final Evidence Record",
+                    (
+                        "Evidence record QR-EVID-774 is the final global record for the active Quartz "
+                        "Relay decision. It requires action engage_relay_dampening_mode before release. "
+                        "The record confirms that the Beacon Matrix drift vector blocking condition "
+                        "must be enforced for quartz-cycle-2026-10-18."
+                    ),
+                    required=True,
+                ),
+                _zone(
+                    "distractor-quartz-partial-threshold",
+                    "partial_distractor",
+                    "Quartz Relay Partial Threshold Note",
+                    (
+                        "A partial threshold note correctly repeats protocol QR-2026.10-hx4 and the "
+                        "18.6 phase unit limit. It does not contain the required action, evidence "
+                        "record ID, cycle label, or blocking condition, so it is not complete evidence."
+                    ),
+                    distractor=True,
+                ),
+                _zone(
+                    "distractor-quartz-previous-protocol",
+                    "previous_version_distractor",
+                    "Quartz Relay Previous Protocol Record",
+                    (
+                        "Previous protocol QR-2026.09-hx3 allowed 16.2 phase units and used action "
+                        "hold_relay_shadow_mode with evidence record QR-EVID-611. That record was "
+                        "valid only before quartz-cycle-2026-10-18 and must not decide the active gate."
+                    ),
+                    distractor=True,
+                ),
+                _zone(
+                    "distractor-quartz-ops-note",
+                    "operational_note_distractor",
+                    "Quartz Relay Operational Note",
+                    (
+                        "An operational note says relay monitors looked stable during a local rehearsal "
+                        "and suggests fast release if dashboard counters are green. It is not a global "
+                        "gate evidence record and does not authorize the active protocol decision."
+                    ),
+                    distractor=True,
+                ),
+            ),
+            required_zone_ids=(
+                "intent-quartz-relay",
+                "constraints-quartz-global",
+                "domain-quartz-threshold",
+                "evidence-quartz-final",
+            ),
+            distractor_zone_ids=(
+                "distractor-quartz-partial-threshold",
+                "distractor-quartz-previous-protocol",
+                "distractor-quartz-ops-note",
+            ),
+            validation_targets=(
+                "QR-2026.10-hx4",
+                "18.6 phase units",
+                "engage_relay_dampening_mode",
+                "Beacon Matrix drift vector exceeds 0.42",
+                "QR-EVID-774",
+                "quartz-cycle-2026-10-18",
+                "intent-quartz-relay",
+                "constraints-quartz-global",
+                "domain-quartz-threshold",
+                "evidence-quartz-final",
+            ),
+            expected_answer=(
+                "active_protocol: QR-2026.10-hx4\n"
+                "allowed_threshold: 18.6 phase units\n"
+                "required_action: engage_relay_dampening_mode\n"
+                "blocking_condition: Beacon Matrix drift vector exceeds 0.42 during the guarded window\n"
+                "evidence_record_id: QR-EVID-774\n"
+                "cycle_label: quartz-cycle-2026-10-18\n"
+                "evidence_zone_ids: intent-quartz-relay, constraints-quartz-global, "
+                "domain-quartz-threshold, evidence-quartz-final"
+            ),
+            required_evidence={
+                "active_protocol": ("constraints-quartz-global",),
+                "allowed_threshold": ("domain-quartz-threshold",),
+                "required_action": ("evidence-quartz-final",),
+                "blocking_condition": ("domain-quartz-threshold", "evidence-quartz-final"),
+                "evidence_record_id": ("evidence-quartz-final",),
+                "cycle_label": ("constraints-quartz-global", "evidence-quartz-final"),
+                "requested_fields": ("intent-quartz-relay",),
+            },
+        ),
     ]
 
 
@@ -916,6 +1050,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             if run["token_reduction_percent"] is not None
         ),
         "openai_selector_actual_usage": _sum_openai_selector_usage(spatial_runs),
+        "fixtures": _summarize_fixtures(spatial_runs),
     }
 
 
@@ -928,6 +1063,37 @@ def task_to_dict(task: MultiZoneTask) -> dict[str, Any]:
         compose_context(task, task.required_zone_ids)
     )
     return data
+
+
+def _summarize_fixtures(spatial_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    task_labels = sorted({run["task_label"] for run in spatial_runs})
+    for task_label in task_labels:
+        runs = [run for run in spatial_runs if run["task_label"] == task_label]
+        if not runs:
+            continue
+        first = runs[0]
+        summaries.append(
+            {
+                "fixture_id": task_label,
+                "run_count": len(runs),
+                "selected_zone_ids": first["selected_zone_ids"],
+                "selected_zone_complete": all(run["selected_zone_complete"] for run in runs),
+                "distractors_omitted": all(run["distractors_omitted"] for run in runs),
+                "fallback_used": any(run["selector_used_fallback"] for run in runs),
+                "honest_multi_zone_pass_count": sum(
+                    1 for run in runs if run["honest_multi_zone_pass"]
+                ),
+                "honest_multi_zone_pass_rate": _rate(
+                    run["honest_multi_zone_pass"] is True for run in runs
+                ),
+                "average_token_reduction_percent": _average(
+                    run["token_reduction_percent"] for run in runs
+                    if run["token_reduction_percent"] is not None
+                ),
+            }
+        )
+    return summaries
 
 
 def write_markdown(path: Path, report: dict[str, Any]) -> None:
@@ -970,11 +1136,30 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"| Output | {_format_optional_int(summary['openai_selector_actual_usage']['output_tokens'])} |",
         f"| Total | {_format_optional_int(summary['openai_selector_actual_usage']['total_tokens'])} |",
         "",
-        "## Runs",
+        "## Fixtures",
         "",
-        "| Task | Mode | Honest pass | Selected zones | Missing required | Distractors selected | Token reduction |",
-        "| --- | --- | ---: | --- | --- | --- | ---: |",
+        "| Fixture ID | Selected zones | Complete | Distractors omitted | Fallback used | Honest pass rate | Token reduction |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
+    for fixture in summary["fixtures"]:
+        lines.append(
+            f"| `{fixture['fixture_id']}` | "
+            f"{', '.join(fixture['selected_zone_ids'])} | "
+            f"{fixture['selected_zone_complete']} | "
+            f"{fixture['distractors_omitted']} | "
+            f"{fixture['fallback_used']} | "
+            f"{_format_percent(fixture['honest_multi_zone_pass_rate'])} | "
+            f"{_format_optional_percent(fixture['average_token_reduction_percent'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Runs",
+            "",
+            "| Task | Mode | Honest pass | Selected zones | Missing required | Distractors selected | Token reduction |",
+            "| --- | --- | ---: | --- | --- | --- | ---: |",
+        ]
+    )
     for run in report["runs"]:
         lines.append(
             f"| `{run['task_label']}` | `{run['mode']}` | "

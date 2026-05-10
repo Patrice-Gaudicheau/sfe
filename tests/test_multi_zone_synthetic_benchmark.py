@@ -140,17 +140,23 @@ class DecoratedIDOpenAIProvider:
 
 class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.task = get_multi_zone_synthetic_tasks()[0]
+        self.tasks = get_multi_zone_synthetic_tasks()
+        self.task = self.tasks[0]
+        self.quartz_task = self.tasks[1]
         self.fixture_selection = FixtureMultiZoneSelector().select(self.task, {})
+        self.quartz_fixture_selection = FixtureMultiZoneSelector().select(self.quartz_task, {})
 
     def _selection_without(self, omitted_zone_id: str) -> dict[str, Any]:
+        return self._selection_without_for_task(self.task, omitted_zone_id)
+
+    def _selection_without_for_task(self, task: Any, omitted_zone_id: str) -> dict[str, Any]:
         zones = [
-            zone_by_id(self.task, zone_id)
-            for zone_id in self.task.required_zone_ids
+            zone_by_id(task, zone_id)
+            for zone_id in task.required_zone_ids
             if zone_id != omitted_zone_id
         ]
         return build_selection(
-            task=self.task,
+            task=task,
             selected_zones=zones,
             selector_name="test_missing_required_zone",
             selector_success=True,
@@ -160,10 +166,13 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         )
 
     def _selection_with_distractor(self) -> dict[str, Any]:
-        zones = [zone_by_id(self.task, zone_id) for zone_id in self.task.required_zone_ids]
-        zones.append(zone_by_id(self.task, self.task.distractor_zone_ids[0]))
+        return self._selection_with_distractor_for_task(self.task, self.task.distractor_zone_ids[0])
+
+    def _selection_with_distractor_for_task(self, task: Any, distractor_zone_id: str) -> dict[str, Any]:
+        zones = [zone_by_id(task, zone_id) for zone_id in task.required_zone_ids]
+        zones.append(zone_by_id(task, distractor_zone_id))
         return build_selection(
-            task=self.task,
+            task=task,
             selected_zones=zones,
             selector_name="test_selects_distractor",
             selector_success=True,
@@ -174,6 +183,7 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
 
     def test_fixture_integrity_requires_multiple_explicit_zones(self) -> None:
         self.assertEqual(self.task.task_label, "multi_zone_synthetic_aurora_release_gate")
+        self.assertEqual(len(self.tasks), 2)
         self.assertGreaterEqual(len(self.task.required_zone_ids), 3)
 
         zone_ids = [zone.zone_id for zone in self.task.zones]
@@ -346,6 +356,138 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
             self.assertIn(f"ZONE ID: {zone.zone_id}", context)
         self.assertNotIn("distractor-aurora-mz1-draft", context)
 
+    def test_second_fixture_happy_path_passes(self) -> None:
+        run = execute_task(
+            task=self.quartz_task,
+            mode="spatial_multi_zone",
+            selection=self.quartz_fixture_selection,
+            fixture_selection=self.quartz_fixture_selection,
+            repeat_index=1,
+        )
+
+        self.assertEqual(self.quartz_task.task_label, "multi_zone_synthetic_quartz_relay_gate")
+        self.assertEqual(len(self.quartz_task.required_zone_ids), 4)
+        self.assertTrue(run["selected_zone_complete"])
+        self.assertTrue(run["distractors_omitted"])
+        self.assertTrue(run["output_validation_before_repair"])
+        self.assertTrue(run["honest_multi_zone_pass"])
+        self.assertEqual(
+            run["selected_zone_ids"],
+            [
+                "intent-quartz-relay",
+                "constraints-quartz-global",
+                "domain-quartz-threshold",
+                "evidence-quartz-final",
+            ],
+        )
+
+    def test_second_fixture_no_single_zone_contains_full_answer(self) -> None:
+        core_answer_targets = {
+            "QR-2026.10-hx4",
+            "18.6 phase units",
+            "engage_relay_dampening_mode",
+            "Beacon Matrix drift vector exceeds 0.42",
+            "QR-EVID-774",
+            "quartz-cycle-2026-10-18",
+        }
+
+        for zone in self.quartz_task.zones:
+            zone_text = zone.text.lower()
+            present_targets = {
+                target for target in core_answer_targets if target.lower() in zone_text
+            }
+            self.assertNotEqual(
+                present_targets,
+                core_answer_targets,
+                f"{zone.zone_id} unexpectedly contains the full answer",
+            )
+
+    def test_second_fixture_missing_required_zone_fails(self) -> None:
+        selection = self._selection_without_for_task(
+            self.quartz_task,
+            "domain-quartz-threshold",
+        )
+        run = execute_task(
+            task=self.quartz_task,
+            mode="spatial_multi_zone",
+            selection=selection,
+            fixture_selection=self.quartz_fixture_selection,
+            repeat_index=1,
+        )
+
+        self.assertFalse(run["selected_zone_complete"])
+        self.assertIn("domain-quartz-threshold", run["missing_required_zone_ids"])
+        self.assertFalse(run["honest_multi_zone_pass"])
+
+    def test_second_fixture_partial_true_distractor_fails(self) -> None:
+        selection = self._selection_with_distractor_for_task(
+            self.quartz_task,
+            "distractor-quartz-partial-threshold",
+        )
+        run = execute_task(
+            task=self.quartz_task,
+            mode="spatial_multi_zone",
+            selection=selection,
+            fixture_selection=self.quartz_fixture_selection,
+            repeat_index=1,
+        )
+
+        self.assertTrue(run["selected_zone_complete"])
+        self.assertFalse(run["distractors_omitted"])
+        self.assertEqual(
+            run["unexpected_distractor_zone_ids"],
+            ["distractor-quartz-partial-threshold"],
+        )
+        self.assertFalse(run["honest_multi_zone_pass"])
+
+    def test_second_fixture_previous_version_distractor_fails(self) -> None:
+        selection = self._selection_with_distractor_for_task(
+            self.quartz_task,
+            "distractor-quartz-previous-protocol",
+        )
+        run = execute_task(
+            task=self.quartz_task,
+            mode="spatial_multi_zone",
+            selection=selection,
+            fixture_selection=self.quartz_fixture_selection,
+            repeat_index=1,
+        )
+
+        self.assertFalse(run["distractors_omitted"])
+        self.assertEqual(
+            run["unexpected_distractor_zone_ids"],
+            ["distractor-quartz-previous-protocol"],
+        )
+        self.assertFalse(run["honest_multi_zone_pass"])
+
+    def test_second_fixture_evidence_mismatch_fails(self) -> None:
+        wrong_evidence_output = self.quartz_task.expected_answer.replace(
+            "evidence_zone_ids: intent-quartz-relay, constraints-quartz-global, "
+            "domain-quartz-threshold, evidence-quartz-final",
+            "evidence_zone_ids: intent-quartz-relay, constraints-quartz-global, "
+            "evidence-quartz-final, distractor-quartz-partial-threshold",
+        )
+        output_validation = validate_output(self.quartz_task, wrong_evidence_output)
+        run = execute_task(
+            task=self.quartz_task,
+            mode="spatial_multi_zone",
+            selection=self.quartz_fixture_selection,
+            fixture_selection=self.quartz_fixture_selection,
+            repeat_index=1,
+            output_override=wrong_evidence_output,
+        )
+
+        self.assertFalse(output_validation["passed"])
+        self.assertEqual(
+            output_validation["evidence_reference_validation"]["missing_zone_ids"],
+            ["domain-quartz-threshold"],
+        )
+        self.assertEqual(
+            output_validation["evidence_reference_validation"]["unexpected_zone_ids"],
+            ["distractor-quartz-partial-threshold"],
+        )
+        self.assertFalse(run["honest_multi_zone_pass"])
+
     def test_report_fields_and_token_accounting_are_present(self) -> None:
         report = run_benchmark([self.task])
         summary = report["summary"]
@@ -381,8 +523,28 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertIsNone(summary["output_validation_after_repair_rate"])
         self.assertIsNone(summary["openai_selector_actual_usage"]["total_tokens"])
 
+    def test_multi_fixture_aggregate_report_is_correct(self) -> None:
+        report = run_benchmark(self.tasks)
+        summary = report["summary"]
+        fixtures = {fixture["fixture_id"]: fixture for fixture in summary["fixtures"]}
+
+        self.assertEqual(report["metadata"]["task_count"], 2)
+        self.assertEqual(summary["run_count"], 4)
+        self.assertEqual(summary["baseline_run_count"], 2)
+        self.assertEqual(summary["spatial_multi_zone_run_count"], 2)
+        self.assertEqual(summary["honest_multi_zone_pass_count"], 2)
+        self.assertEqual(summary["honest_multi_zone_pass_rate"], 1.0)
+        self.assertEqual(set(fixtures), {task.task_label for task in self.tasks})
+        for fixture in fixtures.values():
+            self.assertEqual(fixture["run_count"], 1)
+            self.assertTrue(fixture["selected_zone_complete"])
+            self.assertTrue(fixture["distractors_omitted"])
+            self.assertFalse(fixture["fallback_used"])
+            self.assertEqual(fixture["honest_multi_zone_pass_rate"], 1.0)
+            self.assertGreater(fixture["average_token_reduction_percent"], 0)
+
     def test_markdown_report_includes_honest_pass_line(self) -> None:
-        report = run_benchmark([self.task])
+        report = run_benchmark(self.tasks)
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "multi_zone_report.md"
             write_markdown(path, report)
@@ -392,6 +554,9 @@ class MultiZoneSyntheticBenchmarkTests(unittest.TestCase):
         self.assertIn("Zone selection success rate:", markdown)
         self.assertIn("Selected-zone completeness rate:", markdown)
         self.assertIn("Average token reduction:", markdown)
+        self.assertIn("## Fixtures", markdown)
+        self.assertIn("multi_zone_synthetic_aurora_release_gate", markdown)
+        self.assertIn("multi_zone_synthetic_quartz_relay_gate", markdown)
 
     def test_default_cli_selector_remains_fixture_without_provider(self) -> None:
         with patch.object(sys, "argv", ["run_multi_zone_synthetic_benchmark.py"]):
