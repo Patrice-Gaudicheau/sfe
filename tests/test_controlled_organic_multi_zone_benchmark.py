@@ -21,6 +21,7 @@ from runtime.run_controlled_organic_multi_zone_benchmark import (
     FixtureOrganicSelector,
     OpenAIOrganicExecutorSmoke,
     OpenAIOrganicSelectorSmoke,
+    _apply_openai_smoke_repeat_args,
     _build_executor_from_args,
     _build_selector_from_args,
     _parse_args,
@@ -151,6 +152,37 @@ class FakeOpenAIExecutorProvider:
                 "completion_tokens": 140,
                 "total_tokens": 640,
             },
+        }
+
+
+class SequencedExecutor:
+    provider = "deterministic_test"
+    executor_mode = "sequenced_executor"
+    model: str | None = None
+    api_path: str | None = None
+
+    def __init__(self, outputs: list[str]) -> None:
+        self.outputs = list(outputs)
+        self.calls = 0
+
+    def execute(
+        self,
+        task: Any,
+        selected_source_ids: tuple[str, ...],
+        composed_context: str,
+    ) -> dict[str, Any]:
+        output = self.outputs[self.calls]
+        self.calls += 1
+        return {
+            "executor": "sequenced_executor",
+            "executor_mode": self.executor_mode,
+            "provider": self.provider,
+            "model": self.model,
+            "api_path": self.api_path,
+            "output": output,
+            "output_parse_success": True,
+            "output_parse_error": "",
+            "actual_usage": None,
         }
 
 
@@ -414,6 +446,110 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.executor, "fixture")
         self.assertEqual(selector.provider, "deterministic_mock")
         self.assertEqual(executor.provider, "deterministic_mock")
+
+    def test_repeat_openai_smoke_cli_sets_openai_selector_executor_and_repeat(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_controlled_organic_multi_zone_benchmark.py",
+                "--repeat-openai-smoke",
+                "3",
+            ],
+        ):
+            args = _parse_args()
+
+        _apply_openai_smoke_repeat_args(args)
+
+        self.assertEqual(args.repeat, 3)
+        self.assertEqual(args.selector, "openai")
+        self.assertEqual(args.executor, "openai")
+
+    def test_repeated_deterministic_fixture_runs_aggregate_correctly(self) -> None:
+        report = run_benchmark(self.tasks, repeat=3)
+        summary = report["summary"]
+        stability = summary["stability"]
+
+        self.assertEqual(stability["repeat_count"], 3)
+        self.assertEqual(stability["total_fixture_executions"], 3)
+        self.assertTrue(stability["all_repeats_passed"])
+        self.assertTrue(stability["all_fixtures_passed"])
+        self.assertEqual(summary["honest_controlled_organic_pass_count"], 3)
+        self.assertEqual(summary["honest_controlled_organic_pass_rate"], 1.0)
+        self.assertEqual(len(stability["per_run"]), 3)
+        for result in stability["per_run"]:
+            self.assertTrue(result["honest_controlled_organic_pass"])
+            self.assertEqual(result["fixture_execution_count"], 1)
+            self.assertEqual(result["honest_controlled_organic_pass_count"], 1)
+            self.assertEqual(result["selector_fallback_count"], 0)
+            self.assertEqual(result["required_source_complete_count"], 1)
+            self.assertEqual(result["output_validation_complete_count"], 1)
+            self.assertEqual(result["executor_parse_success_count"], 1)
+        self.assertEqual(len(stability["per_fixture"]), 1)
+        self.assertEqual(stability["per_fixture"][0]["repeat_count"], 3)
+        self.assertEqual(
+            stability["per_fixture"][0]["honest_controlled_organic_pass_count"],
+            3,
+        )
+
+    def test_one_failed_repeated_run_lowers_aggregate_pass_rate(self) -> None:
+        bad_output = self.task.expected_answer.replace("COMPONENT_OWNER_RELAY_GATE", "")
+        executor = SequencedExecutor([self.task.expected_answer, bad_output])
+
+        report = run_benchmark([self.task], repeat=2, executor=executor)  # type: ignore[arg-type]
+        summary = report["summary"]
+        stability = summary["stability"]
+
+        self.assertEqual(summary["honest_controlled_organic_pass_count"], 1)
+        self.assertEqual(summary["honest_controlled_organic_pass_rate"], 0.5)
+        self.assertFalse(stability["all_repeats_passed"])
+        self.assertFalse(stability["all_fixtures_passed"])
+        self.assertTrue(stability["per_run"][0]["honest_controlled_organic_pass"])
+        self.assertFalse(stability["per_run"][1]["honest_controlled_organic_pass"])
+        self.assertEqual(
+            stability["per_fixture"][0]["output_validation_complete_rate"],
+            0.5,
+        )
+
+    def test_fallback_in_any_repeat_is_visible(self) -> None:
+        report = run_benchmark([self.task], repeat=2, selector=FailingSelector())  # type: ignore[arg-type]
+        summary = report["summary"]
+        stability = summary["stability"]
+
+        self.assertEqual(summary["fallback_count"], 2)
+        self.assertEqual(summary["honest_controlled_organic_pass_count"], 0)
+        self.assertFalse(stability["all_repeats_passed"])
+        for result in stability["per_run"]:
+            self.assertEqual(result["selector_fallback_count"], 1)
+            self.assertFalse(result["honest_controlled_organic_pass"])
+
+    def test_mocked_token_usage_aggregates_across_repeats(self) -> None:
+        selector = OpenAIOrganicSelectorSmoke(
+            model="example-openai-router",
+            provider=FakeOpenAISelectorProvider(
+                _selector_json(list(self.task.required_source_ids))
+            ),  # type: ignore[arg-type]
+        )
+        executor = OpenAIOrganicExecutorSmoke(
+            model="example-openai-executor",
+            provider=FakeOpenAIExecutorProvider(_executor_json()),  # type: ignore[arg-type]
+        )
+
+        report = run_benchmark(
+            [self.task],
+            repeat=2,
+            selector=selector,
+            executor=executor,
+        )
+        summary = report["summary"]
+
+        self.assertEqual(summary["openai_selector_actual_usage"]["total_tokens"], 1440)
+        self.assertEqual(summary["openai_executor_actual_usage"]["total_tokens"], 1280)
+        self.assertEqual(summary["stability"]["selector_total_tokens"], 1440)
+        self.assertEqual(summary["stability"]["executor_total_tokens"], 1280)
+        for result in summary["stability"]["per_run"]:
+            self.assertEqual(result["selector_total_tokens"], 720)
+            self.assertEqual(result["executor_total_tokens"], 640)
 
     def test_openai_selector_prompt_uses_source_document_schema(self) -> None:
         prompt = build_openai_selector_prompt(self.task)
@@ -688,6 +824,7 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
             "openai_selector_actual_usage",
             "openai_executor_actual_usage",
             "actual_usage",
+            "stability",
         ):
             self.assertIn(field, summary)
         for field in (
@@ -716,6 +853,8 @@ class ControlledOrganicBenchmarkTests(unittest.TestCase):
         self.assertIn("Suppressed sources", markdown)
         self.assertIn("Composed context", markdown)
         self.assertIn("OpenAI Executor Usage", markdown)
+        self.assertIn("Stability Runs", markdown)
+        self.assertIn("Stability Fixtures", markdown)
 
 
 if __name__ == "__main__":

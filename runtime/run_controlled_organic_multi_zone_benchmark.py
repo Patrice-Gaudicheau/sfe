@@ -93,6 +93,7 @@ class OrganicExecutor(Protocol):
 
 def main() -> None:
     args = _parse_args()
+    _apply_openai_smoke_repeat_args(args)
     selector = _build_selector_from_args(args)
     executor = _build_executor_from_args(args)
     tasks = get_controlled_organic_tasks()
@@ -107,6 +108,14 @@ def _parse_args() -> argparse.Namespace:
         description="Run the deterministic controlled organic multi-zone benchmark."
     )
     parser.add_argument("--repeat", "--repeats", type=int, default=1)
+    parser.add_argument(
+        "--repeat-openai-smoke",
+        type=int,
+        help=(
+            "Run repeated combined OpenAI selector+executor smoke iterations. "
+            "This sets selector=openai, executor=openai, and repeat to the provided count."
+        ),
+    )
     parser.add_argument(
         "--selector",
         choices=("fixture", "openai"),
@@ -153,6 +162,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
     parser.add_argument("--md", type=Path, default=DEFAULT_MD_PATH)
     return parser.parse_args()
+
+
+def _apply_openai_smoke_repeat_args(args: argparse.Namespace) -> None:
+    if args.repeat_openai_smoke is None:
+        return
+    if args.repeat_openai_smoke < 1:
+        raise ValueError("--repeat-openai-smoke must be at least 1.")
+    args.selector = "openai"
+    args.executor = "openai"
+    args.repeat = args.repeat_openai_smoke
 
 
 def _build_selector_from_args(args: argparse.Namespace) -> OrganicSelector:
@@ -926,6 +945,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "openai_executor_actual_usage": _sum_openai_executor_usage(organic_runs),
         "actual_usage": {"input_tokens": None, "output_tokens": None, "total_tokens": None},
         "fixtures": _summarize_fixtures(organic_runs),
+        "stability": _summarize_stability(organic_runs),
     }
 
 
@@ -960,6 +980,83 @@ def _summarize_fixtures(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return summaries
+
+
+def _summarize_stability(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    repeat_indices = sorted({int(run["repeat_index"]) for run in runs})
+    fixture_ids = sorted({run["fixture_id"] for run in runs})
+    per_run: list[dict[str, Any]] = []
+    for repeat_index in repeat_indices:
+        repeat_runs = [run for run in runs if int(run["repeat_index"]) == repeat_index]
+        per_run.append(
+            {
+                "repeat_index": repeat_index,
+                "fixture_execution_count": len(repeat_runs),
+                "honest_controlled_organic_pass": bool(repeat_runs)
+                and all(run["honest_controlled_organic_pass"] for run in repeat_runs),
+                "honest_controlled_organic_pass_count": sum(
+                    1 for run in repeat_runs if run["honest_controlled_organic_pass"]
+                ),
+                "selector_fallback_count": sum(
+                    1 for run in repeat_runs if run["selector_used_fallback"]
+                ),
+                "required_source_complete_count": sum(
+                    1 for run in repeat_runs if run["required_source_complete"]
+                ),
+                "output_validation_complete_count": sum(
+                    1 for run in repeat_runs if run["output_validation_before_repair"]
+                ),
+                "executor_parse_success_count": sum(
+                    1 for run in repeat_runs if run["executor_output_parse_success"]
+                ),
+                "selector_total_tokens": _sum_openai_selector_usage(repeat_runs)[
+                    "total_tokens"
+                ],
+                "executor_total_tokens": _sum_openai_executor_usage(repeat_runs)[
+                    "total_tokens"
+                ],
+            }
+        )
+
+    per_fixture: list[dict[str, Any]] = []
+    for fixture_id in fixture_ids:
+        fixture_runs = [run for run in runs if run["fixture_id"] == fixture_id]
+        per_fixture.append(
+            {
+                "fixture_id": fixture_id,
+                "repeat_count": len(fixture_runs),
+                "honest_controlled_organic_pass": bool(fixture_runs)
+                and all(run["honest_controlled_organic_pass"] for run in fixture_runs),
+                "honest_controlled_organic_pass_count": sum(
+                    1 for run in fixture_runs if run["honest_controlled_organic_pass"]
+                ),
+                "required_source_completeness_rate": _rate(
+                    run["required_source_complete"] is True for run in fixture_runs
+                ),
+                "output_validation_complete_rate": _rate(
+                    run["output_validation_before_repair"] is True for run in fixture_runs
+                ),
+                "fallback_count": sum(
+                    1 for run in fixture_runs if run["selector_used_fallback"]
+                ),
+                "executor_parse_success_rate": _rate(
+                    run["executor_output_parse_success"] is True for run in fixture_runs
+                ),
+            }
+        )
+
+    return {
+        "repeat_count": len(repeat_indices),
+        "total_fixture_executions": len(runs),
+        "per_run": per_run,
+        "per_fixture": per_fixture,
+        "all_repeats_passed": bool(per_run)
+        and all(result["honest_controlled_organic_pass"] for result in per_run),
+        "all_fixtures_passed": bool(per_fixture)
+        and all(result["honest_controlled_organic_pass"] for result in per_fixture),
+        "selector_total_tokens": _sum_openai_selector_usage(runs)["total_tokens"],
+        "executor_total_tokens": _sum_openai_executor_usage(runs)["total_tokens"],
+    }
 
 
 def task_to_dict(task: ControlledOrganicTask) -> dict[str, Any]:
@@ -1001,6 +1098,10 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Executor output parse success rate: {_format_percent(summary['executor_output_parse_success_rate'])}",
         "Output repair status: not_supported",
         f"Average token reduction: {_format_optional_percent(summary['average_token_reduction_percent'])}",
+        f"Stability repeat count: {summary['stability']['repeat_count']}",
+        f"Stability fixture executions: {summary['stability']['total_fixture_executions']}",
+        f"Stability all repeats passed: {summary['stability']['all_repeats_passed']}",
+        f"Stability all fixtures passed: {summary['stability']['all_fixtures_passed']}",
         "",
         "## Estimated Token Accounting",
         "",
@@ -1041,6 +1142,48 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"{fixture['fallback_used']} | "
             f"{_format_percent(fixture['honest_controlled_organic_pass_rate'])} | "
             f"{_format_optional_percent(fixture['average_token_reduction_percent'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Stability Runs",
+            "",
+            "| Repeat | Fixture executions | Honest pass | Honest pass count | Fallback count | Required source complete count | Output validation complete count | Executor parse success count | Selector tokens | Executor tokens |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in summary["stability"]["per_run"]:
+        lines.append(
+            f"| {result['repeat_index']} | "
+            f"{result['fixture_execution_count']} | "
+            f"{result['honest_controlled_organic_pass']} | "
+            f"{result['honest_controlled_organic_pass_count']} | "
+            f"{result['selector_fallback_count']} | "
+            f"{result['required_source_complete_count']} | "
+            f"{result['output_validation_complete_count']} | "
+            f"{result['executor_parse_success_count']} | "
+            f"{_format_optional_int(result['selector_total_tokens'])} | "
+            f"{_format_optional_int(result['executor_total_tokens'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Stability Fixtures",
+            "",
+            "| Fixture ID | Repeats | Honest pass | Honest pass count | Required source completeness rate | Output validation rate | Fallback count | Executor parse success rate |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for result in summary["stability"]["per_fixture"]:
+        lines.append(
+            f"| `{result['fixture_id']}` | "
+            f"{result['repeat_count']} | "
+            f"{result['honest_controlled_organic_pass']} | "
+            f"{result['honest_controlled_organic_pass_count']} | "
+            f"{_format_percent(result['required_source_completeness_rate'])} | "
+            f"{_format_percent(result['output_validation_complete_rate'])} | "
+            f"{result['fallback_count']} | "
+            f"{_format_percent(result['executor_parse_success_rate'])} |"
         )
     lines.extend(
         [
