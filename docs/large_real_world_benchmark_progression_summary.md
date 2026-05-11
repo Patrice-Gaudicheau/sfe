@@ -123,6 +123,24 @@ resistance to adversarial instructions rather than semantic similarity alone.
 This is a narrow deterministic fixture. It does not provide statistical proof of
 general selector robustness, and it makes no provider or API call.
 
+## High-overlap OpenAI selector repeat-3 smoke
+
+SFE also includes a repeat-3 OpenAI selector-only smoke for the high-overlap
+poison-pill fixture. It uses the same deterministic validator as the fixture
+above and does not run an executor.
+
+The observed repeat-3 run used OpenAI `gpt-5.4-nano`. Across three consecutive
+selector calls, the selector passed all three runs: `run_count = 3`,
+`honest_selector_pass_count = 3`, `honest_selector_pass_rate = 1.0`,
+`fallback_count = 0`, `parse_failure_count = 0`, `poison_selection_count = 0`,
+`obsolete_selection_count = 0`, `partial_selection_count = 0`, and
+`mixed_selection_count = 0`. Total recorded usage was 2638 tokens, with total
+recorded latency of 7724 ms.
+
+This is a positive limited stability observation for this model on this fixture.
+It is not statistical evidence of general selector robustness. The deterministic
+validator remains the authority for pass/fail.
+
 ## Next sensible steps
 
 - Add more fixtures.
