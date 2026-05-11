@@ -23,6 +23,9 @@ Each stage kept deterministic validation as the source of truth. The later
 OpenAI stages tested progressively more of the live selected-context path while
 preserving strict pass gates and making fallback visible.
 
+Stages 3-5 should be viewed as functional smoke tests rather than statistical
+proofs of reliability.
+
 ## Results table
 
 | Stage | Selection | Execution | Validation | Repeat | Honest pass | Fallbacks | Parse failures | Token reduction |

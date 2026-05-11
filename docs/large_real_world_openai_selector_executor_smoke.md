@@ -54,9 +54,9 @@ It is stronger than the selector-only and selector + deterministic executor
 benchmarks because both selection and answer generation are performed by OpenAI
 models.
 
-The result shows that, on this controlled large real-world inspired benchmark,
-the selected context was sufficient for an OpenAI executor to produce outputs
-accepted by deterministic validation.
+The result shows that, within the limited scope of these two controlled
+fixtures, the selected context was sufficient for an OpenAI executor to produce
+outputs accepted by deterministic validation.
 
 This supports the SFE idea that selected context can preserve required source
 coverage while reducing prompt context.
@@ -64,10 +64,14 @@ coverage while reducing prompt context.
 ## Limitations
 
 - Only 2 fixtures.
+- Two fixtures are not enough to estimate reliability.
 - Controlled real-world inspired context, not arbitrary production data.
-- Repeat-3 is a smoke check, not statistical validation.
+- Repeat-3 is a functional smoke check, not a stability benchmark or
+  statistical validation.
 - Model behavior may change.
 - Prompt behavior may change.
+- Future work should include noisier and more semantically overlapping
+  distractors.
 - No claim of broad real-world generalization.
 - No claim of production readiness.
 - No gateway/proxy behavior tested yet.
