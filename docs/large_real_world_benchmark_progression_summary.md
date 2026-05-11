@@ -107,6 +107,22 @@ The current evidence is strongest for the claim that SFE-style selected-context
 composition can work on the controlled large real-world inspired benchmark
 family under strict deterministic validation.
 
+## Deterministic hardening fixture
+
+The benchmark suite now also includes a deterministic high-overlap poison-pill
+fixture. It tests exact source selection under hostile semantic overlap: one
+source contains the active authority chain, current cycle date, valid owner,
+current threshold, required control action, and rollback condition, while three
+nearby sources are deliberately plausible but invalid.
+
+The distractors cover an obsolete or replaced source, a partial telemetry-only
+source, and an adversarial source that instructs the selector or executor to
+prefer unsafe values. The fixture checks authority, freshness, completeness, and
+resistance to adversarial instructions rather than semantic similarity alone.
+
+This is a narrow deterministic fixture. It does not provide statistical proof of
+general selector robustness, and it makes no provider or API call.
+
 ## Next sensible steps
 
 - Add more fixtures.
