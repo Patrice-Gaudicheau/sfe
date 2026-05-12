@@ -28,6 +28,11 @@ from sfe_proxy.config import (
     ProxyConfig,
 )
 from sfe_proxy.server import _is_sse_response, create_server
+from sfe_proxy.shadow_router import (
+    DisabledShadowRouter,
+    ShadowRouterInput,
+    ShadowRouterResult,
+)
 
 
 class RecordingUpstreamHandler(BaseHTTPRequestHandler):
@@ -94,6 +99,8 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.shadow_log_dir == DEFAULT_SHADOW_LOG_DIR
     assert config.shadow_log_full_payloads is False
     assert config.shadow_selection_dry_run is False
+    assert config.shadow_router_dry_run is False
+    assert config.shadow_router_provider == "disabled"
 
 
 def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
@@ -109,6 +116,19 @@ def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
     assert config.shadow_min_input_tokens == 123
     assert config.shadow_log_dir == str(tmp_path)
     assert config.shadow_selection_dry_run is True
+
+
+def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "openai")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "Unsupported SFE_PROXY_SHADOW_ROUTER_PROVIDER" in str(exc)
+        assert "disabled" in str(exc)
+    else:
+        raise AssertionError("unsupported shadow router provider should fail")
 
 
 def test_proxy_config_rejects_invalid_shadow_threshold(monkeypatch) -> None:
@@ -551,6 +571,118 @@ def test_shadow_selection_dry_run_disabled_by_default_has_no_selection_fields(tm
     assert "shadow_selection_enabled" not in event
     assert "would_activate_sfe" not in event
     assert "candidate_segments_metadata" not in event
+    assert "shadow_router_enabled" not in event
+
+
+def test_shadow_router_contract_objects_are_safe_json_metadata() -> None:
+    router_input = ShadowRouterInput(
+        request_id="request-1",
+        endpoint="/v1/chat/completions",
+        model="example-model",
+        rough_estimated_input_tokens=100,
+        candidate_segments_metadata=[
+            {
+                "segment_id": "segment-1",
+                "source": "chat_message_1",
+                "text_chars": 40,
+                "text_bytes": 40,
+                "estimated_tokens": 10,
+                "selected": False,
+            }
+        ],
+        eligibility_metadata={"sfe_routing_eligible": True},
+        request_body_bytes=400,
+        stream=False,
+    )
+    result = DisabledShadowRouter().analyze(router_input)
+    event_fields = result.to_event_fields("disabled")
+
+    json.dumps(event_fields)
+    assert event_fields == {
+        "shadow_router_enabled": False,
+        "shadow_router_provider": "disabled",
+        "shadow_router_name": "disabled",
+        "shadow_router_status": "disabled",
+        "shadow_router_reason": "shadow_router_provider_disabled",
+        "shadow_router_latency_ms": 0,
+        "shadow_router_candidate_selected_segment_ids": [],
+        "shadow_router_estimated_selected_input_tokens": None,
+        "shadow_router_estimated_token_reduction_pct": None,
+        "shadow_router_error_type": None,
+        "shadow_router_dry_run_only": True,
+    }
+
+
+def test_shadow_router_result_serializes_error_metadata() -> None:
+    result = ShadowRouterResult(
+        router_enabled=False,
+        router_name="disabled",
+        router_status="error",
+        router_reason="contract_error",
+        router_latency_ms=0,
+        error_type="RuntimeError",
+    )
+
+    event_fields = result.to_event_fields("disabled")
+
+    json.dumps(event_fields)
+    assert event_fields["shadow_router_error_type"] == "RuntimeError"
+    assert event_fields["shadow_router_dry_run_only"] is True
+
+
+def test_shadow_router_dry_run_disabled_provider_preserves_pass_through(tmp_path) -> None:
+    upstream = _start_upstream(
+        status=207,
+        body=b'{"id":"router-contract-test","object":"chat.completion"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_router_dry_run=True,
+        shadow_router_provider="disabled",
+    )
+    prompt = "private router contract prompt"
+    try:
+        payload = {
+            "model": "example-model",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="client-secret",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 207
+    assert response["body"] == {"id": "router-contract-test", "object": "chat.completion"}
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+    assert RecordingUpstreamHandler.records[-1]["headers"]["Authorization"] == "Bearer upstream-secret"
+
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_enabled"] is False
+    assert event["shadow_router_provider"] == "disabled"
+    assert event["shadow_router_name"] == "disabled"
+    assert event["shadow_router_status"] == "disabled"
+    assert event["shadow_router_reason"] == "shadow_router_provider_disabled"
+    assert event["shadow_router_dry_run_only"] is True
+    assert event["shadow_router_candidate_selected_segment_ids"] == []
+
+    serialized_event = json.dumps(event)
+    joined_logs = "\n".join(logs)
+    assert prompt not in serialized_event
+    assert "client-secret" not in serialized_event
+    assert "Authorization" not in serialized_event
+    assert prompt not in joined_logs
 
 
 def test_shadow_selection_dry_run_failure_does_not_break_pass_through(

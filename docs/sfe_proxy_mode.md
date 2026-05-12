@@ -44,6 +44,8 @@ Environment variables:
 - `SFE_PROXY_SHADOW_LOG_DIR`, default `logs/sfe_proxy_shadow`
 - `SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS`, default `false`
 - `SFE_PROXY_SHADOW_SELECTION_DRY_RUN`, default `false`
+- `SFE_PROXY_SHADOW_ROUTER_DRY_RUN`, default `false`
+- `SFE_PROXY_SHADOW_ROUTER_PROVIDER`, default `disabled`
 
 Proxy mode uses the repository root `.env`. Do not create a separate proxy
 environment file and do not duplicate secrets unless you need a proxy-specific
@@ -200,6 +202,28 @@ include text content by default.
 
 `would_activate_sfe` is a dry-run observation field only. It does not mean the
 proxy actually activated SFE execution for that request.
+
+### Shadow Router Dry-Run Contract
+
+The proxy includes an internal, provider-neutral contract for future shadow
+router dry-run analysis. It is disabled by default:
+
+```text
+SFE_PROXY_SHADOW_ROUTER_DRY_RUN=false
+SFE_PROXY_SHADOW_ROUTER_PROVIDER=disabled
+```
+
+Only the `disabled` router provider exists in this branch. No OpenAI,
+Anthropic, Lemonade, local model, or other network router is implemented or
+called. Configuring any provider other than `disabled` fails clearly at startup.
+
+When router dry-run is enabled with the disabled provider, the proxy can add
+safe `shadow_router_*` metadata to the shadow JSONL event. The disabled provider
+does not select segments, does not send request content anywhere, and cannot
+affect the upstream request or downstream response.
+
+This contract is preparation for future provider-specific router dry-runs. It
+is still shadow-only observability, not SFE-enabled execution.
 
 ## Future Modes
 

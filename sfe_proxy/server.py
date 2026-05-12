@@ -15,6 +15,7 @@ from socket import socket
 from typing import Any, Callable
 
 from .config import ProxyConfig
+from .shadow_router import ShadowRouterInput, create_shadow_router
 
 
 SUPPORTED_GET_PATHS = {"/v1/models"}
@@ -324,7 +325,43 @@ def _build_shadow_event(
     }
     if config.shadow_selection_dry_run:
         event.update(_safe_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens))
+    if config.shadow_router_dry_run:
+        event.update(_safe_shadow_router_fields(config, event))
     return event
+
+
+def _safe_shadow_router_fields(config: ProxyConfig, event: dict[str, Any]) -> dict[str, Any]:
+    try:
+        router = create_shadow_router(config.shadow_router_provider)
+        router_input = ShadowRouterInput(
+            request_id=str(event["timestamp"]),
+            endpoint=str(event["endpoint"]),
+            model=event["model"] if isinstance(event.get("model"), str) else None,
+            rough_estimated_input_tokens=int(event["rough_estimated_input_tokens"]),
+            candidate_segments_metadata=list(event.get("candidate_segments_metadata") or []),
+            eligibility_metadata={
+                "sfe_routing_eligible": event["sfe_routing_eligible"],
+                "eligibility_reason": event["eligibility_reason"],
+                "eligibility_threshold_tokens": event["eligibility_threshold_tokens"],
+            },
+            request_body_bytes=int(event["request_body_bytes"]),
+            stream=event["stream"] if isinstance(event.get("stream"), bool) else None,
+        )
+        return router.analyze(router_input).to_event_fields(config.shadow_router_provider)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "shadow_router_enabled": False,
+            "shadow_router_provider": config.shadow_router_provider,
+            "shadow_router_name": config.shadow_router_provider,
+            "shadow_router_status": "error",
+            "shadow_router_reason": "shadow_router_contract_error",
+            "shadow_router_latency_ms": 0,
+            "shadow_router_candidate_selected_segment_ids": [],
+            "shadow_router_estimated_selected_input_tokens": None,
+            "shadow_router_estimated_token_reduction_pct": None,
+            "shadow_router_error_type": type(exc).__name__,
+            "shadow_router_dry_run_only": True,
+        }
 
 
 def _safe_shadow_selection_fields(

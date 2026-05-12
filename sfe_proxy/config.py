@@ -15,6 +15,7 @@ SHADOW_MODE = "shadow"
 SUPPORTED_MODES = (DEFAULT_MODE, SHADOW_MODE)
 DEFAULT_SHADOW_MIN_INPUT_TOKENS = 50000
 DEFAULT_SHADOW_LOG_DIR = "logs/sfe_proxy_shadow"
+DEFAULT_SHADOW_ROUTER_PROVIDER = "disabled"
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,8 @@ class ProxyConfig:
     shadow_log_dir: str = DEFAULT_SHADOW_LOG_DIR
     shadow_log_full_payloads: bool = False
     shadow_selection_dry_run: bool = False
+    shadow_router_dry_run: bool = False
+    shadow_router_provider: str = DEFAULT_SHADOW_ROUTER_PROVIDER
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -65,6 +68,13 @@ class ProxyConfig:
                 os.getenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", "false"),
                 "SFE_PROXY_SHADOW_SELECTION_DRY_RUN",
             ),
+            shadow_router_dry_run=_parse_bool(
+                os.getenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", "false"),
+                "SFE_PROXY_SHADOW_ROUTER_DRY_RUN",
+            ),
+            shadow_router_provider=os.getenv(
+                "SFE_PROXY_SHADOW_ROUTER_PROVIDER", DEFAULT_SHADOW_ROUTER_PROVIDER
+            ),
         ).validated()
 
     def validated(self) -> "ProxyConfig":
@@ -88,6 +98,11 @@ class ProxyConfig:
             raise ValueError("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be non-negative.")
         if not self.shadow_log_dir:
             raise ValueError("SFE_PROXY_SHADOW_LOG_DIR must not be empty.")
+        if self.shadow_router_provider != DEFAULT_SHADOW_ROUTER_PROVIDER:
+            raise ValueError(
+                "Unsupported SFE_PROXY_SHADOW_ROUTER_PROVIDER "
+                f"{self.shadow_router_provider!r}; supported providers: disabled."
+            )
         return self
 
     @property
