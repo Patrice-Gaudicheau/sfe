@@ -28,6 +28,13 @@ from providers.lemonade import (
     DEFAULT_TIMEOUT,
     LemonadeProvider,
 )
+from providers.anthropic import (
+    API_STYLE as ANTHROPIC_API_STYLE,
+    DEFAULT_BASE_URL as ANTHROPIC_DEFAULT_BASE_URL,
+    DEFAULT_EXECUTOR_MODEL as ANTHROPIC_DEFAULT_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as ANTHROPIC_DEFAULT_ROUTER_MODEL,
+    AnthropicProvider,
+)
 from providers.openai_api import (
     DEFAULT_BASE_URL as OPENAI_API_DEFAULT_BASE_URL,
     DEFAULT_EXECUTOR_MODEL as OPENAI_API_DEFAULT_EXECUTOR_MODEL,
@@ -68,12 +75,16 @@ DEFAULT_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark.json"
 DEFAULT_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark.md"
 OPENAI_API_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_openai_api.json"
 OPENAI_API_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_openai_api.md"
+ANTHROPIC_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_anthropic.json"
+ANTHROPIC_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_anthropic.md"
 FIXTURE_ROUTER_NAME = "fixture_relevance_router"
 LEMONADE_EXECUTOR = "lemonade"
 OPENAI_API_EXECUTOR = "openai-api"
-EXECUTORS = (LEMONADE_EXECUTOR, OPENAI_API_EXECUTOR)
+ANTHROPIC_EXECUTOR = "anthropic"
+EXECUTORS = (LEMONADE_EXECUTOR, OPENAI_API_EXECUTOR, ANTHROPIC_EXECUTOR)
 LEMONADE_BLOCK_SELECTOR_NAME = "lemonade_block_selector"
 OPENAI_API_BLOCK_SELECTOR_NAME = "openai_api_block_selector"
+ANTHROPIC_BLOCK_SELECTOR_NAME = "anthropic_messages_block_selector"
 REAL_ROUTER_NAME = LEMONADE_BLOCK_SELECTOR_NAME
 DRY_RUN_ROUTER_NAME = "dry_run_fixture_block_selector"
 SELECTION_MODES = ("fixture", "router", "both")
@@ -195,14 +206,15 @@ def _parse_args() -> argparse.Namespace:
         "--model",
         help=(
             "Executor model id. Defaults to SFE_EXECUTOR_MODEL for Lemonade or "
-            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API."
+            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API or "
+            "SFE_ANTHROPIC_EXECUTOR_MODEL for Anthropic."
         ),
     )
     parser.add_argument(
         "--base-url",
         help=(
             "Provider base URL. Defaults to SFE_LEMONADE_BASE_URL for Lemonade "
-            "or OPENAI_BASE_URL for OpenAI API."
+            "or OPENAI_BASE_URL for OpenAI API or ANTHROPIC_BASE_URL for Anthropic."
         ),
     )
     parser.add_argument(
@@ -246,7 +258,8 @@ def _parse_args() -> argparse.Namespace:
         "--router-model",
         help=(
             "Router model id for --selection-mode router or both. Defaults to "
-            "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI API."
+            "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI API "
+            "or SFE_ANTHROPIC_ROUTER_MODEL for Anthropic."
         ),
     )
     parser.add_argument("--json", type=Path)
@@ -267,28 +280,50 @@ def _resolve_provider_defaults(args: argparse.Namespace) -> argparse.Namespace:
     if args.router_model is None:
         args.router_model = _default_router_model(args.executor)
     if args.json is None:
-        args.json = OPENAI_API_JSON_PATH if args.executor == OPENAI_API_EXECUTOR else DEFAULT_JSON_PATH
+        args.json = _default_json_path(args.executor)
     if args.md is None:
-        args.md = OPENAI_API_MD_PATH if args.executor == OPENAI_API_EXECUTOR else DEFAULT_MD_PATH
+        args.md = _default_md_path(args.executor)
     return args
 
 
 def _default_executor_model(executor: str) -> str:
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or OPENAI_API_DEFAULT_EXECUTOR_MODEL
+    if executor == ANTHROPIC_EXECUTOR:
+        return os.getenv("SFE_ANTHROPIC_EXECUTOR_MODEL") or ANTHROPIC_DEFAULT_EXECUTOR_MODEL
     return os.getenv("SFE_EXECUTOR_MODEL") or DEFAULT_EXECUTION_MODEL
 
 
 def _default_router_model(executor: str) -> str:
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_ROUTER_MODEL") or OPENAI_API_DEFAULT_ROUTER_MODEL
+    if executor == ANTHROPIC_EXECUTOR:
+        return os.getenv("SFE_ANTHROPIC_ROUTER_MODEL") or ANTHROPIC_DEFAULT_ROUTER_MODEL
     return os.getenv("SFE_ROUTER_MODEL") or DEFAULT_ROUTER_MODEL
 
 
 def _default_base_url(executor: str) -> str:
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("OPENAI_BASE_URL") or OPENAI_API_DEFAULT_BASE_URL
+    if executor == ANTHROPIC_EXECUTOR:
+        return os.getenv("ANTHROPIC_BASE_URL") or ANTHROPIC_DEFAULT_BASE_URL
     return os.getenv("SFE_LEMONADE_BASE_URL") or LEMONADE_DEFAULT_BASE_URL
+
+
+def _default_json_path(executor: str) -> Path:
+    if executor == OPENAI_API_EXECUTOR:
+        return OPENAI_API_JSON_PATH
+    if executor == ANTHROPIC_EXECUTOR:
+        return ANTHROPIC_JSON_PATH
+    return DEFAULT_JSON_PATH
+
+
+def _default_md_path(executor: str) -> Path:
+    if executor == OPENAI_API_EXECUTOR:
+        return OPENAI_API_MD_PATH
+    if executor == ANTHROPIC_EXECUTOR:
+        return ANTHROPIC_MD_PATH
+    return DEFAULT_MD_PATH
 
 
 def get_large_contextual_tasks(
@@ -1981,6 +2016,8 @@ def run_benchmark(
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "benchmark_type": BENCHMARK_TYPE,
             "router": _router_name_for_selection_mode(selection_mode, dry_run, executor),
+            "provider": executor,
+            "api_style": _api_style(executor),
             "executor": executor,
             "executor_model": model,
             "router_model": router_model if selection_mode in ("router", "both") else None,
@@ -2038,6 +2075,8 @@ def run_benchmark(
 def _make_provider(executor: str, base_url: str, timeout_seconds: float) -> ChatProvider:
     if executor == OPENAI_API_EXECUTOR:
         return OpenAIAPIProvider(base_url=base_url, timeout=timeout_seconds)
+    if executor == ANTHROPIC_EXECUTOR:
+        return AnthropicProvider(base_url=base_url, timeout=timeout_seconds)
     provider = LemonadeProvider(base_url=base_url)
     provider.timeout = timeout_seconds
     return provider
@@ -2147,13 +2186,25 @@ def _router_name_for_selection_mode(selection_mode: str, dry_run: bool, executor
 def _block_selector_name(executor: str) -> str:
     if executor == OPENAI_API_EXECUTOR:
         return OPENAI_API_BLOCK_SELECTOR_NAME
+    if executor == ANTHROPIC_EXECUTOR:
+        return ANTHROPIC_BLOCK_SELECTOR_NAME
     return LEMONADE_BLOCK_SELECTOR_NAME
 
 
 def _selection_source(executor: str) -> str:
     if executor == OPENAI_API_EXECUTOR:
         return "openai_api"
+    if executor == ANTHROPIC_EXECUTOR:
+        return "anthropic_messages"
     return "lemonade"
+
+
+def _api_style(executor: str) -> str:
+    if executor == OPENAI_API_EXECUTOR:
+        return "openai_responses"
+    if executor == ANTHROPIC_EXECUTOR:
+        return ANTHROPIC_API_STYLE
+    return "openai_compatible_chat"
 
 
 def select_relevant_block(task: LargeContextualTask) -> dict[str, Any]:
@@ -3392,6 +3443,10 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"Benchmark type: `{BENCHMARK_TYPE}`",
         f"Executor: `{report['metadata']['executor']}`",
+        f"API style: `{report['metadata'].get('api_style')}`",
+        f"Executor model: `{report['metadata'].get('executor_model')}`",
+        f"Router model: `{report['metadata'].get('router_model')}`",
+        f"Base URL: `{report['metadata'].get('base_url')}`",
         f"Router: `{report['metadata']['router']}`",
         f"Selection mode: `{report['metadata']['selection_mode']}`",
         f"Task tier: `{report['metadata']['task_tier']}` ({report['metadata']['task_tier_description']})",

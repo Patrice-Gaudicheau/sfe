@@ -75,6 +75,9 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY=", text)
         self.assertIn("SFE_OPENAI_ROUTER_MODEL=", text)
         self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=", text)
+        self.assertIn("ANTHROPIC_API_KEY=", text)
+        self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=", text)
+        self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=", text)
         self.assertIn("SFE_ROUTER_MODEL=Qwen3-0.6B-GGUF", text)
         self.assertIn("SFE_EXECUTOR_MODEL=Qwen3.5-35B-A3B-GGUF", text)
         self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{12,}")
@@ -85,6 +88,12 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "SFE_OPENAI_ROUTER_MODEL=")
             if line.startswith("SFE_OPENAI_EXECUTOR_MODEL="):
                 self.assertEqual(line, "SFE_OPENAI_EXECUTOR_MODEL=")
+            if line.startswith("ANTHROPIC_API_KEY="):
+                self.assertEqual(line, "ANTHROPIC_API_KEY=")
+            if line.startswith("SFE_ANTHROPIC_ROUTER_MODEL="):
+                self.assertEqual(line, "SFE_ANTHROPIC_ROUTER_MODEL=")
+            if line.startswith("SFE_ANTHROPIC_EXECUTOR_MODEL="):
+                self.assertEqual(line, "SFE_ANTHROPIC_EXECUTOR_MODEL=")
 
     def test_gitignore_ignores_env_but_allows_env_example(self) -> None:
         gitignore = PROJECT_ROOT / ".gitignore"

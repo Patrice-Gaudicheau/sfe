@@ -16,6 +16,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from runtime.run_large_contextual_benchmark import (
+    ANTHROPIC_EXECUTOR,
+    ANTHROPIC_JSON_PATH,
     BENCHMARK_TYPE,
     FINAL_PHASE_CONCLUSION,
     LemonadeBlockSelector,
@@ -490,6 +492,109 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
         for run in report["runs"]:
             self.assertEqual(run["provider"], "openai-api")
+
+    def test_anthropic_dry_run_uses_same_fixture_modes_and_metadata(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks()[:1],
+            repeat=1,
+            model="example-anthropic-executor",
+            dry_run=True,
+            selection_mode="both",
+            executor=ANTHROPIC_EXECUTOR,
+            router_model="example-anthropic-router",
+        )
+
+        self.assertEqual(report["metadata"]["executor"], "anthropic")
+        self.assertEqual(report["metadata"]["provider"], "anthropic")
+        self.assertEqual(report["metadata"]["api_style"], "anthropic_messages")
+        self.assertEqual(report["metadata"]["router"], "dry_run_fixture_block_selector")
+        self.assertEqual(report["metadata"]["executor_model"], "example-anthropic-executor")
+        self.assertEqual(report["metadata"]["router_model"], "example-anthropic-router")
+        self.assertEqual(
+            set(report["summary"]["modes"]),
+            {"baseline", "spatial_fixture", "spatial_router"},
+        )
+        for run in report["runs"]:
+            self.assertEqual(run["executor"], "anthropic")
+            self.assertEqual(run["provider"], "anthropic")
+
+    def test_anthropic_cli_uses_env_defaults_and_report_paths(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_ANTHROPIC_EXECUTOR_MODEL": "env-anthropic-executor",
+                "SFE_ANTHROPIC_ROUTER_MODEL": "env-anthropic-router",
+                "ANTHROPIC_BASE_URL": "https://api.anthropic.example",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            ["run_large_contextual_benchmark.py", "--executor", "anthropic", "--dry-run"],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, "anthropic")
+        self.assertEqual(args.model, "env-anthropic-executor")
+        self.assertEqual(args.router_model, "env-anthropic-router")
+        self.assertEqual(args.base_url, "https://api.anthropic.example")
+        self.assertEqual(args.json, ANTHROPIC_JSON_PATH)
+
+    def test_anthropic_provider_path_is_constructed_without_network_in_tests(self) -> None:
+        class FakeAnthropicProvider:
+            def __init__(self, base_url: str, timeout: float) -> None:
+                self.base_url = base_url
+                self.timeout = timeout
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "cache key region code Priya Nair pay-ops"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeAnthropicProvider] = []
+
+        def make_provider(base_url: str, timeout: float) -> FakeAnthropicProvider:
+            provider = FakeAnthropicProvider(base_url, timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.AnthropicProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="example-anthropic-executor",
+                base_url="https://api.anthropic.example",
+                timeout_seconds=7,
+                dry_run=False,
+                selection_mode="fixture",
+                executor=ANTHROPIC_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].base_url, "https://api.anthropic.example")
+        self.assertEqual(providers[0].timeout, 7)
+        self.assertEqual(providers[0].calls, 2)
+        self.assertEqual(report["metadata"]["executor"], "anthropic")
+        self.assertEqual(report["metadata"]["api_style"], "anthropic_messages")
+        self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
+        for run in report["runs"]:
+            self.assertEqual(run["provider"], "anthropic")
 
     def test_practical_tier_dry_run_fixture_report_is_serializable(self) -> None:
         report = run_benchmark(
