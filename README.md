@@ -1,27 +1,71 @@
 # Spatial Field Engine for Cognition
 
-Spatial Field Engine for Cognition (`sfe`) is a Python prototype for experimenting with external workspace structure around LLM calls. It keeps task state in named zones, routes each task to a role/provider, and sends a bounded execution payload instead of always sending one large, flat prompt.
+**Context governance and token optimization for long-context LLM workflows.**
 
-SFE is a context-governance prototype for long-context LLM workflows, with
-fresh local OpenAI observations showing up to 84.08% router-inclusive token
-reduction on a controlled 50k+ structural tier. This is a controlled local
-benchmark result, not a guarantee of production savings.
+Spatial Field Engine for Cognition (`sfe`) is a source-available
+infrastructure prototype that separates context selection from task execution.
+Instead of sending every request as one large flat prompt, SFE routes the task
+through a selector, exposes only the relevant authoritative context to the
+executor, and records the decision path for audit.
 
-SFE does not claim to make a model more intelligent. The current project tests a narrower engineering hypothesis: for some tasks, explicit workspace structure and selective context activation can preserve measured task success while reducing executor context and improving traceability.
+In a fresh local OpenAI reproduction across four controlled context tiers, SFE
+observed up to 84.08% router-inclusive token reduction on a 50k+ structural-tier
+task. The strongest signal appears when context is large enough for routing
+overhead to be amortized.
 
-The evidence in this repository is early, mostly synthetic, and benchmark-specific. Treat the results as a research signal from a technical prototype, not as proof of general model capability or production readiness.
+These are controlled benchmark observations, not a production savings commitment.
+
+SFE does not claim to make a model more intelligent. The current project tests a
+narrower engineering hypothesis: for some tasks, explicit workspace structure
+and selective context activation can preserve measured task success while
+reducing executor context and improving traceability.
+
+The evidence in this repository is early, mostly synthetic, and
+benchmark-specific. Treat the results as a research signal from a technical
+prototype, not as proof of general model capability or production readiness.
+
+## Why This Matters
+
+Long-context LLM calls can waste budget by repeatedly sending irrelevant,
+obsolete, partial, or non-authoritative context. SFE explores whether context
+exposure can be reduced before execution while keeping source selection
+auditable.
+
+The repository preserves full-context baseline comparisons, selected-context
+executor runs, selector-only checks, and selected-vs-full comparisons. The
+intended activation model is selective, not always-on: SFE is most relevant
+when context size, authority conflicts, or audit requirements can justify the
+routing overhead.
+
+## Performance Snapshot
+
+Fresh local OpenAI reproduction across four context-intensity tiers.
+Router-inclusive reduction includes both selector and executor calls.
+
+| Tier | Executor input reduction | Router-inclusive token reduction |
+| --- | ---: | ---: |
+| `standard` [2k-5k] | 81.06% | 21.82% |
+| `practical` [10k-20k] | 88.17% | 63.54% |
+| `high_context` [20k-50k] | 91.11% | 73.35% |
+| `structural` [50k+] | 94.16% | 84.08% |
+
+These are local OpenAI observations on controlled fixtures, not statistical
+proof and not a cost-savings commitment. See `docs/token_cost_metrics.md` for
+token accounting, caveats, and the cost-relevant input/output breakdown.
+
+## Who This Is For
+
+- AI platform teams evaluating context selection, routing, or execution
+  boundaries.
+- Infrastructure teams building LLM gateways or routing layers.
+- AI product publishers with API-heavy workloads where token budgets matter.
+- Teams handling policy, documentation, governance, or authority-conflict
+  workflows.
+- Technical investors evaluating context-optimization infrastructure.
 
 ## Project Status
 
 This repository is currently a technical prototype. It is source-available, not open source. Pull requests are not currently accepted. Forks are allowed for non-commercial research and experimentation under the PolyForm Noncommercial License 1.0.0.
-
-SFE targets a practical infrastructure problem: long-context LLM calls can
-become expensive when every request is sent as one flat prompt. SFE separates
-source selection from execution so that, when activated selectively, the
-executor can receive a smaller authoritative context. In the fresh local OpenAI
-all-tier reproduction, router-inclusive token reduction increased from 21.82%
-on the standard [2k-5k] tier to 84.08% on the structural [50k+] tier. These are
-controlled observations, not guaranteed savings.
 
 ## Licensing
 
@@ -66,18 +110,6 @@ contamination indicators were observed in those local runs, and full-context
 execution also passed. Selected-context execution therefore did not outperform
 full-context execution in those observations. The useful signal is local
 non-regression under controlled conditions, not general reliability.
-
-## Economic Fit
-
-SFE is most relevant to long-context developer workflows, documentation and
-knowledge-base analysis, policy or governance workflows with authority
-conflicts, high-volume API usage where token budgets matter, and systems that
-need auditable context selection before execution.
-
-SFE is not a cost-saving silver bullet. It is most relevant when context is
-large enough, or authority conflicts are dense enough, for routing overhead to
-be amortized. This repository remains a private technical prototype, not a
-production-ready product.
 
 ## Problem
 
@@ -245,26 +277,9 @@ The strongest current signal is context reduction on synthetic large/contextual 
 
 Router-inclusive savings are lower because the router consumes tokens and latency. In the clean high_context Lemonade result, executor input reduction was about 90.98%, while router-plus-executor total token reduction was about 72.8%.
 
-## Current OpenAI Token Reduction Signal
-
-The strongest current OpenAI economic signal is router-inclusive token
-reduction on larger context tiers. The standard tier still saves tokens, but
-router overhead is much more visible. This supports selective activation rather
-than always-on routing.
-
-Fresh local OpenAI reproduction across four context-intensity tiers.
-Router-inclusive reduction includes both selector and executor calls.
-
-| Tier | Baseline scope | Executor input reduction | Router-inclusive token reduction | Note |
-| --- | --- | ---: | ---: | --- |
-| `standard` [2k-5k] | 2k-5k tokens | 81.06% | 21.82% | Router overhead remains visible at this size. |
-| `practical` [10k-20k] | 10k-20k tokens | 88.17% | 63.54% | Stronger amortization signal. |
-| `high_context` [20k-50k] | 20k-50k tokens | 91.11% | 73.35% | Larger avoided executor context. |
-| `structural` [50k+] | 50k+ tokens | 94.16% | 84.08% | Stress-tier result; interpret separately from the clean curve. |
-
-These are local OpenAI observations on controlled fixtures, not statistical
-proof or guaranteed cost savings. See `docs/token_cost_metrics.md` for token
-accounting, caveats, and the cost-relevant input/output breakdown.
+The fresh OpenAI all-tier token-reduction snapshot is summarized near the top
+of this README. See `docs/token_cost_metrics.md` for token accounting,
+caveats, and the cost-relevant input/output breakdown.
 
 A first direct OpenAI API validation reused the same large/contextual fixtures and reporting logic. In four small router-inclusive synthetic runs, executor input reduction ranged from 81.60% to 91.13%, router-inclusive total token reduction ranged from 15.06% on the standard task to about 73.6% on the two high_context tasks, and the router selected the expected block with zero fallbacks. See `docs/openai_validation_report.md`.
 
@@ -287,6 +302,18 @@ These numbers are useful for deciding what to test next. They should not be pres
 - `docs/router_contract.md`: router JSON contract.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.
 - `sfe_white_paper.md`: original architecture proposal; more speculative than the current public README.
+
+## Roadmap Direction
+
+The next planning direction is Gateway or Proxy design. The target shape is a
+request path that can support pass-through mode, shadow SFE mode, and
+SFE-enabled mode, with token accounting and trace headers attached to routing
+decisions.
+
+Activation criteria should stay explicit: context size, authority-conflict
+density, token budget, and audit requirements should determine when SFE is
+used. The goal is to make routing behavior observable before integrating it
+with broader local tooling or production-like request flows.
 
 ## Limitations
 
