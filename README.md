@@ -10,13 +10,21 @@ The evidence in this repository is early, mostly synthetic, and benchmark-specif
 
 This repository is currently a technical prototype. It is source-available, not open source. Pull requests are not currently accepted. Forks are allowed for non-commercial research and experimentation under the PolyForm Noncommercial License 1.0.0.
 
+SFE targets a practical infrastructure problem: long-context LLM calls can
+become expensive when every request is sent as one flat prompt. SFE separates
+source selection from execution so that, when activated selectively, the
+executor can receive a smaller authoritative context. In the fresh local OpenAI
+all-tier reproduction, router-inclusive token reduction increased from 21.82%
+on the standard [2k-5k] tier to 84.08% on the structural [50k+] tier. These are
+controlled observations, not guaranteed savings.
+
 ## Licensing
 
 SFE is published as a source-visible project under the PolyForm Noncommercial License 1.0.0.
 
 SFE encourages exploration, research, evaluation, learning, and small-scale experimentation by individuals, researchers, and small teams under its non-commercial terms.
 
-Commercial deployment, hosted services, enterprise integration, API cost optimization at scale, or incorporation into commercial products requires a separate commercial license.
+Commercial deployment, hosted services, enterprise integration, API cost optimization at scale, token-saving infrastructure use, or incorporation into commercial products requires a separate commercial license.
 
 For details, see `COMMERCIAL_LICENSE.md`.
 
@@ -53,6 +61,18 @@ contamination indicators were observed in those local runs, and full-context
 execution also passed. Selected-context execution therefore did not outperform
 full-context execution in those observations. The useful signal is local
 non-regression under controlled conditions, not general reliability.
+
+## Economic Fit
+
+SFE is most relevant to long-context developer workflows, documentation and
+knowledge-base analysis, policy or governance workflows with authority
+conflicts, high-volume API usage where token budgets matter, and systems that
+need auditable context selection before execution.
+
+SFE is not a cost-saving silver bullet. It is most relevant when context is
+large enough, or authority conflicts are dense enough, for routing overhead to
+be amortized. This repository remains a private technical prototype, not a
+production-ready product.
 
 ## Problem
 
@@ -214,11 +234,32 @@ The strongest current signal is context reduction on synthetic large/contextual 
 
 | Tier | Approximate baseline context | Observed executor input reduction | Notes |
 | --- | ---: | ---: | --- |
-| `standard` | 2k-5k tokens | about 81% | 7 synthetic tasks; fixture and router modes available. |
-| `practical` | 10k-20k tokens | about 88% | Early long-context tier for router-cost amortization checks. |
-| `high_context` | 20k-50k tokens | about 91% | 2 synthetic tasks; clean 64K Lemonade runs only. |
+| `standard` [2k-5k] | 2k-5k tokens | about 81% | 7 synthetic tasks; fixture and router modes available. |
+| `practical` [10k-20k] | 10k-20k tokens | about 88% | Early long-context tier for router-cost amortization checks. |
+| `high_context` [20k-50k] | 20k-50k tokens | about 91% | 2 synthetic tasks; clean 64K Lemonade runs only. |
 
 Router-inclusive savings are lower because the router consumes tokens and latency. In the clean high_context Lemonade result, executor input reduction was about 90.98%, while router-plus-executor total token reduction was about 72.8%.
+
+## Current OpenAI Token Reduction Signal
+
+The strongest current OpenAI economic signal is router-inclusive token
+reduction on larger context tiers. The standard tier still saves tokens, but
+router overhead is much more visible. This supports selective activation rather
+than always-on routing.
+
+Fresh local OpenAI reproduction across four context-intensity tiers.
+Router-inclusive reduction includes both selector and executor calls.
+
+| Tier | Baseline scope | Executor input reduction | Router-inclusive token reduction | Note |
+| --- | --- | ---: | ---: | --- |
+| `standard` [2k-5k] | 2k-5k tokens | 81.06% | 21.82% | Router overhead remains visible at this size. |
+| `practical` [10k-20k] | 10k-20k tokens | 88.17% | 63.54% | Stronger amortization signal. |
+| `high_context` [20k-50k] | 20k-50k tokens | 91.11% | 73.35% | Larger avoided executor context. |
+| `structural` [50k+] | 50k+ tokens | 94.16% | 84.08% | Stress-tier result; interpret separately from the clean curve. |
+
+These are local OpenAI observations on controlled fixtures, not statistical
+proof or guaranteed cost savings. See `docs/token_cost_metrics.md` for token
+accounting, caveats, and the cost-relevant input/output breakdown.
 
 A first direct OpenAI API validation reused the same large/contextual fixtures and reporting logic. In four small router-inclusive synthetic runs, executor input reduction ranged from 81.60% to 91.13%, router-inclusive total token reduction ranged from 15.06% on the standard task to about 73.6% on the two high_context tasks, and the router selected the expected block with zero fallbacks. See `docs/openai_validation_report.md`.
 
@@ -235,6 +276,7 @@ These numbers are useful for deciding what to test next. They should not be pres
 - `docs/large_contextual_benchmark_report.md`: detailed large/contextual benchmark notes.
 - `docs/effectiveness.md`: preserved strict Lemonade effectiveness result.
 - `docs/openai_validation_report.md`: direct OpenAI API validation summary for the large/contextual benchmark.
+- `docs/token_cost_metrics.md`: fresh OpenAI all-tier token accounting and router-inclusive reduction summary.
 - `docs/structural_benchmark_note.md`: exploratory structural 50k+ stress-test notes.
 - `docs/openai_api_benchmark.md`: optional OpenAI API benchmark path.
 - `docs/router_contract.md`: router JSON contract.
