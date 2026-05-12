@@ -220,9 +220,12 @@ class LemonadeShadowRouter:
                 {
                     "role": "system",
                     "content": (
-                        "You are an SFE proxy shadow router dry-run. Return strict JSON only. "
+                        "/no_think\n"
+                        "You are an SFE proxy shadow router dry-run. Return only one JSON object. "
                         "Select candidate segment ids using only the provided extracted text "
-                        "segments and metadata. This is dry-run analysis only."
+                        "segments and metadata. This is dry-run analysis only. "
+                        "No Markdown. No code fences. No prose. No explanation. No reasoning. "
+                        "No text before or after the JSON object."
                     ),
                 },
                 {
@@ -232,6 +235,7 @@ class LemonadeShadowRouter:
             ],
             "max_tokens": self.config.max_output_tokens,
             "temperature": 0,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         request = urllib.request.Request(
             _join_openai_compatible_url(self.config.base_url.rstrip("/"), "/v1/chat/completions"),

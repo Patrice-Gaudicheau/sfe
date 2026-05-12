@@ -801,6 +801,16 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
     assert "placeholder-client-token" not in serialized_lemonade_payload
     assert "Authorization" not in serialized_lemonade_payload
     assert "candidate_segments" in serialized_lemonade_payload
+    assert lemonade_payload["chat_template_kwargs"] == {"enable_thinking": False}
+    system_prompt = lemonade_payload["messages"][0]["content"]
+    assert system_prompt.startswith("/no_think")
+    assert "Return only one JSON object" in system_prompt
+    assert "No Markdown" in system_prompt
+    assert "No code fences" in system_prompt
+    assert "No prose" in system_prompt
+    assert "No explanation" in system_prompt
+    assert "No reasoning" in system_prompt
+    assert "No text before or after the JSON object" in system_prompt
 
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_enabled"] is True
@@ -1228,6 +1238,55 @@ def test_shadow_router_lemonade_invalid_json_is_safe(monkeypatch, tmp_path) -> N
     assert event["shadow_router_status"] == "invalid_output"
     assert event["shadow_router_reason"] == "lemonade_router_invalid_json"
     assert event["shadow_router_error_type"] == "JSONDecodeError"
+
+
+def test_shadow_router_lemonade_reasoning_prose_without_json_stays_invalid_output(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    upstream = _start_upstream(body=b'{"ok":true}')
+    reasoning_prose = "This is local router reasoning prose without any JSON braces."
+    lemonade = _start_lemonade_router(
+        body=_lemonade_router_body(content="", reasoning_content=reasoning_prose)
+    )
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="lemonade",
+    )
+    prompt = "synthetic segment"
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": prompt}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        lemonade.shutdown()
+        lemonade.server_close()
+
+    assert response["status"] == 200
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_status"] == "invalid_output"
+    assert event["shadow_router_reason"] == "lemonade_router_invalid_json"
+    assert event["shadow_router_error_type"] == "JSONDecodeError"
+    serialized_event = json.dumps(event)
+    assert reasoning_prose not in serialized_event
+    assert prompt not in serialized_event
+    assert reasoning_prose not in "\n".join(logs)
 
 
 def test_shadow_router_lemonade_missing_required_fields_is_safe(monkeypatch, tmp_path) -> None:

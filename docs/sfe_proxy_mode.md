@@ -264,6 +264,13 @@ objects. This normalization is not LLM repair: the proxy does not retry, does
 not ask another model to fix output, and does not fall back to deterministic
 selection as if it were Lemonade output.
 
+For Qwen-style local Lemonade router models, the proxy includes the same
+non-thinking control used by the project Lemonade provider:
+`chat_template_kwargs={"enable_thinking": false}`. The router prompt also starts
+with `/no_think` and asks for one JSON object without prose, markdown, code
+fences, explanation, or reasoning. Output is still parsed and schema-validated
+strictly; malformed output remains an `invalid_output` shadow observation.
+
 Lemonade router failures, timeouts, invalid JSON, or malformed results are
 recorded in safe `shadow_router_*` metadata and must not affect the upstream
 request or downstream response. Tests use mocked Lemonade HTTP responses; no
