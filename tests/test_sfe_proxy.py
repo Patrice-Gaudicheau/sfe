@@ -164,68 +164,19 @@ def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) ->
         raise AssertionError("unsupported shadow router provider should fail")
 
 
-def test_proxy_config_accepts_lemonade_router_provider_when_dry_run_disabled(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", "false")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "lemonade")
-    monkeypatch.delenv("SFE_PROXY_LEMONADE_ROUTER_MODEL", raising=False)
-    monkeypatch.delenv("SFE_LEMONADE_MODEL", raising=False)
-
-    config = ProxyConfig.from_env()
-
-    assert config.shadow_router_dry_run is False
-    assert config.shadow_router_provider == "lemonade"
-    assert config.lemonade_router_model == ""
-
-
-def test_proxy_config_ignores_lemonade_router_values_when_inactive(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_MODE", "pass_through")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", "false")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "lemonade")
-    monkeypatch.setenv("SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS", "not-an-int")
-    monkeypatch.setenv("SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS", "not-an-int")
-
-    config = ProxyConfig.from_env()
-
-    assert config.mode == "pass_through"
-    assert config.shadow_router_provider == "lemonade"
-    assert config.lemonade_router_timeout_seconds > 0
-
-
-def test_proxy_config_requires_lemonade_router_model_when_enabled(monkeypatch) -> None:
+def test_proxy_config_accepts_lemonade_router_provider_without_provider_details(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
     monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
     monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", "true")
     monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "lemonade")
-    monkeypatch.delenv("SFE_PROXY_LEMONADE_ROUTER_MODEL", raising=False)
     monkeypatch.delenv("SFE_LEMONADE_MODEL", raising=False)
-
-    try:
-        ProxyConfig.from_env()
-    except ValueError as exc:
-        assert "SFE_PROXY_LEMONADE_ROUTER_MODEL is required" in str(exc)
-    else:
-        raise AssertionError("enabled Lemonade router dry-run should require a model")
-
-
-def test_proxy_config_parses_lemonade_router_config(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", "true")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "lemonade")
-    monkeypatch.setenv("SFE_PROXY_LEMONADE_ROUTER_BASE_URL", "http://127.0.0.1:19999")
-    monkeypatch.setenv("SFE_PROXY_LEMONADE_ROUTER_MODEL", "local-router")
-    monkeypatch.setenv("SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS", "7")
-    monkeypatch.setenv("SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS", "80")
+    monkeypatch.delenv("SFE_ROUTER_MODEL", raising=False)
 
     config = ProxyConfig.from_env()
 
-    assert config.lemonade_router_base_url == "http://127.0.0.1:19999"
-    assert config.lemonade_router_model == "local-router"
-    assert config.lemonade_router_timeout_seconds == 7
-    assert config.lemonade_router_max_output_tokens == 80
+    assert config.shadow_router_dry_run is True
+    assert config.shadow_router_provider == "lemonade"
+
 
 
 def test_proxy_config_rejects_invalid_shadow_threshold(monkeypatch) -> None:
@@ -804,6 +755,8 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
             {"choices": [{"message": {"content": json.dumps(lemonade_response)}}]}
         ).encode("utf-8")
     )
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
     logs: list[str] = []
     proxy = _start_proxy(
         upstream,
@@ -814,8 +767,6 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
-        lemonade_router_model="local-router",
     )
     prompt = "synthetic segment " * 20
     try:
@@ -871,6 +822,165 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
     assert prompt not in "\n".join(logs)
 
 
+def test_shadow_router_lemonade_uses_router_model_fallback(monkeypatch, tmp_path) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_LEMONADE_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    monkeypatch.delenv("SFE_LEMONADE_MODEL", raising=False)
+    upstream = _start_upstream(body=b'{"ok":true}')
+    lemonade_response = {
+        "router_status": "candidate_selected",
+        "router_reason": "fallback_model_selection",
+        "candidate_selected_segment_ids": ["segment-1"],
+        "estimated_router_selected_input_tokens": 5,
+        "estimated_router_token_reduction_pct": 60.0,
+        "confidence": 0.5,
+        "dry_run_only": True,
+    }
+    lemonade = _start_lemonade_router(
+        body=json.dumps(
+            {"choices": [{"message": {"content": json.dumps(lemonade_response)}}]}
+        ).encode("utf-8")
+    )
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_ROUTER_MODEL", "router-fallback-model")
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="lemonade",
+    )
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "synthetic segment"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        lemonade.shutdown()
+        lemonade.server_close()
+
+    assert response["status"] == 200
+    assert len(RecordingLemonadeRouterHandler.records) == 1
+    lemonade_payload = json.loads(RecordingLemonadeRouterHandler.records[-1]["body"].decode("utf-8"))
+    assert lemonade_payload["model"] == "router-fallback-model"
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_status"] == "candidate_selected"
+
+
+def test_shadow_router_lemonade_uses_optional_project_api_key_without_logging(monkeypatch, tmp_path) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    upstream = _start_upstream(body=b'{"ok":true}')
+    lemonade_response = {
+        "router_status": "candidate_selected",
+        "router_reason": "api_key_header_selection",
+        "candidate_selected_segment_ids": ["segment-1"],
+        "estimated_router_selected_input_tokens": 5,
+        "estimated_router_token_reduction_pct": 60.0,
+        "confidence": 0.5,
+        "dry_run_only": True,
+    }
+    lemonade = _start_lemonade_router(
+        body=json.dumps(
+            {"choices": [{"message": {"content": json.dumps(lemonade_response)}}]}
+        ).encode("utf-8")
+    )
+    placeholder_key = "placeholder-local-lemonade-key"
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_API_KEY", placeholder_key)
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="lemonade",
+    )
+    prompt = "synthetic segment"
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": prompt}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        lemonade.shutdown()
+        lemonade.server_close()
+
+    assert response["status"] == 200
+    assert RecordingLemonadeRouterHandler.records[-1]["headers"]["Authorization"] == (
+        f"Bearer {placeholder_key}"
+    )
+    event = _read_shadow_event(tmp_path)
+    serialized_event = json.dumps(event)
+    assert event["shadow_router_status"] == "candidate_selected"
+    assert placeholder_key not in serialized_event
+    assert placeholder_key not in "\n".join(logs)
+    assert prompt not in serialized_event
+
+
+def test_shadow_router_lemonade_missing_model_is_safe_and_skips_call(monkeypatch, tmp_path) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    monkeypatch.delenv("SFE_LEMONADE_MODEL", raising=False)
+    monkeypatch.delenv("SFE_ROUTER_MODEL", raising=False)
+    monkeypatch.delenv("SFE_LEMONADE_API_KEY", raising=False)
+    upstream = _start_upstream(body=b'{"ok":true}')
+    lemonade = _start_lemonade_router()
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="lemonade",
+    )
+    prompt = "synthetic segment"
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": prompt}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        lemonade.shutdown()
+        lemonade.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {"ok": True}
+    assert len(RecordingLemonadeRouterHandler.records) == 0
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_status"] == "provider_error"
+    assert event["shadow_router_reason"] == "lemonade_router_missing_model"
+    assert event["shadow_router_error_type"] == "MissingModel"
+    serialized_event = json.dumps(event)
+    assert prompt not in serialized_event
+    assert "Authorization" not in serialized_event
+    assert prompt not in "\n".join(logs)
+
+
 def test_shadow_router_lemonade_below_threshold_skips_call(tmp_path) -> None:
     shadow_router_module._reset_provider_call_state()
     upstream = _start_upstream(body=b'{"ok":true}')
@@ -884,8 +994,6 @@ def test_shadow_router_lemonade_below_threshold_skips_call(tmp_path) -> None:
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
-        lemonade_router_model="local-router",
     )
     try:
         response = _request_json(
@@ -914,6 +1022,8 @@ def test_shadow_router_lemonade_invalid_json_is_safe(monkeypatch, tmp_path) -> N
     lemonade = _start_lemonade_router(
         body=b'{"choices":[{"message":{"content":"not-json"}}]}',
     )
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
     proxy = _start_proxy(
         upstream,
         [],
@@ -923,8 +1033,6 @@ def test_shadow_router_lemonade_invalid_json_is_safe(monkeypatch, tmp_path) -> N
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
-        lemonade_router_model="local-router",
     )
     try:
         response = _request_json(
@@ -964,6 +1072,8 @@ def test_shadow_router_lemonade_unknown_segment_id_is_safe(monkeypatch, tmp_path
             {"choices": [{"message": {"content": json.dumps(lemonade_response)}}]}
         ).encode("utf-8")
     )
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
     proxy = _start_proxy(
         upstream,
         [],
@@ -973,8 +1083,6 @@ def test_shadow_router_lemonade_unknown_segment_id_is_safe(monkeypatch, tmp_path
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
-        lemonade_router_model="local-router",
     )
     try:
         response = _request_json(
@@ -1000,6 +1108,7 @@ def test_shadow_router_lemonade_unknown_segment_id_is_safe(monkeypatch, tmp_path
 def test_shadow_router_lemonade_timeout_is_safe(monkeypatch, tmp_path) -> None:
     shadow_router_module._reset_provider_call_state()
     monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
     upstream = _start_upstream(body=b'{"ok":true}')
     proxy = _start_proxy(
         upstream,
@@ -1010,8 +1119,6 @@ def test_shadow_router_lemonade_timeout_is_safe(monkeypatch, tmp_path) -> None:
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url="http://127.0.0.1:1",
-        lemonade_router_model="local-router",
     )
 
     def timeout_call(self: LemonadeShadowRouter, router_input: ShadowRouterInput) -> dict[str, Any]:
@@ -1040,6 +1147,7 @@ def test_shadow_router_lemonade_timeout_is_safe(monkeypatch, tmp_path) -> None:
 def test_shadow_router_lemonade_provider_error_is_safe(monkeypatch, tmp_path) -> None:
     shadow_router_module._reset_provider_call_state()
     monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
     upstream = _start_upstream(body=b'{"ok":true}')
     proxy = _start_proxy(
         upstream,
@@ -1050,8 +1158,6 @@ def test_shadow_router_lemonade_provider_error_is_safe(monkeypatch, tmp_path) ->
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url="http://127.0.0.1:1",
-        lemonade_router_model="local-router",
     )
 
     def fail_call(self: LemonadeShadowRouter, router_input: ShadowRouterInput) -> dict[str, Any]:
@@ -1093,8 +1199,6 @@ def test_shadow_router_lemonade_rate_limit_reject_skips_call(monkeypatch, tmp_pa
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
-        lemonade_router_model="local-router",
     )
     try:
         response = _request_json(
@@ -1137,6 +1241,8 @@ def test_shadow_router_lemonade_rate_limit_wait_skips_call_without_sleeping(monk
             {"choices": [{"message": {"content": json.dumps(lemonade_response)}}]}
         ).encode("utf-8")
     )
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
     proxy = _start_proxy(
         upstream,
         [],
@@ -1146,8 +1252,6 @@ def test_shadow_router_lemonade_rate_limit_wait_skips_call_without_sleeping(monk
         shadow_selection_dry_run=True,
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
-        lemonade_router_model="local-router",
     )
     try:
         url = f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions"
@@ -1183,7 +1287,6 @@ def test_pass_through_mode_does_not_call_lemonade_router(tmp_path) -> None:
         shadow_log_dir=str(tmp_path),
         shadow_router_dry_run=True,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
     )
     try:
         _request_json(
@@ -1213,7 +1316,6 @@ def test_shadow_mode_router_disabled_does_not_call_lemonade(tmp_path) -> None:
         shadow_log_dir=str(tmp_path),
         shadow_router_dry_run=False,
         shadow_router_provider="lemonade",
-        lemonade_router_base_url=f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}",
     )
     try:
         _request_json(

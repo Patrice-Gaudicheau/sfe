@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +17,10 @@ LEMONADE_ROUTER_PROVIDER = "lemonade"
 DEFAULT_LEMONADE_ROUTER_BASE_URL = "http://127.0.0.1:13305"
 DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS = 30
 DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS = 160
+LEMONADE_MODEL_ENV_NAMES = (
+    "SFE_LEMONADE_MODEL",
+    "SFE_ROUTER_MODEL",
+)
 
 
 @dataclass(frozen=True)
@@ -98,9 +103,20 @@ class DisabledShadowRouter:
 @dataclass(frozen=True)
 class LemonadeShadowRouterConfig:
     base_url: str = DEFAULT_LEMONADE_ROUTER_BASE_URL
+    api_key: str = ""
     model: str = ""
     timeout_seconds: int = DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS
     max_output_tokens: int = DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS
+
+    @classmethod
+    def from_env(cls) -> "LemonadeShadowRouterConfig":
+        return cls(
+            base_url=os.getenv("SFE_LEMONADE_BASE_URL", DEFAULT_LEMONADE_ROUTER_BASE_URL),
+            api_key=os.getenv("SFE_LEMONADE_API_KEY", ""),
+            model=_first_env_value(LEMONADE_MODEL_ENV_NAMES),
+            timeout_seconds=DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS,
+            max_output_tokens=DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS,
+        )
 
 
 class LemonadeShadowRouter:
@@ -134,20 +150,29 @@ class LemonadeShadowRouter:
                 router_latency_ms=_elapsed_ms(started),
                 rate_limit_decision=limit_decision.to_metadata(),
             )
+        rate_limit_metadata = limit_decision.to_metadata()
+        if not self.config.model:
+            return self._failure(
+                started,
+                "provider_error",
+                "lemonade_router_missing_model",
+                "MissingModel",
+                rate_limit_metadata,
+            )
         _record_provider_call(self.name)
 
         try:
             response = self._call_lemonade(router_input)
             content = _extract_chat_content(response)
             parsed = json.loads(content)
-            return self._parse_result(parsed, router_input, started, limit_decision.to_metadata())
+            return self._parse_result(parsed, router_input, started, rate_limit_metadata)
         except json.JSONDecodeError:
             return self._failure(
                 started,
                 "invalid_output",
                 "lemonade_router_invalid_json",
                 "JSONDecodeError",
-                limit_decision.to_metadata(),
+                rate_limit_metadata,
             )
         except (KeyError, TypeError, ValueError) as exc:
             return self._failure(
@@ -155,7 +180,7 @@ class LemonadeShadowRouter:
                 "invalid_output",
                 "lemonade_router_malformed_result",
                 type(exc).__name__,
-                limit_decision.to_metadata(),
+                rate_limit_metadata,
             )
         except TimeoutError as exc:
             return self._failure(
@@ -163,7 +188,7 @@ class LemonadeShadowRouter:
                 "provider_error",
                 "lemonade_router_timeout",
                 type(exc).__name__,
-                limit_decision.to_metadata(),
+                rate_limit_metadata,
             )
         except (urllib.error.URLError, OSError, RuntimeError) as exc:
             return self._failure(
@@ -171,7 +196,7 @@ class LemonadeShadowRouter:
                 "provider_error",
                 "lemonade_router_provider_error",
                 type(exc).__name__,
-                limit_decision.to_metadata(),
+                rate_limit_metadata,
             )
 
     def _limit_decision(self, router_input: ShadowRouterInput):
@@ -211,7 +236,7 @@ class LemonadeShadowRouter:
         request = urllib.request.Request(
             _join_openai_compatible_url(self.config.base_url.rstrip("/"), "/v1/chat/completions"),
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=_lemonade_headers(self.config.api_key),
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
@@ -300,20 +325,7 @@ def create_shadow_router(
     if provider == DISABLED_ROUTER_PROVIDER:
         return DisabledShadowRouter()
     if provider == LEMONADE_ROUTER_PROVIDER:
-        lemonade_config = LemonadeShadowRouterConfig(
-            base_url=getattr(config, "lemonade_router_base_url", DEFAULT_LEMONADE_ROUTER_BASE_URL),
-            model=getattr(config, "lemonade_router_model", ""),
-            timeout_seconds=getattr(
-                config,
-                "lemonade_router_timeout_seconds",
-                DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS,
-            ),
-            max_output_tokens=getattr(
-                config,
-                "lemonade_router_max_output_tokens",
-                DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS,
-            ),
-        )
+        lemonade_config = LemonadeShadowRouterConfig.from_env()
         return LemonadeShadowRouter(lemonade_config, limit_registry=limit_registry)
     raise ValueError(
         f"Unsupported shadow router provider {provider!r}; supported providers: disabled, lemonade."
@@ -372,6 +384,21 @@ def _join_openai_compatible_url(base_url: str, path: str) -> str:
     if base_url.endswith("/v1") and path.startswith("/v1/"):
         return f"{base_url}{path.removeprefix('/v1')}"
     return f"{base_url}{path}"
+
+
+def _first_env_value(names: tuple[str, ...]) -> str:
+    for name in names:
+        value = os.getenv(name, "")
+        if value:
+            return value
+    return ""
+
+
+def _lemonade_headers(api_key: str) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 def _elapsed_ms(started: float) -> int:

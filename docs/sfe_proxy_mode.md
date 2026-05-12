@@ -230,16 +230,22 @@ enabled only when all of these are set:
 SFE_PROXY_MODE=shadow
 SFE_PROXY_SHADOW_ROUTER_DRY_RUN=true
 SFE_PROXY_SHADOW_ROUTER_PROVIDER=lemonade
-SFE_PROXY_LEMONADE_ROUTER_MODEL=<local-router-model>
 ```
 
-Optional Lemonade router settings:
+Provider details come from the existing project-level Lemonade configuration,
+not proxy-specific provider variables:
 
 ```text
-SFE_PROXY_LEMONADE_ROUTER_BASE_URL=http://127.0.0.1:13305
-SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS=30
-SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS=160
+SFE_LEMONADE_BASE_URL=http://127.0.0.1:13305
+SFE_LEMONADE_API_KEY=<optional-local-provider-key>
+SFE_LEMONADE_MODEL=<local-router-model>
 ```
+
+If `SFE_LEMONADE_MODEL` is not set, the proxy falls back to the existing
+project router model variable `SFE_ROUTER_MODEL`. If neither is set, Lemonade
+router dry-run records a safe provider error and pass-through behavior remains
+unchanged. The recommended fix is to set the standard project-level Lemonade
+model variable, not a proxy-specific model variable.
 
 The Lemonade router dry-run is local-provider oriented. When explicitly
 enabled, it may send extracted text segments to the configured local Lemonade

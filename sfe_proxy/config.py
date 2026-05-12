@@ -21,9 +21,6 @@ SUPPORTED_SHADOW_ROUTER_PROVIDERS = (
     DEFAULT_SHADOW_ROUTER_PROVIDER,
     LEMONADE_SHADOW_ROUTER_PROVIDER,
 )
-DEFAULT_LEMONADE_ROUTER_BASE_URL = "http://127.0.0.1:13305"
-DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS = 30
-DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS = 160
 
 
 @dataclass(frozen=True)
@@ -39,10 +36,6 @@ class ProxyConfig:
     shadow_selection_dry_run: bool = False
     shadow_router_dry_run: bool = False
     shadow_router_provider: str = DEFAULT_SHADOW_ROUTER_PROVIDER
-    lemonade_router_base_url: str = DEFAULT_LEMONADE_ROUTER_BASE_URL
-    lemonade_router_model: str = ""
-    lemonade_router_timeout_seconds: int = DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS
-    lemonade_router_max_output_tokens: int = DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -72,38 +65,6 @@ class ProxyConfig:
         shadow_router_provider = os.getenv(
             "SFE_PROXY_SHADOW_ROUTER_PROVIDER", DEFAULT_SHADOW_ROUTER_PROVIDER
         )
-        lemonade_router_active = (
-            mode == SHADOW_MODE
-            and shadow_router_dry_run
-            and shadow_router_provider == LEMONADE_SHADOW_ROUTER_PROVIDER
-        )
-        lemonade_router_base_url = DEFAULT_LEMONADE_ROUTER_BASE_URL
-        lemonade_router_model = ""
-        lemonade_router_timeout_seconds = DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS
-        lemonade_router_max_output_tokens = DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS
-        if lemonade_router_active:
-            lemonade_router_base_url = os.getenv(
-                "SFE_PROXY_LEMONADE_ROUTER_BASE_URL",
-                os.getenv("SFE_LEMONADE_BASE_URL", DEFAULT_LEMONADE_ROUTER_BASE_URL),
-            )
-            lemonade_router_model = os.getenv(
-                "SFE_PROXY_LEMONADE_ROUTER_MODEL",
-                os.getenv("SFE_LEMONADE_MODEL", ""),
-            )
-            lemonade_router_timeout_seconds = _parse_int(
-                os.getenv(
-                    "SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS",
-                    str(DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS),
-                ),
-                "SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS",
-            )
-            lemonade_router_max_output_tokens = _parse_int(
-                os.getenv(
-                    "SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS",
-                    str(DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS),
-                ),
-                "SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS",
-            )
         return cls(
             host=os.getenv("SFE_PROXY_HOST", DEFAULT_HOST),
             port=port,
@@ -122,10 +83,6 @@ class ProxyConfig:
             ),
             shadow_router_dry_run=shadow_router_dry_run,
             shadow_router_provider=shadow_router_provider,
-            lemonade_router_base_url=lemonade_router_base_url,
-            lemonade_router_model=lemonade_router_model,
-            lemonade_router_timeout_seconds=lemonade_router_timeout_seconds,
-            lemonade_router_max_output_tokens=lemonade_router_max_output_tokens,
         ).validated()
 
     def validated(self) -> "ProxyConfig":
@@ -155,28 +112,6 @@ class ProxyConfig:
                 f"{self.shadow_router_provider!r}; supported providers: "
                 f"{', '.join(SUPPORTED_SHADOW_ROUTER_PROVIDERS)}."
             )
-        if (
-            self.mode == SHADOW_MODE
-            and self.shadow_router_dry_run
-            and self.shadow_router_provider == LEMONADE_SHADOW_ROUTER_PROVIDER
-            and not self.lemonade_router_model
-        ):
-            raise ValueError(
-                "SFE_PROXY_LEMONADE_ROUTER_MODEL is required when "
-                "SFE_PROXY_SHADOW_ROUTER_PROVIDER=lemonade and "
-                "SFE_PROXY_SHADOW_ROUTER_DRY_RUN=true."
-            )
-        lemonade_router_active = (
-            self.mode == SHADOW_MODE
-            and self.shadow_router_dry_run
-            and self.shadow_router_provider == LEMONADE_SHADOW_ROUTER_PROVIDER
-        )
-        if lemonade_router_active and not self.lemonade_router_base_url:
-            raise ValueError("SFE_PROXY_LEMONADE_ROUTER_BASE_URL must not be empty.")
-        if lemonade_router_active and self.lemonade_router_timeout_seconds <= 0:
-            raise ValueError("SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS must be positive.")
-        if lemonade_router_active and self.lemonade_router_max_output_tokens <= 0:
-            raise ValueError("SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS must be positive.")
         return self
 
     @property
@@ -197,10 +132,3 @@ def _parse_bool(raw: str, name: str) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be true or false.")
-
-
-def _parse_int(raw: str, name: str) -> int:
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
