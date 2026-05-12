@@ -43,6 +43,7 @@ Environment variables:
 - `SFE_PROXY_SHADOW_MIN_INPUT_TOKENS`, default `50000`
 - `SFE_PROXY_SHADOW_LOG_DIR`, default `logs/sfe_proxy_shadow`
 - `SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS`, default `false`
+- `SFE_PROXY_SHADOW_SELECTION_DRY_RUN`, default `false`
 
 Proxy mode uses the repository root `.env`. Do not create a separate proxy
 environment file and do not duplicate secrets unless you need a proxy-specific
@@ -159,6 +160,46 @@ shape only and is not provider billing telemetry.
 not enabled in this first shadow implementation; prompts and responses are not
 written to shadow logs by default. Treat any future full-payload logging option
 as dangerous because it can capture prompts, documents, user data, or secrets.
+
+### Shadow Selection Dry-Run
+
+Shadow selection dry-run is disabled by default:
+
+```text
+SFE_PROXY_SHADOW_SELECTION_DRY_RUN=false
+```
+
+When set to `true`, shadow mode adds deterministic dry-run selection fields to
+the JSONL observation for eligible supported POST requests. This does not call
+an LLM router, does not alter the request sent upstream, does not alter the
+response returned to the client, and does not perform SFE-enabled execution.
+
+The first dry-run strategy is `largest_text_segment_baseline`. It extracts safe
+text-shape metadata from OpenAI-compatible request bodies, identifies candidate
+text segments, selects the largest segment as a conservative estimate, and
+reports rough token-reduction metadata. It does not claim semantic correctness
+and should not be read as real SFE routing.
+
+Dry-run metadata includes fields such as:
+
+- `shadow_selection_enabled`
+- `would_activate_sfe`
+- `would_activate_sfe_is_dry_run_only`
+- `selection_strategy`
+- `selection_status`
+- `selection_reason`
+- `estimated_full_input_tokens`
+- `estimated_selected_input_tokens`
+- `estimated_token_reduction_pct`
+- `candidate_segment_count`
+- `candidate_selected_segment_count`
+- `candidate_segments_metadata`
+
+Candidate segment metadata contains source labels and sizes only. It does not
+include text content by default.
+
+`would_activate_sfe` is a dry-run observation field only. It does not mean the
+proxy actually activated SFE execution for that request.
 
 ## Future Modes
 

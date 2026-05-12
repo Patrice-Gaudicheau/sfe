@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import sfe_proxy.server as proxy_server
 from sfe_proxy.config import (
     DEFAULT_HOST,
     DEFAULT_MODE,
@@ -70,6 +71,10 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
     monkeypatch.delenv("SFE_PROXY_MODE", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_DIR", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     try:
@@ -88,6 +93,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.shadow_min_input_tokens == DEFAULT_SHADOW_MIN_INPUT_TOKENS
     assert config.shadow_log_dir == DEFAULT_SHADOW_LOG_DIR
     assert config.shadow_log_full_payloads is False
+    assert config.shadow_selection_dry_run is False
 
 
 def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
@@ -95,12 +101,14 @@ def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
     monkeypatch.setenv("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", "123")
     monkeypatch.setenv("SFE_PROXY_SHADOW_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", "true")
 
     config = ProxyConfig.from_env()
 
     assert config.mode == "shadow"
     assert config.shadow_min_input_tokens == 123
     assert config.shadow_log_dir == str(tmp_path)
+    assert config.shadow_selection_dry_run is True
 
 
 def test_proxy_config_rejects_invalid_shadow_threshold(monkeypatch) -> None:
@@ -424,6 +432,205 @@ def test_shadow_mode_logs_above_threshold_responses_metadata(tmp_path) -> None:
     assert event["rough_estimated_input_tokens"] >= 1
 
 
+def test_shadow_selection_dry_run_adds_fields_for_above_threshold_chat(tmp_path) -> None:
+    upstream = _start_upstream(
+        status=203,
+        body=b'{"id":"dry-run-test","object":"chat.completion"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+    )
+    dominant_prompt = "dominant private context " * 40
+    smaller_prompt = "small private context"
+    try:
+        payload = {
+            "model": "example-model",
+            "messages": [
+                {"role": "system", "content": smaller_prompt},
+                {"role": "user", "content": dominant_prompt},
+            ],
+            "stream": False,
+        }
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="client-secret",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 203
+    assert response["body"] == {"id": "dry-run-test", "object": "chat.completion"}
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_selection_enabled"] is True
+    assert event["would_activate_sfe_is_dry_run_only"] is True
+    assert event["would_activate_sfe"] is True
+    assert event["selection_strategy"] == "largest_text_segment_baseline"
+    assert event["selection_status"] == "candidate_selected"
+    assert event["selection_reason"] == "largest_text_segment_selected_for_dry_run_estimate"
+    assert event["estimated_full_input_tokens"] == event["rough_estimated_input_tokens"]
+    assert event["estimated_selected_input_tokens"] > 0
+    assert event["estimated_token_reduction_pct"] is not None
+    assert event["candidate_segment_count"] == 2
+    assert event["candidate_selected_segment_count"] == 1
+    assert len(event["candidate_segments_metadata"]) == 2
+    assert event["candidate_segments_metadata"][1]["selected"] is True
+
+    serialized_event = json.dumps(event)
+    joined_logs = "\n".join(logs)
+    assert dominant_prompt not in serialized_event
+    assert smaller_prompt not in serialized_event
+    assert "client-secret" not in serialized_event
+    assert "Authorization" not in serialized_event
+    assert dominant_prompt not in joined_logs
+
+
+def test_shadow_selection_dry_run_below_threshold_does_not_activate(tmp_path) -> None:
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=50000,
+        shadow_selection_dry_run=True,
+    )
+    try:
+        _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    event = _read_shadow_event(tmp_path)
+    assert event["sfe_routing_eligible"] is False
+    assert event["shadow_selection_enabled"] is True
+    assert event["would_activate_sfe_is_dry_run_only"] is True
+    assert event["would_activate_sfe"] is False
+    assert event["selection_status"] == "no_selection"
+    assert event["selection_reason"] == "rough_estimated_input_tokens_below_threshold"
+    assert event["candidate_segment_count"] == 0
+
+
+def test_shadow_selection_dry_run_disabled_by_default_has_no_selection_fields(tmp_path) -> None:
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+    )
+    try:
+        _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    event = _read_shadow_event(tmp_path)
+    assert "shadow_selection_enabled" not in event
+    assert "would_activate_sfe" not in event
+    assert "candidate_segments_metadata" not in event
+
+
+def test_shadow_selection_dry_run_failure_does_not_break_pass_through(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(body=b'{"ok":true}')
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+    )
+
+    def fail_selection(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("selection failed")
+
+    monkeypatch.setattr(proxy_server, "_build_shadow_selection_fields", fail_selection)
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {"ok": True}
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_selection_enabled"] is True
+    assert event["would_activate_sfe_is_dry_run_only"] is True
+    assert event["would_activate_sfe"] is False
+    assert event["selection_status"] == "error"
+    assert event["selection_reason"] == "dry_run_analysis_error"
+    assert event["selection_error_type"] == "RuntimeError"
+
+
+def test_shadow_selection_dry_run_mixed_non_text_payload_does_not_break_pass_through(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(body=b'{"ok":true}')
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+    )
+    try:
+        payload = {
+            "model": "example-model",
+            "messages": [
+                {"role": "user", "content": [{"type": "input_image", "image_url": "https://example.invalid/x.png"}]},
+                {"role": "user", "content": [{"type": "input_text", "text": "safe text"}]},
+            ],
+        }
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_selection_enabled"] is True
+    assert event["selection_status"] in {"candidate_selected", "no_selection"}
+    assert "https://example.invalid/x.png" not in json.dumps(event)
+
+
 def test_shadow_log_write_failure_does_not_break_pass_through(tmp_path) -> None:
     upstream = _start_upstream(body=b'{"ok":true}')
     log_path = tmp_path / "not-a-directory"
@@ -460,6 +667,30 @@ def test_pass_through_mode_does_not_write_shadow_log(tmp_path) -> None:
         mode="pass_through",
         shadow_log_dir=str(tmp_path),
         shadow_min_input_tokens=1,
+    )
+    try:
+        _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert not (tmp_path / "shadow_events.jsonl").exists()
+
+
+def test_pass_through_mode_does_not_write_selection_log(tmp_path) -> None:
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="pass_through",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
     )
     try:
         _request_json(

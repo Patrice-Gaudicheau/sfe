@@ -322,7 +322,102 @@ def _build_shadow_event(
         "full_payload_logging_enabled": False,
         "full_payload_logging_requested": config.shadow_log_full_payloads,
     }
+    if config.shadow_selection_dry_run:
+        event.update(_safe_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens))
     return event
+
+
+def _safe_shadow_selection_fields(
+    config: ProxyConfig,
+    path: str,
+    payload: dict[str, Any] | None,
+    rough_estimated_input_tokens: int,
+) -> dict[str, Any]:
+    try:
+        return _build_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "shadow_selection_enabled": True,
+            "would_activate_sfe_is_dry_run_only": True,
+            "would_activate_sfe": False,
+            "selection_strategy": "largest_text_segment_baseline",
+            "selection_status": "error",
+            "selection_reason": "dry_run_analysis_error",
+            "selection_error_type": type(exc).__name__,
+            "estimated_full_input_tokens": rough_estimated_input_tokens,
+            "estimated_selected_input_tokens": None,
+            "estimated_token_reduction_pct": None,
+            "candidate_segment_count": 0,
+            "candidate_selected_segment_count": 0,
+            "candidate_segments_metadata": [],
+        }
+
+
+def _build_shadow_selection_fields(
+    config: ProxyConfig,
+    path: str,
+    payload: dict[str, Any] | None,
+    rough_estimated_input_tokens: int,
+) -> dict[str, Any]:
+    base = {
+        "shadow_selection_enabled": True,
+        "would_activate_sfe_is_dry_run_only": True,
+        "would_activate_sfe": False,
+        "selection_strategy": "largest_text_segment_baseline",
+        "selection_status": "no_selection",
+        "selection_reason": "rough_estimated_input_tokens_below_threshold",
+        "estimated_full_input_tokens": rough_estimated_input_tokens,
+        "estimated_selected_input_tokens": None,
+        "estimated_token_reduction_pct": None,
+        "candidate_segment_count": 0,
+        "candidate_selected_segment_count": 0,
+        "candidate_segments_metadata": [],
+    }
+    if rough_estimated_input_tokens <= config.shadow_min_input_tokens:
+        return base
+
+    segments = _extract_candidate_segments(path, payload)
+    if not segments:
+        base["selection_reason"] = "no_safe_text_segments"
+        return base
+
+    selected_index = max(
+        range(len(segments)),
+        key=lambda index: (segments[index]["estimated_tokens"], segments[index]["text_chars"]),
+    )
+    selected_tokens = int(segments[selected_index]["estimated_tokens"])
+    reduction_pct = (
+        round((1 - (selected_tokens / rough_estimated_input_tokens)) * 100, 2)
+        if rough_estimated_input_tokens > 0
+        else 0.0
+    )
+    metadata = []
+    for index, segment in enumerate(segments):
+        metadata.append(
+            {
+                "segment_id": f"segment-{index + 1}",
+                "source": segment["source"],
+                "text_chars": segment["text_chars"],
+                "text_bytes": segment["text_bytes"],
+                "estimated_tokens": segment["estimated_tokens"],
+                "selected": index == selected_index,
+            }
+        )
+
+    return {
+        "shadow_selection_enabled": True,
+        "would_activate_sfe_is_dry_run_only": True,
+        "would_activate_sfe": True,
+        "selection_strategy": "largest_text_segment_baseline",
+        "selection_status": "candidate_selected",
+        "selection_reason": "largest_text_segment_selected_for_dry_run_estimate",
+        "estimated_full_input_tokens": rough_estimated_input_tokens,
+        "estimated_selected_input_tokens": selected_tokens,
+        "estimated_token_reduction_pct": reduction_pct,
+        "candidate_segment_count": len(segments),
+        "candidate_selected_segment_count": 1,
+        "candidate_segments_metadata": metadata,
+    }
 
 
 def _decode_json_object(body: bytes) -> dict[str, Any] | None:
@@ -361,6 +456,73 @@ def _responses_input_item_count(path: str, payload: dict[str, Any] | None) -> in
         return None
     input_value = payload.get("input")
     return len(input_value) if isinstance(input_value, list) else (1 if input_value is not None else None)
+
+
+def _extract_candidate_segments(
+    path: str,
+    payload: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if payload is None:
+        return []
+    if path == "/v1/chat/completions":
+        return _extract_chat_candidate_segments(payload)
+    if path == "/v1/responses":
+        return _extract_responses_candidate_segments(payload)
+    return []
+
+
+def _extract_chat_candidate_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return []
+    segments: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        text = _extract_text_content(content)
+        if text:
+            segments.append(_segment_metadata(text, f"chat_message_{index + 1}"))
+    return segments
+
+
+def _extract_responses_candidate_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    input_value = payload.get("input")
+    if input_value is None:
+        return []
+    items = input_value if isinstance(input_value, list) else [input_value]
+    segments: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        text = _extract_text_content(item)
+        if text:
+            segments.append(_segment_metadata(text, f"responses_input_{index + 1}"))
+    return segments
+
+
+def _extract_text_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text_parts: list[str] = []
+        for key in ("text", "content", "input_text"):
+            part = value.get(key)
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, list):
+                text_parts.extend(_extract_text_content(child) for child in part)
+        return "\n".join(part for part in text_parts if part)
+    if isinstance(value, list):
+        return "\n".join(part for part in (_extract_text_content(child) for child in value) if part)
+    return ""
+
+
+def _segment_metadata(text: str, source: str) -> dict[str, Any]:
+    return {
+        "source": source,
+        "text_chars": len(text),
+        "text_bytes": len(text.encode("utf-8")),
+        "estimated_tokens": (len(text) + 3) // 4,
+    }
 
 
 def _iter_text_values(value: Any) -> list[str]:

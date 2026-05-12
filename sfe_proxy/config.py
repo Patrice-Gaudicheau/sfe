@@ -27,6 +27,7 @@ class ProxyConfig:
     shadow_min_input_tokens: int = DEFAULT_SHADOW_MIN_INPUT_TOKENS
     shadow_log_dir: str = DEFAULT_SHADOW_LOG_DIR
     shadow_log_full_payloads: bool = False
+    shadow_selection_dry_run: bool = False
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -59,6 +60,10 @@ class ProxyConfig:
             shadow_log_full_payloads=_parse_bool(
                 os.getenv("SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS", "false"),
                 "SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS",
+            ),
+            shadow_selection_dry_run=_parse_bool(
+                os.getenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", "false"),
+                "SFE_PROXY_SHADOW_SELECTION_DRY_RUN",
             ),
         ).validated()
 
