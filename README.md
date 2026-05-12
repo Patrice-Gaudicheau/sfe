@@ -2,6 +2,11 @@
 
 Spatial Field Engine for Cognition (`sfe`) is a Python prototype for experimenting with external workspace structure around LLM calls. It keeps task state in named zones, routes each task to a role/provider, and sends a bounded execution payload instead of always sending one large, flat prompt.
 
+SFE is a context-governance prototype for long-context LLM workflows, with
+fresh local OpenAI observations showing up to 84.08% router-inclusive token
+reduction on a controlled 50k+ structural tier. This is a controlled local
+benchmark result, not a guarantee of production savings.
+
 SFE does not claim to make a model more intelligent. The current project tests a narrower engineering hypothesis: for some tasks, explicit workspace structure and selective context activation can preserve measured task success while reducing executor context and improving traceability.
 
 The evidence in this repository is early, mostly synthetic, and benchmark-specific. Treat the results as a research signal from a technical prototype, not as proof of general model capability or production readiness.
@@ -285,14 +290,23 @@ These numbers are useful for deciding what to test next. They should not be pres
 
 ## Limitations
 
-- The evidence is early and mostly synthetic.
-- Task sets are small and deterministic.
-- Several results depend on a local Lemonade server and specific local model availability.
-- Fixture selection is an oracle upper bound for context reduction, not proof that a router can always find the right block.
-- Real-router results are encouraging but still small.
-- Scoring is mostly heuristic and task-specific.
-- Router cost can erase gains on short or simple prompts.
-- The project does not yet validate broad generalization across providers, model families, tool use, real user workloads, or adversarial retrieval settings.
+- The evidence remains benchmark-specific and mostly controlled.
+- Task counts are still small relative to production workloads.
+- The fresh OpenAI token-reduction reproduction covers all four benchmark
+  tiers, but task counts per tier remain limited.
+- The structural-tier result is promising for token reduction, but remains a
+  stress-tier observation.
+- High-overlap authority-gap fixtures validate routing, diagnostics, and local
+  non-regression behavior, not broad real-world reliability.
+- Selected-context execution did not outperform full-context execution in the
+  latest new-fixture comparisons because full context also passed.
+- SFE can introduce selection-induced errors if the selector chooses the wrong
+  source or filters out required context.
+- Router overhead can erase gains on short or simple prompts.
+- Dollar savings depend on provider pricing, model choice, input/output mix,
+  and deployment policy.
+- Broad production workloads, tool-using agents, multi-tenant systems, and
+  long-running real user traffic are not validated yet.
 
 ## Development Checks
 
