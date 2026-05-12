@@ -26,7 +26,9 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from runtime.high_overlap_benchmark_helpers import (
+    build_failure_diagnostics,
     format_optional_int as _format_optional_int,
+    summarize_failure_diagnostics,
     sum_usage as _sum_usage,
 )
 from runtime.metrics import estimate_text_tokens, percent_reduction, write_json_report, write_text_report
@@ -294,6 +296,15 @@ def execute_condition(
         fallback_used=fallback_used,
         repair_used=repair_used,
     )
+    failure_diagnostics = build_failure_diagnostics(
+        output_validation=output_validation,
+        contamination=diagnostics,
+        provider_error_occurred=provider_error_occurred,
+        parse_success=parse_success,
+        fallback_used=fallback_used,
+        repair_used=repair_used,
+        context_valid=context_validation["context_valid_for_condition"],
+    )
     return {
         "condition": condition,
         "fixture_id": task.fixture_id,
@@ -316,6 +327,7 @@ def execute_condition(
         "output_validation_success": output_validation["passed"],
         "output_validation": output_validation,
         "contamination": diagnostics,
+        **failure_diagnostics,
         "fallback_used": fallback_used,
         "repair_used": repair_used,
         "repair_status": "not_supported",
@@ -500,6 +512,8 @@ def compare_conditions(selected: dict[str, Any], full: dict[str, Any]) -> dict[s
     full_pass = full["honest_pass"]
     full_contaminated = full["contamination"]["contaminated"]
     selected_clean = not selected["contamination"]["contaminated"]
+    selected_field_failure = "field_extraction_failure" in selected.get("failure_flags", [])
+    full_field_failure = "field_extraction_failure" in full.get("failure_flags", [])
     any_provider_error = selected["executor_provider_error"] or full["executor_provider_error"]
     any_parse_failure = (
         not selected["executor_output_parse_success"]
@@ -516,6 +530,14 @@ def compare_conditions(selected: dict[str, Any], full: dict[str, Any]) -> dict[s
         "both_failed": bool(not selected_pass and not full_pass),
         "selected_failed_full_passed": bool(not selected_pass and full_pass),
         "selected_failed_full_failed": bool(not selected_pass and not full_pass),
+        "selected_field_failure_full_passed": bool(
+            selected_field_failure and selected_clean and full_pass
+        ),
+        "selected_clean_field_failure": bool(selected_field_failure and selected_clean),
+        "full_clean_field_failure": bool(
+            full_field_failure and not full["contamination"]["contaminated"]
+        ),
+        "full_contamination_failure": bool(not full_pass and full_contaminated),
         "any_provider_error": any_provider_error,
         "any_parse_failure": any_parse_failure,
         "any_fallback": any_fallback,
@@ -528,6 +550,7 @@ def summarize_comparisons(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     selected_runs = [comparison["selected_context"] for comparison in comparisons]
     full_runs = [comparison["full_context"] for comparison in comparisons]
     condition_runs = selected_runs + full_runs
+    diagnostics = summarize_failure_diagnostics(condition_runs)
     return {
         "comparison_count": len(comparisons),
         "selected_honest_pass_count": sum(
@@ -549,6 +572,18 @@ def summarize_comparisons(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "selected_failed_full_failed_count": sum(
             1 for comparison in comparisons if comparison["selected_failed_full_failed"]
+        ),
+        "selected_field_failure_full_passed_count": sum(
+            1 for comparison in comparisons if comparison["selected_field_failure_full_passed"]
+        ),
+        "selected_clean_field_failure_count": sum(
+            1 for comparison in comparisons if comparison["selected_clean_field_failure"]
+        ),
+        "full_clean_field_failure_count": sum(
+            1 for comparison in comparisons if comparison["full_clean_field_failure"]
+        ),
+        "full_contamination_failure_count": sum(
+            1 for comparison in comparisons if comparison["full_contamination_failure"]
         ),
         "any_provider_error": any(comparison["any_provider_error"] for comparison in comparisons),
         "any_parse_failure": any(comparison["any_parse_failure"] for comparison in comparisons),
@@ -595,6 +630,7 @@ def summarize_comparisons(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
             for run in condition_runs
             if run["contamination"]["mixed_authoritative_and_subtle_evidence"]
         ),
+        **diagnostics,
         "total_prompt_tokens": _sum_usage(condition_runs, "input_tokens"),
         "total_completion_tokens": _sum_usage(condition_runs, "output_tokens"),
         "total_tokens": _sum_usage(condition_runs, "total_tokens"),
@@ -639,6 +675,10 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Both failed count: {summary['both_failed_count']}",
         f"Selected failed, full passed count: {summary['selected_failed_full_passed_count']}",
         f"Selected failed, full failed count: {summary['selected_failed_full_failed_count']}",
+        f"Selected field failure, full passed count: {summary['selected_field_failure_full_passed_count']}",
+        f"Selected clean field failure count: {summary['selected_clean_field_failure_count']}",
+        f"Full clean field failure count: {summary['full_clean_field_failure_count']}",
+        f"Full contamination failure count: {summary['full_contamination_failure_count']}",
         f"Any provider error: {summary['any_provider_error']}",
         f"Any parse failure: {summary['any_parse_failure']}",
         f"Any fallback: {summary['any_fallback']}",
@@ -648,6 +688,13 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Copied partial value count: {summary['copied_partial_value_count']}",
         f"Subtle-source citation count: {summary['subtle_source_citation_count']}",
         f"Mixed authoritative and subtle evidence count: {summary['mixed_authoritative_and_subtle_evidence_count']}",
+        f"Field extraction failure count: {summary['field_extraction_failure_count']}",
+        f"Active protocol failure count: {summary['active_protocol_failure_count']}",
+        f"Cycle date failure count: {summary['cycle_date_failure_count']}",
+        f"Evidence reference failure count: {summary['evidence_reference_failure_count']}",
+        f"Contamination indicator count: {summary['contamination_indicator_count']}",
+        f"Clean field failure count: {summary['clean_field_failure_count']}",
+        f"Contaminated failure count: {summary['contaminated_failure_count']}",
         f"Total tokens: {_format_optional_int(summary['total_tokens'])}",
         "",
         "## Comparisons",

@@ -104,6 +104,7 @@ class HighOverlapPoisonPillContaminationComparisonTests(unittest.TestCase):
         self.assertTrue(selected["context_validation"]["selected_context_only"])
         self.assertTrue(selected["output_validation_success"])
         self.assertTrue(selected["honest_pass"])
+        self.assertEqual(selected["failure_flags"], [])
 
     def test_full_context_path_passes_with_authoritative_output(self) -> None:
         report = self._report(self._valid_output(), self._valid_output())
@@ -128,7 +129,32 @@ class HighOverlapPoisonPillContaminationComparisonTests(unittest.TestCase):
             full["contamination"]["copied_obsolete_values"],
             ["ORION_OWNER_LEGACY"],
         )
+        self.assertIn("contamination_indicator", full["failure_flags"])
         self.assertTrue(comparison["contamination_delta_observed"])
+
+    def test_selected_clean_field_failure_is_not_contamination_delta(self) -> None:
+        selected_output = self._valid_output()
+        selected_output["active_protocol"] = "CBD-ORION-2026-12"
+
+        report = self._report(selected_output, self._valid_output())
+        comparison = report["comparisons"][0]
+        selected = comparison["selected_context"]
+        summary = report["summary"]
+
+        self.assertFalse(selected["honest_pass"])
+        self.assertEqual(selected["failed_field_names"], ["active_protocol"])
+        self.assertTrue(selected["contamination_free"])
+        self.assertIn("field_extraction_failure", selected["failure_flags"])
+        self.assertNotIn("contamination_indicator", selected["failure_flags"])
+        self.assertTrue(comparison["selected_failed_full_passed"])
+        self.assertTrue(comparison["selected_field_failure_full_passed"])
+        self.assertTrue(comparison["selected_clean_field_failure"])
+        self.assertFalse(comparison["contamination_delta_observed"])
+        self.assertEqual(summary["selected_field_failure_full_passed_count"], 1)
+        self.assertEqual(summary["selected_clean_field_failure_count"], 1)
+        self.assertEqual(summary["field_extraction_failure_count"], 1)
+        self.assertEqual(summary["active_protocol_failure_count"], 1)
+        self.assertEqual(summary["contamination_indicator_count"], 0)
 
     def test_full_context_fails_when_copying_partial_value(self) -> None:
         full_output = self._valid_output()
@@ -169,6 +195,8 @@ class HighOverlapPoisonPillContaminationComparisonTests(unittest.TestCase):
         self.assertTrue(full["contamination"]["cited_authoritative_source"])
         self.assertEqual(full["contamination"]["cited_distractor_source_ids"], ["doc-orion-c09"])
         self.assertTrue(full["contamination"]["mixed_authoritative_and_distractor_evidence"])
+        self.assertIn("evidence_reference_failure", full["failure_flags"])
+        self.assertIn("contamination_indicator", full["failure_flags"])
 
     def test_selected_context_excludes_all_distractor_bodies(self) -> None:
         provider = SequencedExecutorProvider([self._valid_output(), self._valid_output()])
@@ -224,6 +252,10 @@ class HighOverlapPoisonPillContaminationComparisonTests(unittest.TestCase):
 
         self.assertTrue(comparison["both_failed"])
         self.assertEqual(report["summary"]["parse_failure_count"], 2)
+        self.assertNotIn(
+            "field_extraction_failure",
+            comparison["selected_context"]["failure_flags"],
+        )
 
     def test_selected_fail_full_pass_reported_honestly(self) -> None:
         report = self._report("not json", self._valid_output())
@@ -272,6 +304,7 @@ class HighOverlapPoisonPillContaminationComparisonTests(unittest.TestCase):
 
         self.assertTrue(selected["fallback_used"])
         self.assertTrue(selected["output_validation_success"])
+        self.assertIn("fallback_used", selected["failure_flags"])
         self.assertFalse(selected["honest_pass"])
 
     def test_repair_used_counts_as_failure(self) -> None:
@@ -390,6 +423,7 @@ class HighOverlapPoisonPillContaminationComparisonTests(unittest.TestCase):
 
         self.assertFalse(outcome["contamination_delta_observed"])
         self.assertFalse(outcome["selected_clean_full_contaminated"])
+        self.assertFalse(outcome["selected_field_failure_full_passed"])
 
 
 if __name__ == "__main__":

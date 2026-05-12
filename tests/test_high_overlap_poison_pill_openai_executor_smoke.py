@@ -116,8 +116,29 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertFalse(run["fallback_used"])
         self.assertFalse(run["repair_used"])
         self.assertTrue(run["honest_executor_pass"])
+        self.assertTrue(run["field_extraction_passed"])
+        self.assertEqual(run["failed_field_names"], [])
+        self.assertTrue(run["evidence_reference_passed"])
+        self.assertTrue(run["contamination_free"])
+        self.assertEqual(run["failure_flags"], [])
         self.assertEqual(run["usage"]["total_tokens"], 534)
         self.assertEqual(run["latency_ms"], 234)
+
+    def test_exact_active_protocol_miss_is_clean_field_failure(self) -> None:
+        output = self._valid_output()
+        output["active_protocol"] = "CBD-ORION-2026-12"
+
+        run = self._run_with_output(output)
+
+        self.assertFalse(run["output_validation_success"])
+        self.assertFalse(run["honest_executor_pass"])
+        self.assertEqual(run["failed_field_names"], ["active_protocol"])
+        self.assertEqual(run["failed_field_count"], 1)
+        self.assertFalse(run["field_extraction_passed"])
+        self.assertTrue(run["evidence_reference_passed"])
+        self.assertTrue(run["contamination_free"])
+        self.assertIn("field_extraction_failure", run["failure_flags"])
+        self.assertNotIn("contamination_indicator", run["failure_flags"])
 
     def test_executor_fails_if_it_copies_obsolete_value(self) -> None:
         output = self._valid_output()
@@ -131,6 +152,8 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
             run["output_validation"]["copied_distractor_values"]["obsolete"],
             ["ORION_OWNER_LEGACY"],
         )
+        self.assertFalse(run["contamination_free"])
+        self.assertIn("contamination_indicator", run["failure_flags"])
         self.assertFalse(run["honest_executor_pass"])
 
     def test_executor_fails_if_it_copies_partial_value(self) -> None:
@@ -169,6 +192,10 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
 
         self.assertFalse(run["output_validation_success"])
         self.assertTrue(run["distractor_citation"])
+        self.assertFalse(run["evidence_reference_passed"])
+        self.assertFalse(run["contamination_free"])
+        self.assertIn("evidence_reference_failure", run["failure_flags"])
+        self.assertIn("contamination_indicator", run["failure_flags"])
         self.assertEqual(
             run["output_validation"]["evidence_reference_validation"]["unexpected_source_ids"],
             ["doc-orion-c09"],
@@ -185,6 +212,10 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertFalse(run["executor_provider_error"])
         self.assertFalse(run["executor_output_parse_success"])
         self.assertIn("Expecting value", run["executor_output_parse_error"])
+        self.assertEqual(run["failed_field_names"], [])
+        self.assertEqual(run["failed_field_count"], 0)
+        self.assertIn("parse_failure", run["failure_flags"])
+        self.assertNotIn("field_extraction_failure", run["failure_flags"])
         self.assertFalse(run["fallback_used"])
         self.assertFalse(run["repair_used"])
         self.assertFalse(run["honest_executor_pass"])
@@ -203,6 +234,8 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertTrue(run["executor_provider_error"])
         self.assertIn("executor unavailable", run["provider_error"])
         self.assertFalse(run["executor_output_parse_success"])
+        self.assertIn("provider_error", run["failure_flags"])
+        self.assertIn("parse_failure", run["failure_flags"])
         self.assertFalse(run["honest_executor_pass"])
 
     def test_selector_fallback_counts_as_honest_failure(self) -> None:
@@ -220,6 +253,7 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
 
         self.assertTrue(run["output_validation_success"])
         self.assertTrue(run["selector_used_fallback"])
+        self.assertIn("fallback_used", run["failure_flags"])
         self.assertFalse(run["honest_executor_pass"])
 
     def test_repair_used_counts_as_honest_failure(self) -> None:
@@ -278,6 +312,8 @@ class HighOverlapPoisonPillOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertEqual(summary["repair_count"], 0)
         self.assertEqual(summary["provider_error_count"], 0)
         self.assertEqual(summary["parse_failure_count"], 0)
+        self.assertEqual(summary["field_extraction_failure_count"], 0)
+        self.assertEqual(summary["contamination_indicator_count"], 0)
         self.assertEqual(summary["total_tokens"], 534)
 
     def test_markdown_report_is_cautious_and_selected_context_only(self) -> None:

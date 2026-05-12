@@ -30,6 +30,7 @@ from providers.openai_api import (
 )
 from runtime.high_overlap_benchmark_helpers import (
     average as _average,
+    build_failure_diagnostics,
     extract_latency_ms as _extract_latency_ms,
     extract_response_text as _extract_response_text,
     extract_usage as _extract_usage,
@@ -39,6 +40,7 @@ from runtime.high_overlap_benchmark_helpers import (
     rate as _rate,
     safe_error_message as _safe_error_message,
     stringify_output_value as _stringify_output_value,
+    summarize_failure_diagnostics,
     sum_usage as _sum_usage,
 )
 from runtime.metrics import estimate_text_tokens, percent_reduction, write_json_report, write_text_report
@@ -288,6 +290,14 @@ def execute_executor_smoke(
         fallback_used=fallback_used,
         repair_used=repair_used,
     )
+    failure_diagnostics = build_failure_diagnostics(
+        output_validation=output_validation,
+        provider_error_occurred=provider_error_occurred,
+        parse_success=parse_success,
+        fallback_used=fallback_used or bool(selection.get("selector_used_fallback")),
+        repair_used=repair_used,
+        context_valid=context_check["selected_context_only"],
+    )
     return {
         "benchmark_type": BENCHMARK_TYPE,
         "fixture_id": task.fixture_id,
@@ -336,6 +346,7 @@ def execute_executor_smoke(
         "excluded_source_citation": bool(unexpected_citations),
         "subtle_source_citation": subtle_citation,
         "mixed_authoritative_and_excluded_evidence": mixed_authoritative_and_excluded_evidence,
+        **failure_diagnostics,
         "fallback_used": fallback_used,
         "repair_used": repair_used,
         "repair_status": "not_supported",
@@ -467,6 +478,7 @@ def evaluate_honest_executor_pass(
 
 
 def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = summarize_failure_diagnostics(runs)
     return {
         "run_count": len(runs),
         "selector_success_count": sum(1 for run in runs if run["selector_success"]),
@@ -502,6 +514,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "mixed_evidence_count": sum(
             1 for run in runs if run["mixed_authoritative_and_excluded_evidence"]
         ),
+        **diagnostics,
         "total_prompt_tokens": _sum_usage(runs, "input_tokens"),
         "total_completion_tokens": _sum_usage(runs, "output_tokens"),
         "total_tokens": _sum_usage(runs, "total_tokens"),
@@ -554,6 +567,13 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Copied partial value count: {summary['copied_partial_value_count']}",
         f"Excluded-source citation count: {summary['excluded_source_citation_count']}",
         f"Mixed evidence count: {summary['mixed_evidence_count']}",
+        f"Field extraction failure count: {summary['field_extraction_failure_count']}",
+        f"Active protocol failure count: {summary['active_protocol_failure_count']}",
+        f"Cycle date failure count: {summary['cycle_date_failure_count']}",
+        f"Evidence reference failure count: {summary['evidence_reference_failure_count']}",
+        f"Contamination indicator count: {summary['contamination_indicator_count']}",
+        f"Clean field failure count: {summary['clean_field_failure_count']}",
+        f"Contaminated failure count: {summary['contaminated_failure_count']}",
         f"Total tokens: {_format_optional_int(summary['total_tokens'])}",
         f"Average latency ms: {_format_optional_float(summary['average_latency_ms'])}",
         "",

@@ -124,6 +124,11 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertFalse(run["fallback_used"])
         self.assertFalse(run["repair_used"])
         self.assertTrue(run["honest_executor_pass"])
+        self.assertTrue(run["field_extraction_passed"])
+        self.assertEqual(run["failed_field_names"], [])
+        self.assertTrue(run["evidence_reference_passed"])
+        self.assertTrue(run["contamination_free"])
+        self.assertEqual(run["failure_flags"], [])
         self.assertEqual(run["usage"]["total_tokens"], 576)
         self.assertEqual(run["latency_ms"], 211)
 
@@ -172,6 +177,8 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertTrue(run["executor_output_parse_success"])
         self.assertFalse(run["output_validation_success"])
         self.assertEqual(run["copied_subtle_poison_value_count"], 3)
+        self.assertFalse(run["contamination_free"])
+        self.assertIn("contamination_indicator", run["failure_flags"])
         self.assertEqual(
             run["output_validation"]["copied_distractor_values"]["subtle_poison"],
             [
@@ -191,6 +198,10 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertFalse(run["output_validation_success"])
         self.assertTrue(run["excluded_source_citation"])
         self.assertTrue(run["subtle_source_citation"])
+        self.assertFalse(run["evidence_reference_passed"])
+        self.assertFalse(run["contamination_free"])
+        self.assertIn("evidence_reference_failure", run["failure_flags"])
+        self.assertIn("contamination_indicator", run["failure_flags"])
         self.assertEqual(
             run["output_validation"]["evidence_reference_validation"]["unexpected_source_ids"],
             ["helios-u22"],
@@ -234,6 +245,9 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertFalse(run["executor_provider_error"])
         self.assertFalse(run["executor_output_parse_success"])
         self.assertIn("Expecting value", run["executor_output_parse_error"])
+        self.assertEqual(run["failed_field_names"], [])
+        self.assertIn("parse_failure", run["failure_flags"])
+        self.assertNotIn("field_extraction_failure", run["failure_flags"])
         self.assertFalse(run["fallback_used"])
         self.assertFalse(run["repair_used"])
         self.assertFalse(run["honest_executor_pass"])
@@ -252,6 +266,8 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertTrue(run["executor_provider_error"])
         self.assertIn("executor unavailable", run["provider_error"])
         self.assertFalse(run["executor_output_parse_success"])
+        self.assertIn("provider_error", run["failure_flags"])
+        self.assertIn("parse_failure", run["failure_flags"])
         self.assertFalse(run["honest_executor_pass"])
 
     def test_selector_fallback_counts_as_honest_failure(self) -> None:
@@ -269,6 +285,7 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
 
         self.assertTrue(run["output_validation_success"])
         self.assertTrue(run["selector_used_fallback"])
+        self.assertIn("fallback_used", run["failure_flags"])
         self.assertFalse(run["honest_executor_pass"])
 
     def test_repair_used_counts_as_honest_failure(self) -> None:
@@ -315,6 +332,8 @@ class HighOverlapSubtlePoisonOpenAIExecutorSmokeTests(unittest.TestCase):
         self.assertEqual(summary["repair_count"], 0)
         self.assertEqual(summary["provider_error_count"], 0)
         self.assertEqual(summary["parse_failure_count"], 0)
+        self.assertEqual(summary["field_extraction_failure_count"], 0)
+        self.assertEqual(summary["contamination_indicator_count"], 0)
         self.assertEqual(summary["total_tokens"], 576)
 
     def test_summary_marks_fallback_and_repair_as_unclean(self) -> None:

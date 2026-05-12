@@ -108,6 +108,7 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
         self.assertTrue(selected["context_validation"]["selected_context_excludes_subtle_source"])
         self.assertTrue(selected["output_validation_success"])
         self.assertTrue(selected["honest_pass"])
+        self.assertEqual(selected["failure_flags"], [])
 
     def test_full_context_path_passes_with_authoritative_output(self) -> None:
         report = self._report(self._valid_output(), self._valid_output())
@@ -196,6 +197,7 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
 
         self.assertFalse(full["honest_pass"])
         self.assertEqual(full["contamination"]["copied_subtle_poison_value_count"], 3)
+        self.assertIn("contamination_indicator", full["failure_flags"])
         self.assertEqual(
             full["contamination"]["copied_subtle_poison_values"],
             [
@@ -207,6 +209,30 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
         self.assertTrue(full["contamination"]["followed_non_authoritative_update"])
         self.assertTrue(comparison["contamination_delta_observed"])
 
+    def test_selected_clean_field_failure_is_reported_separately(self) -> None:
+        selected_output = self._valid_output()
+        selected_output["cycle_date"] = "2027-04"
+
+        report = self._report(selected_output, self._valid_output())
+        comparison = report["comparisons"][0]
+        selected = comparison["selected_context"]
+        summary = report["summary"]
+
+        self.assertFalse(selected["honest_pass"])
+        self.assertEqual(selected["failed_field_names"], ["cycle_date"])
+        self.assertTrue(selected["contamination_free"])
+        self.assertIn("field_extraction_failure", selected["failure_flags"])
+        self.assertNotIn("contamination_indicator", selected["failure_flags"])
+        self.assertTrue(comparison["selected_failed_full_passed"])
+        self.assertTrue(comparison["selected_field_failure_full_passed"])
+        self.assertTrue(comparison["selected_clean_field_failure"])
+        self.assertFalse(comparison["contamination_delta_observed"])
+        self.assertEqual(summary["selected_field_failure_full_passed_count"], 1)
+        self.assertEqual(summary["selected_clean_field_failure_count"], 1)
+        self.assertEqual(summary["field_extraction_failure_count"], 1)
+        self.assertEqual(summary["cycle_date_failure_count"], 1)
+        self.assertEqual(summary["contamination_indicator_count"], 0)
+
     def test_full_context_fails_when_citing_subtle_source(self) -> None:
         full_output = self._valid_output()
         full_output["evidence_source_ids"] = ["helios-u22"]
@@ -217,6 +243,8 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
         self.assertFalse(full["honest_pass"])
         self.assertEqual(full["contamination"]["cited_subtle_source_ids"], ["helios-u22"])
         self.assertTrue(full["contamination"]["followed_non_authoritative_update"])
+        self.assertIn("evidence_reference_failure", full["failure_flags"])
+        self.assertIn("contamination_indicator", full["failure_flags"])
 
     def test_full_context_fails_when_mixing_authoritative_and_subtle_evidence(self) -> None:
         full_output = self._valid_output()
@@ -273,6 +301,10 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
         self.assertTrue(comparison["selected_failed_full_failed"])
         self.assertEqual(report["summary"]["parse_failure_count"], 2)
         self.assertTrue(report["summary"]["any_parse_failure"])
+        self.assertNotIn(
+            "field_extraction_failure",
+            comparison["selected_context"]["failure_flags"],
+        )
 
     def test_selected_fail_full_pass_reported_honestly(self) -> None:
         report = self._report("not json", self._valid_output())
@@ -321,6 +353,7 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
 
         self.assertTrue(selected["fallback_used"])
         self.assertTrue(selected["output_validation_success"])
+        self.assertIn("fallback_used", selected["failure_flags"])
         self.assertFalse(selected["honest_pass"])
 
     def test_repair_used_counts_as_failure(self) -> None:
@@ -457,6 +490,7 @@ class HighOverlapSubtlePoisonContaminationComparisonTests(unittest.TestCase):
 
         self.assertFalse(outcome["contamination_delta_observed"])
         self.assertFalse(outcome["selected_clean_full_contaminated"])
+        self.assertFalse(outcome["selected_field_failure_full_passed"])
         self.assertFalse(outcome["any_provider_error"])
         self.assertFalse(outcome["any_parse_failure"])
 
