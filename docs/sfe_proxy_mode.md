@@ -213,23 +213,59 @@ SFE_PROXY_SHADOW_ROUTER_DRY_RUN=false
 SFE_PROXY_SHADOW_ROUTER_PROVIDER=disabled
 ```
 
-Only the `disabled` router provider exists in this branch. No OpenAI,
-Anthropic, Lemonade, local model, or other network router is implemented or
-called. Configuring any provider other than `disabled` fails clearly at startup.
+The supported router providers are:
+
+- `disabled`: no network call and no router selection.
+- `lemonade`: explicit opt-in metadata-only Lemonade dry-run.
 
 When router dry-run is enabled with the disabled provider, the proxy can add
 safe `shadow_router_*` metadata to the shadow JSONL event. The disabled provider
 does not select segments, does not send request content anywhere, and cannot
 affect the upstream request or downstream response.
 
-This contract is preparation for future provider-specific router dry-runs. It
-is still shadow-only observability, not SFE-enabled execution.
+The Lemonade provider is the first real shadow router dry-run provider. It is
+enabled only when all of these are set:
+
+```text
+SFE_PROXY_MODE=shadow
+SFE_PROXY_SHADOW_ROUTER_DRY_RUN=true
+SFE_PROXY_SHADOW_ROUTER_PROVIDER=lemonade
+SFE_PROXY_LEMONADE_ROUTER_MODEL=<local-router-model>
+```
+
+Optional Lemonade router settings:
+
+```text
+SFE_PROXY_LEMONADE_ROUTER_BASE_URL=http://127.0.0.1:13305
+SFE_PROXY_LEMONADE_ROUTER_TIMEOUT_SECONDS=30
+SFE_PROXY_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS=160
+```
+
+The Lemonade router dry-run is local-provider oriented. When explicitly
+enabled, it may send extracted text segments to the configured local Lemonade
+router so that the router can perform a meaningful dry-run selection. The
+router request also includes endpoint, model name, rough token counts,
+eligibility metadata, request body size, stream flag, and candidate segment
+size metadata.
+
+The Lemonade router request does not include request headers, Authorization
+values, API keys, raw payloads, upstream responses, or downstream response
+content. The extracted text sent to Lemonade is not written to the shadow JSONL
+log. The router prompt asks for strict JSON and the proxy parses that JSON
+without repair, retry, or fallback.
+
+Lemonade router failures, timeouts, invalid JSON, or malformed results are
+recorded in safe `shadow_router_*` metadata and must not affect the upstream
+request or downstream response. Tests use mocked Lemonade HTTP responses; no
+live provider is called by default.
+
+This remains shadow-only observability, not SFE-enabled execution.
 
 ### Provider Limit Decision Contract
 
-The proxy also includes a local provider limit decision contract for future
-shadow router providers. It does not call OpenAI, Anthropic, Lemonade, or any
-other provider, and it does not affect pass-through behavior yet.
+The proxy also includes a local provider limit decision contract for shadow
+router providers. By default it is disabled and does not affect pass-through
+behavior.
 
 The defaults are non-restrictive:
 
@@ -248,7 +284,13 @@ For each numeric limit, `0` means unlimited or disabled for that limit. Queue
 mode can be `reject` or `wait`. In this branch, both are decision modes only:
 `reject` means a future provider call would be rejected by the decision layer,
 while `wait` means a future provider call would require waiting. The proxy does
-not sleep, queue, retry, or call a provider based on this contract yet.
+not sleep, queue, or retry based on this contract.
+
+The Lemonade router dry-run consults the `lemonade` provider limit decision
+before making a mocked or explicitly configured local Lemonade router call. If
+the decision is `rejected` or `wait_required`, the proxy records the decision in
+shadow metadata and skips the Lemonade call. `wait` remains decision-only: the
+proxy does not actively queue or sleep.
 
 Anthropic may need stricter future limits for large prompts and request pacing
 because provider-side input-token-per-minute limits can affect large-context

@@ -326,13 +326,18 @@ def _build_shadow_event(
     if config.shadow_selection_dry_run:
         event.update(_safe_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens))
     if config.shadow_router_dry_run:
-        event.update(_safe_shadow_router_fields(config, event))
+        event.update(_safe_shadow_router_fields(config, event, path, payload))
     return event
 
 
-def _safe_shadow_router_fields(config: ProxyConfig, event: dict[str, Any]) -> dict[str, Any]:
+def _safe_shadow_router_fields(
+    config: ProxyConfig,
+    event: dict[str, Any],
+    path: str,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
     try:
-        router = create_shadow_router(config.shadow_router_provider)
+        router = create_shadow_router(config.shadow_router_provider, config=config)
         router_input = ShadowRouterInput(
             request_id=str(event["timestamp"]),
             endpoint=str(event["endpoint"]),
@@ -346,6 +351,7 @@ def _safe_shadow_router_fields(config: ProxyConfig, event: dict[str, Any]) -> di
             },
             request_body_bytes=int(event["request_body_bytes"]),
             stream=event["stream"] if isinstance(event.get("stream"), bool) else None,
+            candidate_text_segments=_extract_candidate_text_segments(path, payload),
         )
         return router.analyze(router_input).to_event_fields(config.shadow_router_provider)
     except Exception as exc:  # noqa: BLE001
@@ -508,6 +514,28 @@ def _extract_candidate_segments(
     return []
 
 
+def _extract_candidate_text_segments(
+    path: str,
+    payload: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    segments = []
+    for index, segment in enumerate(_extract_candidate_segments(path, payload)):
+        text = segment.get("text")
+        if not isinstance(text, str) or not text:
+            continue
+        segments.append(
+            {
+                "segment_id": f"segment-{index + 1}",
+                "source": segment["source"],
+                "text": text,
+                "text_chars": segment["text_chars"],
+                "text_bytes": segment["text_bytes"],
+                "estimated_tokens": segment["estimated_tokens"],
+            }
+        )
+    return segments
+
+
 def _extract_chat_candidate_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
     messages = payload.get("messages")
     if not isinstance(messages, list):
@@ -556,6 +584,7 @@ def _extract_text_content(value: Any) -> str:
 def _segment_metadata(text: str, source: str) -> dict[str, Any]:
     return {
         "source": source,
+        "text": text,
         "text_chars": len(text),
         "text_bytes": len(text.encode("utf-8")),
         "estimated_tokens": (len(text) + 3) // 4,
