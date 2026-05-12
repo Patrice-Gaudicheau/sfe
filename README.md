@@ -9,7 +9,7 @@ through a selector, exposes only the relevant authoritative context to the
 executor, and records the decision path for audit.
 
 In a fresh local OpenAI reproduction across four controlled context tiers, SFE
-observed up to 84.08% router-inclusive token reduction on a 50k+ structural-tier
+**observed up to 84.08% router-inclusive token reduction** on a 50k+ structural-tier
 task. The strongest signal appears when context is large enough for routing
 overhead to be amortized.
 
@@ -44,10 +44,10 @@ Router-inclusive reduction includes both selector and executor calls.
 
 | Tier | Executor input reduction | Router-inclusive token reduction |
 | --- | ---: | ---: |
-| `standard` [2k-5k] | 81.06% | 21.82% |
-| `practical` [10k-20k] | 88.17% | 63.54% |
-| `high_context` [20k-50k] | 91.11% | 73.35% |
-| `structural` [50k+] | 94.16% | 84.08% |
+| `standard` [2k-5k tokens] | 81.06% | 21.82% |
+| `practical` [10k-20k tokens] | 88.17% | 63.54% |
+| `high_context` [20k-50k tokens] | 91.11% | 73.35% |
+| `structural` [50k+ tokens] | 94.16% | 84.08% |
 
 These are local OpenAI observations on controlled fixtures, not statistical
 proof and not a cost-savings commitment. See `docs/token_cost_metrics.md` for
@@ -271,9 +271,9 @@ The strongest current signal is context reduction on synthetic large/contextual 
 
 | Tier | Approximate baseline context | Observed executor input reduction | Notes |
 | --- | ---: | ---: | --- |
-| `standard` [2k-5k] | 2k-5k tokens | about 81% | 7 synthetic tasks; fixture and router modes available. |
-| `practical` [10k-20k] | 10k-20k tokens | about 88% | Early long-context tier for router-cost amortization checks. |
-| `high_context` [20k-50k] | 20k-50k tokens | about 91% | 2 synthetic tasks; clean 64K Lemonade runs only. |
+| `standard` [2k-5k tokens] | 2k-5k tokens | about 81% | 7 synthetic tasks; fixture and router modes available. |
+| `practical` [10k-20k tokens] | 10k-20k tokens | about 88% | Early long-context tier for router-cost amortization checks. |
+| `high_context` [20k-50k tokens] | 20k-50k tokens | about 91% | 2 synthetic tasks; clean 64K Lemonade runs only. |
 
 Router-inclusive savings are lower because the router consumes tokens and latency. In the clean high_context Lemonade result, executor input reduction was about 90.98%, while router-plus-executor total token reduction was about 72.8%.
 
