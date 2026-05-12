@@ -27,6 +27,19 @@ from providers.openai_api import (
     PROVIDER_NAME as OPENAI_API_PROVIDER,
     OpenAIAPIProvider,
 )
+from runtime.high_overlap_benchmark_helpers import (
+    average as _average,
+    extract_latency_ms as _extract_latency_ms,
+    extract_response_text as _extract_response_text,
+    extract_usage as _extract_usage,
+    format_optional_float as _format_optional_float,
+    format_optional_int as _format_optional_int,
+    format_percent as _format_percent,
+    rate as _rate,
+    safe_error_message as _safe_error_message,
+    stringify_output_value as _stringify_output_value,
+    sum_usage as _sum_usage,
+)
 from runtime.metrics import estimate_text_tokens, percent_reduction, write_json_report, write_text_report
 from runtime.run_high_overlap_poison_pill_benchmark import (
     PoisonPillTask,
@@ -535,105 +548,6 @@ def print_skipped_report(report: dict[str, Any], json_path: Path, md_path: Path)
     print("provider/API call made: false")
     print(f"json: {json_path}")
     print(f"markdown: {md_path}")
-
-
-def _extract_response_text(response: dict[str, Any]) -> str:
-    choices = response.get("choices", [])
-    if not isinstance(choices, list) or not choices:
-        return ""
-    first_choice = choices[0]
-    if not isinstance(first_choice, dict):
-        return ""
-    message = first_choice.get("message", {})
-    if isinstance(message, dict) and message.get("content") is not None:
-        return str(message["content"]).strip()
-    if first_choice.get("text") is not None:
-        return str(first_choice["text"]).strip()
-    return ""
-
-
-def _extract_usage(response: dict[str, Any]) -> dict[str, int | None]:
-    usage = response.get("usage", {})
-    if not isinstance(usage, dict):
-        usage = {}
-    input_tokens = _optional_int(usage.get("prompt_tokens"))
-    output_tokens = _optional_int(usage.get("completion_tokens"))
-    total_tokens = _optional_int(usage.get("total_tokens"))
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
-
-
-def _extract_latency_ms(response: dict[str, Any]) -> int | None:
-    metadata = response.get("openai_api")
-    if isinstance(metadata, dict) and metadata.get("latency_ms") is not None:
-        return int(metadata["latency_ms"])
-    return None
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
-
-def _safe_error_message(exc: Exception) -> str:
-    message = str(exc).strip() or exc.__class__.__name__
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key:
-        message = message.replace(api_key, "[REDACTED]")
-    return message
-
-
-def _stringify_output_value(value: Any) -> str:
-    if isinstance(value, list):
-        return ", ".join(str(item).strip() for item in value)
-    if isinstance(value, dict):
-        return json.dumps(value, sort_keys=True)
-    return str(value).strip()
-
-
-def _rate(values: Any) -> float:
-    items = list(values)
-    if not items:
-        return 0.0
-    return sum(1 for item in items if bool(item)) / len(items)
-
-
-def _average(values: Any) -> float | None:
-    numbers = [float(value) for value in values if value is not None]
-    if not numbers:
-        return None
-    return sum(numbers) / len(numbers)
-
-
-def _sum_usage(runs: list[dict[str, Any]], key: str) -> int | None:
-    values = [run["usage"].get(key) for run in runs if run["usage"].get(key) is not None]
-    if not values:
-        return None
-    return sum(int(value) for value in values)
-
-
-def _format_percent(value: float | None) -> str:
-    if value is None:
-        return "n/a"
-    return f"{value:.2%}"
-
-
-def _format_optional_float(value: float | None) -> str:
-    if value is None:
-        return "n/a"
-    return f"{value:.2f}"
-
-
-def _format_optional_int(value: Any) -> str:
-    if value is None:
-        return "n/a"
-    return str(int(value))
 
 
 if __name__ == "__main__":

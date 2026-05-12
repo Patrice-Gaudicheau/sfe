@@ -24,6 +24,10 @@ from providers.openai_api import (
     PROVIDER_NAME as OPENAI_API_PROVIDER,
     OpenAIAPIProvider,
 )
+from runtime.high_overlap_benchmark_helpers import (
+    format_optional_int as _format_optional_int,
+    sum_usage as _sum_usage,
+)
 from runtime.metrics import estimate_text_tokens, percent_reduction, write_json_report, write_text_report
 from runtime.run_high_overlap_poison_pill_benchmark import (
     PoisonPillTask,
@@ -619,19 +623,6 @@ def _context_source_ids(
     if condition == SELECTED_CONTEXT_CONDITION:
         return list(selected_source_ids)
     return [source.source_id for source in task.sources]
-
-
-def _sum_usage(runs: list[dict[str, Any]], key: str) -> int | None:
-    values = [run["usage"].get(key) for run in runs if run["usage"].get(key) is not None]
-    if not values:
-        return None
-    return sum(int(value) for value in values)
-
-
-def _format_optional_int(value: Any) -> str:
-    if value is None:
-        return "n/a"
-    return str(int(value))
 
 
 if __name__ == "__main__":

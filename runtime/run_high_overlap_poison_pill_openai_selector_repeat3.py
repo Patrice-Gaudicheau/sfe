@@ -19,6 +19,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.openai_api import DEFAULT_ROUTER_MODEL, OpenAIAPIProvider
+from runtime.high_overlap_benchmark_helpers import (
+    format_optional_int as _format_optional_int,
+    format_percent as _format_percent,
+    rate as _rate,
+    sum_latency as _sum_latency,
+    sum_usage as _sum_usage,
+)
 from runtime.metrics import write_json_report, write_text_report
 from runtime.run_high_overlap_poison_pill_benchmark import (
     PoisonPillTask,
@@ -299,39 +306,6 @@ def print_skipped_report(report: dict[str, Any], json_path: Path, md_path: Path)
     print("provider/API call made: false")
     print(f"json: {json_path}")
     print(f"markdown: {md_path}")
-
-
-def _rate(values: Any) -> float:
-    items = list(values)
-    if not items:
-        return 0.0
-    return sum(1 for item in items if bool(item)) / len(items)
-
-
-def _sum_usage(runs: list[dict[str, Any]], key: str) -> int | None:
-    values = [run["usage"].get(key) for run in runs if run["usage"].get(key) is not None]
-    if not values:
-        return None
-    return sum(int(value) for value in values)
-
-
-def _sum_latency(runs: list[dict[str, Any]]) -> int | None:
-    values = [run["latency_ms"] for run in runs if run.get("latency_ms") is not None]
-    if not values:
-        return None
-    return sum(int(value) for value in values)
-
-
-def _format_percent(value: float | None) -> str:
-    if value is None:
-        return "n/a"
-    return f"{value:.2%}"
-
-
-def _format_optional_int(value: Any) -> str:
-    if value is None:
-        return "n/a"
-    return str(int(value))
 
 
 if __name__ == "__main__":
