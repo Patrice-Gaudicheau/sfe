@@ -12,4 +12,4 @@ license = { text = "PolyForm Noncommercial License 1.0.0" }
 dependencies = []
 
 [tool.setuptools]
-packages = ["sfe", "cognitive_map"]
+packages = ["sfe", "cognitive_map", "sfe_proxy"]
