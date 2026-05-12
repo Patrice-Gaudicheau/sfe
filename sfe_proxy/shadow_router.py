@@ -163,8 +163,8 @@ class LemonadeShadowRouter:
 
         try:
             response = self._call_lemonade(router_input)
-            content = _extract_chat_content(response)
-            parsed = json.loads(content)
+            content = _extract_lemonade_router_content(response)
+            parsed = _loads_router_json_object(content)
             return self._parse_result(parsed, router_input, started, rate_limit_metadata)
         except json.JSONDecodeError:
             return self._failure(
@@ -364,7 +364,7 @@ def _known_segment_ids(router_input: ShadowRouterInput) -> set[str]:
     return ids
 
 
-def _extract_chat_content(response: dict[str, Any]) -> str:
+def _extract_lemonade_router_content(response: dict[str, Any]) -> str:
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("Lemonade response missing choices")
@@ -372,12 +372,62 @@ def _extract_chat_content(response: dict[str, Any]) -> str:
     if not isinstance(first, dict):
         raise ValueError("Lemonade response choice must be an object")
     message = first.get("message")
-    if not isinstance(message, dict):
-        raise ValueError("Lemonade response missing message")
-    content = message.get("content")
-    if not isinstance(content, str):
-        raise ValueError("Lemonade response content must be a string")
-    return content
+    if isinstance(message, dict):
+        for key in ("content", "reasoning_content"):
+            value = message.get(key)
+            if value is not None:
+                text = str(value).strip()
+                if text:
+                    return text
+    if first.get("text") is not None:
+        text = str(first["text"]).strip()
+        if text:
+            return text
+    raise ValueError("Lemonade response missing router content")
+
+
+def _loads_router_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError("Lemonade router output is empty")
+
+    candidates = [stripped]
+    unfenced = _strip_markdown_code_fence(stripped)
+    if unfenced != stripped:
+        candidates.append(unfenced)
+
+    last_decode_error: json.JSONDecodeError | None = None
+    for candidate in candidates:
+        try:
+            return _require_json_object(json.loads(candidate))
+        except json.JSONDecodeError as exc:
+            last_decode_error = exc
+
+    extract_from = candidates[-1]
+    start = extract_from.find("{")
+    end = extract_from.rfind("}")
+    if start != -1 and end > start:
+        return _require_json_object(json.loads(extract_from[start : end + 1]))
+    if last_decode_error is not None:
+        raise last_decode_error
+    raise ValueError("Lemonade router output is not a JSON object")
+
+
+def _strip_markdown_code_fence(text: str) -> str:
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _require_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("Lemonade router output must be a JSON object")
+    return value
 
 
 def _join_openai_compatible_url(base_url: str, path: str) -> str:

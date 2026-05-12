@@ -257,8 +257,12 @@ size metadata.
 The Lemonade router request does not include request headers, Authorization
 values, API keys, raw payloads, upstream responses, or downstream response
 content. The extracted text sent to Lemonade is not written to the shadow JSONL
-log. The router prompt asks for strict JSON and the proxy parses that JSON
-without repair, retry, or fallback.
+log. The router prompt asks for strict JSON. The proxy also applies a small
+deterministic JSON parsing normalization for common local model formatting,
+including whole-output markdown fences and safely extractable prose-wrapped JSON
+objects. This normalization is not LLM repair: the proxy does not retry, does
+not ask another model to fix output, and does not fall back to deterministic
+selection as if it were Lemonade output.
 
 Lemonade router failures, timeouts, invalid JSON, or malformed results are
 recorded in safe `shadow_router_*` metadata and must not affect the upstream
