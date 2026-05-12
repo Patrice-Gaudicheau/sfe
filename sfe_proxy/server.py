@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from socket import socket
 from typing import Any, Callable
 
@@ -71,6 +72,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         model, stream = _request_metadata(body)
         upstream_url = _upstream_url(self.server.config, self.path)
         status_code = 502
+        shadow_event = (
+            _build_shadow_event(self.server.config, self.command, path, body)
+            if _should_shadow_observe(self.server.config, self.command, path)
+            else None
+        )
         try:
             if not _allowed_path(self.command, path):
                 self._send_json(
@@ -95,6 +101,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 )
         finally:
             latency_ms = int((time.perf_counter() - started) * 1000)
+            if shadow_event is not None:
+                shadow_event["upstream_status_code"] = status_code
+                shadow_event["upstream_latency_ms"] = latency_ms
+                self._write_shadow_event(shadow_event)
             self._log_request(
                 upstream_url=upstream_url,
                 status_code=status_code,
@@ -183,6 +193,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
         }
         self.server.log_sink(json.dumps(event, sort_keys=True))
 
+    def _write_shadow_event(self, event: dict[str, Any]) -> None:
+        try:
+            log_dir = Path(self.server.config.shadow_log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / "shadow_events.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, sort_keys=True) + "\n")
+        except OSError as exc:
+            self.server.log_sink(
+                json.dumps(
+                    {
+                        "event": "shadow_log_write_failed",
+                        "message": str(exc),
+                        "path": _path_without_query(self.path),
+                    },
+                    sort_keys=True,
+                )
+            )
+
 
 def create_server(
     config: ProxyConfig,
@@ -251,6 +279,108 @@ def _forward_headers(headers: Any) -> dict[str, str]:
 
 def _is_sse_response(content_type: str) -> bool:
     return content_type.lower().split(";", 1)[0].strip() == "text/event-stream"
+
+
+def _should_shadow_observe(config: ProxyConfig, method: str, path: str) -> bool:
+    return config.mode == "shadow" and method == "POST" and path in SUPPORTED_POST_PATHS
+
+
+def _build_shadow_event(
+    config: ProxyConfig,
+    method: str,
+    path: str,
+    body: bytes,
+) -> dict[str, Any]:
+    payload = _decode_json_object(body)
+    texts = list(_iter_text_values(payload)) if payload is not None else []
+    largest_text_chars = max((len(text) for text in texts), default=0)
+    largest_text_bytes = max((len(text.encode("utf-8")) for text in texts), default=0)
+    rough_estimated_input_tokens = _rough_estimate_tokens_from_texts(texts, body)
+    eligible = rough_estimated_input_tokens > config.shadow_min_input_tokens
+    event = {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "event": "sfe_proxy_shadow_observation",
+        "mode": config.mode,
+        "method": method,
+        "endpoint": path,
+        "model": _payload_model(payload),
+        "stream": _payload_stream(payload),
+        "request_body_bytes": len(body),
+        "rough_estimated_input_tokens": rough_estimated_input_tokens,
+        "rough_token_estimate_method": "text_chars_div_4_min_body_bytes_div_4",
+        "message_count": _chat_message_count(path, payload),
+        "input_item_count": _responses_input_item_count(path, payload),
+        "largest_text_field_chars": largest_text_chars,
+        "largest_text_field_bytes": largest_text_bytes,
+        "sfe_routing_eligible": eligible,
+        "eligibility_reason": (
+            "rough_estimated_input_tokens_above_threshold"
+            if eligible
+            else "rough_estimated_input_tokens_below_threshold"
+        ),
+        "eligibility_threshold_tokens": config.shadow_min_input_tokens,
+        "full_payload_logging_enabled": False,
+        "full_payload_logging_requested": config.shadow_log_full_payloads,
+    }
+    return event
+
+
+def _decode_json_object(body: bytes) -> dict[str, Any] | None:
+    if not body:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _payload_model(payload: dict[str, Any] | None) -> str | None:
+    if payload is None:
+        return None
+    model = payload.get("model")
+    return model if isinstance(model, str) else None
+
+
+def _payload_stream(payload: dict[str, Any] | None) -> bool | None:
+    if payload is None:
+        return None
+    stream = payload.get("stream")
+    return stream if isinstance(stream, bool) else None
+
+
+def _chat_message_count(path: str, payload: dict[str, Any] | None) -> int | None:
+    if path != "/v1/chat/completions" or payload is None:
+        return None
+    messages = payload.get("messages")
+    return len(messages) if isinstance(messages, list) else None
+
+
+def _responses_input_item_count(path: str, payload: dict[str, Any] | None) -> int | None:
+    if path != "/v1/responses" or payload is None:
+        return None
+    input_value = payload.get("input")
+    return len(input_value) if isinstance(input_value, list) else (1 if input_value is not None else None)
+
+
+def _iter_text_values(value: Any) -> list[str]:
+    texts: list[str] = []
+    if isinstance(value, str):
+        texts.append(value)
+    elif isinstance(value, dict):
+        for child in value.values():
+            texts.extend(_iter_text_values(child))
+    elif isinstance(value, list):
+        for child in value:
+            texts.extend(_iter_text_values(child))
+    return texts
+
+
+def _rough_estimate_tokens_from_texts(texts: list[str], body: bytes) -> int:
+    text_chars = sum(len(text) for text in texts)
+    text_estimate = (text_chars + 3) // 4
+    body_estimate = (len(body) + 3) // 4
+    return max(text_estimate, body_estimate)
 
 
 def _ensure_port_available(host: str, port: int) -> None:

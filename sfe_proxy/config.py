@@ -11,7 +11,10 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17891
 DEFAULT_UPSTREAM_BASE_URL = "https://api.openai.com"
 DEFAULT_MODE = "pass_through"
-SUPPORTED_MODES = (DEFAULT_MODE,)
+SHADOW_MODE = "shadow"
+SUPPORTED_MODES = (DEFAULT_MODE, SHADOW_MODE)
+DEFAULT_SHADOW_MIN_INPUT_TOKENS = 50000
+DEFAULT_SHADOW_LOG_DIR = "logs/sfe_proxy_shadow"
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,9 @@ class ProxyConfig:
     upstream_base_url: str = DEFAULT_UPSTREAM_BASE_URL
     upstream_api_key: str = ""
     mode: str = DEFAULT_MODE
+    shadow_min_input_tokens: int = DEFAULT_SHADOW_MIN_INPUT_TOKENS
+    shadow_log_dir: str = DEFAULT_SHADOW_LOG_DIR
+    shadow_log_full_payloads: bool = False
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -35,12 +41,25 @@ class ProxyConfig:
         upstream_api_key = os.getenv("SFE_PROXY_UPSTREAM_API_KEY", "")
         if not upstream_api_key and _is_openai_upstream(upstream_base_url):
             upstream_api_key = os.getenv("OPENAI_API_KEY", "")
+        shadow_min_input_tokens_raw = os.getenv(
+            "SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", str(DEFAULT_SHADOW_MIN_INPUT_TOKENS)
+        )
+        try:
+            shadow_min_input_tokens = int(shadow_min_input_tokens_raw)
+        except ValueError as exc:
+            raise ValueError("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be an integer.") from exc
         return cls(
             host=os.getenv("SFE_PROXY_HOST", DEFAULT_HOST),
             port=port,
             upstream_base_url=upstream_base_url,
             upstream_api_key=upstream_api_key,
             mode=os.getenv("SFE_PROXY_MODE", DEFAULT_MODE),
+            shadow_min_input_tokens=shadow_min_input_tokens,
+            shadow_log_dir=os.getenv("SFE_PROXY_SHADOW_LOG_DIR", DEFAULT_SHADOW_LOG_DIR),
+            shadow_log_full_payloads=_parse_bool(
+                os.getenv("SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS", "false"),
+                "SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS",
+            ),
         ).validated()
 
     def validated(self) -> "ProxyConfig":
@@ -57,9 +76,13 @@ class ProxyConfig:
             raise ValueError("SFE_PROXY_UPSTREAM_BASE_URL must not be empty.")
         if not self.upstream_api_key:
             raise ValueError(
-                "SFE_PROXY_UPSTREAM_API_KEY is required for pass_through mode; "
+                "SFE_PROXY_UPSTREAM_API_KEY is required for proxy mode; "
                 "OPENAI_API_KEY may be used as a fallback only for OpenAI upstreams."
             )
+        if self.shadow_min_input_tokens < 0:
+            raise ValueError("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be non-negative.")
+        if not self.shadow_log_dir:
+            raise ValueError("SFE_PROXY_SHADOW_LOG_DIR must not be empty.")
         return self
 
     @property
@@ -71,3 +94,12 @@ def _is_openai_upstream(base_url: str) -> bool:
     parsed = urlparse(base_url or DEFAULT_UPSTREAM_BASE_URL)
     hostname = (parsed.hostname or "").lower()
     return hostname == "api.openai.com"
+
+
+def _parse_bool(raw: str, name: str) -> bool:
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be true or false.")

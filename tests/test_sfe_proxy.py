@@ -21,6 +21,8 @@ from sfe_proxy.config import (
     DEFAULT_HOST,
     DEFAULT_MODE,
     DEFAULT_PORT,
+    DEFAULT_SHADOW_LOG_DIR,
+    DEFAULT_SHADOW_MIN_INPUT_TOKENS,
     DEFAULT_UPSTREAM_BASE_URL,
     ProxyConfig,
 )
@@ -83,6 +85,46 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.port == DEFAULT_PORT
     assert config.upstream_base_url == DEFAULT_UPSTREAM_BASE_URL
     assert config.mode == DEFAULT_MODE
+    assert config.shadow_min_input_tokens == DEFAULT_SHADOW_MIN_INPUT_TOKENS
+    assert config.shadow_log_dir == DEFAULT_SHADOW_LOG_DIR
+    assert config.shadow_log_full_payloads is False
+
+
+def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", "123")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_LOG_DIR", str(tmp_path))
+
+    config = ProxyConfig.from_env()
+
+    assert config.mode == "shadow"
+    assert config.shadow_min_input_tokens == 123
+    assert config.shadow_log_dir == str(tmp_path)
+
+
+def test_proxy_config_rejects_invalid_shadow_threshold(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", "not-an-int")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be an integer" in str(exc)
+    else:
+        raise AssertionError("invalid shadow threshold should fail")
+
+
+def test_proxy_config_rejects_negative_shadow_threshold(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", "-1")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be non-negative" in str(exc)
+    else:
+        raise AssertionError("negative shadow threshold should fail")
 
 
 def test_proxy_config_explicit_upstream_key_wins_over_openai_fallback(monkeypatch) -> None:
@@ -130,7 +172,7 @@ def test_proxy_config_does_not_use_openai_key_for_non_openai_upstream(monkeypatc
 
 def test_proxy_config_rejects_unsupported_mode(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
+    monkeypatch.setenv("SFE_PROXY_MODE", "sfe_enabled")
 
     try:
         ProxyConfig.from_env()
@@ -288,6 +330,151 @@ def test_streaming_sse_bytes_are_passed_through() -> None:
     assert '"stream": true' in "\n".join(logs)
 
 
+def test_shadow_mode_preserves_upstream_body_status_and_logs_safe_below_threshold(tmp_path) -> None:
+    upstream = _start_upstream(
+        status=202,
+        body=b'{"id":"shadow-test","object":"chat.completion"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=50000,
+    )
+    prompt = "sensitive prompt content"
+    try:
+        payload = {
+            "model": "example-model",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="client-secret",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 202
+    assert response["body"] == {"id": "shadow-test", "object": "chat.completion"}
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "shadow"
+    assert event["endpoint"] == "/v1/chat/completions"
+    assert event["model"] == "example-model"
+    assert event["stream"] is False
+    assert event["request_body_bytes"] == len(json.dumps(payload).encode("utf-8"))
+    assert event["message_count"] == 1
+    assert event["input_item_count"] is None
+    assert event["sfe_routing_eligible"] is False
+    assert event["eligibility_reason"] == "rough_estimated_input_tokens_below_threshold"
+    assert event["upstream_status_code"] == 202
+
+    serialized_event = json.dumps(event)
+    joined_logs = "\n".join(logs)
+    assert "client-secret" not in serialized_event
+    assert "Authorization" not in serialized_event
+    assert prompt not in serialized_event
+    assert prompt not in joined_logs
+
+
+def test_shadow_mode_logs_above_threshold_responses_metadata(tmp_path) -> None:
+    upstream = _start_upstream(body=b'{"id":"resp-test","object":"response"}')
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+    )
+    try:
+        payload = {
+            "model": "example-model",
+            "input": [
+                {"role": "user", "content": [{"type": "input_text", "text": "hello"}]},
+                {"role": "user", "content": [{"type": "input_text", "text": "world"}]},
+            ],
+            "stream": True,
+        }
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    event = _read_shadow_event(tmp_path)
+    assert event["endpoint"] == "/v1/responses"
+    assert event["stream"] is True
+    assert event["input_item_count"] == 2
+    assert event["message_count"] is None
+    assert event["sfe_routing_eligible"] is True
+    assert event["eligibility_reason"] == "rough_estimated_input_tokens_above_threshold"
+    assert event["rough_estimated_input_tokens"] >= 1
+
+
+def test_shadow_log_write_failure_does_not_break_pass_through(tmp_path) -> None:
+    upstream = _start_upstream(body=b'{"ok":true}')
+    log_path = tmp_path / "not-a-directory"
+    log_path.write_text("already a file", encoding="utf-8")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(log_path),
+        shadow_min_input_tokens=1,
+    )
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {"ok": True}
+    assert "shadow_log_write_failed" in "\n".join(logs)
+
+
+def test_pass_through_mode_does_not_write_shadow_log(tmp_path) -> None:
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="pass_through",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+    )
+    try:
+        _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert not (tmp_path / "shadow_events.jsonl").exists()
+
+
 def test_sse_content_type_detection_allows_parameters() -> None:
     assert _is_sse_response("text/event-stream")
     assert _is_sse_response("text/event-stream; charset=utf-8")
@@ -309,15 +496,21 @@ def _start_upstream(
     return server
 
 
-def _start_proxy(upstream: ThreadingHTTPServer, logs: list[str]) -> ThreadingHTTPServer:
+def _start_proxy(
+    upstream: ThreadingHTTPServer,
+    logs: list[str],
+    **config_overrides: Any,
+) -> ThreadingHTTPServer:
     host, port = upstream.server_address
+    config_values = {
+        "host": "127.0.0.1",
+        "port": _free_port(),
+        "upstream_base_url": f"http://{host}:{port}",
+        "upstream_api_key": "upstream-secret",
+    }
+    config_values.update(config_overrides)
     proxy = create_server(
-        ProxyConfig(
-            host="127.0.0.1",
-            port=_free_port(),
-            upstream_base_url=f"http://{host}:{port}",
-            upstream_api_key="upstream-secret",
-        ),
+        ProxyConfig(**config_values),
         log_sink=logs.append,
     )
     threading.Thread(target=proxy.serve_forever, daemon=True).start()
@@ -354,3 +547,9 @@ def _request_raw(
             "content_type": response.headers.get("Content-Type"),
             "headers": response.headers,
         }
+
+
+def _read_shadow_event(log_dir: Path) -> dict[str, Any]:
+    lines = (log_dir / "shadow_events.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    return json.loads(lines[0])

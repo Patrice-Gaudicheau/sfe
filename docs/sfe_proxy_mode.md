@@ -3,10 +3,11 @@
 SFE remains Spatial Field Engine for Cognition. Proxy mode is an integration
 mode, not a project rename.
 
-The first proxy implementation is deliberately boring: it is an
-OpenAI-compatible HTTP pass-through proxy. It does not perform SFE selection, it
-does not modify prompts, it does not modify responses, it does not apply hidden
-repair, and it does not introduce fallback or semantic routing behavior.
+The proxy implementation is deliberately boring: it is an OpenAI-compatible
+HTTP proxy with pass-through behavior and optional shadow observability. It does
+not perform SFE-enabled execution, it does not modify prompts, it does not
+modify responses, it does not apply hidden repair, and it does not introduce
+fallback or semantic routing behavior.
 
 ## Purpose
 
@@ -14,12 +15,12 @@ Proxy mode is intended as a zero-code integration path for OpenAI-compatible
 clients. A client can point at the local SFE proxy endpoint while the proxy
 forwards requests unchanged to an upstream OpenAI-compatible provider.
 
-This first version is useful for validating operational plumbing before adding
-future shadow or SFE-enabled behavior.
+This version is useful for validating operational plumbing and request-shape
+observability before adding future SFE-enabled behavior.
 
 ## Endpoints
 
-The initial pass-through proxy supports:
+The proxy supports:
 
 - `GET /v1/models`
 - `POST /v1/chat/completions`
@@ -37,8 +38,11 @@ Environment variables:
 - `SFE_PROXY_HOST`, default `127.0.0.1`
 - `SFE_PROXY_PORT`, default `17891`
 - `SFE_PROXY_UPSTREAM_BASE_URL`, default `https://api.openai.com`
-- `SFE_PROXY_UPSTREAM_API_KEY`, preferred upstream key for pass-through mode
+- `SFE_PROXY_UPSTREAM_API_KEY`, preferred upstream key for proxy mode
 - `SFE_PROXY_MODE`, default `pass_through`
+- `SFE_PROXY_SHADOW_MIN_INPUT_TOKENS`, default `50000`
+- `SFE_PROXY_SHADOW_LOG_DIR`, default `logs/sfe_proxy_shadow`
+- `SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS`, default `false`
 
 Proxy mode uses the repository root `.env`. Do not create a separate proxy
 environment file and do not duplicate secrets unless you need a proxy-specific
@@ -50,8 +54,15 @@ when `SFE_PROXY_UPSTREAM_BASE_URL` points to `https://api.openai.com`,
 proxy fails clearly at startup. The OpenAI fallback is not applied to non-OpenAI
 upstream URLs.
 
-Only `SFE_PROXY_MODE=pass_through` is supported. Any other mode fails clearly at
-startup.
+Supported modes:
+
+- `pass_through`: forwards supported requests unchanged and returns upstream
+  responses unchanged.
+- `shadow`: forwards supported requests unchanged and returns upstream responses
+  unchanged, while writing safe local JSONL observations for supported POST
+  requests.
+
+Any other mode fails clearly at startup.
 
 The default bind address is `127.0.0.1`, not `0.0.0.0`. Do not expose the proxy
 on the LAN unless you explicitly choose to change the bind address and understand
@@ -109,7 +120,47 @@ The proxy logs only minimal request metadata:
 It does not log API keys, `Authorization` headers, full prompts, or full
 responses by default.
 
+## Shadow Mode
+
+Shadow mode is enabled with:
+
+```text
+SFE_PROXY_MODE=shadow
+```
+
+Shadow mode must not affect client-visible behavior. It forwards the original
+OpenAI-compatible request body to the upstream provider and returns the upstream
+status code, response body, error payload, and SSE stream to the client using
+the same pass-through path.
+
+For supported POST endpoints, shadow mode writes one safe JSONL observation per
+request to `SFE_PROXY_SHADOW_LOG_DIR`. The event includes metadata such as:
+
+- timestamp
+- endpoint
+- model, when present
+- stream flag, when present
+- request body byte size
+- rough estimated input tokens
+- message count for `/v1/chat/completions`
+- input item count for `/v1/responses`
+- largest text field size
+- future SFE routing eligibility
+- eligibility reason
+
+The first eligibility rule is conservative and deterministic: a request is
+eligible only when the rough estimated input tokens are above
+`SFE_PROXY_SHADOW_MIN_INPUT_TOKENS`, which defaults to `50000`.
+
+The token estimate is intentionally labeled rough. It is based on local request
+shape only and is not provider billing telemetry.
+
+`SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS` defaults to `false`. Full payload logging is
+not enabled in this first shadow implementation; prompts and responses are not
+written to shadow logs by default. Treat any future full-payload logging option
+as dangerous because it can capture prompts, documents, user data, or secrets.
+
 ## Future Modes
 
-Shadow mode and SFE-enabled mode are future steps. They are not implemented in
-this first pass-through version.
+SFE-enabled mode is a future step. It is not implemented in this pass-through
+and shadow-observability version.
