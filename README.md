@@ -28,6 +28,32 @@ Pull requests are not currently accepted.
 
 Forks for non-commercial research and experimentation are allowed under the license.
 
+## Where To Start
+
+New technical reviewers should start with `docs/INDEX.md`. It gives a compact
+map of the benchmark families, runner categories, current high-overlap status,
+and the recommended reading path.
+
+For the current high-overlap methodology, read
+`docs/high_overlap_fixture_expansion_phase_close.md` and
+`docs/high_overlap_diagnostic_bucketing_notes.md`.
+
+## Current Private Benchmark Status
+
+The high-overlap fixture-expansion phase is complete for three additional
+authority-gap fixtures:
+
+- Aurelia: scope authority conflict.
+- Borealis: deprecated memo vs active implementation notice.
+- Cassini: policy exception vs active policy.
+
+Their deterministic tests pass. Limited local OpenAI selector, executor, and
+selected-vs-full comparison observations were clean for these fixtures: no
+contamination indicators were observed in those local runs, and full-context
+execution also passed. Selected-context execution therefore did not outperform
+full-context execution in those observations. The useful signal is local
+non-regression under controlled conditions, not general reliability.
+
 ## Problem
 
 Large prompts often mix user intent, constraints, background facts, distractors, prior decisions, and execution instructions in one context window. That can make runs harder to audit and can spend tokens on information that is irrelevant to the next model call.
@@ -58,6 +84,31 @@ The main execution pattern is:
 4. Execute through the configured provider.
 5. Record token estimates, latency, routing validity, fallbacks, and task-specific success checks.
 
+## Glossary
+
+- Selector: the routing or selection step that chooses which source or context
+  block should be exposed to execution.
+- Executor: the model call that produces the final task answer from the
+  selected or full context.
+- Selected context: the bounded context exposed after selection, usually one
+  authoritative source in the high-overlap fixtures.
+- Full context: the complete fixture context, including authoritative and
+  excluded or competing sources.
+- Honest pass: a strict pass with no fallback, repair, provider error, parse
+  failure, or disqualifying metadata.
+- Diagnostic bucketing: mechanical failure categorization that keeps strict
+  pass/fail unchanged while separating field extraction, evidence reference,
+  contamination indicator, provider, parse, fallback, and repair failures.
+- Contamination indicator: a mechanical signal such as copied excluded values,
+  excluded-source citation, poison instruction following, or mixed
+  authoritative and excluded evidence.
+- Field extraction failure: a strict failure where the selected source may be
+  correct but an exact required field is missing or wrong.
+- Selection-induced error: a failure caused by selecting too little context, the
+  wrong context, or a context block that omits information needed for the task.
+- Local observation: a result from a local run in a specific environment; it is
+  not a statistical or general reliability claim.
+
 ## Setup
 
 This project is dependency-light and targets Python 3.10+.
@@ -79,6 +130,16 @@ SFE_EXECUTOR_MODEL=<local-executor-model-id>
 ```
 
 OpenAI API benchmarks are optional and require `OPENAI_API_KEY` plus explicit `SFE_OPENAI_ROUTER_MODEL` and `SFE_OPENAI_EXECUTOR_MODEL` values that are available to your account.
+
+## Live API Caution
+
+Deterministic tests do not require an API key. Live OpenAI runners require
+`OPENAI_API_KEY`; keep it in a local `.env` file and never commit it.
+
+Generated benchmark reports should be written under `/tmp` or another
+untracked local location. Some selected-vs-full comparison runner names do not
+include `openai` even though they call OpenAI when the API key is present. Check
+`docs/INDEX.md` before running live scripts.
 
 ## Benchmarks
 
@@ -169,6 +230,7 @@ These numbers are useful for deciding what to test next. They should not be pres
 
 ## Documentation
 
+- `docs/INDEX.md`: recommended starting point and runner-category map for technical reviewers.
 - `docs/public_release_technical_report.md`: public-facing technical report for the current release-readiness snapshot.
 - `docs/large_contextual_benchmark_report.md`: detailed large/contextual benchmark notes.
 - `docs/effectiveness.md`: preserved strict Lemonade effectiveness result.
