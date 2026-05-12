@@ -2,14 +2,14 @@
 
 **Context governance and token optimization for long-context LLM workflows.**
 
-Spatial Field Engine for Cognition (`sfe`) is a source-available
+Spatial Field Engine for Cognition (`SFE`) is a source-available
 infrastructure prototype that separates context selection from task execution.
 Instead of sending every request as one large flat prompt, SFE routes the task
 through a selector, exposes only the relevant authoritative context to the
 executor, and records the decision path for audit.
 
-In a fresh local OpenAI reproduction across four controlled context tiers, SFE
-**observed up to 84.08% router-inclusive token reduction** on a 50k+ structural-tier
+In a fresh local OpenAI reproduction across four controlled context tiers, **SFE
+observed up to 84.08% router-inclusive token reduction** on a 50k+ structural-tier
 task. The strongest signal appears when context is large enough for routing
 overhead to be amortized.
 
