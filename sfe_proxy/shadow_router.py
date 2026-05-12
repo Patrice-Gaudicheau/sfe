@@ -15,7 +15,7 @@ from .provider_limits import ProviderLimitRegistry
 DISABLED_ROUTER_PROVIDER = "disabled"
 LEMONADE_ROUTER_PROVIDER = "lemonade"
 DEFAULT_LEMONADE_ROUTER_BASE_URL = "http://127.0.0.1:13305"
-DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS = 30
+DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS = 30
 DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS = 160
 LEMONADE_MODEL_ENV_NAMES = (
     "SFE_LEMONADE_MODEL",
@@ -105,16 +105,20 @@ class LemonadeShadowRouterConfig:
     base_url: str = DEFAULT_LEMONADE_ROUTER_BASE_URL
     api_key: str = ""
     model: str = ""
-    timeout_seconds: int = DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS
+    timeout_seconds: int = DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
     max_output_tokens: int = DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS
 
     @classmethod
-    def from_env(cls) -> "LemonadeShadowRouterConfig":
+    def from_env(
+        cls,
+        *,
+        timeout_seconds: int = DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS,
+    ) -> "LemonadeShadowRouterConfig":
         return cls(
             base_url=os.getenv("SFE_LEMONADE_BASE_URL", DEFAULT_LEMONADE_ROUTER_BASE_URL),
             api_key=os.getenv("SFE_LEMONADE_API_KEY", ""),
             model=_first_env_value(LEMONADE_MODEL_ENV_NAMES),
-            timeout_seconds=DEFAULT_LEMONADE_ROUTER_TIMEOUT_SECONDS,
+            timeout_seconds=timeout_seconds,
             max_output_tokens=DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS,
         )
 
@@ -329,7 +333,14 @@ def create_shadow_router(
     if provider == DISABLED_ROUTER_PROVIDER:
         return DisabledShadowRouter()
     if provider == LEMONADE_ROUTER_PROVIDER:
-        lemonade_config = LemonadeShadowRouterConfig.from_env()
+        timeout_seconds = getattr(
+            config,
+            "shadow_router_timeout_seconds",
+            DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS,
+        )
+        lemonade_config = LemonadeShadowRouterConfig.from_env(
+            timeout_seconds=int(timeout_seconds)
+        )
         return LemonadeShadowRouter(lemonade_config, limit_registry=limit_registry)
     raise ValueError(
         f"Unsupported shadow router provider {provider!r}; supported providers: disabled, lemonade."

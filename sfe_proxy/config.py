@@ -16,6 +16,7 @@ SUPPORTED_MODES = (DEFAULT_MODE, SHADOW_MODE)
 DEFAULT_SHADOW_MIN_INPUT_TOKENS = 50000
 DEFAULT_SHADOW_LOG_DIR = "logs/sfe_proxy_shadow"
 DEFAULT_SHADOW_ROUTER_PROVIDER = "disabled"
+DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS = 30
 LEMONADE_SHADOW_ROUTER_PROVIDER = "lemonade"
 SUPPORTED_SHADOW_ROUTER_PROVIDERS = (
     DEFAULT_SHADOW_ROUTER_PROVIDER,
@@ -36,6 +37,7 @@ class ProxyConfig:
     shadow_selection_dry_run: bool = False
     shadow_router_dry_run: bool = False
     shadow_router_provider: str = DEFAULT_SHADOW_ROUTER_PROVIDER
+    shadow_router_timeout_seconds: int = DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -65,6 +67,13 @@ class ProxyConfig:
         shadow_router_provider = os.getenv(
             "SFE_PROXY_SHADOW_ROUTER_PROVIDER", DEFAULT_SHADOW_ROUTER_PROVIDER
         )
+        shadow_router_timeout_seconds = _parse_int(
+            os.getenv(
+                "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS",
+                str(DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS),
+            ),
+            "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS",
+        )
         return cls(
             host=os.getenv("SFE_PROXY_HOST", DEFAULT_HOST),
             port=port,
@@ -83,6 +92,7 @@ class ProxyConfig:
             ),
             shadow_router_dry_run=shadow_router_dry_run,
             shadow_router_provider=shadow_router_provider,
+            shadow_router_timeout_seconds=shadow_router_timeout_seconds,
         ).validated()
 
     def validated(self) -> "ProxyConfig":
@@ -106,6 +116,8 @@ class ProxyConfig:
             raise ValueError("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be non-negative.")
         if not self.shadow_log_dir:
             raise ValueError("SFE_PROXY_SHADOW_LOG_DIR must not be empty.")
+        if self.shadow_router_timeout_seconds <= 0:
+            raise ValueError("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS must be positive.")
         if self.shadow_router_provider not in SUPPORTED_SHADOW_ROUTER_PROVIDERS:
             raise ValueError(
                 "Unsupported SFE_PROXY_SHADOW_ROUTER_PROVIDER "
@@ -132,3 +144,10 @@ def _parse_bool(raw: str, name: str) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be true or false.")
+
+
+def _parse_int(raw: str, name: str) -> int:
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc

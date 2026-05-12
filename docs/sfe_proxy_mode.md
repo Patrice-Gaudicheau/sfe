@@ -230,6 +230,7 @@ enabled only when all of these are set:
 SFE_PROXY_MODE=shadow
 SFE_PROXY_SHADOW_ROUTER_DRY_RUN=true
 SFE_PROXY_SHADOW_ROUTER_PROVIDER=lemonade
+SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS=30
 ```
 
 Provider details come from the existing project-level Lemonade configuration,
@@ -246,6 +247,12 @@ project router model variable `SFE_ROUTER_MODEL`. If neither is set, Lemonade
 router dry-run records a safe provider error and pass-through behavior remains
 unchanged. The recommended fix is to set the standard project-level Lemonade
 model variable, not a proxy-specific model variable.
+
+`SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS` is a generic shadow-router timeout,
+not a Lemonade-specific provider setting. The default is 30 seconds. Larger
+local router models may need a higher value. This timeout applies only to
+shadow router dry-run calls and does not change the upstream pass-through
+request timeout.
 
 The Lemonade router dry-run is local-provider oriented. When explicitly
 enabled, it may send extracted text segments to the configured local Lemonade

@@ -25,6 +25,7 @@ from sfe_proxy.config import (
     DEFAULT_PORT,
     DEFAULT_SHADOW_LOG_DIR,
     DEFAULT_SHADOW_MIN_INPUT_TOKENS,
+    DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS,
     DEFAULT_UPSTREAM_BASE_URL,
     ProxyConfig,
 )
@@ -112,6 +113,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_DIR", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     try:
@@ -133,6 +135,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.shadow_selection_dry_run is False
     assert config.shadow_router_dry_run is False
     assert config.shadow_router_provider == "disabled"
+    assert config.shadow_router_timeout_seconds == DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
 
 
 def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
@@ -176,6 +179,39 @@ def test_proxy_config_accepts_lemonade_router_provider_without_provider_details(
 
     assert config.shadow_router_dry_run is True
     assert config.shadow_router_provider == "lemonade"
+
+
+def test_proxy_config_parses_shadow_router_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", "75")
+
+    config = ProxyConfig.from_env()
+
+    assert config.shadow_router_timeout_seconds == 75
+
+
+def test_proxy_config_rejects_invalid_shadow_router_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", "not-an-int")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS must be an integer" in str(exc)
+    else:
+        raise AssertionError("invalid shadow router timeout should fail")
+
+
+def test_proxy_config_rejects_non_positive_shadow_router_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    for value in ("0", "-1"):
+        monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", value)
+        try:
+            ProxyConfig.from_env()
+        except ValueError as exc:
+            assert "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS must be positive" in str(exc)
+        else:
+            raise AssertionError("non-positive shadow router timeout should fail")
 
 
 
@@ -1377,6 +1413,55 @@ def test_shadow_router_lemonade_unknown_segment_id_is_safe(monkeypatch, tmp_path
     assert event["shadow_router_reason"] == "lemonade_router_malformed_result"
     assert event["shadow_router_error_type"] == "ValueError"
     assert event["shadow_router_candidate_selected_segment_ids"] == []
+
+
+def test_shadow_router_lemonade_uses_generic_timeout(monkeypatch, tmp_path) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
+    upstream = _start_upstream(body=b'{"ok":true}')
+    observed: dict[str, int] = {}
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="lemonade",
+        shadow_router_timeout_seconds=77,
+    )
+
+    def observe_timeout(self: LemonadeShadowRouter, router_input: ShadowRouterInput) -> dict[str, Any]:
+        observed["timeout_seconds"] = self.config.timeout_seconds
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(_lemonade_router_result(reason="timeout_config_seen"))
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(LemonadeShadowRouter, "_call_lemonade", observe_timeout)
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"model": "example-model", "messages": [{"role": "user", "content": "synthetic segment"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert observed["timeout_seconds"] == 77
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_status"] == "candidate_selected"
+    assert event["shadow_router_reason"] == "timeout_config_seen"
 
 
 def test_shadow_router_lemonade_timeout_is_safe(monkeypatch, tmp_path) -> None:
