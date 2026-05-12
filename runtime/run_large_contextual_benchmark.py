@@ -138,6 +138,22 @@ class BlockSelector(Protocol):
         ...
 
 
+class ProviderCallPacer:
+    """Optional delay between live provider calls."""
+
+    def __init__(self, delay_seconds: float = 0.0, sleep_func=time.sleep) -> None:
+        if delay_seconds < 0:
+            raise ValueError("--provider-call-delay-seconds must be at least 0.")
+        self.delay_seconds = delay_seconds
+        self.sleep_func = sleep_func
+        self.call_count = 0
+
+    def wait_before_call(self) -> None:
+        if self.delay_seconds > 0 and self.call_count > 0:
+            self.sleep_func(self.delay_seconds)
+        self.call_count += 1
+
+
 @dataclass(frozen=True)
 class ContextBlock:
     block_id: str
@@ -179,6 +195,7 @@ def main() -> None:
         task_tier=args.task_tier,
         executor=args.executor,
         max_output_repairs=args.max_output_repairs,
+        provider_call_delay_seconds=args.provider_call_delay_seconds,
     )
 
     write_json(args.json, report)
@@ -231,6 +248,15 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Maximum structural output repair attempts per eligible spatial_router run. "
             "Defaults to 0; repair is disabled unless explicitly enabled."
+        ),
+    )
+    parser.add_argument(
+        "--provider-call-delay-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional delay inserted between live provider calls within a benchmark "
+            "run. Defaults to 0 and does not affect dry-run execution."
         ),
     )
     parser.add_argument(
@@ -1942,6 +1968,8 @@ def run_benchmark(
     task_tier: str = TASK_TIER_STANDARD,
     executor: str = LEMONADE_EXECUTOR,
     max_output_repairs: int = 0,
+    provider_call_delay_seconds: float = 0.0,
+    sleep_func=time.sleep,
 ) -> dict[str, Any]:
     if repeat < 1:
         raise ValueError("--repeat must be at least 1.")
@@ -1951,6 +1979,8 @@ def run_benchmark(
         raise ValueError("--max-tokens must be at least 1.")
     if max_output_repairs < 0:
         raise ValueError("--max-output-repairs must be at least 0.")
+    if provider_call_delay_seconds < 0:
+        raise ValueError("--provider-call-delay-seconds must be at least 0.")
     if not tasks:
         raise ValueError("At least one large/contextual task is required.")
     if selection_mode not in SELECTION_MODES:
@@ -1959,6 +1989,10 @@ def run_benchmark(
         raise ValueError(f"Unknown executor: {executor}")
     task_tier = normalize_task_tier(task_tier)
     base_url = base_url or _default_base_url(executor)
+    provider_pacer = ProviderCallPacer(
+        delay_seconds=provider_call_delay_seconds,
+        sleep_func=sleep_func,
+    )
 
     provider = provider or (None if dry_run else _make_provider(executor, base_url, timeout_seconds))
     router_model = router_model or _default_router_model(executor)
@@ -1969,6 +2003,7 @@ def run_benchmark(
         base_url=base_url,
         timeout_seconds=timeout_seconds,
         router_model=router_model,
+        provider_pacer=provider_pacer,
     )
     selection_verifier = SelectionVerifier()
     selection_verification_enabled = _selection_verification_enabled(task_tier)
@@ -2008,6 +2043,7 @@ def run_benchmark(
                         output_repair_enabled=output_repair_enabled,
                         max_output_repairs=max_output_repairs,
                         task_tier=task_tier,
+                        provider_pacer=provider_pacer,
                     )
                 )
 
@@ -2029,6 +2065,7 @@ def run_benchmark(
             "task_count": len(tasks),
             "run_count": len(runs),
             "dry_run": dry_run,
+            "provider_call_delay_seconds": provider_call_delay_seconds,
             "selection_verification": {
                 "enabled": selection_verification_enabled,
                 "trigger": (
@@ -2089,6 +2126,7 @@ def _make_selector(
     base_url: str,
     timeout_seconds: float,
     router_model: str,
+    provider_pacer: ProviderCallPacer | None = None,
 ) -> BlockSelector | None:
     if selection_mode == "fixture":
         return None
@@ -2100,6 +2138,7 @@ def _make_selector(
         model=router_model,
         router_name=_block_selector_name(executor),
         selection_source=_selection_source(executor),
+        provider_pacer=provider_pacer,
     )
 
 
@@ -2287,11 +2326,13 @@ class LemonadeBlockSelector:
         model: str,
         router_name: str = LEMONADE_BLOCK_SELECTOR_NAME,
         selection_source: str = "lemonade",
+        provider_pacer: ProviderCallPacer | None = None,
     ):
         self.provider = provider
         self.model = model
         self.router_name = router_name
         self.selection_source = selection_source
+        self.provider_pacer = provider_pacer or ProviderCallPacer()
 
     def select(
         self,
@@ -2304,6 +2345,7 @@ class LemonadeBlockSelector:
         output = ""
         attempted_block_id: str | None = None
         try:
+            self.provider_pacer.wait_before_call()
             response = self.provider.chat(
                 [{"role": "user", "content": prompt}],
                 model=self.model,
@@ -2560,6 +2602,7 @@ def _maybe_repair_output(
     provider: ChatProvider | None,
     model: str,
     max_tokens: int,
+    provider_pacer: ProviderCallPacer | None = None,
 ) -> tuple[OutputRepairResult, bool]:
     output_missing_targets = tuple(
         output_validation.missing_targets if output_validation is not None else ()
@@ -2613,6 +2656,8 @@ def _maybe_repair_output(
         )
 
     selected_block = _block_by_id(task, str(route["selected_block_id"]))
+    if provider_pacer is not None:
+        provider_pacer.wait_before_call()
     repair = output_repairer.repair(
         provider=provider,
         model=model,
@@ -2645,6 +2690,7 @@ def execute_task(
     output_repair_enabled: bool = False,
     max_output_repairs: int = 0,
     task_tier: str | None = None,
+    provider_pacer: ProviderCallPacer | None = None,
 ) -> dict[str, Any]:
     prompt = build_prompt(task, mode, route, task_tier=task_tier)
     prompt_tokens_estimate = estimate_tokens(prompt)
@@ -2664,6 +2710,8 @@ def execute_task(
         if provider is None:
             raise ValueError("provider is required when dry_run is false.")
         try:
+            if provider_pacer is not None:
+                provider_pacer.wait_before_call()
             response = provider.chat(
                 [{"role": "user", "content": prompt}],
                 model=model,
@@ -2700,6 +2748,7 @@ def execute_task(
         provider=provider,
         model=model,
         max_tokens=max_tokens,
+        provider_pacer=provider_pacer,
     )
     repair_complete = repair_result.status == OUTPUT_REPAIR_STATUS_ATTEMPTED_COMPLETE
     output_final = repair_result.repaired_text if repair_complete else output
@@ -3451,6 +3500,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"Selection mode: `{report['metadata']['selection_mode']}`",
         f"Task tier: `{report['metadata']['task_tier']}` ({report['metadata']['task_tier_description']})",
         f"Dry run: `{report['metadata']['dry_run']}`",
+        f"Provider call delay seconds: `{report['metadata'].get('provider_call_delay_seconds', 0.0)}`",
         "",
         "## Summary",
         "",

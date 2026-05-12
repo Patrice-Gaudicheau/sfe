@@ -370,6 +370,7 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["metadata"]["executor"], "lemonade")
         self.assertEqual(report["metadata"]["selection_mode"], "fixture")
         self.assertEqual(report["metadata"]["task_tier"], TASK_TIER_STANDARD)
+        self.assertEqual(report["metadata"]["provider_call_delay_seconds"], 0.0)
         self.assertEqual(report["metadata"]["task_count"], len(get_large_contextual_tasks()))
         self.assertEqual(report["summary"]["modes"]["baseline"]["run_count"], len(get_large_contextual_tasks()))
         self.assertEqual(
@@ -437,6 +438,90 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.router_model, "env-openai-router")
         self.assertEqual(args.base_url, "https://api.example.test/v1")
         self.assertEqual(args.json, OPENAI_API_JSON_PATH)
+
+    def test_cli_accepts_provider_call_delay_seconds(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_large_contextual_benchmark.py",
+                "--dry-run",
+                "--provider-call-delay-seconds",
+                "1.5",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.provider_call_delay_seconds, 1.5)
+
+    def test_provider_call_delay_sleeps_between_live_provider_calls(self) -> None:
+        task = get_large_contextual_tasks()[:1][0]
+        fixture_block_id = str(select_relevant_block(task)["selected_block_id"])
+        sleep_calls: list[float] = []
+
+        class FakeProvider:
+            def __init__(self, base_url: str) -> None:
+                self.base_url = base_url
+                self.timeout = None
+
+            def chat(self, messages, *_: object, **__: object) -> dict[str, object]:  # type: ignore[no-untyped-def]
+                prompt = str(messages[0]["content"])
+                if "Return JSON only" in prompt:
+                    content = json.dumps(
+                        {
+                            "selected_block_id": fixture_block_id,
+                            "confidence": 1.0,
+                            "reason": "contains requested values",
+                        }
+                    )
+                else:
+                    content = " ".join(task.expected_answer_hints)
+                return {
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.LemonadeProvider",
+            FakeProvider,
+        ):
+            report = run_benchmark(
+                tasks=[task],
+                repeat=1,
+                model="fake-lemonade-model",
+                base_url="http://localhost:8000/api/v0",
+                dry_run=False,
+                selection_mode="both",
+                provider_call_delay_seconds=1.25,
+                sleep_func=sleep_calls.append,
+            )
+
+        self.assertEqual(sleep_calls, [1.25, 1.25, 1.25])
+        self.assertEqual(report["metadata"]["provider_call_delay_seconds"], 1.25)
+        self.assertEqual(
+            set(report["summary"]["modes"]),
+            {"baseline", "spatial_fixture", "spatial_router"},
+        )
+
+    def test_provider_call_delay_does_not_sleep_in_dry_run(self) -> None:
+        sleep_calls: list[float] = []
+
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks()[:1],
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="both",
+            provider_call_delay_seconds=2.0,
+            sleep_func=sleep_calls.append,
+        )
+
+        self.assertEqual(sleep_calls, [])
+        self.assertEqual(report["metadata"]["provider_call_delay_seconds"], 2.0)
 
     def test_openai_api_provider_path_is_constructed_without_network_in_tests(self) -> None:
         class FakeOpenAIProvider:
