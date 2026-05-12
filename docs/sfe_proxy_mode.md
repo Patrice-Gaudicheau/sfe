@@ -225,6 +225,36 @@ affect the upstream request or downstream response.
 This contract is preparation for future provider-specific router dry-runs. It
 is still shadow-only observability, not SFE-enabled execution.
 
+### Provider Limit Decision Contract
+
+The proxy also includes a local provider limit decision contract for future
+shadow router providers. It does not call OpenAI, Anthropic, Lemonade, or any
+other provider, and it does not affect pass-through behavior yet.
+
+The defaults are non-restrictive:
+
+```text
+SFE_PROXY_PROVIDER_LIMITS_ENABLED=false
+SFE_PROXY_PROVIDER_DEFAULT_MIN_INTERVAL_MS=0
+SFE_PROXY_PROVIDER_DEFAULT_MAX_INPUT_TOKENS=0
+SFE_PROXY_PROVIDER_DEFAULT_MAX_REQUESTS_PER_MINUTE=0
+SFE_PROXY_PROVIDER_DEFAULT_QUEUE_MODE=reject
+```
+
+Provider-specific settings exist for `openai`, `anthropic`, and `lemonade`.
+`disabled` is also a supported provider key and remains harmless.
+
+For each numeric limit, `0` means unlimited or disabled for that limit. Queue
+mode can be `reject` or `wait`. In this branch, both are decision modes only:
+`reject` means a future provider call would be rejected by the decision layer,
+while `wait` means a future provider call would require waiting. The proxy does
+not sleep, queue, retry, or call a provider based on this contract yet.
+
+Anthropic may need stricter future limits for large prompts and request pacing
+because provider-side input-token-per-minute limits can affect large-context
+workloads. Those constraints are represented here as local configuration and
+decision metadata only.
+
 ## Future Modes
 
 SFE-enabled mode is a future step. It is not implemented in this pass-through

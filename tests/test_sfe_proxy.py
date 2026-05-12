@@ -27,6 +27,7 @@ from sfe_proxy.config import (
     DEFAULT_UPSTREAM_BASE_URL,
     ProxyConfig,
 )
+from sfe_proxy.provider_limits import ProviderLimitRegistry, ProviderRateLimiter
 from sfe_proxy.server import _is_sse_response, create_server
 from sfe_proxy.shadow_router import (
     DisabledShadowRouter,
@@ -683,6 +684,270 @@ def test_shadow_router_dry_run_disabled_provider_preserves_pass_through(tmp_path
     assert "client-secret" not in serialized_event
     assert "Authorization" not in serialized_event
     assert prompt not in joined_logs
+
+
+def test_provider_limit_defaults_are_disabled_and_unlimited() -> None:
+    registry = ProviderLimitRegistry.from_env({})
+    config = registry.config_for("openai")
+
+    assert config.enabled is False
+    assert config.min_interval_ms == 0
+    assert config.max_input_tokens == 0
+    assert config.max_requests_per_minute == 0
+    assert config.queue_mode == "reject"
+
+    decision = registry.limiter_for("openai").decide(estimated_input_tokens=999999)
+    assert decision.allowed is True
+    assert decision.reason == "limits_disabled"
+
+
+def test_provider_limit_explicit_empty_env_ignores_process_env(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", "true")
+    monkeypatch.setenv("SFE_PROXY_OPENAI_MAX_INPUT_TOKENS", "1")
+
+    registry = ProviderLimitRegistry.from_env({})
+    config = registry.config_for("openai")
+
+    assert config.enabled is False
+    assert config.max_input_tokens == 0
+
+
+def test_provider_specific_values_override_defaults() -> None:
+    registry = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_PROVIDER_DEFAULT_MIN_INTERVAL_MS": "100",
+            "SFE_PROXY_PROVIDER_DEFAULT_MAX_INPUT_TOKENS": "1000",
+            "SFE_PROXY_PROVIDER_DEFAULT_MAX_REQUESTS_PER_MINUTE": "10",
+            "SFE_PROXY_PROVIDER_DEFAULT_QUEUE_MODE": "reject",
+            "SFE_PROXY_OPENAI_MIN_INTERVAL_MS": "250",
+            "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "2000",
+            "SFE_PROXY_OPENAI_MAX_REQUESTS_PER_MINUTE": "20",
+            "SFE_PROXY_OPENAI_QUEUE_MODE": "wait",
+        }
+    )
+
+    openai_config = registry.config_for("openai")
+    anthropic_config = registry.config_for("anthropic")
+
+    assert openai_config.enabled is True
+    assert openai_config.min_interval_ms == 250
+    assert openai_config.max_input_tokens == 2000
+    assert openai_config.max_requests_per_minute == 20
+    assert openai_config.queue_mode == "wait"
+    assert anthropic_config.min_interval_ms == 100
+    assert anthropic_config.max_input_tokens == 1000
+    assert anthropic_config.max_requests_per_minute == 10
+    assert anthropic_config.queue_mode == "reject"
+
+
+def test_anthropic_provider_limits_parse_explicit_values() -> None:
+    registry = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_ANTHROPIC_MIN_INTERVAL_MS": "600000",
+            "SFE_PROXY_ANTHROPIC_MAX_INPUT_TOKENS": "40000",
+            "SFE_PROXY_ANTHROPIC_MAX_REQUESTS_PER_MINUTE": "1",
+            "SFE_PROXY_ANTHROPIC_QUEUE_MODE": "wait",
+        }
+    )
+
+    config = registry.config_for("anthropic")
+
+    assert config.enabled is True
+    assert config.min_interval_ms == 600000
+    assert config.max_input_tokens == 40000
+    assert config.max_requests_per_minute == 1
+    assert config.queue_mode == "wait"
+
+
+def test_provider_limit_zero_means_unlimited() -> None:
+    limiter = ProviderRateLimiter(
+        ProviderLimitRegistry.from_env(
+            {
+                "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+                "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "0",
+                "SFE_PROXY_OPENAI_MAX_REQUESTS_PER_MINUTE": "0",
+                "SFE_PROXY_OPENAI_MIN_INTERVAL_MS": "0",
+            }
+        ).config_for("openai")
+    )
+
+    decision = limiter.decide(
+        estimated_input_tokens=500000,
+        elapsed_since_last_request_ms=0,
+        requests_in_last_minute=1000,
+    )
+
+    assert decision.allowed is True
+    assert decision.reason == "within_limits"
+
+
+def test_provider_limit_invalid_numeric_values_fail_clearly() -> None:
+    try:
+        ProviderLimitRegistry.from_env({"SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "not-an-int"})
+    except ValueError as exc:
+        assert "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS must be an integer" in str(exc)
+    else:
+        raise AssertionError("invalid numeric limit should fail")
+
+
+def test_provider_limit_negative_numeric_values_fail_clearly() -> None:
+    try:
+        ProviderLimitRegistry.from_env({"SFE_PROXY_OPENAI_MIN_INTERVAL_MS": "-1"})
+    except ValueError as exc:
+        assert "SFE_PROXY_OPENAI_MIN_INTERVAL_MS must be non-negative" in str(exc)
+    else:
+        raise AssertionError("negative numeric limit should fail")
+
+
+def test_provider_limit_invalid_queue_mode_fails_clearly() -> None:
+    try:
+        ProviderLimitRegistry.from_env({"SFE_PROXY_OPENAI_QUEUE_MODE": "sleep"})
+    except ValueError as exc:
+        assert "SFE_PROXY_OPENAI_QUEUE_MODE must be one of" in str(exc)
+    else:
+        raise AssertionError("invalid queue mode should fail")
+
+
+def test_provider_limit_allows_under_limits() -> None:
+    limiter = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "100",
+            "SFE_PROXY_OPENAI_MIN_INTERVAL_MS": "100",
+            "SFE_PROXY_OPENAI_MAX_REQUESTS_PER_MINUTE": "10",
+        }
+    ).limiter_for("openai")
+
+    decision = limiter.decide(
+        estimated_input_tokens=50,
+        elapsed_since_last_request_ms=100,
+        requests_in_last_minute=9,
+    )
+
+    assert decision.allowed is True
+    assert decision.rejected is False
+    assert decision.wait_required is False
+    assert decision.reason == "within_limits"
+
+
+def test_provider_limit_rejects_when_input_tokens_exceeded() -> None:
+    limiter = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "100",
+            "SFE_PROXY_OPENAI_QUEUE_MODE": "reject",
+        }
+    ).limiter_for("openai")
+
+    decision = limiter.decide(estimated_input_tokens=101)
+
+    assert decision.allowed is False
+    assert decision.rejected is True
+    assert decision.wait_required is False
+    assert decision.reason == "max_input_tokens_exceeded"
+
+
+def test_provider_limit_token_cap_rejects_even_in_wait_mode() -> None:
+    limiter = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "100",
+            "SFE_PROXY_OPENAI_QUEUE_MODE": "wait",
+        }
+    ).limiter_for("openai")
+
+    decision = limiter.decide(estimated_input_tokens=101)
+
+    assert decision.allowed is False
+    assert decision.rejected is True
+    assert decision.wait_required is False
+    assert decision.reason == "max_input_tokens_exceeded"
+
+
+def test_provider_limit_wait_required_without_sleeping_for_pacing() -> None:
+    limiter = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_ANTHROPIC_MIN_INTERVAL_MS": "1000",
+            "SFE_PROXY_ANTHROPIC_QUEUE_MODE": "wait",
+        }
+    ).limiter_for("anthropic")
+
+    decision = limiter.decide(
+        estimated_input_tokens=50,
+        elapsed_since_last_request_ms=250,
+    )
+
+    assert decision.allowed is False
+    assert decision.rejected is False
+    assert decision.wait_required is True
+    assert decision.reason == "min_interval_ms_not_elapsed"
+    assert decision.wait_ms == 750
+
+
+def test_provider_limit_wait_required_without_sleeping_for_rpm() -> None:
+    limiter = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_ANTHROPIC_MAX_REQUESTS_PER_MINUTE": "1",
+            "SFE_PROXY_ANTHROPIC_QUEUE_MODE": "wait",
+        }
+    ).limiter_for("anthropic")
+
+    decision = limiter.decide(
+        estimated_input_tokens=50,
+        requests_in_last_minute=1,
+    )
+
+    assert decision.allowed is False
+    assert decision.rejected is False
+    assert decision.wait_required is True
+    assert decision.reason == "max_requests_per_minute_exceeded"
+    assert decision.wait_ms == 60000
+
+
+def test_provider_limit_disabled_provider_is_harmless() -> None:
+    registry = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_PROVIDER_DEFAULT_MAX_INPUT_TOKENS": "1",
+        }
+    )
+
+    config = registry.config_for("disabled")
+    decision = registry.limiter_for("disabled").decide(estimated_input_tokens=999999)
+
+    assert config.enabled is False
+    assert decision.allowed is True
+    assert decision.reason == "limits_disabled"
+
+
+def test_provider_limit_unknown_provider_fails_clearly() -> None:
+    registry = ProviderLimitRegistry.from_env({})
+
+    try:
+        registry.config_for("unknown")
+    except ValueError as exc:
+        assert "Unsupported provider key" in str(exc)
+    else:
+        raise AssertionError("unknown provider key should fail")
+
+
+def test_provider_limit_decision_metadata_is_json_compatible() -> None:
+    decision = ProviderLimitRegistry.from_env(
+        {
+            "SFE_PROXY_PROVIDER_LIMITS_ENABLED": "true",
+            "SFE_PROXY_OPENAI_MAX_INPUT_TOKENS": "100",
+        }
+    ).limiter_for("openai").decide(estimated_input_tokens=101)
+
+    metadata = decision.to_metadata()
+
+    json.dumps(metadata)
+    assert metadata["configured_limits"]["max_input_tokens"] == 100
+    assert metadata["estimated_input_tokens"] == 101
 
 
 def test_shadow_selection_dry_run_failure_does_not_break_pass_through(
