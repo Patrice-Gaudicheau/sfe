@@ -1,19 +1,22 @@
 # Spatial Field Engine for Cognition
 
-**Context governance and token optimization for long-context LLM workflows.**
+**Context-governance infrastructure for long-context LLM workflows.**
 
-Spatial Field Engine for Cognition (`SFE`) is a source-available
-infrastructure prototype that separates context selection from task execution.
-Instead of sending every request as one large flat prompt, SFE routes the task
-through a selector, exposes only the relevant authoritative context to the
-executor, and records the decision path for audit.
+Spatial Field Engine for Cognition (`SFE`) is source-available
+context-governance infrastructure for long-context LLM workflows. It separates
+context selection from task execution: instead of sending every request as one
+large flat prompt, SFE routes the task through a selector, exposes selected
+authoritative context to the executor, and records the decision path for audit.
 
-In a fresh local OpenAI reproduction across four controlled context tiers, **SFE
-observed up to 84.08% router-inclusive token reduction** on a 50k+ structural-tier
-task. The strongest signal appears when context is large enough for routing
-overhead to be amortized.
+The commercial relevance is strongest where teams run repeated API-heavy
+long-context workflows and need token-budget control, authority governance, and
+auditable context selection. SFE may be useful when avoided context is large
+enough to amortize routing overhead.
 
-These are controlled benchmark observations, not a production savings commitment.
+In protocol-aligned controlled observations on 50k+ structural-tier tasks, SFE
+measured 84.08% router-inclusive token reduction with OpenAI and 83.63% with
+Anthropic. These are controlled benchmark observations, not production savings
+commitments.
 
 SFE does not claim to make a model more intelligent. The current project tests a
 narrower engineering hypothesis: for some tasks, explicit workspace structure
@@ -23,6 +26,17 @@ reducing executor context and improving traceability.
 The evidence in this repository is early, mostly synthetic, and
 benchmark-specific. Treat the results as a research signal from a technical
 prototype, not as proof of general model capability or production readiness.
+
+## Core Engineering Signal
+
+Across protocol-aligned OpenAI and Anthropic campaigns, selected-context
+reduction patterns were nearly identical. Router-inclusive gains were modest on
+standard context, then increased sharply as context grew.
+
+The useful signal is the amortization pattern, not a claim of universal
+activation. Structural 50k+ observations reached 84.08% OpenAI and 83.63%
+Anthropic router-inclusive reduction. These remain controlled benchmark
+observations.
 
 ## Why This Matters
 
@@ -37,31 +51,63 @@ intended activation model is selective, not always-on: SFE is most relevant
 when context size, authority conflicts, or audit requirements can justify the
 routing overhead.
 
-## Performance Snapshot
+## Multi-Provider Performance Snapshot
 
-Fresh local OpenAI reproduction across four context-intensity tiers.
-Router-inclusive reduction includes both selector and executor calls.
+Protocol-aligned controlled OpenAI and Anthropic observations across four
+context-intensity tiers.
 
-| Tier | Executor input reduction | Router-inclusive token reduction |
-| --- | ---: | ---: |
-| `standard` [2k-5k tokens] | 81.06% | 21.82% |
-| `practical` [10k-20k tokens] | 88.17% | 63.54% |
-| `high_context` [20k-50k tokens] | 91.11% | 73.35% |
-| `structural` [50k+ tokens] | 94.16% | 84.08% |
+| Tier | OpenAI selected reduction | OpenAI router-inclusive reduction | Anthropic selected reduction | Anthropic router-inclusive reduction |
+| --- | ---: | ---: | ---: | ---: |
+| `standard` [2k-5k tokens] | 81.06% | 21.71% | 80.88% | 19.09% |
+| `practical` [10k-20k tokens] | 88.17% | 63.40% | 88.05% | 62.01% |
+| `high_context` [20k-50k tokens] | 91.11% | 73.38% | 91.02% | 72.02% |
+| `structural` [50k+ tokens] | 94.16% | 84.08% | 93.94% | 83.63% |
 
-These are local OpenAI observations on controlled fixtures, not statistical
-proof and not a cost-savings commitment. See `docs/token_cost_metrics.md` for
-token accounting, caveats, and the cost-relevant input/output breakdown.
+Selected reduction means executor-visible context reduction. Router-inclusive
+reduction includes selector/router overhead. The standard tier shows router
+overhead clearly; larger tiers show better amortization. Anthropic structural
+required `600` seconds of provider-call pacing because of provider
+input-token-per-minute limits.
+
+These are controlled observations, not statistical proof and not production
+commitments. See `docs/provider_comparison_summary.md` for the cross-provider
+summary and `docs/token_cost_metrics.md` for OpenAI token accounting details.
+
+## Operational Relevance
+
+SFE may be commercially relevant when avoided context is large enough to
+amortize routing cost. Current areas of interest include:
+
+- API-heavy long-context workflows.
+- LLM gateways and proxy layers.
+- Token budget control and context exposure reduction.
+- Auditable routing decisions.
+- Authority conflicts between documents, versions, policies, or governance
+  sources.
+- Provider-routing and context-budget policies.
+- Enterprise assistant workflows where full-context prompting is expensive or
+  hard to audit.
+
+## The Amortization Hypothesis
+
+Routing has a fixed cost. SFE is not intended to activate on every prompt, and
+short or simple prompts may not benefit. The project is most relevant when
+avoided context is large enough, or when authority and audit requirements
+justify routing.
+
+Selective activation is therefore central to the design: context size,
+authority-conflict density, token budget, and audit requirements should decide
+when SFE is used.
 
 ## Who This Is For
 
-- AI platform teams evaluating context selection, routing, or execution
-  boundaries.
-- Infrastructure teams building LLM gateways or routing layers.
-- AI product publishers with API-heavy workloads where token budgets matter.
-- Teams handling policy, documentation, governance, or authority-conflict
-  workflows.
-- Technical investors evaluating context-optimization infrastructure.
+- AI platform teams.
+- LLM infrastructure architects.
+- Teams building gateways, proxies, or provider-routing systems.
+- Teams operating API-heavy long-context workloads.
+- Teams handling authority conflicts, policy documents, governance,
+  compliance, or audit-sensitive assistant workflows.
+- Technical investors evaluating context-governance infrastructure.
 
 ## Project Status
 
@@ -71,9 +117,15 @@ This repository is currently a technical prototype. It is source-available, not 
 
 SFE is published as a source-visible project under the PolyForm Noncommercial License 1.0.0.
 
-SFE encourages exploration, research, evaluation, learning, and small-scale experimentation by individuals, researchers, and small teams under its non-commercial terms.
+Research and evaluation are source-visible under the PolyForm Noncommercial
+License 1.0.0. SFE encourages exploration, learning, and small-scale
+experimentation by individuals, researchers, and small teams under its
+non-commercial terms.
 
-Commercial deployment, hosted services, enterprise integration, API cost optimization at scale, token-saving infrastructure use, or incorporation into commercial products requires a separate commercial license.
+Commercial and production use requires a separate commercial license. This
+includes commercial deployment, hosted services, enterprise integration, API
+cost optimization at scale, token-saving infrastructure use, or incorporation
+into commercial products.
 
 For details, see `COMMERCIAL_LICENSE.md`.
 
@@ -130,7 +182,8 @@ At a high level, the current repository has four layers:
 
 - `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
 - `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
-- `providers/`: minimal provider adapters, including Lemonade and OpenAI-compatible paths.
+- `providers/`: minimal provider adapters, including Lemonade, OpenAI API, and
+  native Anthropic Messages API paths.
 - `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
 
 The main execution pattern is:
@@ -186,17 +239,32 @@ SFE_ROUTER_MODEL=<local-router-model-id>
 SFE_EXECUTOR_MODEL=<local-executor-model-id>
 ```
 
-OpenAI API benchmarks are optional and require `OPENAI_API_KEY` plus explicit `SFE_OPENAI_ROUTER_MODEL` and `SFE_OPENAI_EXECUTOR_MODEL` values that are available to your account.
+OpenAI API benchmarks are optional and require `OPENAI_API_KEY` plus explicit
+`SFE_OPENAI_ROUTER_MODEL` and `SFE_OPENAI_EXECUTOR_MODEL` values that are
+available to your account.
+
+Anthropic API benchmarks are optional and require:
+
+```bash
+ANTHROPIC_API_KEY=<local-key>
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+SFE_ANTHROPIC_ROUTER_MODEL=<anthropic-router-model-id>
+SFE_ANTHROPIC_EXECUTOR_MODEL=<anthropic-executor-model-id>
+```
 
 ## Live API Caution
 
 Deterministic tests do not require an API key. Live OpenAI runners require
-`OPENAI_API_KEY`; keep it in a local `.env` file and never commit it.
+`OPENAI_API_KEY`; live Anthropic runners require `ANTHROPIC_API_KEY`. Keep
+secrets in a local `.env` file and never commit them.
 
 Generated benchmark reports should be written under `/tmp` or another
 untracked local location. Some selected-vs-full comparison runner names do not
 include `openai` even though they call OpenAI when the API key is present. Check
 `docs/INDEX.md` before running live scripts.
+
+Anthropic structural runs may require `--provider-call-delay-seconds` because
+provider input-token-per-minute limits can affect execution timing.
 
 ## Benchmarks
 
@@ -240,10 +308,11 @@ Run the high_context 20k-50k tier:
 python runtime/run_large_contextual_benchmark.py --task-tier high_context --selection-mode both --limit 1
 ```
 
-An exploratory `structural` 50k+ stress-test tier is also available. It is
-documented separately because it is intended to expose routing and answer
-completeness limits rather than extend the main validation curve; see
-`docs/structural_benchmark_note.md`.
+The `structural` 50k+ stress-test tier is also available. It remains a
+stress-tier observation, but it is now included in the protocol-aligned OpenAI
+and Anthropic multi-provider benchmark summaries. Use it to examine router
+amortization, answer completeness, and provider execution constraints at larger
+context sizes.
 
 Build prompts and reports without calling Lemonade:
 
@@ -267,31 +336,37 @@ Generated logs, JSONL streams, SQLite files, and benchmark outputs are written u
 
 ## Current Benchmark Signal
 
-The strongest current signal is context reduction on synthetic large/contextual tasks:
+The strongest current cross-provider signal comes from protocol-aligned OpenAI
+and Anthropic large/contextual campaigns. Both show nearly identical
+selected-context reduction patterns, and both show router-inclusive savings
+increasing with context size.
 
-| Tier | Approximate baseline context | Observed executor input reduction | Notes |
-| --- | ---: | ---: | --- |
-| `standard` [2k-5k tokens] | 2k-5k tokens | about 81% | 7 synthetic tasks; fixture and router modes available. |
-| `practical` [10k-20k tokens] | 10k-20k tokens | about 88% | Early long-context tier for router-cost amortization checks. |
-| `high_context` [20k-50k tokens] | 20k-50k tokens | about 91% | 2 synthetic tasks; clean 64K Lemonade runs only. |
+Structural 50k+ observations are clean on both providers:
 
-Router-inclusive savings are lower because the router consumes tokens and latency. In the clean high_context Lemonade result, executor input reduction was about 90.98%, while router-plus-executor total token reduction was about 72.8%.
+- OpenAI: 94.16% selected reduction and 84.08% router-inclusive reduction.
+- Anthropic: 93.94% selected reduction and 83.63% router-inclusive reduction,
+  with `600` seconds provider-call pacing for structural because of Anthropic
+  input-token-per-minute limits.
 
-The fresh OpenAI all-tier token-reduction snapshot is summarized near the top
-of this README. See `docs/token_cost_metrics.md` for token accounting,
-caveats, and the cost-relevant input/output breakdown.
+Lemonade remains useful as a local-provider result and historical benchmark
+path. It is no longer the only current headline for token-reduction behavior.
 
-A first direct OpenAI API validation reused the same large/contextual fixtures and reporting logic. In four small router-inclusive synthetic runs, executor input reduction ranged from 81.60% to 91.13%, router-inclusive total token reduction ranged from 15.06% on the standard task to about 73.6% on the two high_context tasks, and the router selected the expected block with zero fallbacks. See `docs/openai_validation_report.md`.
+In the large/contextual benchmark, `spatial_fixture` means oracle-style
+selection of the known relevant block and should be read as an upper bound on
+executor context reduction. `spatial_router` means the selector chose the block
+before execution. Executor context reduction excludes router cost;
+router-inclusive or end-to-end reduction includes selector overhead.
 
-The strict mixed-task effectiveness benchmark in `docs/effectiveness.md` preserves an additional Lemonade result: 27.89% mean total token savings overall, 21.40% mean total token savings on successful pairs only, 100% router success, 100% JSON validity, and 100% routing accuracy on the current small task set.
-
-In the large/contextual benchmark, `spatial_fixture` means oracle-style selection of the known relevant block and should be read as an upper bound on executor context reduction. `spatial_router` means the selector chose the block before execution. Executor context reduction excludes router cost; router-inclusive or end-to-end reduction includes selector overhead.
-
-These numbers are useful for deciding what to test next. They should not be presented as general proof that SFE improves answer quality, reasoning, or model intelligence.
+These numbers are useful for deciding what to test next. They should not be
+presented as general proof that SFE improves answer quality, reasoning, or
+model intelligence.
 
 ## Documentation
 
 - `docs/INDEX.md`: recommended starting point and runner-category map for technical reviewers.
+- `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
+- `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
+- `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.
 - `docs/public_release_technical_report.md`: public-facing technical report for the current release-readiness snapshot.
 - `docs/large_contextual_benchmark_report.md`: detailed large/contextual benchmark notes.
 - `docs/effectiveness.md`: preserved strict Lemonade effectiveness result.
@@ -317,12 +392,15 @@ with broader local tooling or production-like request flows.
 
 ## Limitations
 
-- The evidence remains benchmark-specific and mostly controlled.
-- Task counts are still small relative to production workloads.
-- The fresh OpenAI token-reduction reproduction covers all four benchmark
+- The evidence remains benchmark-specific and controlled, not a production
+  commitment.
+- Repeat campaign sizes are still small relative to production workloads; these
+  are not statistical proof.
+- OpenAI and Anthropic token-reduction reproductions cover all four benchmark
   tiers, but task counts per tier remain limited.
-- The structural-tier result is promising for token reduction, but remains a
-  stress-tier observation.
+- Provider-specific rate limits can affect execution strategy.
+- Anthropic structural required `600` seconds provider-call pacing because of
+  Anthropic input-token-per-minute limits.
 - High-overlap authority-gap fixtures validate routing, diagnostics, and local
   non-regression behavior, not broad real-world reliability.
 - Selected-context execution did not outperform full-context execution in the
@@ -331,7 +409,7 @@ with broader local tooling or production-like request flows.
   source or filters out required context.
 - Router overhead can erase gains on short or simple prompts.
 - Dollar savings depend on provider pricing, model choice, input/output mix,
-  and deployment policy.
+  cache policy, batch policy, and deployment policy.
 - Broad production workloads, tool-using agents, multi-tenant systems, and
   long-running real user traffic are not validated yet.
 
