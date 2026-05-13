@@ -14,9 +14,12 @@ from .provider_limits import ProviderLimitRegistry
 
 DISABLED_ROUTER_PROVIDER = "disabled"
 LEMONADE_ROUTER_PROVIDER = "lemonade"
+OPENAI_ROUTER_PROVIDER = "openai"
 DEFAULT_LEMONADE_ROUTER_BASE_URL = "http://127.0.0.1:13305"
+DEFAULT_OPENAI_ROUTER_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS = 30
 DEFAULT_LEMONADE_ROUTER_MAX_OUTPUT_TOKENS = 160
+DEFAULT_OPENAI_ROUTER_MAX_OUTPUT_TOKENS = 160
 LEMONADE_MODEL_ENV_NAMES = (
     "SFE_LEMONADE_MODEL",
     "SFE_ROUTER_MODEL",
@@ -263,46 +266,206 @@ class LemonadeShadowRouter:
         started: float,
         rate_limit_metadata: dict[str, object],
     ) -> ShadowRouterResult:
-        if not isinstance(parsed, dict):
-            raise ValueError("router result must be a JSON object")
-        status = parsed["router_status"]
-        reason = parsed["router_reason"]
-        selected_ids = parsed["candidate_selected_segment_ids"]
-        selected_tokens = parsed["estimated_router_selected_input_tokens"]
-        reduction_pct = parsed["estimated_router_token_reduction_pct"]
-        dry_run_only = parsed["dry_run_only"]
-        confidence = parsed.get("confidence")
-        if not isinstance(status, str):
-            raise ValueError("router_status must be a string")
-        if not isinstance(reason, str):
-            raise ValueError("router_reason must be a string")
-        if not isinstance(selected_ids, list) or not all(isinstance(item, str) for item in selected_ids):
-            raise ValueError("candidate_selected_segment_ids must be a list of strings")
-        allowed_ids = _known_segment_ids(router_input)
-        unknown_ids = [item for item in selected_ids if item not in allowed_ids]
-        if unknown_ids:
-            raise ValueError("candidate_selected_segment_ids contains unknown segment ids")
-        if selected_tokens is not None and (not isinstance(selected_tokens, int) or selected_tokens < 0):
-            raise ValueError("estimated_router_selected_input_tokens must be a non-negative integer or null")
-        if reduction_pct is not None and not isinstance(reduction_pct, int | float):
-            raise ValueError("estimated_router_token_reduction_pct must be numeric or null")
-        if dry_run_only is not True:
-            raise ValueError("dry_run_only must be true")
-        if confidence is not None and not isinstance(confidence, int | float):
-            raise ValueError("confidence must be numeric or null")
+        return _parse_router_result(
+            parsed,
+            router_input,
+            started,
+            rate_limit_metadata,
+            self.name,
+        )
+
+    def _failure(
+        self,
+        started: float,
+        status: str,
+        reason: str,
+        error_type: str,
+        rate_limit_metadata: dict[str, object],
+    ) -> ShadowRouterResult:
         return ShadowRouterResult(
             router_enabled=True,
             router_name=self.name,
             router_status=status,
             router_reason=reason,
             router_latency_ms=_elapsed_ms(started),
-            candidate_selected_segment_ids=selected_ids,
-            estimated_router_selected_input_tokens=selected_tokens,
-            estimated_router_token_reduction_pct=(
-                round(float(reduction_pct), 2) if reduction_pct is not None else None
-            ),
             rate_limit_decision=rate_limit_metadata,
-            confidence=round(float(confidence), 4) if confidence is not None else None,
+            error_type=error_type,
+        )
+
+
+@dataclass(frozen=True)
+class OpenAIShadowRouterConfig:
+    base_url: str = DEFAULT_OPENAI_ROUTER_BASE_URL
+    api_key: str = ""
+    model: str = ""
+    timeout_seconds: int = DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
+    max_output_tokens: int = DEFAULT_OPENAI_ROUTER_MAX_OUTPUT_TOKENS
+
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        timeout_seconds: int = DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS,
+    ) -> "OpenAIShadowRouterConfig":
+        return cls(
+            base_url=os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_ROUTER_BASE_URL),
+            api_key=os.getenv("OPENAI_API_KEY", ""),
+            model=os.getenv("SFE_OPENAI_ROUTER_MODEL", ""),
+            timeout_seconds=timeout_seconds,
+            max_output_tokens=DEFAULT_OPENAI_ROUTER_MAX_OUTPUT_TOKENS,
+        )
+
+
+class OpenAIShadowRouter:
+    name = OPENAI_ROUTER_PROVIDER
+
+    def __init__(
+        self,
+        config: OpenAIShadowRouterConfig,
+        limit_registry: ProviderLimitRegistry | None = None,
+    ) -> None:
+        self.config = config
+        self.limit_registry = limit_registry or ProviderLimitRegistry.from_env()
+
+    def analyze(self, router_input: ShadowRouterInput) -> ShadowRouterResult:
+        started = time.perf_counter()
+        if router_input.eligibility_metadata.get("sfe_routing_eligible") is not True:
+            return ShadowRouterResult(
+                router_enabled=True,
+                router_name=self.name,
+                router_status="not_eligible",
+                router_reason="sfe_routing_eligible_false",
+                router_latency_ms=_elapsed_ms(started),
+            )
+        limit_decision = self._limit_decision(router_input)
+        if not limit_decision.allowed:
+            return ShadowRouterResult(
+                router_enabled=True,
+                router_name=self.name,
+                router_status="rate_limited",
+                router_reason=limit_decision.reason,
+                router_latency_ms=_elapsed_ms(started),
+                rate_limit_decision=limit_decision.to_metadata(),
+            )
+        rate_limit_metadata = limit_decision.to_metadata()
+        if not self.config.api_key:
+            return self._failure(
+                started,
+                "provider_error",
+                "openai_router_missing_api_key",
+                "MissingAPIKey",
+                rate_limit_metadata,
+            )
+        if not self.config.model:
+            return self._failure(
+                started,
+                "provider_error",
+                "openai_router_missing_model",
+                "MissingModel",
+                rate_limit_metadata,
+            )
+        _record_provider_call(self.name)
+
+        try:
+            response = self._call_openai(router_input)
+            content = _extract_openai_router_content(response)
+            parsed = _loads_router_json_object(content)
+            return self._parse_result(parsed, router_input, started, rate_limit_metadata)
+        except json.JSONDecodeError:
+            return self._failure(
+                started,
+                "invalid_output",
+                "openai_router_invalid_json",
+                "JSONDecodeError",
+                rate_limit_metadata,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._failure(
+                started,
+                "invalid_output",
+                "openai_router_malformed_result",
+                type(exc).__name__,
+                rate_limit_metadata,
+            )
+        except TimeoutError as exc:
+            return self._failure(
+                started,
+                "provider_error",
+                "openai_router_timeout",
+                type(exc).__name__,
+                rate_limit_metadata,
+            )
+        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+            return self._failure(
+                started,
+                "provider_error",
+                "openai_router_provider_error",
+                type(exc).__name__,
+                rate_limit_metadata,
+            )
+
+    def _limit_decision(self, router_input: ShadowRouterInput):
+        limiter = self.limit_registry.limiter_for(OPENAI_ROUTER_PROVIDER)
+        state = _provider_state(self.name)
+        now_ms = _monotonic_ms()
+        recent = [stamp for stamp in state["recent_request_ms"] if now_ms - stamp < 60000]
+        state["recent_request_ms"] = recent
+        last_request_ms = state.get("last_request_ms")
+        elapsed_ms = None if last_request_ms is None else now_ms - int(last_request_ms)
+        return limiter.decide(
+            estimated_input_tokens=router_input.rough_estimated_input_tokens,
+            elapsed_since_last_request_ms=elapsed_ms,
+            requests_in_last_minute=len(recent),
+        )
+
+    def _call_openai(self, router_input: ShadowRouterInput) -> dict[str, Any]:
+        payload = {
+            "model": self.config.model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an SFE proxy router dry-run. Return only one JSON object. "
+                        "Select candidate segment ids using only the provided extracted text "
+                        "segments and metadata. No Markdown. No code fences. No prose. "
+                        "No explanation. No reasoning. No text before or after the JSON object."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(_safe_router_prompt_metadata(router_input), sort_keys=True),
+                },
+            ],
+            "max_output_tokens": self.config.max_output_tokens,
+        }
+        request = urllib.request.Request(
+            _join_openai_compatible_url(self.config.base_url.rstrip("/"), "/v1/responses"),
+            data=json.dumps(payload).encode("utf-8"),
+            headers=_openai_headers(self.config.api_key),
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+        if not body:
+            raise ValueError("empty OpenAI router response")
+        decoded = json.loads(body)
+        if not isinstance(decoded, dict):
+            raise ValueError("OpenAI router response must be a JSON object")
+        return decoded
+
+    def _parse_result(
+        self,
+        parsed: Any,
+        router_input: ShadowRouterInput,
+        started: float,
+        rate_limit_metadata: dict[str, object],
+    ) -> ShadowRouterResult:
+        return _parse_router_result(
+            parsed,
+            router_input,
+            started,
+            rate_limit_metadata,
+            self.name,
         )
 
     def _failure(
@@ -342,8 +505,18 @@ def create_shadow_router(
             timeout_seconds=int(timeout_seconds)
         )
         return LemonadeShadowRouter(lemonade_config, limit_registry=limit_registry)
+    if provider == OPENAI_ROUTER_PROVIDER:
+        timeout_seconds = getattr(
+            config,
+            "shadow_router_timeout_seconds",
+            DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS,
+        )
+        openai_config = OpenAIShadowRouterConfig.from_env(
+            timeout_seconds=int(timeout_seconds)
+        )
+        return OpenAIShadowRouter(openai_config, limit_registry=limit_registry)
     raise ValueError(
-        f"Unsupported shadow router provider {provider!r}; supported providers: disabled, lemonade."
+        f"Unsupported shadow router provider {provider!r}; supported providers: disabled, lemonade, openai."
     )
 
 
@@ -379,6 +552,56 @@ def _known_segment_ids(router_input: ShadowRouterInput) -> set[str]:
     return ids
 
 
+def _parse_router_result(
+    parsed: Any,
+    router_input: ShadowRouterInput,
+    started: float,
+    rate_limit_metadata: dict[str, object],
+    router_name: str,
+) -> ShadowRouterResult:
+    if not isinstance(parsed, dict):
+        raise ValueError("router result must be a JSON object")
+    status = parsed["router_status"]
+    reason = parsed["router_reason"]
+    selected_ids = parsed["candidate_selected_segment_ids"]
+    selected_tokens = parsed["estimated_router_selected_input_tokens"]
+    reduction_pct = parsed["estimated_router_token_reduction_pct"]
+    dry_run_only = parsed["dry_run_only"]
+    confidence = parsed.get("confidence")
+    if not isinstance(status, str):
+        raise ValueError("router_status must be a string")
+    if not isinstance(reason, str):
+        raise ValueError("router_reason must be a string")
+    if not isinstance(selected_ids, list) or not all(isinstance(item, str) for item in selected_ids):
+        raise ValueError("candidate_selected_segment_ids must be a list of strings")
+    allowed_ids = _known_segment_ids(router_input)
+    unknown_ids = [item for item in selected_ids if item not in allowed_ids]
+    if unknown_ids:
+        raise ValueError("candidate_selected_segment_ids contains unknown segment ids")
+    if selected_tokens is not None and (not isinstance(selected_tokens, int) or selected_tokens < 0):
+        raise ValueError("estimated_router_selected_input_tokens must be a non-negative integer or null")
+    if reduction_pct is not None and not isinstance(reduction_pct, int | float):
+        raise ValueError("estimated_router_token_reduction_pct must be numeric or null")
+    if dry_run_only is not True:
+        raise ValueError("dry_run_only must be true")
+    if confidence is not None and not isinstance(confidence, int | float):
+        raise ValueError("confidence must be numeric or null")
+    return ShadowRouterResult(
+        router_enabled=True,
+        router_name=router_name,
+        router_status=status,
+        router_reason=reason,
+        router_latency_ms=_elapsed_ms(started),
+        candidate_selected_segment_ids=selected_ids,
+        estimated_router_selected_input_tokens=selected_tokens,
+        estimated_router_token_reduction_pct=(
+            round(float(reduction_pct), 2) if reduction_pct is not None else None
+        ),
+        rate_limit_decision=rate_limit_metadata,
+        confidence=round(float(confidence), 4) if confidence is not None else None,
+    )
+
+
 def _extract_lemonade_router_content(response: dict[str, Any]) -> str:
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -399,6 +622,37 @@ def _extract_lemonade_router_content(response: dict[str, Any]) -> str:
         if text:
             return text
     raise ValueError("Lemonade response missing router content")
+
+
+def _extract_openai_router_content(response: dict[str, Any]) -> str:
+    output_text = response.get("output_text")
+    if output_text is not None:
+        text = str(output_text).strip()
+        if text:
+            return text
+
+    output_parts: list[str] = []
+    output = response.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if isinstance(content, list):
+                for content_item in content:
+                    if not isinstance(content_item, dict):
+                        continue
+                    text = content_item.get("text")
+                    if text is not None:
+                        output_parts.append(str(text))
+            text = item.get("text")
+            if text is not None:
+                output_parts.append(str(text))
+    joined = "".join(output_parts).strip()
+    if joined:
+        return joined
+
+    return _extract_lemonade_router_content(response)
 
 
 def _loads_router_json_object(text: str) -> dict[str, Any]:
@@ -464,6 +718,13 @@ def _lemonade_headers(api_key: str) -> dict[str, str]:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     return headers
+
+
+def _openai_headers(api_key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
 
 def _elapsed_ms(started: float) -> int:

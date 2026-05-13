@@ -226,6 +226,7 @@ The supported router providers are:
 
 - `disabled`: no network call and no router selection.
 - `lemonade`: explicit opt-in metadata-only Lemonade dry-run.
+- `openai`: explicit opt-in metadata-only OpenAI dry-run.
 
 When router dry-run is enabled with the disabled provider, the proxy can add
 safe `shadow_router_*` metadata to the shadow JSONL event. The disabled provider
@@ -293,6 +294,25 @@ request or downstream response. Tests use mocked Lemonade HTTP responses; no
 live provider is called by default.
 
 This remains shadow-only observability, not SFE-enabled execution.
+
+The OpenAI router provider uses the same provider-neutral router result
+contract with the OpenAI `/v1/responses` API. It is enabled only when all of
+these are set:
+
+```text
+SFE_PROXY_SHADOW_ROUTER_DRY_RUN=true
+SFE_PROXY_SHADOW_ROUTER_PROVIDER=openai
+OPENAI_API_KEY=<provider-key>
+SFE_OPENAI_ROUTER_MODEL=<router-model>
+```
+
+`OPENAI_BASE_URL` may be used to point at an OpenAI-compatible endpoint; when it
+is unset, the default OpenAI API base URL is used. The OpenAI router request
+sends extracted candidate text segments and safe routing metadata to the
+configured OpenAI-compatible router. It does not send request headers,
+Authorization values, API keys, upstream responses, or downstream response
+content. OpenAI router failures, timeouts, invalid JSON, or malformed results
+are recorded in safe `shadow_router_*` metadata.
 
 ### Provider Limit Decision Contract
 

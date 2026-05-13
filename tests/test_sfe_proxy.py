@@ -183,7 +183,7 @@ def test_proxy_config_accepts_enabled_mode(monkeypatch, tmp_path) -> None:
 
 def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "openai")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "unsupported-provider")
 
     try:
         ProxyConfig.from_env()
@@ -191,6 +191,7 @@ def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) ->
         assert "Unsupported SFE_PROXY_SHADOW_ROUTER_PROVIDER" in str(exc)
         assert "disabled" in str(exc)
         assert "lemonade" in str(exc)
+        assert "openai" in str(exc)
     else:
         raise AssertionError("unsupported shadow router provider should fail")
 
@@ -207,6 +208,20 @@ def test_proxy_config_accepts_lemonade_router_provider_without_provider_details(
 
     assert config.shadow_router_dry_run is True
     assert config.shadow_router_provider == "lemonade"
+
+
+def test_proxy_config_accepts_openai_router_provider_without_provider_details(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+    monkeypatch.setenv("SFE_PROXY_MODE", "shadow")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", "true")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_OPENAI_ROUTER_MODEL", raising=False)
+
+    config = ProxyConfig.from_env()
+
+    assert config.shadow_router_dry_run is True
+    assert config.shadow_router_provider == "openai"
 
 
 def test_proxy_config_parses_shadow_router_timeout(monkeypatch) -> None:
@@ -1139,6 +1154,176 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
     assert prompt not in serialized_event
     assert "placeholder-client-token" not in serialized_event
     assert "Authorization" not in serialized_event
+    assert prompt not in "\n".join(logs)
+
+
+def test_shadow_router_openai_success_adds_safe_metadata(monkeypatch, tmp_path) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    upstream = _start_upstream(
+        status=208,
+        body=b'{"id":"openai-router-test","object":"chat.completion"}',
+    )
+    router_response = {
+        "router_status": "candidate_selected",
+        "router_reason": "openai_router_selected_tariff_segment",
+        "candidate_selected_segment_ids": ["segment-3"],
+        "estimated_router_selected_input_tokens": 42,
+        "estimated_router_token_reduction_pct": 75.5,
+        "confidence": 0.87,
+        "dry_run_only": True,
+    }
+    openai_router = _start_lemonade_router(
+        body=json.dumps({"output_text": json.dumps(router_response)}).encode("utf-8")
+    )
+    monkeypatch.setenv(
+        "OPENAI_BASE_URL",
+        f"http://{openai_router.server_address[0]}:{openai_router.server_address[1]}/v1",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "placeholder-openai-router-key")
+    monkeypatch.setenv("SFE_OPENAI_ROUTER_MODEL", "mock-openai-router")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="openai",
+    )
+    distractor_a = "SEGMENT A distractor cafeteria operations. " * 4
+    useful_segment = (
+        "SEGMENT C active utility tariff memo. "
+        "UTILITY-RATE-SCHEDULE-DELTA-17 sets the threshold at 42 kilowatts. "
+    ) * 8
+    distractor_b = "SEGMENT B distractor logistics notes. " * 4
+    question = "What threshold does the active utility tariff memo set?"
+    payload = {
+        "model": "example-model",
+        "messages": [
+            {"role": "system", "content": "Answer from supplied segments."},
+            {"role": "user", "content": distractor_a},
+            {"role": "user", "content": useful_segment},
+            {"role": "user", "content": distractor_b},
+            {"role": "user", "content": question},
+        ],
+        "stream": False,
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        openai_router.shutdown()
+        openai_router.server_close()
+
+    assert response["status"] == 208
+    assert response["body"] == {"id": "openai-router-test", "object": "chat.completion"}
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+    assert len(RecordingLemonadeRouterHandler.records) == 1
+
+    router_record = RecordingLemonadeRouterHandler.records[-1]
+    router_payload = json.loads(router_record["body"].decode("utf-8"))
+    assert router_record["path"] == "/v1/responses"
+    assert router_record["headers"]["Authorization"] == "Bearer placeholder-openai-router-key"
+    assert router_payload["model"] == "mock-openai-router"
+    assert router_payload["max_output_tokens"] == 160
+    assert "chat_template_kwargs" not in router_payload
+    serialized_router_payload = json.dumps(router_payload)
+    assert "candidate_segments" in serialized_router_payload
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" in serialized_router_payload
+    assert "placeholder-client-token" not in serialized_router_payload
+    assert "Authorization" not in serialized_router_payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_enabled"] is True
+    assert event["shadow_router_provider"] == "openai"
+    assert event["shadow_router_name"] == "openai"
+    assert event["shadow_router_status"] == "candidate_selected"
+    assert event["shadow_router_reason"] == "openai_router_selected_tariff_segment"
+    assert event["shadow_router_candidate_selected_segment_ids"] == ["segment-3"]
+    assert event["shadow_router_estimated_selected_input_tokens"] == 42
+    assert event["shadow_router_estimated_token_reduction_pct"] == 75.5
+    assert event["shadow_router_confidence"] == 0.87
+    assert event["shadow_router_dry_run_only"] is True
+    assert event["shadow_router_rate_limit_decision"]["allowed"] is True
+
+    serialized_event = json.dumps(event)
+    joined_logs = "\n".join(logs)
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" not in serialized_event
+    assert "placeholder-openai-router-key" not in serialized_event
+    assert "placeholder-client-token" not in serialized_event
+    assert "Authorization" not in serialized_event
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" not in joined_logs
+
+
+def test_shadow_router_openai_missing_api_key_records_safe_error(monkeypatch, tmp_path) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    upstream = _start_upstream(
+        status=208,
+        body=b'{"id":"openai-router-missing-key-test","object":"chat.completion"}',
+    )
+    openai_router = _start_lemonade_router()
+    monkeypatch.setenv(
+        "OPENAI_BASE_URL",
+        f"http://{openai_router.server_address[0]}:{openai_router.server_address[1]}/v1",
+    )
+    monkeypatch.setenv("SFE_OPENAI_ROUTER_MODEL", "mock-openai-router")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="openai",
+    )
+    prompt = "synthetic segment " * 20
+    payload = {
+        "model": "example-model",
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        openai_router.shutdown()
+        openai_router.server_close()
+
+    assert response["status"] == 208
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+    assert RecordingLemonadeRouterHandler.records == []
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_enabled"] is True
+    assert event["shadow_router_provider"] == "openai"
+    assert event["shadow_router_status"] == "provider_error"
+    assert event["shadow_router_reason"] == "openai_router_missing_api_key"
+    assert event["shadow_router_error_type"] == "MissingAPIKey"
+    assert event["shadow_router_candidate_selected_segment_ids"] == []
+    assert event["shadow_router_dry_run_only"] is True
+    serialized_event = json.dumps(event)
+    assert prompt not in serialized_event
+    assert "placeholder-client-token" not in serialized_event
     assert prompt not in "\n".join(logs)
 
 

@@ -20,10 +20,10 @@ selection, and OpenAI only as the live enabled upstream/executor path.
 
 ## Routing Scope
 
-The current proxy implementation does not include an OpenAI shadow-router
-provider. This runner therefore uses provider-neutral deterministic selection
-for routing and records that explicitly. `SFE_OPENAI_ROUTER_MODEL` is reported
-when configured, but it is not used as a live OpenAI router in this runner.
+This runner uses provider-neutral deterministic selection for routing and
+records that explicitly. `SFE_OPENAI_ROUTER_MODEL` is reported when configured,
+but it is not used as a live OpenAI router in this runner. Live OpenAI routing
+is covered by the separate OpenAI router plus executor enabled-mode runner.
 
 ## Scope Limits
 
@@ -46,6 +46,6 @@ No `.env` file is required by the runner, and secret values must not be printed.
 
 ## Next Step
 
-The next step is to inspect the single-fixture OpenAI result before considering
-either an OpenAI router implementation or any multi-fixture OpenAI enabled-mode
-runner.
+The next step is to inspect the single-fixture OpenAI result alongside the
+separate OpenAI router plus executor result before considering any multi-fixture
+OpenAI enabled-mode runner.
