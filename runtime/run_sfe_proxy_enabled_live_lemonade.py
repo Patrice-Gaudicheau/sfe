@@ -11,9 +11,8 @@ import tempfile
 import threading
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -90,33 +89,26 @@ def main() -> int:
     with tempfile.TemporaryDirectory(
         prefix="sfe_proxy_enabled_live_lemonade_"
     ) as shadow_log_dir:
-        with _temporary_env(
-            {
-                "SFE_LEMONADE_BASE_URL": base_url,
-                "SFE_LEMONADE_MODEL": router_model,
-                "SFE_PROXY_PROVIDER_LIMITS_ENABLED": None,
-            }
-        ):
-            proxy = _start_proxy(
-                base_url=base_url,
-                shadow_log_dir=shadow_log_dir,
-                logs=logs,
-                timeout_seconds=timeout_seconds,
-            )
+        proxy = _start_proxy(
+            base_url=base_url,
+            shadow_log_dir=shadow_log_dir,
+            logs=logs,
+            timeout_seconds=timeout_seconds,
+        )
+        try:
             try:
-                try:
-                    response = _request_json(
-                        f"{_server_url(proxy)}/v1/chat/completions",
-                        payload,
-                        timeout_seconds=timeout_seconds,
-                    )
-                except TimeoutError as exc:
-                    request_error = exc
-                except (urllib.error.URLError, OSError) as exc:
-                    request_error = exc
-            finally:
-                proxy.shutdown()
-                proxy.server_close()
+                response = _request_json(
+                    f"{_server_url(proxy)}/v1/chat/completions",
+                    payload,
+                    timeout_seconds=timeout_seconds,
+                )
+            except TimeoutError as exc:
+                request_error = exc
+            except (urllib.error.URLError, OSError) as exc:
+                request_error = exc
+        finally:
+            proxy.shutdown()
+            proxy.server_close()
         event = _read_shadow_event_if_present(Path(shadow_log_dir))
 
     summary = _build_summary(
@@ -165,16 +157,11 @@ def _lemonade_base_url() -> str:
 
 
 def _router_model() -> str:
-    return (
-        os.getenv("SFE_ROUTER_MODEL")
-        or os.getenv("SFE_LEMONADE_ROUTER_MODEL")
-        or os.getenv("SFE_LEMONADE_MODEL")
-        or ""
-    )
+    return os.getenv("SFE_ROUTER_MODEL") or ""
 
 
 def _executor_model() -> str:
-    return os.getenv("SFE_EXECUTOR_MODEL") or os.getenv("SFE_LEMONADE_MODEL") or ""
+    return os.getenv("SFE_EXECUTOR_MODEL") or ""
 
 
 def _live_timeout_seconds() -> int:
@@ -600,24 +587,6 @@ def _free_port() -> int:
 
 def _join_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}{path}"
-
-
-@contextmanager
-def _temporary_env(values: dict[str, str | None]) -> Iterator[None]:
-    previous = {key: os.environ.get(key) for key in values}
-    try:
-        for key, value in values.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 if __name__ == "__main__":
