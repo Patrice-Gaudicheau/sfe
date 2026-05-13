@@ -32,6 +32,11 @@ add Gemma or multi-model comparison, does not expose the proxy to external
 clients, and does not claim production readiness. It also does not establish
 statistical routing accuracy or production reliability.
 
+An initial `incident_runbook` fixture was tried during development. It was
+excluded from the committed runner after one live JSON run timed out on that
+fixture. The timeout was treated as an incomplete live fixture result, not as a
+successful enabled-mode validation and not as a hidden pass.
+
 ## Configuration
 
 The runner uses existing environment variables:
