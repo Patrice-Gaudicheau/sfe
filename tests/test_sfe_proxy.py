@@ -80,6 +80,7 @@ class RecordingLemonadeRouterHandler(BaseHTTPRequestHandler):
     response_status = 200
     response_body: bytes = b'{"choices":[{"message":{"content":"{}"}}]}'
     response_headers = {"Content-Type": "application/json"}
+    response_factory: Any = None
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or "0")
@@ -92,12 +93,17 @@ class RecordingLemonadeRouterHandler(BaseHTTPRequestHandler):
                 "body": body,
             }
         )
+        response_body = (
+            self.__class__.response_factory(body)
+            if self.__class__.response_factory is not None
+            else self.__class__.response_body
+        )
         self.send_response(self.__class__.response_status)
         for key, value in self.__class__.response_headers.items():
             self.send_header(key, value)
-        self.send_header("Content-Length", str(len(self.__class__.response_body)))
+        self.send_header("Content-Length", str(len(response_body)))
         self.end_headers()
-        self.wfile.write(self.__class__.response_body)
+        self.wfile.write(response_body)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         return
@@ -866,6 +872,144 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
     assert "placeholder-client-token" not in serialized_event
     assert "Authorization" not in serialized_event
     assert prompt not in "\n".join(logs)
+
+
+def test_shadow_router_lemonade_multisegment_smoke_selects_expected_segment(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    shadow_router_module._reset_provider_call_state()
+    monkeypatch.delenv("SFE_LEMONADE_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_PROXY_PROVIDER_LIMITS_ENABLED", raising=False)
+    upstream_body = b'{"id":"multisegment-smoke","object":"chat.completion","choices":[]}'
+    upstream = _start_upstream(status=200, body=upstream_body)
+    expected_segment_id = "segment-3"
+    observed_router_segments: list[dict[str, Any]] = []
+
+    def select_policy_segment(body: bytes) -> bytes:
+        lemonade_payload = json.loads(body.decode("utf-8"))
+        router_prompt = json.loads(lemonade_payload["messages"][1]["content"])
+        segments = router_prompt["candidate_segments"]
+        observed_router_segments[:] = segments
+        selected = next(
+            segment
+            for segment in segments
+            if "UTILITY-RATE-SCHEDULE-DELTA-17" in segment["text"]
+        )
+        assert selected["segment_id"] == expected_segment_id
+        selected_tokens = int(selected["estimated_tokens"])
+        full_tokens = int(router_prompt["rough_estimated_input_tokens"])
+        reduction_pct = round((1 - (selected_tokens / full_tokens)) * 100, 2)
+        router_output = {
+            "router_status": "candidate_selected",
+            "router_reason": "selected_tariff_policy_segment_for_question",
+            "candidate_selected_segment_ids": [selected["segment_id"]],
+            "estimated_router_selected_input_tokens": selected_tokens,
+            "estimated_router_token_reduction_pct": reduction_pct,
+            "confidence": 0.91,
+            "dry_run_only": True,
+        }
+        return _lemonade_router_body(content=json.dumps(router_output))
+
+    lemonade = _start_lemonade_router(response_factory=select_policy_segment)
+    monkeypatch.setenv("SFE_LEMONADE_BASE_URL", f"http://{lemonade.server_address[0]}:{lemonade.server_address[1]}")
+    monkeypatch.setenv("SFE_LEMONADE_MODEL", "local-router")
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_selection_dry_run=True,
+        shadow_router_dry_run=True,
+        shadow_router_provider="lemonade",
+    )
+    distractor_a = (
+        "SEGMENT A - archived cafeteria operations. "
+        "This segment describes badge color rotation, break-room inventory, "
+        "and coffee machine cleaning windows. "
+    ) * 8
+    distractor_b = (
+        "SEGMENT B - historical logistics notes. "
+        "This segment covers dock assignments, pallet labels, and carrier calls. "
+    ) * 8
+    useful_segment = (
+        "SEGMENT C - active utility tariff memo. "
+        "UTILITY-RATE-SCHEDULE-DELTA-17 sets the battery dispatch threshold at "
+        "42 kilowatts during the evening peak interval. "
+    ) * 4
+    distractor_c = (
+        "SEGMENT D - unrelated customer support transcript. "
+        "This segment discusses login retries, email aliases, and ticket tags. "
+    ) * 8
+    question = (
+        "Using the active utility tariff memo only, what battery dispatch "
+        "threshold applies during the evening peak interval?"
+    )
+    payload = {
+        "model": "example-model",
+        "messages": [
+            {"role": "system", "content": "Answer from the supplied segments."},
+            {"role": "user", "content": distractor_a},
+            {"role": "user", "content": useful_segment},
+            {"role": "user", "content": distractor_b},
+            {"role": "user", "content": distractor_c},
+            {"role": "user", "content": question},
+        ],
+        "stream": False,
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        lemonade.shutdown()
+        lemonade.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == json.loads(upstream_body.decode("utf-8"))
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+    assert RecordingUpstreamHandler.records[-1]["headers"]["Authorization"] == "Bearer upstream-secret"
+    assert len(RecordingLemonadeRouterHandler.records) == 1
+    assert [segment["segment_id"] for segment in observed_router_segments] == [
+        "segment-1",
+        "segment-2",
+        "segment-3",
+        "segment-4",
+        "segment-5",
+        "segment-6",
+    ]
+
+    event = _read_shadow_event(tmp_path)
+    assert event["shadow_router_enabled"] is True
+    assert event["shadow_router_provider"] == "lemonade"
+    assert event["shadow_router_status"] == "candidate_selected"
+    assert event["shadow_router_reason"] == "selected_tariff_policy_segment_for_question"
+    assert event["shadow_router_candidate_selected_segment_ids"] == [expected_segment_id]
+    assert event["shadow_router_estimated_selected_input_tokens"] > 0
+    assert event["shadow_router_estimated_token_reduction_pct"] is not None
+    assert event["shadow_router_estimated_token_reduction_pct"] > 0
+    assert event["shadow_router_confidence"] == 0.91
+    assert event["shadow_router_dry_run_only"] is True
+    assert event["selection_status"] == "candidate_selected"
+    assert event["would_activate_sfe"] is True
+    assert event["candidate_segment_count"] == 6
+
+    serialized_event = json.dumps(event)
+    joined_logs = "\n".join(logs)
+    assert useful_segment not in serialized_event
+    assert question not in serialized_event
+    assert "placeholder-client-token" not in serialized_event
+    assert "Authorization" not in serialized_event
+    assert useful_segment not in joined_logs
+    assert question not in joined_logs
 
 
 def test_shadow_router_lemonade_json_code_fence_succeeds(monkeypatch, tmp_path) -> None:
@@ -2137,11 +2281,13 @@ def _start_lemonade_router(
     status: int = 200,
     body: bytes = b'{"choices":[{"message":{"content":"{}"}}]}',
     headers: dict[str, str] | None = None,
+    response_factory: Any = None,
 ) -> ThreadingHTTPServer:
     RecordingLemonadeRouterHandler.records = []
     RecordingLemonadeRouterHandler.response_status = status
     RecordingLemonadeRouterHandler.response_body = body
     RecordingLemonadeRouterHandler.response_headers = headers or {"Content-Type": "application/json"}
+    RecordingLemonadeRouterHandler.response_factory = response_factory
     server = ThreadingHTTPServer(("127.0.0.1", 0), RecordingLemonadeRouterHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
