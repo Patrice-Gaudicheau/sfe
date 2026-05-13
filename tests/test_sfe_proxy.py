@@ -170,6 +170,17 @@ def test_proxy_config_accepts_dry_run_enabled_mode(monkeypatch, tmp_path) -> Non
     assert config.shadow_log_dir == str(tmp_path)
 
 
+def test_proxy_config_accepts_enabled_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "upstream-secret")
+    monkeypatch.setenv("SFE_PROXY_MODE", "enabled")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_LOG_DIR", str(tmp_path))
+
+    config = ProxyConfig.from_env()
+
+    assert config.mode == "enabled"
+    assert config.shadow_log_dir == str(tmp_path)
+
+
 def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
     monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "openai")
@@ -729,6 +740,138 @@ def test_dry_run_enabled_candidate_diagnostics_do_not_require_payload_logging(
     assert event["dry_run_enabled_selected_segment_ids"] == ["segment-2"]
     assert event["dry_run_enabled_candidate_request_estimated_tokens"] > 0
     assert "dry_run_enabled_candidate_request" not in event
+
+
+def test_enabled_mode_sends_reduced_candidate_request_to_upstream(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"enabled-upstream","object":"chat.completion"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_log_full_payloads=True,
+    )
+    distractor_a = "SEGMENT A distractor cafeteria operations. " * 4
+    useful = (
+        "SEGMENT C active utility tariff memo. "
+        "UTILITY-RATE-SCHEDULE-DELTA-17 sets the threshold at 42 kilowatts. "
+    ) * 8
+    distractor_b = "SEGMENT B distractor logistics notes. " * 4
+    question = "What threshold does the active utility tariff memo set?"
+    payload = {
+        "model": "example-model",
+        "messages": [
+            {"role": "system", "content": "Answer from supplied segments."},
+            {"role": "user", "content": distractor_a},
+            {"role": "user", "content": useful},
+            {"role": "user", "content": distractor_b},
+            {"role": "user", "content": question},
+        ],
+        "stream": False,
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {"id": "enabled-upstream", "object": "chat.completion"}
+    assert len(RecordingUpstreamHandler.records) == 1
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload != payload
+    serialized_upstream = json.dumps(upstream_payload)
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" in serialized_upstream
+    assert question in serialized_upstream
+    assert "SEGMENT A distractor cafeteria" not in serialized_upstream
+    assert "SEGMENT B distractor logistics" not in serialized_upstream
+    assert "placeholder-client-token" not in serialized_upstream
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "enabled"
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_is_real_execution"] is True
+    assert event["enabled_replaces_upstream_request"] is True
+    assert event["enabled_changes_client_response"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    assert event["enabled_request_sent"] is True
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_selected_segment_ids"] == ["segment-3"]
+    assert event["enabled_full_request_estimated_tokens"] == event[
+        "rough_estimated_input_tokens"
+    ]
+    assert event["enabled_candidate_request_estimated_tokens"] > 0
+    assert event["enabled_estimated_token_reduction_pct"] > 0
+    assert event["upstream_status_code"] == 200
+    assert "shadow_router_status" not in event
+    assert "placeholder-client-token" not in "\n".join(logs)
+
+
+def test_enabled_mode_rejects_when_no_candidate_request_is_available(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=50000,
+    )
+    try:
+        request = urllib.request.Request(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": "example-model",
+                    "messages": [{"role": "user", "content": "short"}],
+                }
+            ).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer placeholder-client-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("enabled mode without a candidate should fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert status == 422
+    assert body["error"]["type"] == "sfe_enabled_routing_error"
+    assert RecordingUpstreamHandler.records == []
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "enabled"
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_request_sent"] is False
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_reason"] == "no_selected_segments"
+    assert event["upstream_status_code"] == 422
 
 
 def test_shadow_selection_dry_run_below_threshold_does_not_activate(tmp_path) -> None:

@@ -14,7 +14,7 @@ from pathlib import Path
 from socket import socket
 from typing import Any, Callable
 
-from .config import DRY_RUN_ENABLED_MODE, SHADOW_MODE, ProxyConfig
+from .config import DRY_RUN_ENABLED_MODE, ENABLED_MODE, SHADOW_MODE, ProxyConfig
 from .shadow_router import ShadowRouterInput, create_shadow_router
 
 
@@ -86,7 +86,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 )
                 status_code = 404
                 return
-            request = self._build_upstream_request(upstream_url, body)
+            upstream_body = body
+            if (
+                self.server.config.mode == ENABLED_MODE
+                and self.command == "POST"
+                and path in SUPPORTED_POST_PATHS
+            ):
+                enabled_result = _enabled_upstream_body(
+                    self.server.config,
+                    path,
+                    body,
+                    shadow_event or {},
+                )
+                if shadow_event is not None:
+                    shadow_event.update(enabled_result["event_fields"])
+                if enabled_result["body"] is None:
+                    status_code = 422
+                    self._send_json(
+                        422,
+                        {
+                            "error": {
+                                "message": "SFE enabled candidate request unavailable",
+                                "type": "sfe_enabled_routing_error",
+                                "reason": enabled_result["event_fields"].get(
+                                    "enabled_reason"
+                                ),
+                            }
+                        },
+                    )
+                    return
+                upstream_body = enabled_result["body"]
+            request = self._build_upstream_request(upstream_url, upstream_body)
             try:
                 with urllib.request.urlopen(request, timeout=300) as upstream:
                     status_code = int(upstream.status)
@@ -272,7 +302,7 @@ def _forward_headers(headers: Any) -> dict[str, str]:
         lowered = key.lower()
         if lowered in HOP_BY_HOP_HEADERS or lowered in SENSITIVE_HEADERS:
             continue
-        if lowered == "host":
+        if lowered in {"host", "content-length"}:
             continue
         forwarded[key] = value
     return forwarded
@@ -283,7 +313,7 @@ def _is_sse_response(content_type: str) -> bool:
 
 
 def _should_shadow_observe(config: ProxyConfig, method: str, path: str) -> bool:
-    return config.mode in {SHADOW_MODE, DRY_RUN_ENABLED_MODE} and method == "POST" and path in SUPPORTED_POST_PATHS
+    return config.mode in {SHADOW_MODE, DRY_RUN_ENABLED_MODE, ENABLED_MODE} and method == "POST" and path in SUPPORTED_POST_PATHS
 
 
 def _build_shadow_event(
@@ -323,7 +353,7 @@ def _build_shadow_event(
         "full_payload_logging_enabled": False,
         "full_payload_logging_requested": config.shadow_log_full_payloads,
     }
-    if config.shadow_selection_dry_run or config.mode == DRY_RUN_ENABLED_MODE:
+    if config.shadow_selection_dry_run or config.mode in {DRY_RUN_ENABLED_MODE, ENABLED_MODE}:
         event.update(_safe_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens))
     if config.shadow_router_dry_run:
         event.update(_safe_shadow_router_fields(config, event, path, payload))
@@ -338,6 +368,58 @@ def _build_shadow_event(
             )
         )
     return event
+
+
+def _enabled_upstream_body(
+    config: ProxyConfig,
+    path: str,
+    original_body: bytes,
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _decode_json_object(original_body)
+    rough_tokens = int(event.get("rough_estimated_input_tokens") or 0)
+    try:
+        details = _candidate_request_details(config, path, payload, event, rough_tokens)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "body": None,
+            "event_fields": {
+                "enabled_candidate_request_built": False,
+                "enabled_request_sent": False,
+                "enabled_original_request_sent": False,
+                "enabled_error_type": type(exc).__name__,
+                "enabled_reason": "candidate_request_build_error",
+            },
+        }
+    candidate_request = details.pop("candidate_request", None)
+    fields = {
+        key.replace("dry_run_enabled_", "enabled_"): value
+        for key, value in details.items()
+    }
+    fields.update(
+        {
+            "enabled_is_real_execution": True,
+            "enabled_replaces_upstream_request": True,
+            "enabled_changes_client_response": True,
+            "enabled_candidate_request_sent_to_upstream": True,
+            "enabled_request_sent": candidate_request is not None,
+            "enabled_original_request_sent": False,
+        }
+    )
+    if candidate_request is None:
+        fields.update(
+            {
+                "enabled_candidate_request_built": False,
+                "enabled_candidate_request_sent_to_upstream": False,
+                "enabled_request_sent": False,
+                "enabled_reason": fields.get("enabled_reason") or "no_selected_segments",
+            }
+        )
+        return {"body": None, "event_fields": fields}
+    return {
+        "body": json.dumps(candidate_request).encode("utf-8"),
+        "event_fields": fields,
+    }
 
 
 def _safe_dry_run_enabled_fields(
@@ -371,6 +453,24 @@ def _build_dry_run_enabled_fields(
     event: dict[str, Any],
     rough_estimated_input_tokens: int,
 ) -> dict[str, Any]:
+    details = _candidate_request_details(
+        config,
+        path,
+        payload,
+        event,
+        rough_estimated_input_tokens,
+    )
+    details.pop("candidate_request", None)
+    return details
+
+
+def _candidate_request_details(
+    config: ProxyConfig,
+    path: str,
+    payload: dict[str, Any] | None,
+    event: dict[str, Any],
+    rough_estimated_input_tokens: int,
+) -> dict[str, Any]:
     selected_segment_ids = _selected_segment_ids_for_dry_run(event)
     segments = _extract_candidate_text_segments(path, payload)
     segment_by_id = {segment["segment_id"]: segment for segment in segments}
@@ -395,6 +495,7 @@ def _build_dry_run_enabled_fields(
             "dry_run_enabled_candidate_request_estimated_tokens": None,
             "dry_run_enabled_estimated_token_reduction_pct": None,
             "dry_run_enabled_selected_segment_count": 0,
+            "candidate_request": None,
         }
 
     candidate_request = _candidate_request_for_endpoint(
@@ -445,6 +546,7 @@ def _build_dry_run_enabled_fields(
     }
     if config.shadow_log_full_payloads:
         fields["dry_run_enabled_candidate_request"] = candidate_request
+    fields["candidate_request"] = candidate_request
     return fields
 
 

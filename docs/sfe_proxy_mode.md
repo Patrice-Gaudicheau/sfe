@@ -68,6 +68,11 @@ Supported modes:
   responses unchanged, while building a reduced SFE candidate request for local
   diagnostics only. The reduced request is not used as the upstream request and
   is not returned to the client.
+- `enabled`: builds a reduced SFE candidate request from selected segment IDs,
+  sends that reduced request to the configured upstream, and returns that
+  upstream response to the client. The original full request is not sent
+  upstream. If no candidate request can be built, the proxy rejects the request
+  with a controlled routing error rather than silently falling back.
 
 Any other mode fails clearly at startup.
 
@@ -325,8 +330,10 @@ because provider-side input-token-per-minute limits can affect large-context
 workloads. Those constraints are represented here as local configuration and
 decision metadata only.
 
-## Future Modes
+## Enabled Mode
 
-SFE-enabled client-visible execution is a future step. `dry_run_enabled` is only
-a pre-enabled safety mode for inspecting the candidate request that could be used
-later.
+`enabled` is the first controlled client-visible SFE proxy mode. It is
+provider-agnostic proxy behavior: candidate request construction happens in the
+proxy layer, and the configured upstream can be any compatible upstream used in
+tests or future provider validation. Current validation uses mocked upstreams and
+provider-neutral selection only; live provider validation is not claimed here.
