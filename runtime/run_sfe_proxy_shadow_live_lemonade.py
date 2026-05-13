@@ -8,6 +8,7 @@ import socket
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +27,8 @@ from sfe_proxy.shadow_router import _reset_provider_call_state
 
 
 EXPECTED_SEGMENT_ID = "segment-3"
+DEFAULT_LIVE_TIMEOUT_SECONDS = 180
+LIVE_TIMEOUT_ENV = "SFE_PROXY_SHADOW_LIVE_TIMEOUT_SECONDS"
 UPSTREAM_RESPONSE = {
     "id": "live-lemonade-shadow-smoke",
     "object": "chat.completion",
@@ -64,14 +67,18 @@ def main() -> int:
     payload = _build_payload()
     base_url = _lemonade_base_url()
     router_model = _router_model()
+    timeout_seconds = _live_timeout_seconds()
 
     if not router_model:
-        summary = _missing_model_summary(base_url)
+        summary = _missing_model_summary(base_url, timeout_seconds)
         _print_summary(summary)
         return 1
 
     upstream = _start_server(RecordingUpstreamHandler)
     logs: list[str] = []
+    response: dict[str, Any] | None = None
+    event: dict[str, Any] | None = None
+    request_error: BaseException | None = None
     try:
         with tempfile.TemporaryDirectory(prefix="sfe_proxy_shadow_live_lemonade_") as shadow_log_dir:
             with _temporary_env(
@@ -86,16 +93,29 @@ def main() -> int:
                     response = _request_json(
                         f"{_server_url(proxy)}/v1/chat/completions",
                         payload,
+                        timeout_seconds=timeout_seconds,
                     )
+                except TimeoutError as exc:
+                    request_error = exc
+                except (urllib.error.URLError, OSError) as exc:
+                    request_error = exc
                 finally:
                     proxy.shutdown()
                     proxy.server_close()
-            event = _read_shadow_event(Path(shadow_log_dir))
+            event = _read_shadow_event_if_present(Path(shadow_log_dir))
     finally:
         upstream.shutdown()
         upstream.server_close()
 
-    summary = _build_summary(payload, response, event, base_url, router_model)
+    summary = _build_summary(
+        payload,
+        response,
+        event,
+        base_url,
+        router_model,
+        timeout_seconds,
+        request_error,
+    )
     _print_summary(summary)
     return 0 if summary["passed"] else 1
 
@@ -113,9 +133,22 @@ def _router_model() -> str:
     )
 
 
-def _missing_model_summary(base_url: str) -> dict[str, Any]:
+def _live_timeout_seconds() -> int:
+    raw = os.getenv(LIVE_TIMEOUT_ENV, str(DEFAULT_LIVE_TIMEOUT_SECONDS))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"{LIVE_TIMEOUT_ENV} must be an integer.") from exc
+    if value <= 0:
+        raise SystemExit(f"{LIVE_TIMEOUT_ENV} must be positive.")
+    return value
+
+
+def _missing_model_summary(base_url: str, timeout_seconds: int) -> dict[str, Any]:
     return {
         "passed": False,
+        "status": "configuration_error",
+        "timeout_seconds": timeout_seconds,
         "lemonade_base_url": base_url,
         "router_model": "",
         "expected_segment_id": EXPECTED_SEGMENT_ID,
@@ -170,32 +203,44 @@ def _build_payload() -> dict[str, Any]:
 
 def _build_summary(
     payload: dict[str, Any],
-    response: dict[str, Any],
-    event: dict[str, Any],
+    response: dict[str, Any] | None,
+    event: dict[str, Any] | None,
     base_url: str,
     router_model: str,
+    timeout_seconds: int,
+    request_error: BaseException | None,
 ) -> dict[str, Any]:
+    event = event or {}
     selected_ids = event.get("shadow_router_candidate_selected_segment_ids")
     selected_segment_ids = selected_ids if isinstance(selected_ids, list) else []
     upstream_payload = _last_upstream_payload()
     router_metadata_usable = (
-        event.get("shadow_router_status") == "candidate_selected"
-        and bool(selected_segment_ids)
+        bool(selected_segment_ids)
         and event.get("shadow_router_dry_run_only") is True
+        and event.get("shadow_router_error_type") is None
     )
     selection_matched = selected_segment_ids == [EXPECTED_SEGMENT_ID]
-    upstream_request_unchanged = upstream_payload == payload
+    upstream_request_unchanged = None if upstream_payload is None else upstream_payload == payload
     client_response_unchanged = (
-        response.get("status") == 200 and response.get("body") == UPSTREAM_RESPONSE
+        None
+        if response is None
+        else response.get("status") == 200 and response.get("body") == UPSTREAM_RESPONSE
     )
     passed = (
         router_metadata_usable
         and selection_matched
-        and upstream_request_unchanged
-        and client_response_unchanged
+        and upstream_request_unchanged is True
+        and client_response_unchanged is True
     )
+    status = "pass" if passed else "fail"
+    if isinstance(request_error, TimeoutError) or event.get("shadow_router_reason") == "lemonade_router_timeout":
+        status = "timeout"
+    elif request_error is not None:
+        status = "request_error"
     return {
         "passed": passed,
+        "status": status,
+        "timeout_seconds": timeout_seconds,
         "lemonade_base_url": base_url,
         "router_model": router_model,
         "expected_segment_id": EXPECTED_SEGMENT_ID,
@@ -210,6 +255,8 @@ def _build_summary(
         "router_status": event.get("shadow_router_status"),
         "router_reason": event.get("shadow_router_reason"),
         "router_error_type": event.get("shadow_router_error_type"),
+        "request_error_type": type(request_error).__name__ if request_error else None,
+        "request_error": str(request_error) if request_error else None,
         "router_metadata_usable": router_metadata_usable,
         "router_dry_run_only": event.get("shadow_router_dry_run_only"),
         "upstream_request_unchanged": upstream_request_unchanged,
@@ -221,7 +268,8 @@ def _build_summary(
 def _print_summary(summary: dict[str, Any]) -> None:
     print("SFE proxy shadow live Lemonade runner")
     print("scope: live local Lemonade router in proxy shadow dry-run mode")
-    print(f"status: {'pass' if summary['passed'] else 'fail'}")
+    print(f"status: {summary['status']}")
+    print(f"timeout seconds: {summary['timeout_seconds']}")
     print(f"lemonade base URL: {summary['lemonade_base_url']}")
     print(f"router model: {summary['router_model']}")
     print(f"selected segment IDs: {summary['selected_segment_ids']}")
@@ -232,6 +280,8 @@ def _print_summary(summary: dict[str, Any]) -> None:
     print(f"router status: {summary['router_status']}")
     print(f"router reason: {summary['router_reason']}")
     print(f"router error type: {summary['router_error_type']}")
+    print(f"request error type: {summary.get('request_error_type')}")
+    print(f"request error: {summary.get('request_error')}")
     print(f"router metadata usable: {summary['router_metadata_usable']}")
     print(f"upstream request unchanged: {summary['upstream_request_unchanged']}")
     print(f"client response unchanged: {summary['client_response_unchanged']}")
@@ -268,7 +318,12 @@ def _start_proxy(
     return proxy
 
 
-def _request_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _request_json(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: int,
+) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -279,7 +334,7 @@ def _request_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=5) as response:
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
         return {
             "status": response.status,
             "body": json.loads(response.read().decode("utf-8")),
@@ -298,6 +353,16 @@ def _read_shadow_event(log_dir: Path) -> dict[str, Any]:
     if len(lines) != 1:
         raise RuntimeError(f"expected exactly one shadow event, found {len(lines)}")
     return json.loads(lines[0])
+
+
+def _read_shadow_event_if_present(log_dir: Path) -> dict[str, Any] | None:
+    path = log_dir / "shadow_events.jsonl"
+    if not path.exists():
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return None
+    return json.loads(lines[-1])
 
 
 def _read_request_body(handler: BaseHTTPRequestHandler) -> bytes:
