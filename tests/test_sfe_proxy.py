@@ -159,6 +159,17 @@ def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
     assert config.shadow_selection_dry_run is True
 
 
+def test_proxy_config_accepts_dry_run_enabled_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "upstream-secret")
+    monkeypatch.setenv("SFE_PROXY_MODE", "dry_run_enabled")
+    monkeypatch.setenv("SFE_PROXY_SHADOW_LOG_DIR", str(tmp_path))
+
+    config = ProxyConfig.from_env()
+
+    assert config.mode == "dry_run_enabled"
+    assert config.shadow_log_dir == str(tmp_path)
+
+
 def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
     monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "openai")
@@ -604,6 +615,120 @@ def test_shadow_selection_dry_run_adds_fields_for_above_threshold_chat(tmp_path)
     assert "placeholder-client-token" not in serialized_event
     assert "Authorization" not in serialized_event
     assert dominant_prompt not in joined_logs
+
+
+def test_dry_run_enabled_builds_candidate_request_without_changing_client_path(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"normal-upstream","object":"chat.completion"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="dry_run_enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_log_full_payloads=True,
+    )
+    distractor_a = "SEGMENT A distractor cafeteria operations. " * 4
+    useful = (
+        "SEGMENT C active utility tariff memo. "
+        "UTILITY-RATE-SCHEDULE-DELTA-17 sets the threshold at 42 kilowatts. "
+    ) * 8
+    distractor_b = "SEGMENT B distractor logistics notes. " * 4
+    question = "What threshold does the active utility tariff memo set?"
+    payload = {
+        "model": "example-model",
+        "messages": [
+            {"role": "system", "content": "Answer from supplied segments."},
+            {"role": "user", "content": distractor_a},
+            {"role": "user", "content": useful},
+            {"role": "user", "content": distractor_b},
+            {"role": "user", "content": question},
+        ],
+        "stream": False,
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {"id": "normal-upstream", "object": "chat.completion"}
+    assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "dry_run_enabled"
+    assert event["dry_run_enabled_candidate_built"] is True
+    assert event["dry_run_enabled_is_real_execution"] is False
+    assert event["dry_run_enabled_replaces_upstream_request"] is False
+    assert event["dry_run_enabled_changes_client_response"] is False
+    assert event["dry_run_enabled_candidate_request_sent_to_upstream"] is False
+    assert event["dry_run_enabled_experimental_response_exposed"] is False
+    assert event["dry_run_enabled_original_upstream_request_unchanged"] is True
+    assert event["dry_run_enabled_client_response_unchanged"] is True
+    assert event["dry_run_enabled_selected_segment_ids"] == ["segment-3"]
+    assert event["dry_run_enabled_candidate_request_estimated_tokens"] > 0
+    assert event["dry_run_enabled_full_request_estimated_tokens"] == event[
+        "rough_estimated_input_tokens"
+    ]
+    assert event["dry_run_enabled_estimated_token_reduction_pct"] > 0
+    assert "shadow_router_status" not in event
+
+    candidate_request = event["dry_run_enabled_candidate_request"]
+    serialized_candidate = json.dumps(candidate_request)
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" in serialized_candidate
+    assert question in serialized_candidate
+    assert "SEGMENT A distractor cafeteria" not in serialized_candidate
+    assert "SEGMENT B distractor logistics" not in serialized_candidate
+    assert "placeholder-client-token" not in serialized_candidate
+    assert "placeholder-client-token" not in "\n".join(logs)
+
+
+def test_dry_run_enabled_candidate_diagnostics_do_not_require_payload_logging(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        mode="dry_run_enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        shadow_log_full_payloads=False,
+    )
+    try:
+        _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {
+                "model": "example-model",
+                "messages": [
+                    {"role": "user", "content": "small"},
+                    {"role": "user", "content": "larger selected segment " * 8},
+                ],
+            },
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    event = _read_shadow_event(tmp_path)
+    assert event["dry_run_enabled_candidate_built"] is True
+    assert event["dry_run_enabled_selected_segment_ids"] == ["segment-2"]
+    assert event["dry_run_enabled_candidate_request_estimated_tokens"] > 0
+    assert "dry_run_enabled_candidate_request" not in event
 
 
 def test_shadow_selection_dry_run_below_threshold_does_not_activate(tmp_path) -> None:

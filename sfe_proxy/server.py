@@ -14,7 +14,7 @@ from pathlib import Path
 from socket import socket
 from typing import Any, Callable
 
-from .config import ProxyConfig
+from .config import DRY_RUN_ENABLED_MODE, SHADOW_MODE, ProxyConfig
 from .shadow_router import ShadowRouterInput, create_shadow_router
 
 
@@ -283,7 +283,7 @@ def _is_sse_response(content_type: str) -> bool:
 
 
 def _should_shadow_observe(config: ProxyConfig, method: str, path: str) -> bool:
-    return config.mode == "shadow" and method == "POST" and path in SUPPORTED_POST_PATHS
+    return config.mode in {SHADOW_MODE, DRY_RUN_ENABLED_MODE} and method == "POST" and path in SUPPORTED_POST_PATHS
 
 
 def _build_shadow_event(
@@ -323,11 +323,198 @@ def _build_shadow_event(
         "full_payload_logging_enabled": False,
         "full_payload_logging_requested": config.shadow_log_full_payloads,
     }
-    if config.shadow_selection_dry_run:
+    if config.shadow_selection_dry_run or config.mode == DRY_RUN_ENABLED_MODE:
         event.update(_safe_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens))
     if config.shadow_router_dry_run:
         event.update(_safe_shadow_router_fields(config, event, path, payload))
+    if config.mode == DRY_RUN_ENABLED_MODE:
+        event.update(
+            _safe_dry_run_enabled_fields(
+                config,
+                path,
+                payload,
+                event,
+                rough_estimated_input_tokens,
+            )
+        )
     return event
+
+
+def _safe_dry_run_enabled_fields(
+    config: ProxyConfig,
+    path: str,
+    payload: dict[str, Any] | None,
+    event: dict[str, Any],
+    rough_estimated_input_tokens: int,
+) -> dict[str, Any]:
+    try:
+        return _build_dry_run_enabled_fields(
+            config,
+            path,
+            payload,
+            event,
+            rough_estimated_input_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "dry_run_enabled_candidate_built": False,
+            "dry_run_enabled_error_type": type(exc).__name__,
+            "dry_run_enabled_reason": "candidate_request_build_error",
+            "dry_run_enabled_is_real_execution": False,
+        }
+
+
+def _build_dry_run_enabled_fields(
+    config: ProxyConfig,
+    path: str,
+    payload: dict[str, Any] | None,
+    event: dict[str, Any],
+    rough_estimated_input_tokens: int,
+) -> dict[str, Any]:
+    selected_segment_ids = _selected_segment_ids_for_dry_run(event)
+    segments = _extract_candidate_text_segments(path, payload)
+    segment_by_id = {segment["segment_id"]: segment for segment in segments}
+    selected_segments = [
+        segment_by_id[segment_id]
+        for segment_id in selected_segment_ids
+        if segment_id in segment_by_id
+    ]
+    question_text = _last_text_segment(segments)
+    if not selected_segments:
+        return {
+            "dry_run_enabled_candidate_built": False,
+            "dry_run_enabled_reason": "no_selected_segments",
+            "dry_run_enabled_selected_segment_ids": selected_segment_ids,
+            "dry_run_enabled_is_real_execution": False,
+            "dry_run_enabled_replaces_upstream_request": False,
+            "dry_run_enabled_changes_client_response": False,
+            "dry_run_enabled_candidate_request_sent_to_upstream": False,
+            "dry_run_enabled_experimental_response_exposed": False,
+            "dry_run_enabled_original_upstream_request_unchanged": True,
+            "dry_run_enabled_client_response_unchanged": True,
+            "dry_run_enabled_candidate_request_estimated_tokens": None,
+            "dry_run_enabled_estimated_token_reduction_pct": None,
+            "dry_run_enabled_selected_segment_count": 0,
+        }
+
+    candidate_request = _candidate_request_for_endpoint(
+        path,
+        payload,
+        selected_segments,
+        question_text,
+    )
+    candidate_tokens = _rough_estimate_tokens_from_texts(
+        _iter_text_values(candidate_request),
+        json.dumps(candidate_request, sort_keys=True).encode("utf-8"),
+    )
+    reduction_pct = (
+        round((1 - (candidate_tokens / rough_estimated_input_tokens)) * 100, 2)
+        if rough_estimated_input_tokens > 0
+        else 0.0
+    )
+    selected_metadata = [
+        {
+            "segment_id": segment["segment_id"],
+            "source": segment["source"],
+            "text_chars": segment["text_chars"],
+            "text_bytes": segment["text_bytes"],
+            "estimated_tokens": segment["estimated_tokens"],
+        }
+        for segment in selected_segments
+    ]
+    fields: dict[str, Any] = {
+        "dry_run_enabled_candidate_built": True,
+        "dry_run_enabled_reason": "candidate_request_built_for_diagnostics",
+        "dry_run_enabled_is_real_execution": False,
+        "dry_run_enabled_replaces_upstream_request": False,
+        "dry_run_enabled_changes_client_response": False,
+        "dry_run_enabled_candidate_request_sent_to_upstream": False,
+        "dry_run_enabled_experimental_response_exposed": False,
+        "dry_run_enabled_original_upstream_request_unchanged": True,
+        "dry_run_enabled_client_response_unchanged": True,
+        "dry_run_enabled_selected_segment_ids": selected_segment_ids,
+        "dry_run_enabled_selected_segment_count": len(selected_segments),
+        "dry_run_enabled_selected_segments_metadata": selected_metadata,
+        "dry_run_enabled_full_request_estimated_tokens": rough_estimated_input_tokens,
+        "dry_run_enabled_candidate_request_estimated_tokens": candidate_tokens,
+        "dry_run_enabled_estimated_token_reduction_pct": reduction_pct,
+        "dry_run_enabled_candidate_endpoint": path,
+        "dry_run_enabled_candidate_contains_text": bool(
+            _iter_text_values(candidate_request)
+        ),
+    }
+    if config.shadow_log_full_payloads:
+        fields["dry_run_enabled_candidate_request"] = candidate_request
+    return fields
+
+
+def _selected_segment_ids_for_dry_run(event: dict[str, Any]) -> list[str]:
+    router_selected = event.get("shadow_router_candidate_selected_segment_ids")
+    if isinstance(router_selected, list) and all(isinstance(item, str) for item in router_selected) and router_selected:
+        return list(router_selected)
+    metadata = event.get("candidate_segments_metadata")
+    if not isinstance(metadata, list):
+        return []
+    selected = []
+    for item in metadata:
+        if not isinstance(item, dict) or item.get("selected") is not True:
+            continue
+        segment_id = item.get("segment_id")
+        if isinstance(segment_id, str):
+            selected.append(segment_id)
+    return selected
+
+
+def _last_text_segment(segments: list[dict[str, Any]]) -> str:
+    for segment in reversed(segments):
+        text = segment.get("text")
+        if isinstance(text, str) and text:
+            return text
+    return ""
+
+
+def _candidate_request_for_endpoint(
+    path: str,
+    payload: dict[str, Any] | None,
+    selected_segments: list[dict[str, Any]],
+    question_text: str,
+) -> dict[str, Any]:
+    selected_context = "\n\n".join(
+        f"[{segment['segment_id']}]\n{segment['text']}" for segment in selected_segments
+    )
+    candidate_text = "\n\n".join(
+        part
+        for part in (
+            "Selected context:",
+            selected_context,
+            "Question:",
+            question_text,
+        )
+        if part
+    )
+    model = _payload_model(payload)
+    if path == "/v1/responses":
+        request: dict[str, Any] = {"input": candidate_text}
+        if model is not None:
+            request["model"] = model
+        return request
+    request = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Dry-run SFE candidate request assembled from selected "
+                    "segments. This request was not used for the client "
+                    "response."
+                ),
+            },
+            {"role": "user", "content": candidate_text},
+        ],
+        "stream": False,
+    }
+    if model is not None:
+        request["model"] = model
+    return request
 
 
 def _safe_shadow_router_fields(

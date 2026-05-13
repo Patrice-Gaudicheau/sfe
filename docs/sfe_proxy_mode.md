@@ -64,6 +64,10 @@ Supported modes:
 - `shadow`: forwards supported requests unchanged and returns upstream responses
   unchanged, while writing safe local JSONL observations for supported POST
   requests.
+- `dry_run_enabled`: forwards supported requests unchanged and returns upstream
+  responses unchanged, while building a reduced SFE candidate request for local
+  diagnostics only. The reduced request is not used as the upstream request and
+  is not returned to the client.
 
 Any other mode fails clearly at startup.
 
@@ -323,5 +327,6 @@ decision metadata only.
 
 ## Future Modes
 
-SFE-enabled mode is a future step. It is not implemented in this pass-through
-and shadow-observability version.
+SFE-enabled client-visible execution is a future step. `dry_run_enabled` is only
+a pre-enabled safety mode for inspecting the candidate request that could be used
+later.
