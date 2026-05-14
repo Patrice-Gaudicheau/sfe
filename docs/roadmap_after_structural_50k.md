@@ -239,6 +239,86 @@ Possible metrics:
 This phase should be framed as a roadmap idea, not a completed capability or a
 production security claim.
 
+## Long-Term Research Direction: Context Routing Unit
+
+A more speculative long-term research direction is a Context Routing Unit
+(CRU). SFE should remain software-first. CRU is not current functionality, not
+real silicon, and not a near-term hardware implementation plan.
+
+The CRU concept would be a software simulation of a possible future
+context-routing co-processor inside the SFE runtime. Its purpose would be to
+model hardware-like boundaries and responsibilities before any real hardware
+consideration. The research question is whether deterministic, repetitive, and
+auditable context-control operations can be separated cleanly from semantic
+routing decisions.
+
+In this framing, CRU would explore which parts of SFE could behave like a
+hardware-assisted context-control layer. It would delegate deterministic control
+work to a hardware-like software component, while keeping semantic routing,
+policy decisions, model behavior, provider abstraction, and refusal logic in
+evolvable software. Models, providers, and policies should be able to change
+without redesigning a hardware boundary.
+
+This is a research blueprint, not a committed implementation path. It should
+not be described as a CPU, as a hardware product, or as a performance guarantee.
+
+### Possible Deterministic CRU Responsibilities
+
+The simulated CRU boundary could start with deterministic operations such as:
+
+- fragment hashing;
+- fragment identity verification;
+- exact-match constraint checks;
+- context size budget enforcement;
+- cache lookup;
+- deterministic zone eligibility checks;
+- selected-zone validity checks;
+- tool allowlist checks;
+- quota enforcement;
+- trace integrity;
+- structured audit events.
+
+These responsibilities are attractive because they are auditable and do not
+require semantic interpretation by themselves.
+
+### Possible Accelerated Responsibilities
+
+Some operations could be accelerated by GPU, TPU, NPU, or similar hardware
+while still being controlled by software:
+
+- embeddings;
+- reranking;
+- semantic scoring;
+- small router or classifier models.
+
+These should remain software-governed. Acceleration would not by itself decide
+policy, safety, provider behavior, or final context arbitration.
+
+### Responsibilities Outside CRU
+
+The following should remain outside CRU in the software semantic layer:
+
+- intent interpretation;
+- final zone arbitration;
+- semantic validation;
+- provider abstraction;
+- policy decisions;
+- tool exposure policy;
+- safety and refusal logic.
+
+Keeping these responsibilities outside the simulated CRU preserves flexibility.
+It also avoids hard-coding model-specific or policy-specific behavior into a
+hardware-like boundary.
+
+### Research Framing
+
+The CRU idea should be evaluated only as a long-term roadmap concept. A useful
+first step, if this direction is ever explored, would be a software-only
+simulation that records which operations are deterministic, which are semantic,
+and which require provider or policy decisions. Any future report should keep
+the distinction explicit and avoid claiming hardware performance or production
+readiness.
+
 ## Risks
 
 - Overclaiming from one benchmark family or one provider.
