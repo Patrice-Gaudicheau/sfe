@@ -1,8 +1,8 @@
 # Alibaba Router Smoke Note
 
-This note records a limited single-run Alibaba Model Studio router smoke test.
-It is not a reliability benchmark, not a statistical routing result, and not a
-production validation.
+This note records a limited Alibaba Model Studio router smoke test. It is not a
+reliability benchmark, not a statistical routing result, and not a production
+validation.
 
 ## Configuration
 
@@ -17,21 +17,30 @@ accounting and cost sanity checks.
 
 ## High-Overlap Selector Smoke
 
-The meaningful smoke result used the controlled high-overlap selector fixture:
+The meaningful smoke result used the controlled high-overlap selector fixture
+with three repeated selector-only calls:
 
 - Fixture: `high_overlap_cassini_policy_exception_gate`
-- Selected ID: `cassini-v31`
 - Expected authoritative ID: `cassini-v31`
-- Exact authoritative selection: `true`
-- Honest selector pass: `true`
-- Parse success: `true`
-- Fallback used: `false`
-- Provider error: `false`
-- Router tokens: `745` input, `121` output, `866` total
-- Latency: `2251 ms`
+- Run count: `3`
+- Honest selector pass count: `3/3`
+- Parse failure count: `0`
+- Fallback count: `0`
+- Provider error count: `0`
+- Total token range: `824` to `878`
+- Latency range: `1720 ms` to `2102 ms`
 
-In this single run, `qwen3.6-flash` produced valid JSON and selected the
-authoritative high-overlap document without fallback.
+Per-run results:
+
+| Run | Selected ID | Exact authoritative | Honest pass | Input tokens | Output tokens | Total tokens | Latency ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | `cassini-v31` | `true` | `true` | `745` | `79` | `824` | `1721` |
+| 2 | `cassini-v31` | `true` | `true` | `745` | `79` | `824` | `1720` |
+| 3 | `cassini-v31` | `true` | `true` | `745` | `133` | `878` | `2102` |
+
+Across these three limited calls, `qwen3.6-flash` produced valid JSON and
+selected the authoritative high-overlap document without fallback. This is still
+only a small smoke signal; it should not be treated as a reliability estimate.
 
 ## Generic Effectiveness Smoke
 
