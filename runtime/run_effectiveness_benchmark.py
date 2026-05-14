@@ -30,9 +30,16 @@ from providers.openai_api import (
     PROVIDER_NAME as OPENAI_API_PROVIDER_NAME,
     OpenAIAPIProvider,
 )
+from providers.alibaba import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_ALIBABA_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MODEL,
+    PROVIDER_NAME as ALIBABA_API_PROVIDER_NAME,
+    AlibabaAPIProvider,
+)
 from providers.lemonade import DEFAULT_TIMEOUT, LemonadeProvider
 from router.llm_router import (
     DEFAULT_ROUTER_MODEL,
+    route_with_alibaba_api_diagnostics,
     route_with_codexcli_diagnostics,
     route_with_openai_api_diagnostics,
     route_with_llm_diagnostics,
@@ -94,12 +101,25 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--executor",
-        choices=("mock", "lemonade", OPENAI_CODEXCLI_PROVIDER_NAME, OPENAI_API_PROVIDER_NAME),
+        choices=(
+            "mock",
+            "lemonade",
+            OPENAI_CODEXCLI_PROVIDER_NAME,
+            OPENAI_API_PROVIDER_NAME,
+            ALIBABA_API_PROVIDER_NAME,
+        ),
         default="mock",
     )
     parser.add_argument(
         "--router",
-        choices=("mock", "llm", "llm_raw", OPENAI_CODEXCLI_PROVIDER_NAME, OPENAI_API_PROVIDER_NAME),
+        choices=(
+            "mock",
+            "llm",
+            "llm_raw",
+            OPENAI_CODEXCLI_PROVIDER_NAME,
+            OPENAI_API_PROVIDER_NAME,
+            ALIBABA_API_PROVIDER_NAME,
+        ),
         default="mock",
     )
     parser.add_argument(
@@ -122,7 +142,8 @@ def _parse_args() -> argparse.Namespace:
             "Model used by llm, llm_raw, and OpenAI/CodexCLI routers. Lemonade "
             f"defaults to SFE_ROUTER_MODEL or {DEFAULT_ROUTER_MODEL}; "
             f"{OPENAI_API_PROVIDER_NAME} defaults to {DEFAULT_OPENAI_API_ROUTER_MODEL}; "
-            f"{OPENAI_CODEXCLI_PROVIDER_NAME} defaults to {DEFAULT_CODEXCLI_ROUTER_MODEL}."
+            f"{OPENAI_CODEXCLI_PROVIDER_NAME} defaults to {DEFAULT_CODEXCLI_ROUTER_MODEL}; "
+            f"{ALIBABA_API_PROVIDER_NAME} defaults to {DEFAULT_ALIBABA_ROUTER_MODEL}."
         ),
     )
     parser.add_argument(
@@ -420,6 +441,8 @@ def _baseline_routing_decision(
 
 
 def _resolve_router_model(router_name: str, router_model: str | None) -> str | None:
+    if router_name == ALIBABA_API_PROVIDER_NAME:
+        return router_model or os.getenv("SFE_ALIBABA_ROUTER_MODEL") or DEFAULT_ALIBABA_ROUTER_MODEL
     if router_name == OPENAI_API_PROVIDER_NAME:
         return router_model or os.getenv("SFE_OPENAI_ROUTER_MODEL") or DEFAULT_OPENAI_API_ROUTER_MODEL
     if router_name == OPENAI_CODEXCLI_PROVIDER_NAME:
@@ -430,6 +453,12 @@ def _resolve_router_model(router_name: str, router_model: str | None) -> str | N
 
 
 def _resolve_executor_model(executor_name: str, executor_model: str | None) -> str | None:
+    if executor_name == ALIBABA_API_PROVIDER_NAME:
+        return (
+            _alibaba_executor_model_or_none(executor_model)
+            or os.getenv("SFE_ALIBABA_EXECUTOR_MODEL")
+            or DEFAULT_ALIBABA_EXECUTOR_MODEL
+        )
     if executor_name in (OPENAI_CODEXCLI_PROVIDER_NAME, OPENAI_API_PROVIDER_NAME):
         return executor_model or os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL
     if executor_name == "lemonade":
@@ -444,13 +473,27 @@ def _baseline_model_for_executor(executor_name: str, executor_model: str | None)
         return _select_lemonade_executor_model()
     if executor_name in (OPENAI_CODEXCLI_PROVIDER_NAME, OPENAI_API_PROVIDER_NAME):
         return DEFAULT_OPENAI_EXECUTOR_MODEL
+    if executor_name == ALIBABA_API_PROVIDER_NAME:
+        return DEFAULT_ALIBABA_EXECUTOR_MODEL
     return "mock-executor"
+
+
+def _alibaba_executor_model_or_none(executor_model: str | None) -> str | None:
+    if not executor_model or executor_model == DEFAULT_OPENAI_EXECUTOR_MODEL:
+        return None
+    return executor_model
 
 
 def _resolve_router_timeout_seconds(
     router_name: str, router_timeout_seconds: float
 ) -> float | None:
-    if router_name not in ("llm", "llm_raw", OPENAI_CODEXCLI_PROVIDER_NAME, OPENAI_API_PROVIDER_NAME):
+    if router_name not in (
+        "llm",
+        "llm_raw",
+        OPENAI_CODEXCLI_PROVIDER_NAME,
+        OPENAI_API_PROVIDER_NAME,
+        ALIBABA_API_PROVIDER_NAME,
+    ):
         return None
     return router_timeout_seconds
 
@@ -498,6 +541,13 @@ def _route_for_spatial(
                 prompt,
                 router_model=router_model,
                 executor_model=executor_model or DEFAULT_OPENAI_EXECUTOR_MODEL,
+                timeout_seconds=router_timeout_seconds,
+            )
+        elif router_name == ALIBABA_API_PROVIDER_NAME:
+            decision, diagnostics = route_with_alibaba_api_diagnostics(
+                prompt,
+                router_model=router_model,
+                executor_model=executor_model or DEFAULT_ALIBABA_EXECUTOR_MODEL,
                 timeout_seconds=router_timeout_seconds,
             )
         else:
@@ -615,6 +665,16 @@ def _execute(
             routing_decision=routing_decision,
             mode=mode,
             model=executor_model or DEFAULT_OPENAI_EXECUTOR_MODEL,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            debug_raw_response=debug_raw_response,
+        )
+    if executor_name == ALIBABA_API_PROVIDER_NAME:
+        return _execute_with_alibaba_api(
+            task=task,
+            routing_decision=routing_decision,
+            mode=mode,
+            model=executor_model or DEFAULT_ALIBABA_EXECUTOR_MODEL,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
             debug_raw_response=debug_raw_response,
@@ -821,6 +881,69 @@ def _execute_with_openai_api(
     }
 
 
+def _execute_with_alibaba_api(
+    task: dict[str, Any],
+    routing_decision: dict[str, Any],
+    mode: str,
+    model: str,
+    max_tokens: int,
+    timeout_seconds: float,
+    debug_raw_response: bool,
+) -> dict[str, Any]:
+    provider = AlibabaAPIProvider(timeout=timeout_seconds)
+    prompt = _build_execution_prompt(task["prompt"], routing_decision, mode)
+
+    started = time.perf_counter()
+    try:
+        response = provider.chat(
+            [{"role": "user", "content": prompt}],
+            model=model,
+            max_tokens=max_tokens,
+            temperature=0.0,
+        )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        prompt_tokens = _estimate_tokens(prompt)
+        api_error = getattr(exc, "diagnostics", {})
+        return {
+            "model": model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": 0,
+            "total_tokens": prompt_tokens,
+            "token_usage_source": "estimated_after_error",
+            "token_usage_scientific": False,
+            "api_error_status": api_error.get("api_error_status"),
+            "api_error_type": api_error.get("api_error_type"),
+            "api_error_code": api_error.get("api_error_code"),
+            "api_error_message": api_error.get("api_error_message"),
+            "api_error_retry_count": api_error.get("api_error_retry_count", 0),
+            "api_error_attempts": api_error.get("api_error_attempts", []),
+            "latency_ms": latency_ms,
+            "output": "",
+            "error": str(exc),
+        }
+
+    if debug_raw_response:
+        print(json.dumps({"mode": mode, "task_id": task["id"], "raw_response": response}, indent=2))
+
+    output = _extract_response_text(response)
+    tokens = _extract_token_usage(response, prompt, output)
+
+    return {
+        "model": model,
+        "prompt_tokens": int(tokens["input_tokens"]),
+        "completion_tokens": int(tokens["output_tokens"]),
+        "total_tokens": int(tokens["total_tokens"]),
+        "token_usage_source": _provider_token_usage_source(response),
+        "token_usage_scientific": _has_provider_token_usage(response),
+        **_api_metadata_for_report(response, "alibaba_api"),
+        "latency_ms": latency_ms,
+        "output": output,
+        "error": "" if output.strip() else "empty_executor_content",
+    }
+
+
 def _failed_execution(error: str) -> dict[str, Any]:
     return {
         "mode": "spatial",
@@ -861,7 +984,13 @@ def _provider_token_usage_source(response: dict[str, Any]) -> str:
 
 
 def _openai_api_metadata_for_report(response: dict[str, Any]) -> dict[str, Any]:
+    return _api_metadata_for_report(response, "openai_api")
+
+
+def _api_metadata_for_report(response: dict[str, Any], metadata_key: str) -> dict[str, Any]:
     metadata = response.get("openai_api", {})
+    if metadata_key != "openai_api":
+        metadata = response.get(metadata_key, {})
     if not isinstance(metadata, dict):
         metadata = {}
     return {
@@ -1480,14 +1609,15 @@ def _real_routing_accuracy(pairs: list[dict[str, Any]]) -> float | None:
 
 def _openai_api_failure_count(pairs: list[dict[str, Any]]) -> int:
     count = 0
+    api_providers = {OPENAI_API_PROVIDER_NAME, ALIBABA_API_PROVIDER_NAME}
     for pair in pairs:
-        if pair["routing"].get("router") == OPENAI_API_PROVIDER_NAME and pair["routing"].get("error"):
+        if pair["routing"].get("router") in api_providers and pair["routing"].get("error"):
             count += 1
         count += len(pair["routing"].get("api_error_attempts") or [])
-        if pair["baseline"].get("executor") == OPENAI_API_PROVIDER_NAME and pair["baseline"].get("error"):
+        if pair["baseline"].get("executor") in api_providers and pair["baseline"].get("error"):
             count += 1
         count += len(pair["baseline"].get("api_error_attempts") or [])
-        if pair["spatial"].get("executor") == OPENAI_API_PROVIDER_NAME and pair["spatial"].get("error"):
+        if pair["spatial"].get("executor") in api_providers and pair["spatial"].get("error"):
             count += 1
         count += len(pair["spatial"].get("api_error_attempts") or [])
     return count

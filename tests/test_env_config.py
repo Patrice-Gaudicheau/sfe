@@ -75,6 +75,14 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY=", text)
         self.assertIn("SFE_OPENAI_ROUTER_MODEL=", text)
         self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=", text)
+        self.assertIn("ALIBABA_API_KEY=", text)
+        self.assertIn(
+            "ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            text,
+        )
+        self.assertIn("SFE_ALIBABA_ROUTER_MODEL=qwen3.6-flash", text)
+        self.assertIn("SFE_ALIBABA_EXECUTOR_MODEL=qwen3.6-plus", text)
+        self.assertIn("SFE_ALIBABA_DISABLE_THINKING=true", text)
         self.assertIn("ANTHROPIC_API_KEY=", text)
         self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=", text)
         self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=", text)
@@ -88,6 +96,8 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "SFE_OPENAI_ROUTER_MODEL=")
             if line.startswith("SFE_OPENAI_EXECUTOR_MODEL="):
                 self.assertEqual(line, "SFE_OPENAI_EXECUTOR_MODEL=")
+            if line.startswith("ALIBABA_API_KEY="):
+                self.assertEqual(line, "ALIBABA_API_KEY=")
             if line.startswith("ANTHROPIC_API_KEY="):
                 self.assertEqual(line, "ANTHROPIC_API_KEY=")
             if line.startswith("SFE_ANTHROPIC_ROUTER_MODEL="):
