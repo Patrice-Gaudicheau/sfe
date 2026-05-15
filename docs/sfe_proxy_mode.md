@@ -37,8 +37,20 @@ Environment variables:
 
 - `SFE_PROXY_HOST`, default `127.0.0.1`
 - `SFE_PROXY_PORT`, default `17891`
+- `SFE_PROXY_PROVIDER`, default `openai-compatible`
 - `SFE_PROXY_UPSTREAM_BASE_URL`, default `https://api.openai.com`
 - `SFE_PROXY_UPSTREAM_API_KEY`, preferred upstream key for proxy mode
+- `SFE_ANTHROPIC_API_KEY`, Anthropic proxy provider key; `ANTHROPIC_API_KEY`
+  is also accepted
+- `SFE_ANTHROPIC_BASE_URL`, default `https://api.anthropic.com`
+- `SFE_ANTHROPIC_VERSION`, default `2023-06-01`
+- `SFE_ANTHROPIC_MODEL`, Anthropic Messages API model for proxy execution
+- `SFE_ANTHROPIC_API_TIMEOUT`, default `60`
+- `SFE_ANTHROPIC_MAX_TOKENS`, default `1024`
+- `SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS`, default `0`
+- `SFE_ANTHROPIC_MAX_INPUT_CHARS`, default `0`
+- `SFE_ANTHROPIC_RETRY_ON_RATE_LIMIT`, default `false`
+- `SFE_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS`, default `10`
 - `SFE_PROXY_MODE`, default `pass_through`
 - `SFE_PROXY_SHADOW_MIN_INPUT_TOKENS`, default `50000`
 - `SFE_PROXY_SHADOW_LOG_DIR`, default `logs/sfe_proxy_shadow`
@@ -51,11 +63,45 @@ Proxy mode uses the repository root `.env`. Do not create a separate proxy
 environment file and do not duplicate secrets unless you need a proxy-specific
 upstream key.
 
+Supported execution providers:
+
+- `openai-compatible`: the existing default behavior. Supported requests are
+  forwarded unchanged to `SFE_PROXY_UPSTREAM_BASE_URL` with an OpenAI-compatible
+  bearer token.
+- `anthropic`: supported POST requests are converted to Anthropic Messages API
+  calls at `${SFE_ANTHROPIC_BASE_URL}/v1/messages`, then text responses are
+  converted back to the proxy response shape. This path supports text-only
+  `messages` and `input` payloads. System chat messages are combined into the
+  Anthropic top-level `system` field. It does not implement streaming, tools,
+  images, prompt caching, or structured output.
+
 `SFE_PROXY_UPSTREAM_API_KEY` wins when set. For the default OpenAI upstream, or
 when `SFE_PROXY_UPSTREAM_BASE_URL` points to `https://api.openai.com`,
 `OPENAI_API_KEY` can be used as a fallback. If neither key is available, the
 proxy fails clearly at startup. The OpenAI fallback is not applied to non-OpenAI
 upstream URLs.
+
+For `SFE_PROXY_PROVIDER=anthropic`, `SFE_ANTHROPIC_API_KEY` or
+`ANTHROPIC_API_KEY` is required. `SFE_ANTHROPIC_MODEL` overrides any incoming
+request model when set; otherwise the request model is used. Anthropic requires
+`max_tokens`, so the proxy sends `SFE_ANTHROPIC_MAX_TOKENS`.
+
+The Anthropic proxy path includes optional process-local operational guards for
+large-context and repeated calls:
+
+- `SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS` inserts a simple local delay
+  before Anthropic provider calls after the first call. `0` disables pacing.
+- `SFE_ANTHROPIC_MAX_INPUT_CHARS` rejects Anthropic proxy requests when the
+  mapped text payload exceeds the configured character guard. `0` disables the
+  guard.
+- `SFE_ANTHROPIC_RETRY_ON_RATE_LIMIT=true` retries once on HTTP `429` only.
+  The retry uses `Retry-After` when present and caps that sleep with
+  `SFE_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS`.
+
+These guards are especially useful for Anthropic because large-context and
+repeated proxy calls can hit throughput, timeout, or provider rate-limit
+constraints. They are local proxy safeguards only: there is no distributed
+locking, queue, broad provider retry policy, or benchmark runner coupling.
 
 Supported modes:
 

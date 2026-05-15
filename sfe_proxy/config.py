@@ -10,6 +10,17 @@ from urllib.parse import urlparse
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17891
 DEFAULT_UPSTREAM_BASE_URL = "https://api.openai.com"
+DEFAULT_PROXY_PROVIDER = "openai-compatible"
+ANTHROPIC_PROXY_PROVIDER = "anthropic"
+SUPPORTED_PROXY_PROVIDERS = (DEFAULT_PROXY_PROVIDER, ANTHROPIC_PROXY_PROVIDER)
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_ANTHROPIC_TIMEOUT_SECONDS = 60
+DEFAULT_ANTHROPIC_MAX_TOKENS = 1024
+DEFAULT_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS = 0.0
+DEFAULT_ANTHROPIC_MAX_INPUT_CHARS = 0
+DEFAULT_ANTHROPIC_RETRY_ON_RATE_LIMIT = False
+DEFAULT_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS = 10.0
 DEFAULT_MODE = "pass_through"
 SHADOW_MODE = "shadow"
 DRY_RUN_ENABLED_MODE = "dry_run_enabled"
@@ -32,8 +43,21 @@ SUPPORTED_SHADOW_ROUTER_PROVIDERS = (
 class ProxyConfig:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
+    provider: str = DEFAULT_PROXY_PROVIDER
     upstream_base_url: str = DEFAULT_UPSTREAM_BASE_URL
     upstream_api_key: str = ""
+    anthropic_base_url: str = DEFAULT_ANTHROPIC_BASE_URL
+    anthropic_api_key: str = ""
+    anthropic_version: str = DEFAULT_ANTHROPIC_VERSION
+    anthropic_model: str = ""
+    anthropic_timeout_seconds: float = DEFAULT_ANTHROPIC_TIMEOUT_SECONDS
+    anthropic_max_tokens: int = DEFAULT_ANTHROPIC_MAX_TOKENS
+    anthropic_min_request_interval_seconds: float = (
+        DEFAULT_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS
+    )
+    anthropic_max_input_chars: int = DEFAULT_ANTHROPIC_MAX_INPUT_CHARS
+    anthropic_retry_on_rate_limit: bool = DEFAULT_ANTHROPIC_RETRY_ON_RATE_LIMIT
+    anthropic_max_retry_sleep_seconds: float = DEFAULT_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS
     mode: str = DEFAULT_MODE
     shadow_min_input_tokens: int = DEFAULT_SHADOW_MIN_INPUT_TOKENS
     shadow_log_dir: str = DEFAULT_SHADOW_LOG_DIR
@@ -53,8 +77,13 @@ class ProxyConfig:
         upstream_base_url = os.getenv(
             "SFE_PROXY_UPSTREAM_BASE_URL", DEFAULT_UPSTREAM_BASE_URL
         )
+        provider = os.getenv("SFE_PROXY_PROVIDER", DEFAULT_PROXY_PROVIDER)
         upstream_api_key = os.getenv("SFE_PROXY_UPSTREAM_API_KEY", "")
-        if not upstream_api_key and _is_openai_upstream(upstream_base_url):
+        if (
+            provider == DEFAULT_PROXY_PROVIDER
+            and not upstream_api_key
+            and _is_openai_upstream(upstream_base_url)
+        ):
             upstream_api_key = os.getenv("OPENAI_API_KEY", "")
         shadow_min_input_tokens_raw = os.getenv(
             "SFE_PROXY_SHADOW_MIN_INPUT_TOKENS", str(DEFAULT_SHADOW_MIN_INPUT_TOKENS)
@@ -81,8 +110,62 @@ class ProxyConfig:
         return cls(
             host=os.getenv("SFE_PROXY_HOST", DEFAULT_HOST),
             port=port,
+            provider=provider,
             upstream_base_url=upstream_base_url,
             upstream_api_key=upstream_api_key,
+            anthropic_base_url=os.getenv(
+                "SFE_ANTHROPIC_BASE_URL", DEFAULT_ANTHROPIC_BASE_URL
+            ),
+            anthropic_api_key=(
+                os.getenv("SFE_ANTHROPIC_API_KEY", "")
+                or os.getenv("ANTHROPIC_API_KEY", "")
+            ),
+            anthropic_version=os.getenv(
+                "SFE_ANTHROPIC_VERSION", DEFAULT_ANTHROPIC_VERSION
+            ),
+            anthropic_model=os.getenv("SFE_ANTHROPIC_MODEL", ""),
+            anthropic_timeout_seconds=_parse_float(
+                os.getenv(
+                    "SFE_ANTHROPIC_API_TIMEOUT",
+                    str(DEFAULT_ANTHROPIC_TIMEOUT_SECONDS),
+                ),
+                "SFE_ANTHROPIC_API_TIMEOUT",
+            ),
+            anthropic_max_tokens=_parse_int(
+                os.getenv(
+                    "SFE_ANTHROPIC_MAX_TOKENS",
+                    str(DEFAULT_ANTHROPIC_MAX_TOKENS),
+                ),
+                "SFE_ANTHROPIC_MAX_TOKENS",
+            ),
+            anthropic_min_request_interval_seconds=_parse_float(
+                os.getenv(
+                    "SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS",
+                    str(DEFAULT_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS),
+                ),
+                "SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS",
+            ),
+            anthropic_max_input_chars=_parse_int(
+                os.getenv(
+                    "SFE_ANTHROPIC_MAX_INPUT_CHARS",
+                    str(DEFAULT_ANTHROPIC_MAX_INPUT_CHARS),
+                ),
+                "SFE_ANTHROPIC_MAX_INPUT_CHARS",
+            ),
+            anthropic_retry_on_rate_limit=_parse_bool(
+                os.getenv(
+                    "SFE_ANTHROPIC_RETRY_ON_RATE_LIMIT",
+                    str(DEFAULT_ANTHROPIC_RETRY_ON_RATE_LIMIT).lower(),
+                ),
+                "SFE_ANTHROPIC_RETRY_ON_RATE_LIMIT",
+            ),
+            anthropic_max_retry_sleep_seconds=_parse_float(
+                os.getenv(
+                    "SFE_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS",
+                    str(DEFAULT_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS),
+                ),
+                "SFE_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS",
+            ),
             mode=mode,
             shadow_min_input_tokens=shadow_min_input_tokens,
             shadow_log_dir=os.getenv("SFE_PROXY_SHADOW_LOG_DIR", DEFAULT_SHADOW_LOG_DIR),
@@ -100,6 +183,11 @@ class ProxyConfig:
         ).validated()
 
     def validated(self) -> "ProxyConfig":
+        if self.provider not in SUPPORTED_PROXY_PROVIDERS:
+            supported = ", ".join(SUPPORTED_PROXY_PROVIDERS)
+            raise ValueError(
+                f"Unsupported SFE_PROXY_PROVIDER {self.provider!r}; supported providers: {supported}."
+            )
         if self.mode not in SUPPORTED_MODES:
             supported = ", ".join(SUPPORTED_MODES)
             raise ValueError(
@@ -109,13 +197,36 @@ class ProxyConfig:
             raise ValueError("SFE_PROXY_HOST must not be empty.")
         if not (1 <= self.port <= 65535):
             raise ValueError("SFE_PROXY_PORT must be between 1 and 65535.")
-        if not self.upstream_base_url:
+        if self.provider == DEFAULT_PROXY_PROVIDER and not self.upstream_base_url:
             raise ValueError("SFE_PROXY_UPSTREAM_BASE_URL must not be empty.")
-        if not self.upstream_api_key:
+        if self.provider == DEFAULT_PROXY_PROVIDER and not self.upstream_api_key:
             raise ValueError(
                 "SFE_PROXY_UPSTREAM_API_KEY is required for proxy mode; "
                 "OPENAI_API_KEY may be used as a fallback only for OpenAI upstreams."
             )
+        if self.provider == ANTHROPIC_PROXY_PROVIDER:
+            if not self.anthropic_base_url:
+                raise ValueError("SFE_ANTHROPIC_BASE_URL must not be empty.")
+            if not self.anthropic_api_key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY or SFE_ANTHROPIC_API_KEY is required for anthropic proxy provider."
+                )
+            if not self.anthropic_version:
+                raise ValueError("SFE_ANTHROPIC_VERSION must not be empty.")
+            if self.anthropic_timeout_seconds <= 0:
+                raise ValueError("SFE_ANTHROPIC_API_TIMEOUT must be positive.")
+            if self.anthropic_max_tokens <= 0:
+                raise ValueError("SFE_ANTHROPIC_MAX_TOKENS must be positive.")
+            if self.anthropic_min_request_interval_seconds < 0:
+                raise ValueError(
+                    "SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS must be non-negative."
+                )
+            if self.anthropic_max_input_chars < 0:
+                raise ValueError("SFE_ANTHROPIC_MAX_INPUT_CHARS must be non-negative.")
+            if self.anthropic_max_retry_sleep_seconds < 0:
+                raise ValueError(
+                    "SFE_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS must be non-negative."
+                )
         if self.shadow_min_input_tokens < 0:
             raise ValueError("SFE_PROXY_SHADOW_MIN_INPUT_TOKENS must be non-negative.")
         if not self.shadow_log_dir:
@@ -133,6 +244,10 @@ class ProxyConfig:
     @property
     def normalized_upstream_base_url(self) -> str:
         return self.upstream_base_url.rstrip("/")
+
+    @property
+    def normalized_anthropic_base_url(self) -> str:
+        return self.anthropic_base_url.rstrip("/")
 
 
 def _is_openai_upstream(base_url: str) -> bool:
@@ -155,3 +270,10 @@ def _parse_int(raw: str, name: str) -> int:
         return int(raw)
     except ValueError as exc:
         raise ValueError(f"{name} must be an integer.") from exc
+
+
+def _parse_float(raw: str, name: str) -> float:
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number.") from exc

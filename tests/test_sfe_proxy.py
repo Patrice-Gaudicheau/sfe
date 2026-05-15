@@ -6,6 +6,7 @@ import json
 import socket
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -104,6 +105,41 @@ class RecordingLemonadeRouterHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(response_body)))
         self.end_headers()
         self.wfile.write(response_body)
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        return
+
+
+class RecordingAnthropicHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    records: list[dict[str, Any]] = []
+    response_status = 200
+    response_body: bytes = b'{"id":"msg_test","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"hello from anthropic"}]}'
+    response_headers = {"Content-Type": "application/json"}
+    response_delay_seconds = 0.0
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length") or "0")
+        body = self.rfile.read(length) if length else b""
+        self.__class__.records.append(
+            {
+                "method": self.command,
+                "path": self.path,
+                "headers": dict(self.headers.items()),
+                "body": body,
+            }
+        )
+        if self.__class__.response_delay_seconds:
+            time.sleep(self.__class__.response_delay_seconds)
+        self.send_response(self.__class__.response_status)
+        for key, value in self.__class__.response_headers.items():
+            self.send_header(key, value)
+        self.send_header("Content-Length", str(len(self.__class__.response_body)))
+        self.end_headers()
+        try:
+            self.wfile.write(self.__class__.response_body)
+        except BrokenPipeError:
+            return
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         return
@@ -222,6 +258,60 @@ def test_proxy_config_accepts_openai_router_provider_without_provider_details(mo
 
     assert config.shadow_router_dry_run is True
     assert config.shadow_router_provider == "openai"
+
+
+def test_proxy_config_accepts_anthropic_provider_from_env(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    monkeypatch.setenv("SFE_ANTHROPIC_BASE_URL", "http://127.0.0.1:12345")
+    monkeypatch.setenv("SFE_ANTHROPIC_VERSION", "2023-06-01")
+    monkeypatch.setenv("SFE_ANTHROPIC_MODEL", "claude-test")
+    monkeypatch.setenv("SFE_ANTHROPIC_API_TIMEOUT", "17")
+    monkeypatch.setenv("SFE_ANTHROPIC_MAX_TOKENS", "256")
+    monkeypatch.setenv("SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS", "2.5")
+    monkeypatch.setenv("SFE_ANTHROPIC_MAX_INPUT_CHARS", "12345")
+    monkeypatch.setenv("SFE_ANTHROPIC_RETRY_ON_RATE_LIMIT", "true")
+    monkeypatch.setenv("SFE_ANTHROPIC_MAX_RETRY_SLEEP_SECONDS", "4.5")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "anthropic"
+    assert config.anthropic_api_key == "anthropic-key"
+    assert config.anthropic_base_url == "http://127.0.0.1:12345"
+    assert config.anthropic_version == "2023-06-01"
+    assert config.anthropic_model == "claude-test"
+    assert config.anthropic_timeout_seconds == 17
+    assert config.anthropic_max_tokens == 256
+    assert config.anthropic_min_request_interval_seconds == 2.5
+    assert config.anthropic_max_input_chars == 12345
+    assert config.anthropic_retry_on_rate_limit is True
+    assert config.anthropic_max_retry_sleep_seconds == 4.5
+
+
+def test_proxy_config_prefers_specific_anthropic_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "anthropic")
+    monkeypatch.setenv("SFE_ANTHROPIC_API_KEY", "specific-anthropic-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "generic-anthropic-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.anthropic_api_key == "specific-anthropic-key"
+
+
+def test_proxy_config_rejects_anthropic_provider_without_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "anthropic")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "ANTHROPIC_API_KEY or SFE_ANTHROPIC_API_KEY" in str(exc)
+    else:
+        raise AssertionError("anthropic proxy provider should require an API key")
 
 
 def test_proxy_config_parses_shadow_router_timeout(monkeypatch) -> None:
@@ -373,6 +463,533 @@ def test_pass_through_preserves_json_body_status_and_safe_auth_logging() -> None
     assert "Authorization" not in joined_logs
     assert '"model": "example-model"' in joined_logs
     assert '"stream": false' in joined_logs
+
+
+def test_anthropic_provider_maps_chat_request_and_response() -> None:
+    anthropic = _start_anthropic_provider(
+        body=json.dumps(
+            {
+                "id": "msg_test",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-test",
+                "content": [
+                    {"type": "text", "text": "first block"},
+                    {"type": "text", "text": "second block"},
+                ],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 11, "output_tokens": 7},
+            }
+        ).encode("utf-8")
+    )
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-configured",
+        anthropic_timeout_seconds=5,
+        anthropic_max_tokens=256,
+    )
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {
+                "model": "client-model",
+                "messages": [{"role": "user", "content": "hello"}],
+                "stream": False,
+            },
+            api_key="client-key",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert response["status"] == 200
+    assert response["body"]["provider"] == "anthropic"
+    assert response["body"]["choices"][0]["message"]["content"] == "first block\nsecond block"
+    assert response["body"]["choices"][0]["finish_reason"] == "stop"
+    assert response["body"]["usage"]["prompt_tokens"] == 11
+    assert response["body"]["usage"]["completion_tokens"] == 7
+    assert response["body"]["usage"]["total_tokens"] == 18
+    assert response["body"]["usage"]["anthropic_input_tokens"] == 11
+    assert response["body"]["usage"]["anthropic_output_tokens"] == 7
+
+    record = RecordingAnthropicHandler.records[-1]
+    assert record["path"] == "/v1/messages"
+    headers = {key.lower(): value for key, value in record["headers"].items()}
+    assert headers["x-api-key"] == "anthropic-secret"
+    assert headers["anthropic-version"] == "2023-06-01"
+    assert "authorization" not in headers
+    provider_payload = json.loads(record["body"].decode("utf-8"))
+    assert provider_payload == {
+        "model": "claude-configured",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+
+
+def test_anthropic_provider_maps_system_messages_to_top_level_system() -> None:
+    anthropic = _start_anthropic_provider()
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+    )
+    try:
+        _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {
+                "messages": [
+                    {"role": "system", "content": "first system"},
+                    {"role": "system", "content": "second system"},
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "hi"},
+                ],
+            },
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    provider_payload = json.loads(RecordingAnthropicHandler.records[-1]["body"].decode("utf-8"))
+    assert provider_payload["system"] == "first system\n\nsecond system"
+    assert provider_payload["messages"] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
+
+
+def test_anthropic_provider_maps_responses_request_and_response() -> None:
+    anthropic = _start_anthropic_provider(
+        body=json.dumps(
+            {
+                "id": "msg_response_test",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-test",
+                "content": [{"type": "text", "text": "responses text"}],
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            }
+        ).encode("utf-8")
+    )
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+        anthropic_max_tokens=128,
+    )
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            {
+                "input": [
+                    {
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": "system text"}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "question text"}],
+                    },
+                    {"type": "input_text", "text": "follow-up text"},
+                ],
+            },
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    provider_payload = json.loads(RecordingAnthropicHandler.records[-1]["body"].decode("utf-8"))
+    assert provider_payload == {
+        "model": "claude-test",
+        "max_tokens": 128,
+        "messages": [
+            {"role": "user", "content": "question text"},
+            {"role": "user", "content": "follow-up text"},
+        ],
+        "system": "system text",
+    }
+    assert response["status"] == 200
+    assert response["body"]["object"] == "response"
+    assert response["body"]["output_text"] == "responses text"
+    assert response["body"]["output"][0]["content"] == [
+        {"type": "output_text", "text": "responses text"}
+    ]
+    assert response["body"]["usage"]["prompt_tokens"] == 5
+    assert response["body"]["usage"]["completion_tokens"] == 3
+    assert response["body"]["usage"]["total_tokens"] == 8
+
+
+def test_anthropic_provider_input_guard_rejects_before_provider_call() -> None:
+    anthropic = _start_anthropic_provider()
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+        anthropic_max_input_chars=5,
+    )
+    try:
+        try:
+            _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "too much text"}]},
+            )
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected Anthropic input guard to fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert status == 413
+    assert body == {
+        "error": {
+            "message": "Anthropic proxy input exceeds configured max input character guard",
+            "type": "anthropic_input_guard_exceeded",
+            "provider": "anthropic",
+        }
+    }
+    assert RecordingAnthropicHandler.records == []
+
+
+def test_anthropic_provider_min_request_interval_sleeps_when_configured(
+    monkeypatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(proxy_server.time, "sleep", sleeps.append)
+    anthropic = _start_anthropic_provider()
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+        anthropic_min_request_interval_seconds=5.0,
+    )
+    try:
+        url = f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions"
+        _request_json(url, {"messages": [{"role": "user", "content": "first"}]})
+        _request_json(url, {"messages": [{"role": "user", "content": "second"}]})
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert len(RecordingAnthropicHandler.records) == 2
+    assert sleeps
+    assert sleeps[0] > 0
+    assert sleeps[0] <= 5.0
+
+
+def test_anthropic_provider_reports_rate_limit_without_retry_safely() -> None:
+    anthropic = _start_anthropic_provider(
+        status=429,
+        body=b'{"error":{"message":"provider rate limit includes details"}}',
+    )
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+    )
+    try:
+        try:
+            _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hello"}]},
+            )
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected Anthropic rate limit response to fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert status == 429
+    assert body == {
+        "error": {
+            "message": "Anthropic provider rate limit",
+            "type": "anthropic_rate_limit",
+            "provider": "anthropic",
+        }
+    }
+
+
+def test_anthropic_provider_retries_rate_limit_once_and_caps_retry_after(
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    sleeps: list[float] = []
+
+    def fake_call_once(server: Any, request_body: dict[str, Any]) -> dict[str, Any]:
+        calls.append(request_body)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                "http://anthropic.test/v1/messages",
+                429,
+                "Too Many Requests",
+                {"Retry-After": "99"},
+                None,
+            )
+        return {
+            "id": "msg_retry",
+            "model": "claude-test",
+            "content": [{"type": "text", "text": "retried ok"}],
+        }
+
+    monkeypatch.setattr(proxy_server, "_call_anthropic_once", fake_call_once)
+    monkeypatch.setattr(proxy_server.time, "sleep", sleeps.append)
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url="http://anthropic.test",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+        anthropic_retry_on_rate_limit=True,
+        anthropic_max_retry_sleep_seconds=3.0,
+    )
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            {"messages": [{"role": "user", "content": "hello"}]},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert len(calls) == 2
+    assert sleeps == [3.0]
+    assert response["status"] == 200
+    assert response["body"]["choices"][0]["message"]["content"] == "retried ok"
+
+
+def test_anthropic_provider_reports_retry_exhausted_safely(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_call_once(server: Any, request_body: dict[str, Any]) -> dict[str, Any]:
+        calls.append(request_body)
+        raise urllib.error.HTTPError(
+            "http://anthropic.test/v1/messages",
+            429,
+            "Too Many Requests",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr(proxy_server, "_call_anthropic_once", fake_call_once)
+    monkeypatch.setattr(proxy_server.time, "sleep", lambda seconds: None)
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url="http://anthropic.test",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+        anthropic_retry_on_rate_limit=True,
+    )
+    try:
+        try:
+            _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hello"}]},
+            )
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected Anthropic rate limit retry exhaustion")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert len(calls) == 2
+    assert status == 429
+    assert body == {
+        "error": {
+            "message": "Anthropic provider rate limit retry exhausted",
+            "type": "anthropic_rate_limit_retry_exhausted",
+            "provider": "anthropic",
+        }
+    }
+
+
+def test_anthropic_provider_reports_non_rate_limit_http_error_safely() -> None:
+    anthropic = _start_anthropic_provider(
+        status=500,
+        body=b'{"error":{"message":"provider overloaded details"}}',
+    )
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+    )
+    try:
+        try:
+            _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hello"}]},
+            )
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected Anthropic non-rate-limit HTTP error")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert status == 500
+    assert body == {
+        "error": {
+            "message": "Anthropic provider request failed",
+            "type": "anthropic_provider_error",
+            "provider": "anthropic",
+            "status_code": 500,
+        }
+    }
+
+
+def test_anthropic_provider_reports_timeout_safely() -> None:
+    anthropic = _start_anthropic_provider(response_delay_seconds=2.0)
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+        anthropic_timeout_seconds=1,
+    )
+    try:
+        try:
+            _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hello"}]},
+            )
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected Anthropic timeout to fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert status == 504
+    assert body == {
+        "error": {
+            "message": "Anthropic provider request timed out",
+            "type": "anthropic_provider_timeout",
+            "provider": "anthropic",
+        }
+    }
+
+
+def test_anthropic_provider_reports_malformed_response_safely() -> None:
+    anthropic = _start_anthropic_provider(body=b'{"content":[{"type":"image"}]}')
+    upstream = _start_upstream()
+    proxy = _start_proxy(
+        upstream,
+        [],
+        provider="anthropic",
+        anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
+        anthropic_api_key="anthropic-secret",
+        anthropic_model="claude-test",
+    )
+    try:
+        try:
+            _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hello"}]},
+            )
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected malformed Anthropic response to fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+        anthropic.shutdown()
+        anthropic.server_close()
+
+    assert status == 502
+    assert body == {
+        "error": {
+            "message": "Anthropic provider response did not include text content",
+            "type": "anthropic_malformed_response",
+            "provider": "anthropic",
+        }
+    }
 
 
 def test_models_and_responses_endpoints_are_forwarded() -> None:
@@ -2742,6 +3359,23 @@ def _start_lemonade_router(
     RecordingLemonadeRouterHandler.response_headers = headers or {"Content-Type": "application/json"}
     RecordingLemonadeRouterHandler.response_factory = response_factory
     server = ThreadingHTTPServer(("127.0.0.1", 0), RecordingLemonadeRouterHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _start_anthropic_provider(
+    *,
+    status: int = 200,
+    body: bytes = b'{"id":"msg_test","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"hello from anthropic"}]}',
+    headers: dict[str, str] | None = None,
+    response_delay_seconds: float = 0.0,
+) -> ThreadingHTTPServer:
+    RecordingAnthropicHandler.records = []
+    RecordingAnthropicHandler.response_status = status
+    RecordingAnthropicHandler.response_body = body
+    RecordingAnthropicHandler.response_headers = headers or {"Content-Type": "application/json"}
+    RecordingAnthropicHandler.response_delay_seconds = response_delay_seconds
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RecordingAnthropicHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 

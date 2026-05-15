@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import time
 import urllib.error
@@ -11,10 +12,16 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from socket import socket
+from threading import Lock
 from typing import Any, Callable
 
-from .config import DRY_RUN_ENABLED_MODE, ENABLED_MODE, SHADOW_MODE, ProxyConfig
+from .config import (
+    ANTHROPIC_PROXY_PROVIDER,
+    DRY_RUN_ENABLED_MODE,
+    ENABLED_MODE,
+    SHADOW_MODE,
+    ProxyConfig,
+)
 from .shadow_router import ShadowRouterInput, create_shadow_router
 
 
@@ -39,6 +46,14 @@ DOWNSTREAM_RESPONSE_HEADERS_TO_STRIP = HOP_BY_HOP_HEADERS | {
 }
 
 
+class AnthropicRequestError(Exception):
+    def __init__(self, status_code: int, error_type: str, safe_message: str) -> None:
+        super().__init__(safe_message)
+        self.status_code = status_code
+        self.error_type = error_type
+        self.safe_message = safe_message
+
+
 class SFEProxyServer(ThreadingHTTPServer):
     def __init__(
         self,
@@ -50,6 +65,8 @@ class SFEProxyServer(ThreadingHTTPServer):
         super().__init__(server_address, request_handler_class)
         self.config = config
         self.log_sink = log_sink or (lambda line: print(line, file=sys.stderr, flush=True))
+        self.anthropic_pacing_lock = Lock()
+        self.anthropic_last_request_at: float | None = None
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -71,7 +88,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         path = _path_without_query(self.path)
         body = self._read_body()
         model, stream = _request_metadata(body)
-        upstream_url = _upstream_url(self.server.config, self.path)
+        upstream_url = _request_upstream_url(self.server.config, self.path)
         status_code = 502
         shadow_event = (
             _build_shadow_event(self.server.config, self.command, path, body)
@@ -85,6 +102,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     {"error": {"message": "Unsupported proxy endpoint", "path": path}},
                 )
                 status_code = 404
+                return
+            if (
+                self.server.config.provider == ANTHROPIC_PROXY_PROVIDER
+                and self.command == "GET"
+            ):
+                status_code = 404
+                self._send_json(
+                    404,
+                    {
+                        "error": {
+                            "message": "Unsupported endpoint for anthropic proxy provider",
+                            "type": "unsupported_provider_endpoint",
+                            "provider": ANTHROPIC_PROXY_PROVIDER,
+                        }
+                    },
+                )
                 return
             upstream_body = body
             if (
@@ -116,20 +149,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     )
                     return
                 upstream_body = enabled_result["body"]
-            request = self._build_upstream_request(upstream_url, upstream_body)
-            try:
-                with urllib.request.urlopen(request, timeout=300) as upstream:
-                    status_code = int(upstream.status)
-                    self._send_upstream_response(upstream)
-            except urllib.error.HTTPError as exc:
-                status_code = int(exc.code)
-                self._send_upstream_response(exc)
-            except urllib.error.URLError as exc:
-                status_code = 502
-                self._send_json(
-                    502,
-                    {"error": {"message": "Upstream request failed", "type": "upstream_error"}},
+            if self.server.config.provider == ANTHROPIC_PROXY_PROVIDER:
+                anthropic_result = self._send_anthropic_provider_response(
+                    path,
+                    upstream_body,
                 )
+                status_code = int(anthropic_result["status_code"])
+                if shadow_event is not None:
+                    shadow_event.update(anthropic_result.get("event_fields", {}))
+            else:
+                request = self._build_upstream_request(upstream_url, upstream_body)
+                try:
+                    with urllib.request.urlopen(request, timeout=300) as upstream:
+                        status_code = int(upstream.status)
+                        self._send_upstream_response(upstream)
+                except urllib.error.HTTPError as exc:
+                    status_code = int(exc.code)
+                    self._send_upstream_response(exc)
+                except urllib.error.URLError:
+                    status_code = 502
+                    self._send_json(
+                        502,
+                        {"error": {"message": "Upstream request failed", "type": "upstream_error"}},
+                    )
         finally:
             latency_ms = int((time.perf_counter() - started) * 1000)
             if shadow_event is not None:
@@ -161,6 +203,139 @@ class ProxyHandler(BaseHTTPRequestHandler):
             headers=headers,
             method=self.command,
         )
+
+    def _send_anthropic_provider_response(
+        self,
+        path: str,
+        body: bytes,
+    ) -> dict[str, Any]:
+        try:
+            request_body = _anthropic_request_body(self.server.config, path, body)
+            _check_anthropic_input_guard(self.server.config, request_body)
+            provider_response, retry_count = _call_anthropic_with_optional_retry(
+                self.server,
+                request_body,
+            )
+            response_payload = _openai_compatible_response_from_anthropic(
+                path,
+                provider_response,
+            )
+            self._send_json(200, response_payload)
+            event_fields = _anthropic_usage_event_fields(provider_response)
+            event_fields["provider_retry_count"] = retry_count
+            return {
+                "status_code": 200,
+                "event_fields": event_fields,
+            }
+        except AnthropicRequestError as exc:
+            self._send_json(
+                exc.status_code,
+                {
+                    "error": {
+                        "message": exc.safe_message,
+                        "type": exc.error_type,
+                        "provider": ANTHROPIC_PROXY_PROVIDER,
+                    }
+                },
+            )
+            return {
+                "status_code": exc.status_code,
+                "event_fields": {
+                    "provider": ANTHROPIC_PROXY_PROVIDER,
+                    "provider_error_type": exc.error_type,
+                },
+            }
+        except urllib.error.HTTPError as exc:
+            self._send_json(
+                int(exc.code),
+                {
+                    "error": {
+                        "message": "Anthropic provider request failed",
+                        "type": "anthropic_provider_error",
+                        "provider": ANTHROPIC_PROXY_PROVIDER,
+                        "status_code": int(exc.code),
+                    }
+                },
+            )
+            return {
+                "status_code": int(exc.code),
+                "event_fields": {
+                    "provider": ANTHROPIC_PROXY_PROVIDER,
+                    "provider_error_type": "anthropic_provider_error",
+                },
+            }
+        except (TimeoutError, socket.timeout):
+            self._send_json(
+                504,
+                {
+                    "error": {
+                        "message": "Anthropic provider request timed out",
+                        "type": "anthropic_provider_timeout",
+                        "provider": ANTHROPIC_PROXY_PROVIDER,
+                    }
+                },
+            )
+            return {
+                "status_code": 504,
+                "event_fields": {
+                    "provider": ANTHROPIC_PROXY_PROVIDER,
+                    "provider_error_type": "anthropic_provider_timeout",
+                },
+            }
+        except urllib.error.URLError as exc:
+            if _is_timeout_error(exc):
+                self._send_json(
+                    504,
+                    {
+                        "error": {
+                            "message": "Anthropic provider request timed out",
+                            "type": "anthropic_provider_timeout",
+                            "provider": ANTHROPIC_PROXY_PROVIDER,
+                        }
+                    },
+                )
+                return {
+                    "status_code": 504,
+                    "event_fields": {
+                        "provider": ANTHROPIC_PROXY_PROVIDER,
+                        "provider_error_type": "anthropic_provider_timeout",
+                    },
+                }
+            self._send_json(
+                502,
+                {
+                    "error": {
+                        "message": "Anthropic provider request failed",
+                        "type": "anthropic_provider_error",
+                        "provider": ANTHROPIC_PROXY_PROVIDER,
+                    }
+                },
+            )
+            return {
+                "status_code": 502,
+                "event_fields": {
+                    "provider": ANTHROPIC_PROXY_PROVIDER,
+                    "provider_error_type": "anthropic_provider_error",
+                },
+            }
+        except OSError:
+            self._send_json(
+                502,
+                {
+                    "error": {
+                        "message": "Anthropic provider request failed",
+                        "type": "anthropic_provider_error",
+                        "provider": ANTHROPIC_PROXY_PROVIDER,
+                    }
+                },
+            )
+            return {
+                "status_code": 502,
+                "event_fields": {
+                    "provider": ANTHROPIC_PROXY_PROVIDER,
+                    "provider_error_type": "anthropic_provider_error",
+                },
+            }
 
     def _send_upstream_response(self, upstream: Any) -> None:
         self.close_connection = True
@@ -280,6 +455,23 @@ def _path_without_query(path: str) -> str:
 
 def _upstream_url(config: ProxyConfig, path: str) -> str:
     return f"{config.normalized_upstream_base_url}{path}"
+
+
+def _request_upstream_url(config: ProxyConfig, path: str) -> str:
+    if config.provider == ANTHROPIC_PROXY_PROVIDER:
+        return _anthropic_messages_url(config)
+    return _upstream_url(config, path)
+
+
+def _anthropic_messages_url(config: ProxyConfig) -> str:
+    return f"{config.normalized_anthropic_base_url}/v1/messages"
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, (TimeoutError, socket.timeout))
 
 
 def _request_metadata(body: bytes) -> tuple[str | None, bool | None]:
@@ -752,6 +944,427 @@ def _build_shadow_selection_fields(
     }
 
 
+def _anthropic_headers(config: ProxyConfig) -> dict[str, str]:
+    return {
+        "x-api-key": config.anthropic_api_key,
+        "anthropic-version": config.anthropic_version,
+        "content-type": "application/json",
+    }
+
+
+def _call_anthropic_with_optional_retry(
+    server: SFEProxyServer,
+    request_body: dict[str, Any],
+) -> tuple[dict[str, Any], int]:
+    retry_count = 0
+    while True:
+        try:
+            return _call_anthropic_once(server, request_body), retry_count
+        except urllib.error.HTTPError as exc:
+            if int(exc.code) != 429:
+                raise
+            if not server.config.anthropic_retry_on_rate_limit:
+                raise AnthropicRequestError(
+                    429,
+                    "anthropic_rate_limit",
+                    "Anthropic provider rate limit",
+                ) from exc
+            if retry_count >= 1:
+                raise AnthropicRequestError(
+                    429,
+                    "anthropic_rate_limit_retry_exhausted",
+                    "Anthropic provider rate limit retry exhausted",
+                ) from exc
+            time.sleep(_anthropic_retry_sleep_seconds(server.config, exc))
+            retry_count += 1
+
+
+def _call_anthropic_once(
+    server: SFEProxyServer,
+    request_body: dict[str, Any],
+) -> dict[str, Any]:
+    _wait_for_anthropic_request_interval(server)
+    request = urllib.request.Request(
+        _anthropic_messages_url(server.config),
+        data=json.dumps(request_body).encode("utf-8"),
+        headers=_anthropic_headers(server.config),
+        method="POST",
+    )
+    with urllib.request.urlopen(
+        request,
+        timeout=server.config.anthropic_timeout_seconds,
+    ) as upstream:
+        return _decode_provider_json(upstream.read())
+
+
+def _wait_for_anthropic_request_interval(server: SFEProxyServer) -> None:
+    interval = server.config.anthropic_min_request_interval_seconds
+    if interval <= 0:
+        return
+    with server.anthropic_pacing_lock:
+        now = time.monotonic()
+        last = server.anthropic_last_request_at
+        if last is not None:
+            wait_seconds = interval - (now - last)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+                now = time.monotonic()
+        server.anthropic_last_request_at = now
+
+
+def _anthropic_retry_sleep_seconds(
+    config: ProxyConfig,
+    exc: urllib.error.HTTPError,
+) -> float:
+    retry_after = exc.headers.get("Retry-After") if exc.headers is not None else None
+    parsed = _parse_retry_after_seconds(retry_after)
+    sleep_seconds = parsed if parsed is not None else 0.0
+    return min(sleep_seconds, config.anthropic_max_retry_sleep_seconds)
+
+
+def _parse_retry_after_seconds(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        return None
+    return value if value > 0 else 0.0
+
+
+def _check_anthropic_input_guard(
+    config: ProxyConfig,
+    request_body: dict[str, Any],
+) -> None:
+    max_chars = config.anthropic_max_input_chars
+    if max_chars <= 0:
+        return
+    input_chars = _anthropic_text_payload_chars(request_body)
+    if input_chars > max_chars:
+        raise AnthropicRequestError(
+            413,
+            "anthropic_input_guard_exceeded",
+            "Anthropic proxy input exceeds configured max input character guard",
+        )
+
+
+def _anthropic_text_payload_chars(request_body: dict[str, Any]) -> int:
+    total = 0
+    system = request_body.get("system")
+    if isinstance(system, str):
+        total += len(system)
+    messages = request_body.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                total += len(message["content"])
+    return total
+
+
+def _anthropic_request_body(
+    config: ProxyConfig,
+    path: str,
+    body: bytes,
+) -> dict[str, Any]:
+    payload = _decode_json_object(body)
+    if payload is None:
+        raise AnthropicRequestError(
+            400,
+            "anthropic_request_mapping_error",
+            "Request body must be a JSON object for anthropic proxy provider",
+        )
+    if _payload_stream(payload) is True:
+        raise AnthropicRequestError(
+            400,
+            "anthropic_unsupported_request",
+            "Streaming is not supported for anthropic proxy provider",
+        )
+    if path == "/v1/chat/completions":
+        system, messages = _anthropic_messages_from_chat_payload(payload)
+    elif path == "/v1/responses":
+        system, messages = _anthropic_messages_from_responses_payload(payload)
+    else:
+        raise AnthropicRequestError(
+            404,
+            "unsupported_provider_endpoint",
+            "Unsupported endpoint for anthropic proxy provider",
+        )
+    model = config.anthropic_model or _payload_model(payload)
+    if not model:
+        raise AnthropicRequestError(
+            400,
+            "anthropic_missing_model",
+            "SFE_ANTHROPIC_MODEL or request model is required for anthropic proxy provider",
+        )
+    if not messages:
+        raise AnthropicRequestError(
+            400,
+            "anthropic_request_mapping_error",
+            "At least one user or assistant message is required for anthropic proxy provider",
+        )
+    request: dict[str, Any] = {
+        "model": model,
+        "max_tokens": config.anthropic_max_tokens,
+        "messages": messages,
+    }
+    if system:
+        request["system"] = system
+    return request
+
+
+def _anthropic_messages_from_chat_payload(
+    payload: dict[str, Any],
+) -> tuple[str, list[dict[str, str]]]:
+    raw_messages = payload.get("messages")
+    if not isinstance(raw_messages, list):
+        raise AnthropicRequestError(
+            400,
+            "anthropic_request_mapping_error",
+            "OpenAI chat payload must include a messages list for anthropic proxy provider",
+        )
+    system_parts: list[str] = []
+    messages: list[dict[str, str]] = []
+    for message in raw_messages:
+        if not isinstance(message, dict):
+            raise AnthropicRequestError(
+                400,
+                "anthropic_request_mapping_error",
+                "OpenAI chat messages must be JSON objects for anthropic proxy provider",
+            )
+        role = message.get("role")
+        text = _extract_strict_text_content(message.get("content"))
+        if role == "system":
+            if text:
+                system_parts.append(text)
+            continue
+        if role not in {"user", "assistant"}:
+            raise AnthropicRequestError(
+                400,
+                "anthropic_unsupported_role",
+                "Unsupported message role for anthropic proxy provider",
+            )
+        messages.append({"role": role, "content": text})
+    return "\n\n".join(system_parts), messages
+
+
+def _anthropic_messages_from_responses_payload(
+    payload: dict[str, Any],
+) -> tuple[str, list[dict[str, str]]]:
+    input_value = payload.get("input")
+    if isinstance(input_value, str):
+        return "", [{"role": "user", "content": input_value}]
+    if isinstance(input_value, list):
+        system_parts: list[str] = []
+        messages: list[dict[str, str]] = []
+        for item in input_value:
+            if isinstance(item, str):
+                messages.append({"role": "user", "content": item})
+                continue
+            if not isinstance(item, dict):
+                raise AnthropicRequestError(
+                    400,
+                    "anthropic_request_mapping_error",
+                    "Responses input items must be strings or JSON objects for anthropic proxy provider",
+                )
+            role = item.get("role", "user")
+            text = _extract_strict_text_content(item.get("content", item))
+            if role == "system":
+                if text:
+                    system_parts.append(text)
+                continue
+            if role not in {"user", "assistant"}:
+                raise AnthropicRequestError(
+                    400,
+                    "anthropic_unsupported_role",
+                    "Unsupported input role for anthropic proxy provider",
+                )
+            messages.append({"role": role, "content": text})
+        return "\n\n".join(system_parts), messages
+    raise AnthropicRequestError(
+        400,
+        "anthropic_request_mapping_error",
+        "Responses payload must include text input for anthropic proxy provider",
+    )
+
+
+def _extract_strict_text_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        item_type = value.get("type")
+        if item_type in {"text", "input_text", "output_text"}:
+            text = value.get("text")
+            if isinstance(text, str):
+                return text
+            raise AnthropicRequestError(
+                400,
+                "anthropic_unsupported_content",
+                "Text content blocks must include string text for anthropic proxy provider",
+            )
+        raise AnthropicRequestError(
+            400,
+            "anthropic_unsupported_content",
+            "Only text content is supported for anthropic proxy provider",
+        )
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                raise AnthropicRequestError(
+                    400,
+                    "anthropic_unsupported_content",
+                    "Only text content is supported for anthropic proxy provider",
+                )
+            item_type = item.get("type")
+            if item_type in {"text", "input_text", "output_text"}:
+                text = item.get("text")
+                if not isinstance(text, str):
+                    raise AnthropicRequestError(
+                        400,
+                        "anthropic_unsupported_content",
+                        "Text content blocks must include string text for anthropic proxy provider",
+                    )
+                parts.append(text)
+                continue
+            raise AnthropicRequestError(
+                400,
+                "anthropic_unsupported_content",
+                "Only text content is supported for anthropic proxy provider",
+            )
+        return "\n".join(parts)
+    raise AnthropicRequestError(
+        400,
+        "anthropic_unsupported_content",
+        "Only text content is supported for anthropic proxy provider",
+    )
+
+
+def _decode_provider_json(body: bytes) -> dict[str, Any]:
+    try:
+        decoded = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AnthropicRequestError(
+            502,
+            "anthropic_malformed_response",
+            "Anthropic provider returned malformed JSON",
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise AnthropicRequestError(
+            502,
+            "anthropic_malformed_response",
+            "Anthropic provider returned malformed JSON",
+        )
+    return decoded
+
+
+def _openai_compatible_response_from_anthropic(
+    path: str,
+    provider_response: dict[str, Any],
+) -> dict[str, Any]:
+    text = _anthropic_text_response(provider_response)
+    usage = _anthropic_usage_payload(provider_response)
+    model = provider_response.get("model")
+    response_id = provider_response.get("id")
+    if path == "/v1/responses":
+        response_payload: dict[str, Any] = {
+            "id": response_id if isinstance(response_id, str) else "anthropic-response",
+            "object": "response",
+            "model": model if isinstance(model, str) else None,
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                }
+            ],
+            "output_text": text,
+            "provider": ANTHROPIC_PROXY_PROVIDER,
+        }
+    else:
+        response_payload = {
+            "id": response_id if isinstance(response_id, str) else "anthropic-chat-completion",
+            "object": "chat.completion",
+            "model": model if isinstance(model, str) else None,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": _anthropic_finish_reason(provider_response),
+                }
+            ],
+            "provider": ANTHROPIC_PROXY_PROVIDER,
+        }
+    if usage:
+        response_payload["usage"] = usage
+    return response_payload
+
+
+def _anthropic_text_response(provider_response: dict[str, Any]) -> str:
+    content = provider_response.get("content")
+    if not isinstance(content, list):
+        raise AnthropicRequestError(
+            502,
+            "anthropic_malformed_response",
+            "Anthropic provider response did not include content blocks",
+        )
+    texts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text" and isinstance(block.get("text"), str):
+            texts.append(block["text"])
+    if not texts:
+        raise AnthropicRequestError(
+            502,
+            "anthropic_malformed_response",
+            "Anthropic provider response did not include text content",
+        )
+    return "\n".join(texts)
+
+
+def _anthropic_finish_reason(provider_response: dict[str, Any]) -> str | None:
+    stop_reason = provider_response.get("stop_reason")
+    if stop_reason == "end_turn":
+        return "stop"
+    if stop_reason == "max_tokens":
+        return "length"
+    return stop_reason if isinstance(stop_reason, str) else None
+
+
+def _anthropic_usage_payload(provider_response: dict[str, Any]) -> dict[str, int] | None:
+    usage = provider_response.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    input_tokens = usage.get("input_tokens")
+    output_tokens = usage.get("output_tokens")
+    result: dict[str, int] = {}
+    if isinstance(input_tokens, int):
+        result["prompt_tokens"] = input_tokens
+        result["anthropic_input_tokens"] = input_tokens
+    if isinstance(output_tokens, int):
+        result["completion_tokens"] = output_tokens
+        result["anthropic_output_tokens"] = output_tokens
+    if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+        result["total_tokens"] = input_tokens + output_tokens
+    return result or None
+
+
+def _anthropic_usage_event_fields(provider_response: dict[str, Any]) -> dict[str, Any]:
+    usage = provider_response.get("usage")
+    fields: dict[str, Any] = {"provider": ANTHROPIC_PROXY_PROVIDER}
+    if isinstance(usage, dict):
+        input_tokens = usage.get("input_tokens")
+        output_tokens = usage.get("output_tokens")
+        if isinstance(input_tokens, int):
+            fields["anthropic_input_tokens"] = input_tokens
+        if isinstance(output_tokens, int):
+            fields["anthropic_output_tokens"] = output_tokens
+    return fields
+
+
 def _decode_json_object(body: bytes) -> dict[str, Any] | None:
     if not body:
         return None
@@ -901,7 +1514,7 @@ def _rough_estimate_tokens_from_texts(texts: list[str], body: bytes) -> int:
 
 
 def _ensure_port_available(host: str, port: int) -> None:
-    with socket() as probe:
+    with socket.socket() as probe:
         try:
             probe.bind((host, port))
         except OSError as exc:
