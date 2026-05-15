@@ -1,5 +1,12 @@
 # Large Real-World OpenAI Selector + Executor Smoke
 
+Status note: This is a historical live-smoke record preserved for
+audit/research continuity. It predates later Proxy and provider work, so
+statements saying gateway/proxy behavior was not yet tested should be read as
+historical. Current terminology and implementation status use the experimental
+SFE Proxy. Start with `README.md` and `docs/INDEX.md` for the latest project
+overview.
+
 ## Scope
 
 This benchmark uses OpenAI for both source selection and final answer generation.

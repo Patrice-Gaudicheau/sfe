@@ -1,5 +1,12 @@
 # Roadmap After Structural 50k
 
+Status note: This is a historical roadmap from an earlier structural benchmark
+phase, preserved for audit/research continuity. Some items below have since
+been implemented or superseded by later provider, benchmark, and Proxy work.
+Current terminology and implementation status use the experimental SFE Proxy.
+Start with `README.md`, `docs/INDEX.md`, and the current benchmark/provider/proxy
+docs for the latest project state.
+
 ## Current Status
 
 Phase 1 established that SFE can pass an honest structural-routing benchmark on
