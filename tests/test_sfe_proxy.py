@@ -22,6 +22,7 @@ import sfe_proxy.server as proxy_server
 import sfe_proxy.shadow_router as shadow_router_module
 from sfe_proxy.config import (
     DEFAULT_HOST,
+    DEFAULT_LEMONADE_UPSTREAM_BASE_URL,
     DEFAULT_MODE,
     DEFAULT_PORT,
     DEFAULT_SHADOW_LOG_DIR,
@@ -148,6 +149,7 @@ class RecordingAnthropicHandler(BaseHTTPRequestHandler):
 def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_HOST", raising=False)
     monkeypatch.delenv("SFE_PROXY_PORT", raising=False)
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
     monkeypatch.delenv("SFE_PROXY_MODE", raising=False)
@@ -178,6 +180,64 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.shadow_router_dry_run is False
     assert config.shadow_router_provider == "disabled"
     assert config.shadow_router_timeout_seconds == DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
+
+
+def test_proxy_config_accepts_openai_proxy_provider_alias(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-fallback-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "openai"
+    assert config.upstream_base_url == DEFAULT_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "openai-fallback-key"
+
+
+def test_proxy_config_openai_alias_keeps_explicit_upstream_override(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "openai")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_BASE_URL", "https://example.invalid")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "explicit-proxy-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "openai"
+    assert config.upstream_base_url == "https://example.invalid"
+    assert config.upstream_api_key == "explicit-proxy-key"
+
+
+def test_proxy_config_accepts_lemonade_proxy_provider_alias(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "lemonade")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "local-placeholder-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "lemonade"
+    assert config.upstream_base_url == DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "local-placeholder-key"
+
+
+def test_proxy_config_empty_upstream_uses_provider_default(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "lemonade")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_BASE_URL", "")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "local-placeholder-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.upstream_base_url == DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+
+
+def test_proxy_config_lemonade_alias_keeps_explicit_upstream_override(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "lemonade")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_BASE_URL", "http://127.0.0.1:18080")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "local-placeholder-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "lemonade"
+    assert config.upstream_base_url == "http://127.0.0.1:18080"
 
 
 def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
@@ -415,6 +475,22 @@ def test_proxy_config_does_not_use_openai_key_for_non_openai_upstream(monkeypatc
         raise AssertionError("non-OpenAI upstream should require explicit proxy key")
 
 
+def test_proxy_config_rejects_unsupported_provider(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "unsupported-provider")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "Unsupported SFE_PROXY_PROVIDER" in str(exc)
+        assert "openai-compatible" in str(exc)
+        assert "openai" in str(exc)
+        assert "lemonade" in str(exc)
+        assert "anthropic" in str(exc)
+    else:
+        raise AssertionError("unsupported proxy provider should fail")
+
+
 def test_proxy_config_rejects_unsupported_mode(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
     monkeypatch.setenv("SFE_PROXY_MODE", "sfe_enabled")
@@ -463,6 +539,43 @@ def test_pass_through_preserves_json_body_status_and_safe_auth_logging() -> None
     assert "Authorization" not in joined_logs
     assert '"model": "example-model"' in joined_logs
     assert '"stream": false' in joined_logs
+
+
+def test_openai_and_lemonade_provider_aliases_use_openai_compatible_path() -> None:
+    for provider in ("openai", "lemonade"):
+        upstream = _start_upstream(
+            status=200,
+            body=b'{"id":"alias-upstream","object":"chat.completion"}',
+        )
+        proxy = _start_proxy(upstream, [], provider=provider)
+        try:
+            payload = {
+                "model": "example-model",
+                "messages": [{"role": "user", "content": f"hello {provider}"}],
+            }
+            response = _request_json(
+                f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+                payload,
+            )
+        finally:
+            proxy.shutdown()
+            proxy.server_close()
+            upstream.shutdown()
+            upstream.server_close()
+
+        assert response["status"] == 200
+        assert response["body"] == {
+            "id": "alias-upstream",
+            "object": "chat.completion",
+        }
+        assert RecordingUpstreamHandler.records[-1]["path"] == "/v1/chat/completions"
+        assert json.loads(
+            RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+        ) == payload
+        assert (
+            RecordingUpstreamHandler.records[-1]["headers"]["Authorization"]
+            == "Bearer upstream-secret"
+        )
 
 
 def test_anthropic_provider_maps_chat_request_and_response() -> None:

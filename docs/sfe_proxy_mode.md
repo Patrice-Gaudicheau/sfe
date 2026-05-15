@@ -38,7 +38,7 @@ Environment variables:
 - `SFE_PROXY_HOST`, default `127.0.0.1`
 - `SFE_PROXY_PORT`, default `17891`
 - `SFE_PROXY_PROVIDER`, default `openai-compatible`
-- `SFE_PROXY_UPSTREAM_BASE_URL`, default `https://api.openai.com`
+- `SFE_PROXY_UPSTREAM_BASE_URL`, provider-specific default
 - `SFE_PROXY_UPSTREAM_API_KEY`, preferred upstream key for proxy mode
 - `SFE_ANTHROPIC_API_KEY`, Anthropic proxy provider key; `ANTHROPIC_API_KEY`
   is also accepted
@@ -67,7 +67,14 @@ Supported execution providers:
 
 - `openai-compatible`: the existing default behavior. Supported requests are
   forwarded unchanged to `SFE_PROXY_UPSTREAM_BASE_URL` with an OpenAI-compatible
-  bearer token.
+  bearer token. It defaults to `https://api.openai.com` unless
+  `SFE_PROXY_UPSTREAM_BASE_URL` is set.
+- `openai`: explicit OpenAI alias using the same OpenAI-compatible proxy path.
+  It defaults to `https://api.openai.com` unless `SFE_PROXY_UPSTREAM_BASE_URL`
+  is set.
+- `lemonade`: explicit Lemonade alias using the same OpenAI-compatible proxy
+  path. It defaults to `http://127.0.0.1:13305` unless
+  `SFE_PROXY_UPSTREAM_BASE_URL` is set.
 - `anthropic`: supported POST requests are converted to Anthropic Messages API
   calls at `${SFE_ANTHROPIC_BASE_URL}/v1/messages`, then text responses are
   converted back to the proxy response shape. This path supports text-only

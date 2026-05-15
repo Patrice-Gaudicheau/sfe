@@ -10,9 +10,22 @@ from urllib.parse import urlparse
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17891
 DEFAULT_UPSTREAM_BASE_URL = "https://api.openai.com"
+DEFAULT_LEMONADE_UPSTREAM_BASE_URL = "http://127.0.0.1:13305"
 DEFAULT_PROXY_PROVIDER = "openai-compatible"
+OPENAI_PROXY_PROVIDER = "openai"
+LEMONADE_PROXY_PROVIDER = "lemonade"
 ANTHROPIC_PROXY_PROVIDER = "anthropic"
-SUPPORTED_PROXY_PROVIDERS = (DEFAULT_PROXY_PROVIDER, ANTHROPIC_PROXY_PROVIDER)
+OPENAI_COMPATIBLE_PROXY_PROVIDERS = (
+    DEFAULT_PROXY_PROVIDER,
+    OPENAI_PROXY_PROVIDER,
+    LEMONADE_PROXY_PROVIDER,
+)
+SUPPORTED_PROXY_PROVIDERS = (
+    DEFAULT_PROXY_PROVIDER,
+    OPENAI_PROXY_PROVIDER,
+    LEMONADE_PROXY_PROVIDER,
+    ANTHROPIC_PROXY_PROVIDER,
+)
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_ANTHROPIC_TIMEOUT_SECONDS = 60
@@ -74,13 +87,13 @@ class ProxyConfig:
             port = int(port_raw)
         except ValueError as exc:
             raise ValueError("SFE_PROXY_PORT must be an integer.") from exc
-        upstream_base_url = os.getenv(
-            "SFE_PROXY_UPSTREAM_BASE_URL", DEFAULT_UPSTREAM_BASE_URL
-        )
         provider = os.getenv("SFE_PROXY_PROVIDER", DEFAULT_PROXY_PROVIDER)
+        upstream_base_url = os.getenv("SFE_PROXY_UPSTREAM_BASE_URL", "").strip()
+        if not upstream_base_url:
+            upstream_base_url = _default_upstream_base_url(provider)
         upstream_api_key = os.getenv("SFE_PROXY_UPSTREAM_API_KEY", "")
         if (
-            provider == DEFAULT_PROXY_PROVIDER
+            provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS
             and not upstream_api_key
             and _is_openai_upstream(upstream_base_url)
         ):
@@ -197,9 +210,9 @@ class ProxyConfig:
             raise ValueError("SFE_PROXY_HOST must not be empty.")
         if not (1 <= self.port <= 65535):
             raise ValueError("SFE_PROXY_PORT must be between 1 and 65535.")
-        if self.provider == DEFAULT_PROXY_PROVIDER and not self.upstream_base_url:
+        if self.provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS and not self.upstream_base_url:
             raise ValueError("SFE_PROXY_UPSTREAM_BASE_URL must not be empty.")
-        if self.provider == DEFAULT_PROXY_PROVIDER and not self.upstream_api_key:
+        if self.provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS and not self.upstream_api_key:
             raise ValueError(
                 "SFE_PROXY_UPSTREAM_API_KEY is required for proxy mode; "
                 "OPENAI_API_KEY may be used as a fallback only for OpenAI upstreams."
@@ -254,6 +267,12 @@ def _is_openai_upstream(base_url: str) -> bool:
     parsed = urlparse(base_url or DEFAULT_UPSTREAM_BASE_URL)
     hostname = (parsed.hostname or "").lower()
     return hostname == "api.openai.com"
+
+
+def _default_upstream_base_url(provider: str) -> str:
+    if provider == LEMONADE_PROXY_PROVIDER:
+        return DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+    return DEFAULT_UPSTREAM_BASE_URL
 
 
 def _parse_bool(raw: str, name: str) -> bool:
