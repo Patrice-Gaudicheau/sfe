@@ -48,6 +48,9 @@ statistical reliability, or general model-safety guarantees.
   OpenAI paced-equivalent campaign summary.
 - [anthropic_benchmark_paced_summary.md](anthropic_benchmark_paced_summary.md):
   Anthropic paced campaign summary, including structural provider-call pacing.
+- [alibaba_provider_history.md](alibaba_provider_history.md): preferred
+  starting point for Alibaba/Qwen historical provider integration and related
+  Alibaba-hosted model exploration notes.
 - [alibaba_progressive_benchmark_note.md](alibaba_progressive_benchmark_note.md):
   progressive Alibaba/Qwen benchmark note.
 - [alibaba_comparable_benchmark_runs.md](alibaba_comparable_benchmark_runs.md):
@@ -143,6 +146,9 @@ current top-level project status.
 - [proxy_enabled_live_openai_summary.md](history/proxy/proxy_enabled_live_openai_summary.md)
 - [proxy_enabled_live_openai_router_summary.md](history/proxy/proxy_enabled_live_openai_router_summary.md)
 - [proxy_enabled_live_openai_router_multifixture_summary.md](history/proxy/proxy_enabled_live_openai_router_multifixture_summary.md)
+- [alibaba_provider_history.md](alibaba_provider_history.md): rollup for the
+  Alibaba/Qwen historical integration notes and Alibaba-hosted DeepSeek
+  exploration records below.
 - [alibaba_router_smoke_note.md](alibaba_router_smoke_note.md)
 - [alibaba_structural_50k_spatial_smoke_note.md](alibaba_structural_50k_spatial_smoke_note.md)
 - [alibaba_deepseek_smoke_note.md](alibaba_deepseek_smoke_note.md)
