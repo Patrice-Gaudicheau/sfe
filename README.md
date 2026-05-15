@@ -92,7 +92,7 @@ SFE may be commercially relevant when avoided context is large enough to
 amortize routing cost. Current areas of interest include:
 
 - API-heavy long-context workflows.
-- LLM gateways and proxy layers.
+- LLM proxy layers.
 - Token budget control and context exposure reduction.
 - Auditable routing decisions.
 - Authority conflicts between documents, versions, policies, or governance
@@ -116,7 +116,7 @@ when SFE is used.
 
 - AI platform teams.
 - LLM infrastructure architects.
-- Teams building gateways, proxies, or provider-routing systems.
+- Teams building proxies or provider-routing systems.
 - Teams operating API-heavy long-context workloads.
 - Teams handling authority conflicts, policy documents, governance,
   compliance, or audit-sensitive assistant workflows.
@@ -160,21 +160,19 @@ For the current high-overlap methodology, read
 `docs/high_overlap_fixture_expansion_phase_close.md` and
 `docs/high_overlap_diagnostic_bucketing_notes.md`.
 
-## Current Private Benchmark Status
+## High-Overlap Fixture Status
 
-The high-overlap fixture-expansion phase is complete for three additional
-authority-gap fixtures:
+The high-overlap fixture-expansion phase is complete for three authority-gap
+fixtures:
 
 - Aurelia: scope authority conflict.
 - Borealis: deprecated memo vs active implementation notice.
 - Cassini: policy exception vs active policy.
 
 Their deterministic tests pass. Limited local OpenAI selector, executor, and
-selected-vs-full comparison observations were clean for these fixtures: no
-contamination indicators were observed in those local runs, and full-context
-execution also passed. Selected-context execution therefore did not outperform
-full-context execution in those observations. The useful signal is local
-non-regression under controlled conditions, not general reliability.
+selected-vs-full comparison observations were clean for these fixtures, but
+full-context execution also passed. The useful signal is controlled local
+non-regression, not general reliability or a broad quality claim.
 
 ## Problem
 
@@ -191,13 +189,15 @@ The tradeoff is that routing and orchestration have fixed costs. SFE only looks 
 
 ## Architecture
 
-At a high level, the current repository has four layers:
+At a high level, the current repository has five layers:
 
 - `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
 - `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
-- `providers/`: minimal provider adapters, including Lemonade, OpenAI API, and
-  native Anthropic Messages API paths.
+- `providers/`: minimal benchmark provider adapters, including Lemonade,
+  OpenAI API, Alibaba/Qwen, and native Anthropic Messages API paths.
 - `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
+- `sfe_proxy/`: experimental OpenAI-compatible local proxy for pass-through,
+  shadow observation, and enabled SFE routing experiments.
 
 The main execution pattern is:
 
@@ -244,6 +244,45 @@ python -m pip install -e .
 
 Copy `.env.example` to `.env` for local provider configuration. `.env` is ignored and must not be committed.
 
+## Minimal Verification
+
+These commands do not require provider API keys:
+
+```bash
+python -m py_compile runtime/run_large_contextual_benchmark.py sfe_proxy/config.py sfe_proxy/server.py
+pytest tests/test_env_config.py -q
+pytest tests/test_large_contextual_benchmark.py -q
+pytest tests/test_sfe_proxy.py -q
+python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
+```
+
+The full test suite can also be run from the repository root:
+
+```bash
+TMPDIR=/tmp TMP=/tmp TEMP=/tmp pytest -q
+```
+
+Under WSL, using a Linux temp directory avoids pytest capture issues when `TMP`
+or `TEMP` point to `/mnt/c/...`.
+
+## Provider Support
+
+The current prototype has provider paths for OpenAI, Lemonade, Alibaba/Qwen,
+and Anthropic. They do not all have identical maturity or API shape.
+
+| Provider | Benchmark path | Proxy path | Notes |
+| --- | --- | --- | --- |
+| OpenAI | `--executor openai-api` in large/contextual benchmarks and related OpenAI runners | `SFE_PROXY_PROVIDER=openai` or generic `openai-compatible` | Uses OpenAI-compatible or direct OpenAI API configuration. Set `OPENAI_API_KEY`, `SFE_OPENAI_ROUTER_MODEL`, and `SFE_OPENAI_EXECUTOR_MODEL` for live benchmark runs. |
+| Lemonade | `--executor lemonade` and historical/local benchmark runners | `SFE_PROXY_PROVIDER=lemonade` | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
+| Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | `SFE_PROXY_PROVIDER=alibaba` | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
+| Anthropic | `--executor anthropic` in large/contextual benchmarks | `SFE_PROXY_PROVIDER=anthropic` | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
+
+Proxy-specific variables are documented in `.env.example` and
+`docs/sfe_proxy_mode.md`. For proxy mode, `SFE_PROXY_UPSTREAM_API_KEY` is the
+generic upstream-key override. Alibaba proxy mode also accepts
+`ALIBABA_API_KEY` and `DASHSCOPE_API_KEY`; Anthropic proxy mode accepts
+`SFE_ANTHROPIC_API_KEY` and `ANTHROPIC_API_KEY`.
+
 Lemonade is used here as a local OpenAI-compatible inference server. Configure it with:
 
 ```bash
@@ -265,11 +304,22 @@ SFE_ANTHROPIC_ROUTER_MODEL=<anthropic-router-model-id>
 SFE_ANTHROPIC_EXECUTOR_MODEL=<anthropic-executor-model-id>
 ```
 
+Alibaba/Qwen benchmark runs are optional and require:
+
+```bash
+ALIBABA_API_KEY=<local-key>
+ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+SFE_ALIBABA_ROUTER_MODEL=qwen3.6-flash
+SFE_ALIBABA_EXECUTOR_MODEL=qwen3.6-plus
+SFE_ALIBABA_DISABLE_THINKING=true
+```
+
 ## Live API Caution
 
 Deterministic tests do not require an API key. Live OpenAI runners require
-`OPENAI_API_KEY`; live Anthropic runners require `ANTHROPIC_API_KEY`. Keep
-secrets in a local `.env` file and never commit them.
+`OPENAI_API_KEY`; live Anthropic runners require `ANTHROPIC_API_KEY`; live
+Alibaba/Qwen runners require `ALIBABA_API_KEY`. Keep secrets in a local `.env`
+file and never commit them.
 
 Generated benchmark reports should be written under `/tmp` or another
 untracked local location. Some selected-vs-full comparison runner names do not
@@ -278,6 +328,51 @@ include `openai` even though they call OpenAI when the API key is present. Check
 
 Anthropic structural runs may require `--provider-call-delay-seconds` because
 provider input-token-per-minute limits can affect execution timing.
+
+## Proxy Mode
+
+The repository now includes an experimental SFE Proxy prototype in
+`sfe_proxy/`. It is an OpenAI-compatible local HTTP proxy layer for
+pass-through, shadow observation, and enabled SFE routing experiments. It is
+not presented as production-ready infrastructure.
+
+Run it directly with:
+
+```bash
+python -m sfe_proxy
+```
+
+By default it binds to `127.0.0.1:17891`. The supported proxy providers are:
+
+- `openai-compatible`: generic OpenAI-compatible upstream path.
+- `openai`: explicit OpenAI alias using the OpenAI-compatible path.
+- `lemonade`: local Lemonade OpenAI-compatible path.
+- `alibaba`: Alibaba/DashScope/Qwen alias using the OpenAI-compatible path.
+- `anthropic`: Anthropic Messages API adapter for text-only proxy requests.
+
+The supported modes are:
+
+- `pass_through`: forward supported requests to the upstream.
+- `shadow`: forward requests and write safe local observation events.
+- `dry_run_enabled`: build reduced candidate requests for diagnostics while
+  still forwarding the original request.
+- `enabled`: send a reduced candidate request upstream when one can be built.
+
+The proxy supports `GET /v1/models`, `POST /v1/chat/completions`, and
+`POST /v1/responses`. A minimal local request shape is:
+
+```bash
+curl http://127.0.0.1:17891/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"configured-model","messages":[{"role":"user","content":"Reply with OK"}]}'
+```
+
+Provider keys and upstream URLs are configured through `.env.example`.
+Anthropic proxy mode has text-only mapping and provider-specific pacing,
+input-guard, and optional one-retry-on-429 settings. Alibaba proxy mode forwards
+OpenAI-compatible request bodies unchanged and has live validation for
+`/v1/chat/completions`; `/v1/responses` may require an explicit DashScope
+compatible base URL depending on the endpoint used.
 
 ## Benchmarks
 
@@ -301,6 +396,20 @@ Run the large/contextual fixture benchmark:
 
 ```bash
 python runtime/run_large_contextual_benchmark.py --task-tier standard --selection-mode fixture
+```
+
+Provider-backed large/contextual runs use the same runner with an explicit
+executor. Current executor choices are `lemonade`, `openai-api`,
+`alibaba-api`, and `anthropic`:
+
+```bash
+python runtime/run_large_contextual_benchmark.py \
+  --executor alibaba-api \
+  --task-tier standard \
+  --selection-mode both \
+  --repeat 3 \
+  --max-tokens 240 \
+  --provider-call-delay-seconds 1.0
 ```
 
 Compare fixture and real-router selection:
@@ -327,10 +436,16 @@ and Anthropic multi-provider benchmark summaries. Use it to examine router
 amortization, answer completeness, and provider execution constraints at larger
 context sizes.
 
-Build prompts and reports without calling Lemonade:
+Build prompts and reports without provider calls:
 
 ```bash
 python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
+```
+
+Run one tiny Alibaba/Qwen smoke test when local credentials are configured:
+
+```bash
+python runtime/run_alibaba_smoke.py --model qwen3.6-flash
 ```
 
 Run the Cognitive Map deterministic micro-benchmark:
@@ -399,17 +514,13 @@ model intelligence.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.
 - `sfe_white_paper.md`: original architecture proposal; more speculative than the current public README.
 
-## Roadmap Direction
+## Proxy Development Direction
 
-The next planning direction is Gateway or Proxy design. The target shape is a
-request path that can support pass-through mode, shadow SFE mode, and
-SFE-enabled mode, with token accounting and trace headers attached to routing
-decisions.
-
-Activation criteria should stay explicit: context size, authority-conflict
-density, token budget, and audit requirements should determine when SFE is
-used. The goal is to make routing behavior observable before integrating it
-with broader local tooling or production-like request flows.
+The next Proxy work should stay narrow: better observability, clearer activation
+criteria, and safer provider-operation boundaries. Context size,
+authority-conflict density, token budget, and audit requirements should
+determine when SFE routing is used. The current proxy remains an experimental
+prototype for local integration and controlled routing experiments.
 
 ## Limitations
 
@@ -435,13 +546,3 @@ with broader local tooling or production-like request flows.
   cache policy, batch policy, and deployment policy.
 - Broad production workloads, tool-using agents, multi-tenant systems, and
   long-running real user traffic are not validated yet.
-
-## Development Checks
-
-Run the test suite from the repository root:
-
-```bash
-TMPDIR=/tmp TMP=/tmp TEMP=/tmp pytest -q
-```
-
-Under WSL, using a Linux temp directory avoids pytest capture issues when `TMP` or `TEMP` point to `/mnt/c/...`.
