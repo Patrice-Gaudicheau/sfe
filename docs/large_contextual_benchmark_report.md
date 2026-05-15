@@ -1,6 +1,20 @@
-# Large Contextual Lemonade Benchmark
+# Large Contextual Benchmark Report
 
-This report records the large/contextual benchmark phases merged to `main`. The fixture/oracle benchmark was merged in commit `793e5e4f9d73f7e5fbc9d2ab6ce2139ac8708fe7`; the optional real-router selection mode was merged in commit `5abf6ed1ecfde7cee6e6acc289e513f469699e99`.
+This report records the large/contextual benchmark phases merged to `main`.
+The fixture/oracle benchmark was merged in commit
+`793e5e4f9d73f7e5fbc9d2ab6ce2139ac8708fe7`; the optional real-router selection
+mode was merged in commit `5abf6ed1ecfde7cee6e6acc289e513f469699e99`.
+
+The older detailed results below are Lemonade-first historical benchmark notes.
+Current provider-comparison summaries now also cover OpenAI, Anthropic, and
+Alibaba/Qwen. See:
+
+- `docs/provider_comparison_summary.md`
+- `docs/token_cost_metrics.md`
+- `docs/openai_paced_equivalent_summary.md`
+- `docs/anthropic_benchmark_paced_summary.md`
+- `docs/alibaba_large_contextual_missing_tiers.md`
+- `docs/alibaba_structural_50k_comparison_note.md`
 
 ## Purpose
 
@@ -8,19 +22,22 @@ The benchmark tests whether SFE can provide a practical advantage when the execu
 
 Each task contains multiple context blocks. One block is clearly relevant to the user question; the remaining blocks are plausible distractors. The baseline receives all blocks. The spatial/SFE path receives the user question plus only the selected relevant block.
 
-The benchmark is Lemonade-first. No OpenAI API reproduction or OpenAI execution path is included in this phase.
+The benchmark began as Lemonade-first. The current runner also supports
+provider-backed execution through `lemonade`, `openai-api`, `alibaba-api`, and
+`anthropic` executors. These provider paths should still be compared only when
+the run protocol is aligned.
 
 ## Benchmark Shape
 
 - Benchmark type: `large/contextual`
-- Executor: `lemonade`
+- Executor choices: `lemonade`, `openai-api`, `alibaba-api`, and `anthropic`
 - Default router: `fixture_relevance_router`
 - Optional real router: `lemonade_block_selector`
 - Current fixture task count: 7
 - Default task tier: `standard`
 - Practical task tier: `practical` with 10k-20k estimated baseline input tokens
 - High-context task tier: `high_context` with 20k-50k estimated baseline input tokens
-- Planned future task tier: `structural` for 50k+ tokens
+- Structural task tier: `structural` with 50k+ estimated baseline input tokens
 - Preserved live result task count: 7
 - Preserved live result run count: 14
 - Dry run: false for the preserved live result
@@ -29,7 +46,11 @@ The benchmark is Lemonade-first. No OpenAI API reproduction or OpenAI execution 
 - Default selection method: deterministic fixture marker
 - Optional selection method: Lemonade block selector over compact block metadata
 
-The deterministic selector remains intentional as the default fixture mode. It isolates executor context reduction and avoids mixing that result with router-quality measurement. Real-router mode is now available as a separate opt-in path for testing whether Lemonade can identify the relevant block under semantic noise.
+The deterministic selector remains intentional as the default fixture mode. It
+isolates executor context reduction and avoids mixing that result with
+router-quality measurement. Real-router mode is available as a separate opt-in
+path for testing whether the configured provider can identify the relevant
+block under semantic noise.
 
 ## Task Tiers
 
@@ -51,7 +72,29 @@ python runtime/run_large_contextual_benchmark.py --task-tier high_context --sele
 
 The high_context tier is separate from the standard and practical task sets and currently contains 20k-50k estimated baseline input token tasks. It is intended to test whether SFE becomes materially useful as prompt size, semantic noise, and distractor density grow.
 
-The planned `structural` tier would target 50k+ token tasks where context structure becomes a necessity rather than an optimization. That tier is not implemented. No full live high_context result is claimed here.
+The `structural` tier targets 50k+ token tasks where context structure becomes
+closer to a necessity than a small optimization. It is implemented in the
+current runner and is included in current OpenAI, Anthropic, and Alibaba/Qwen
+documentation. Structural observations remain small controlled runs, not broad
+reliability evidence.
+
+## Current Multi-Provider Status
+
+OpenAI and Anthropic have protocol-aligned `standard`, `practical`,
+`high_context`, and `structural` observations. Alibaba/Qwen has repeat-3
+`standard`, `practical`, and `high_context` observations, plus a single live
+`structural` baseline-vs-spatial comparison. Lemonade remains useful as a local
+provider and historical validation path.
+
+Current README-level terminology distinguishes:
+
+- selected reduction: executor-visible context reduction;
+- router-inclusive reduction: reduction after selector/router overhead;
+- `spatial_fixture`: oracle-style fixture selection;
+- `spatial_router`: provider-backed router selection.
+
+These are controlled benchmark observations, not statistical proof and not
+production readiness evidence.
 
 ## High Context 64K Lemonade Result
 
@@ -105,7 +148,7 @@ Derived comparison:
 
 This is the cleanest high_context comparison so far: baseline, spatial_fixture, and spatial_router all succeeded; the router selected the fixture-matching block on both tasks; fallback count was zero; and spatial_router preserved correctness while reducing both latency and router-inclusive token usage.
 
-The result is still a small engineering signal, not statistical proof. It covers only two high_context tasks, one live iteration, local Lemonade execution, and synthetic deterministic fixtures. It has not been reproduced through the OpenAI API. The result depends on Lemonade being configured with enough context capacity; for this run, that was 64K.
+The result is still a small engineering signal, not statistical proof. It covers only two high_context tasks, one live iteration, local Lemonade execution, and synthetic deterministic fixtures. Current OpenAI, Anthropic, and Alibaba/Qwen notes now provide separate provider-comparison context; this historical Lemonade result depends on Lemonade being configured with enough context capacity; for this run, that was 64K.
 
 The next recommended high_context step is a small stability run, for example:
 
@@ -113,7 +156,9 @@ The next recommended high_context step is a small stability run, for example:
 python runtime/run_large_contextual_stability.py --iterations 3 --selection-mode both --task-tier high_context --timeout-seconds 600
 ```
 
-Do not jump directly to OpenAI API reproduction or the planned structural 50K+ tier before checking whether the 64K high_context signal is stable across a few repeated Lemonade runs.
+This historical recommendation was appropriate before the later provider and
+structural work. Current readers should use the provider-comparison summaries
+listed above for the latest cross-provider status.
 
 ## High Context 3-Iteration Stability Result
 
@@ -151,7 +196,11 @@ Per-task router stability:
 
 This is encouraging and stronger than the single smoke run: baseline, spatial_fixture, and spatial_router succeeded on all repeated runs; the router selected the fixture-matching block every time; and no fallback-assisted executor runs occurred.
 
-The result is still not statistical proof. It covers two high_context tasks, three live iterations, local Lemonade execution, and synthetic deterministic fixtures. It has not been reproduced with the OpenAI API. The appropriate next step is additional small Lemonade stability work or focused task expansion before making broader claims, moving to OpenAI reproduction, or implementing the planned structural 50K+ tier.
+The result is still not statistical proof. It covers two high_context tasks,
+three live iterations, local Lemonade execution, and synthetic deterministic
+fixtures. Later OpenAI, Anthropic, Alibaba/Qwen, and structural notes provide
+additional context, but they remain controlled benchmark observations rather
+than broad reliability claims.
 
 ## Selection Modes
 
@@ -193,7 +242,12 @@ The expanded tasks add harder semantic distractors:
 - Near-relevant blocks, where a distractor contains part of the operational context but lacks the exact decision, mitigation, threshold, or owner.
 - Selected-block cross-references, where the answer requires connecting two details inside the selected block.
 
-The expanded 7-task fixture set now has a full Lemonade fixture live run and a full Lemonade real-router live run. The expansion makes the deterministic context-reduction fixture harder. Real-router mode tests whether SFE can identify the relevant block, not just benefit from a known block. OpenAI API reproduction remains deferred until the Lemonade real-router signal is reviewed and explicitly approved for reproduction.
+The expanded 7-task fixture set has a full Lemonade fixture live run and a full
+Lemonade real-router live run. The expansion makes the deterministic
+context-reduction fixture harder. Real-router mode tests whether SFE can
+identify the relevant block, not just benefit from a known block. Later OpenAI,
+Anthropic, and Alibaba/Qwen runs are summarized in the provider-specific notes
+linked above.
 
 ## Fixture Live Result
 
@@ -266,7 +320,10 @@ The result supports selective SFE activation when the task has enough irrelevant
 
 The real-router result is encouraging because Lemonade selected the fixture-matching block on the current 7-task benchmark after prompt hardening. It is still not a statistical proof. The task set is small, deterministic, and synthetic; the result should be treated as a positive engineering signal rather than a general claim about router reliability.
 
-End-to-end economics still matter. Router selection has its own token and latency cost, so SFE should be activated where context reduction or cognitive separation can plausibly amortize that cost. The next likely phase should be repeated live runs to assess stability, a larger task set, or OpenAI API reproduction only if explicitly approved.
+End-to-end economics still matter. Router selection has its own token and
+latency cost, so SFE should be activated where context reduction or cognitive
+separation can plausibly amortize that cost. Current docs should report both
+selected-context reduction and router-inclusive reduction.
 
 ## Limits
 
@@ -276,7 +333,9 @@ End-to-end economics still matter. Router selection has its own token and latenc
 - Results depend on the local Lemonade server and configured model.
 - The fixture live result uses deterministic fixture selection and is an oracle upper bound.
 - The real-router live result evaluates block selection only on the current 7-task fixture set.
-- OpenAI API reproduction has not been run and is intentionally deferred pending explicit approval.
+- Later OpenAI, Anthropic, and Alibaba/Qwen observations exist, but the
+  historical Lemonade results in this report remain small, synthetic, and
+  controlled.
 
 ## Phase Conclusion
 
