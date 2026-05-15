@@ -16,6 +16,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from runtime.run_large_contextual_benchmark import (
+    ALIBABA_API_EXECUTOR,
+    ALIBABA_API_JSON_PATH,
     ANTHROPIC_EXECUTOR,
     ANTHROPIC_JSON_PATH,
     BENCHMARK_TYPE,
@@ -680,6 +682,87 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
         for run in report["runs"]:
             self.assertEqual(run["provider"], "anthropic")
+
+    def test_alibaba_api_cli_uses_env_defaults_and_report_paths(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_ALIBABA_EXECUTOR_MODEL": "env-alibaba-executor",
+                "SFE_ALIBABA_ROUTER_MODEL": "env-alibaba-router",
+                "ALIBABA_BASE_URL": "https://dashscope.example.test/compatible-mode/v1",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            ["run_large_contextual_benchmark.py", "--executor", "alibaba-api", "--dry-run"],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, "alibaba-api")
+        self.assertEqual(args.model, "env-alibaba-executor")
+        self.assertEqual(args.router_model, "env-alibaba-router")
+        self.assertEqual(args.base_url, "https://dashscope.example.test/compatible-mode/v1")
+        self.assertEqual(args.json, ALIBABA_API_JSON_PATH)
+
+    def test_alibaba_api_provider_path_is_constructed_without_network_in_tests(self) -> None:
+        class FakeAlibabaProvider:
+            def __init__(self, base_url: str, timeout: float) -> None:
+                self.base_url = base_url
+                self.timeout = timeout
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "cache key region code Priya Nair pay-ops"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeAlibabaProvider] = []
+
+        def make_provider(base_url: str, timeout: float) -> FakeAlibabaProvider:
+            provider = FakeAlibabaProvider(base_url, timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.AlibabaAPIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="example-alibaba-executor",
+                base_url="https://dashscope.example.test/compatible-mode/v1",
+                timeout_seconds=7,
+                dry_run=False,
+                selection_mode="fixture",
+                executor=ALIBABA_API_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(
+            providers[0].base_url,
+            "https://dashscope.example.test/compatible-mode/v1",
+        )
+        self.assertEqual(providers[0].timeout, 7)
+        self.assertEqual(providers[0].calls, 2)
+        self.assertEqual(report["metadata"]["executor"], "alibaba-api")
+        self.assertEqual(report["metadata"]["api_style"], "openai_compatible_chat")
+        self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
+        for run in report["runs"]:
+            self.assertEqual(run["provider"], "alibaba-api")
 
     def test_practical_tier_dry_run_fixture_report_is_serializable(self) -> None:
         report = run_benchmark(

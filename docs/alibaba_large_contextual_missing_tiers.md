@@ -11,11 +11,23 @@ The existing large/contextual benchmark methodology was not changed. The run
 used the same fixtures, tier definitions, selection modes, and token-reduction
 formulas as the existing provider comparison path.
 
-`runtime/run_large_contextual_benchmark.py` currently does not expose
-`alibaba-api` as a CLI provider option. The Alibaba/Qwen run therefore used a
-direct Python invocation of `run_benchmark(...)` with in-memory Alibaba provider
-injection. This avoided changing benchmark code while exercising the same
-benchmark implementation.
+The original Alibaba/Qwen run used a direct Python invocation of
+`run_benchmark(...)` with in-memory Alibaba provider injection before
+`runtime/run_large_contextual_benchmark.py` exposed `alibaba-api` as a CLI
+provider option. That avoided changing benchmark methodology while exercising
+the same benchmark implementation.
+
+Future Alibaba/Qwen large/contextual runs can use the CLI provider option:
+
+```bash
+python runtime/run_large_contextual_benchmark.py \
+  --executor alibaba-api \
+  --task-tier standard \
+  --selection-mode both \
+  --repeat 3 \
+  --max-tokens 240 \
+  --provider-call-delay-seconds 1.0
+```
 
 Configuration:
 
