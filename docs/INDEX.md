@@ -27,6 +27,8 @@ statistical reliability, or general model-safety guarantees.
   router-inclusive reduction details.
 - [large_contextual_benchmark_report.md](large_contextual_benchmark_report.md):
   large/contextual benchmark methodology and report notes.
+- [large_real_world_history.md](large_real_world_history.md): rollup for
+  historical large real-world-style benchmark progression notes.
 - [effectiveness.md](effectiveness.md): preserved strict Lemonade
   effectiveness result.
 - [decisions.md](decisions.md): project decision notes where applicable.
@@ -73,8 +75,8 @@ statistical reliability, or general model-safety guarantees.
 - [high_overlap_history.md](high_overlap_history.md): preferred starting point
   for historical High-Overlap experiment notes before reading individual smoke
   and progression records.
-- [large_real_world_benchmark_progression_summary.md](large_real_world_benchmark_progression_summary.md):
-  progression notes for large real-world-style benchmark work.
+- [large_real_world_history.md](large_real_world_history.md): preferred
+  starting point for historical large real-world-style benchmark notes.
 - [structural_benchmark_note.md](structural_benchmark_note.md): exploratory
   structural 50k+ stress-test notes.
 - [results_structural_50k_openai.md](results_structural_50k_openai.md):
@@ -134,9 +136,10 @@ current top-level project status.
 - [high_overlap_new_fixtures_selector_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_smoke_notes.md)
 - [high_overlap_new_fixtures_selector_repeat3_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_repeat3_notes.md)
 - [high_overlap_new_fixtures_comparison_notes.md](history/high_overlap/high_overlap_new_fixtures_comparison_notes.md)
-- [large_real_world_openai_selector_smoke.md](large_real_world_openai_selector_smoke.md)
-- [large_real_world_openai_selector_executor_smoke.md](large_real_world_openai_selector_executor_smoke.md)
-- [large_real_world_openai_selector_deterministic_executor.md](large_real_world_openai_selector_deterministic_executor.md)
+- [large_real_world_benchmark_progression_summary.md](history/large_real_world/large_real_world_benchmark_progression_summary.md)
+- [large_real_world_openai_selector_smoke.md](history/large_real_world/large_real_world_openai_selector_smoke.md)
+- [large_real_world_openai_selector_executor_smoke.md](history/large_real_world/large_real_world_openai_selector_executor_smoke.md)
+- [large_real_world_openai_selector_deterministic_executor.md](history/large_real_world/large_real_world_openai_selector_deterministic_executor.md)
 - [proxy_shadow_local_smoke_summary.md](history/proxy/proxy_shadow_local_smoke_summary.md)
 - [proxy_shadow_candidate_context_summary.md](history/proxy/proxy_shadow_candidate_context_summary.md)
 - [proxy_shadow_dry_run_enabled_comparison_summary.md](history/proxy/proxy_shadow_dry_run_enabled_comparison_summary.md)
