@@ -374,6 +374,51 @@ OpenAI-compatible request bodies unchanged and has live validation for
 `/v1/chat/completions`; `/v1/responses` may require an explicit DashScope
 compatible base URL depending on the endpoint used.
 
+### Running The Proxy With Docker
+
+The repository includes a `Dockerfile`, `docker-compose.proxy.yml`, and Makefile
+targets for the experimental Proxy. Docker Compose reads the repository root
+`.env` file for runtime configuration; keep provider keys local and do not
+commit `.env`.
+
+Build and run through the Makefile:
+
+```bash
+make build
+make start
+make logs
+make status
+make stop
+```
+
+Direct Compose commands are:
+
+```bash
+docker compose -f docker-compose.proxy.yml build sfe-proxy
+docker compose -f docker-compose.proxy.yml up -d sfe-proxy
+docker compose -f docker-compose.proxy.yml logs -f sfe-proxy
+docker compose -f docker-compose.proxy.yml down
+```
+
+The container listens on port `17891` internally. The compose file publishes it
+on the host loopback address by default:
+
+```text
+127.0.0.1:17891
+```
+
+After the container is running, the same local request shape can be used:
+
+```bash
+curl http://127.0.0.1:17891/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"configured-model","messages":[{"role":"user","content":"Reply with OK"}]}'
+```
+
+`make build` does not require provider secrets. `make start` validates that the
+selected proxy provider has the required local key configuration before starting
+the container.
+
 ## Benchmarks
 
 Run the deterministic local benchmark:
