@@ -4,19 +4,23 @@ SFE remains Spatial Field Engine for Cognition. Proxy mode is an integration
 mode, not a project rename.
 
 The proxy implementation is deliberately boring: it is an OpenAI-compatible
-HTTP proxy with pass-through behavior and optional shadow observability. It does
-not perform SFE-enabled execution, it does not modify prompts, it does not
-modify responses, it does not apply hidden repair, and it does not introduce
-fallback or semantic routing behavior.
+HTTP proxy with explicit modes for pass-through, shadow observation,
+dry-run-enabled diagnostics, and controlled enabled-mode experiments. In
+pass-through and shadow modes it forwards supported requests unchanged. In
+enabled mode it can send a reduced candidate request when one can be built. It
+does not apply hidden repair, and it does not silently fall back to full-context
+execution when enabled-mode candidate construction fails.
 
 ## Purpose
 
 Proxy mode is intended as a zero-code integration path for OpenAI-compatible
 clients. A client can point at the local SFE proxy endpoint while the proxy
-forwards requests unchanged to an upstream OpenAI-compatible provider.
+forwards requests unchanged in pass-through and shadow modes, or exercises the
+documented reduced-request path in enabled mode.
 
 This version is useful for validating operational plumbing and request-shape
-observability before adding future SFE-enabled behavior.
+observability around experimental SFE routing behavior. It is not production
+deployment guidance.
 
 ## Endpoints
 
@@ -185,6 +189,12 @@ make stop
 currently means `make build` followed by `make start`, so runtime key validation
 still applies there. Docker Compose reads the root `.env` for runtime variables
 and does not bake API keys into the image.
+
+When the container calls a local upstream such as Lemonade, `127.0.0.1` inside
+the container refers to the container itself, not the host. Depending on Docker
+Desktop, WSL, or Linux networking, configure `SFE_PROXY_UPSTREAM_BASE_URL` with
+`host.docker.internal`, a host LAN IP, or another endpoint reachable from the
+container.
 
 The container listens internally on `0.0.0.0`, but the compose port mapping binds
 to `${SFE_PROXY_HOST:-127.0.0.1}` on the host. Seeing

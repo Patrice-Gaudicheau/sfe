@@ -140,6 +140,8 @@ current top-level project status.
 - [large_real_world_openai_selector_smoke.md](history/large_real_world/large_real_world_openai_selector_smoke.md)
 - [large_real_world_openai_selector_executor_smoke.md](history/large_real_world/large_real_world_openai_selector_executor_smoke.md)
 - [large_real_world_openai_selector_deterministic_executor.md](history/large_real_world/large_real_world_openai_selector_deterministic_executor.md)
+- [openai_smoke_reports/](history/openai_smoke_reports/README.md): historical
+  generated Markdown report snapshots moved out of tracked `logs/`.
 - [proxy_shadow_local_smoke_summary.md](history/proxy/proxy_shadow_local_smoke_summary.md)
 - [proxy_shadow_candidate_context_summary.md](history/proxy/proxy_shadow_candidate_context_summary.md)
 - [proxy_shadow_dry_run_enabled_comparison_summary.md](history/proxy/proxy_shadow_dry_run_enabled_comparison_summary.md)

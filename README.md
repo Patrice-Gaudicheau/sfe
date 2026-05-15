@@ -381,18 +381,17 @@ targets for the experimental Proxy. Docker Compose reads the repository root
 `.env` file for runtime configuration; keep provider keys local and do not
 commit `.env`.
 
-Build and run through the Makefile:
+For a first local Docker run, use:
 
 ```bash
 make install
-make remove
-...
-make stop
-make start
-make logs
-make status
-
 ```
+
+`make install` runs `make build` and then `make start`. Use `make build` when
+you only want to build the image, `make start` to start an already built
+container, `make logs` to follow proxy logs, `make status` to inspect the
+compose service, `make stop` to stop it, and `make remove` to stop it and remove
+orphans.
 
 Direct Compose commands are:
 
@@ -422,6 +421,12 @@ curl http://127.0.0.1:17891/v1/chat/completions \
 selected proxy provider has the required local key configuration before starting
 the container.
 
+If the Dockerized proxy calls a local Lemonade or OpenAI-compatible server,
+remember that `127.0.0.1` from inside the container is the container itself.
+Depending on Docker Desktop, WSL, or Linux networking, use
+`host.docker.internal`, a host LAN IP, or another endpoint reachable from the
+container.
+
 ### Using The Dockerized Proxy From CodexCLI
 
 Start the Dockerized SFE Proxy first, using the Docker commands above. Once it
@@ -431,7 +436,9 @@ is running, verify that the OpenAI-compatible model endpoint is reachable:
 curl -s http://127.0.0.1:17891/v1/models | jq
 ```
 
-Optionally verify the Responses API path:
+Optionally verify the Responses API path. The model below is only an example
+that was valid in one local environment; use a model returned by your own
+`/v1/models` response.
 
 ```bash
 curl -s http://127.0.0.1:17891/v1/responses \
@@ -455,9 +462,14 @@ model_provider = "sfe"
 model = "gpt-5.3-codex"
 ```
 
-Replace `gpt-5.3-codex` with a model ID actually returned by your local
-`/v1/models` response. A virtual model name such as `sfe` will fail unless the
-proxy explicitly exposes a model alias named `sfe`.
+Replace `gpt-5.3-codex` with a model ID returned by:
+
+```bash
+curl -s http://127.0.0.1:17891/v1/models | jq
+```
+
+A virtual model name such as `sfe` will fail unless the proxy explicitly
+exposes a model alias named `sfe`.
 
 Launch CodexCLI with:
 

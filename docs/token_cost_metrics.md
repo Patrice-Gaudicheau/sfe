@@ -44,6 +44,12 @@ Run context:
 | high_context | 20k-50k tokens | 2 | 2/2 | 2/2 | 2/2 | 91.11% | 73.35% |
 | structural | 50k+ tokens | 1 | 1/1 | 1/1 | 1/1 | 94.16% | 84.08% |
 
+This table is a fresh local OpenAI all-tier reproduction. The cross-provider
+summary in `docs/provider_comparison_summary.md` uses a separate
+protocol-aligned OpenAI/Anthropic campaign snapshot, where the standard-tier
+OpenAI router-inclusive reduction is `21.71%`. Treat the small standard-tier
+difference as run-snapshot drift rather than a new headline claim.
+
 ## Token Accounting
 
 | Tier | Baseline total tokens | Router tokens | Selected executor tokens | Router+executor total tokens |
