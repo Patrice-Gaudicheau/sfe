@@ -70,6 +70,9 @@ statistical reliability, or general model-safety guarantees.
   fixtures.
 - [high_overlap_fixture_expansion_phase_close.md](high_overlap_fixture_expansion_phase_close.md):
   phase closeout for the high-overlap fixture expansion.
+- [high_overlap_history.md](high_overlap_history.md): preferred starting point
+  for historical High-Overlap experiment notes before reading individual smoke
+  and progression records.
 - [large_real_world_benchmark_progression_summary.md](large_real_world_benchmark_progression_summary.md):
   progression notes for large real-world-style benchmark work.
 - [structural_benchmark_note.md](structural_benchmark_note.md): exploratory
@@ -123,12 +126,14 @@ current top-level project status.
 - [proxy_milestone_history.md](proxy_milestone_history.md): rollup for the
   historical Proxy shadow, dry-run-enabled, enabled-mode, and live-provider
   milestone notes below.
-- [high_overlap_poison_pill_progression_summary.md](high_overlap_poison_pill_progression_summary.md)
-- [high_overlap_subtle_poison_progression_summary.md](high_overlap_subtle_poison_progression_summary.md)
-- [high_overlap_new_fixtures_openai_smoke_notes.md](high_overlap_new_fixtures_openai_smoke_notes.md)
-- [high_overlap_new_fixtures_selector_smoke_notes.md](high_overlap_new_fixtures_selector_smoke_notes.md)
-- [high_overlap_new_fixtures_selector_repeat3_notes.md](high_overlap_new_fixtures_selector_repeat3_notes.md)
-- [high_overlap_new_fixtures_comparison_notes.md](high_overlap_new_fixtures_comparison_notes.md)
+- [high_overlap_history.md](high_overlap_history.md): rollup for the
+  historical High-Overlap experiment notes below.
+- [high_overlap_poison_pill_progression_summary.md](history/high_overlap/high_overlap_poison_pill_progression_summary.md)
+- [high_overlap_subtle_poison_progression_summary.md](history/high_overlap/high_overlap_subtle_poison_progression_summary.md)
+- [high_overlap_new_fixtures_openai_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_openai_smoke_notes.md)
+- [high_overlap_new_fixtures_selector_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_smoke_notes.md)
+- [high_overlap_new_fixtures_selector_repeat3_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_repeat3_notes.md)
+- [high_overlap_new_fixtures_comparison_notes.md](history/high_overlap/high_overlap_new_fixtures_comparison_notes.md)
 - [large_real_world_openai_selector_smoke.md](large_real_world_openai_selector_smoke.md)
 - [large_real_world_openai_selector_executor_smoke.md](large_real_world_openai_selector_executor_smoke.md)
 - [large_real_world_openai_selector_deterministic_executor.md](large_real_world_openai_selector_deterministic_executor.md)
