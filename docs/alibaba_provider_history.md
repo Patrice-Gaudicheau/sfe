@@ -28,12 +28,12 @@ document says otherwise. It should not be read as a repeat campaign.
 Earlier Alibaba/Qwen work advanced through small provider checks before the
 current large/contextual summaries existed:
 
-- [alibaba_router_smoke_note.md](alibaba_router_smoke_note.md): early router
+- [alibaba_router_smoke_note.md](history/providers/alibaba/alibaba_router_smoke_note.md): early router
   smoke checks for Alibaba/Qwen provider wiring.
-- [alibaba_progressive_benchmark_note.md](alibaba_progressive_benchmark_note.md):
+- [alibaba_progressive_benchmark_note.md](history/providers/alibaba/alibaba_progressive_benchmark_note.md):
   progressive setup across effectiveness, high-overlap selector,
   multi-zone, limited large/contextual, and structural dry-run stages.
-- [alibaba_structural_50k_spatial_smoke_note.md](alibaba_structural_50k_spatial_smoke_note.md):
+- [alibaba_structural_50k_spatial_smoke_note.md](history/providers/alibaba/alibaba_structural_50k_spatial_smoke_note.md):
   earlier structural spatial-only smoke that preceded the current
   baseline-vs-spatial structural comparison.
 
@@ -46,12 +46,12 @@ benchmark status should be taken from the supporting docs above and from
 The DeepSeek-related notes are Alibaba-hosted provider exploration records.
 They should not be confused with the current Alibaba/Qwen benchmark headline:
 
-- [alibaba_deepseek_smoke_note.md](alibaba_deepseek_smoke_note.md): DeepSeek
+- [alibaba_deepseek_smoke_note.md](history/providers/alibaba/alibaba_deepseek_smoke_note.md): DeepSeek
   connectivity and limited benchmark smoke observations through Alibaba-hosted
   paths.
-- [alibaba_deepseek_structural_spatial_smoke_note.md](alibaba_deepseek_structural_spatial_smoke_note.md):
+- [alibaba_deepseek_structural_spatial_smoke_note.md](history/providers/alibaba/alibaba_deepseek_structural_spatial_smoke_note.md):
   DeepSeek structural spatial-only smoke.
-- [alibaba_deepseek_structural_50k_comparison_note.md](alibaba_deepseek_structural_50k_comparison_note.md):
+- [alibaba_deepseek_structural_50k_comparison_note.md](history/providers/alibaba/alibaba_deepseek_structural_50k_comparison_note.md):
   DeepSeek structural 50k baseline-vs-spatial comparison note.
 
 These are model/provider exploration records, not current Qwen summary rows and

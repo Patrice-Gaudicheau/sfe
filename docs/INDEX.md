@@ -51,7 +51,7 @@ statistical reliability, or general model-safety guarantees.
 - [alibaba_provider_history.md](alibaba_provider_history.md): preferred
   starting point for Alibaba/Qwen historical provider integration and related
   Alibaba-hosted model exploration notes.
-- [alibaba_progressive_benchmark_note.md](alibaba_progressive_benchmark_note.md):
+- [alibaba_progressive_benchmark_note.md](history/providers/alibaba/alibaba_progressive_benchmark_note.md):
   progressive Alibaba/Qwen benchmark note.
 - [alibaba_comparable_benchmark_runs.md](alibaba_comparable_benchmark_runs.md):
   limited Alibaba/Qwen replay across selected benchmark families.
@@ -149,11 +149,11 @@ current top-level project status.
 - [alibaba_provider_history.md](alibaba_provider_history.md): rollup for the
   Alibaba/Qwen historical integration notes and Alibaba-hosted DeepSeek
   exploration records below.
-- [alibaba_router_smoke_note.md](alibaba_router_smoke_note.md)
-- [alibaba_structural_50k_spatial_smoke_note.md](alibaba_structural_50k_spatial_smoke_note.md)
-- [alibaba_deepseek_smoke_note.md](alibaba_deepseek_smoke_note.md)
-- [alibaba_deepseek_structural_spatial_smoke_note.md](alibaba_deepseek_structural_spatial_smoke_note.md)
-- [alibaba_deepseek_structural_50k_comparison_note.md](alibaba_deepseek_structural_50k_comparison_note.md)
+- [alibaba_router_smoke_note.md](history/providers/alibaba/alibaba_router_smoke_note.md)
+- [alibaba_structural_50k_spatial_smoke_note.md](history/providers/alibaba/alibaba_structural_50k_spatial_smoke_note.md)
+- [alibaba_deepseek_smoke_note.md](history/providers/alibaba/alibaba_deepseek_smoke_note.md)
+- [alibaba_deepseek_structural_spatial_smoke_note.md](history/providers/alibaba/alibaba_deepseek_structural_spatial_smoke_note.md)
+- [alibaba_deepseek_structural_50k_comparison_note.md](history/providers/alibaba/alibaba_deepseek_structural_50k_comparison_note.md)
 - [roadmap_after_structural_50k.md](roadmap_after_structural_50k.md)
 
 ## Terms And Caveats
