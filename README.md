@@ -14,9 +14,9 @@ auditable context selection. SFE may be useful when avoided context is large
 enough to amortize routing overhead.
 
 In protocol-aligned controlled observations on 50k+ structural-tier tasks, SFE
-measured 84.08% router-inclusive token reduction with OpenAI and 83.63% with
-Anthropic. These are controlled benchmark observations, not production savings
-commitments.
+measured 84.08% router-inclusive token reduction with OpenAI, 83.63% with
+Anthropic, and 83.57% in a single-run Alibaba/Qwen structural comparison. These
+are controlled benchmark observations, not production savings commitments.
 
 SFE does not claim to make a model more intelligent. The current project tests a
 narrower engineering hypothesis: for some tasks, explicit workspace structure
@@ -30,13 +30,15 @@ prototype, not as proof of general model capability or production readiness.
 ## Core Engineering Signal
 
 Across protocol-aligned OpenAI and Anthropic campaigns, selected-context
-reduction patterns were nearly identical. Router-inclusive gains were modest on
-standard context, then increased sharply as context grew.
+reduction patterns were nearly identical. A narrower Alibaba/Qwen replay also
+completed selected benchmark families, including one live structural
+baseline-vs-spatial comparison. Router-inclusive gains were modest on standard
+context, then increased sharply as context grew.
 
 The useful signal is the amortization pattern, not a claim of universal
 activation. Structural 50k+ observations reached 84.08% OpenAI and 83.63%
-Anthropic router-inclusive reduction. These remain controlled benchmark
-observations.
+Anthropic router-inclusive reduction, with a single-run Alibaba/Qwen structural
+observation at 83.57%. These remain controlled benchmark observations.
 
 ## Why This Matters
 
@@ -53,25 +55,36 @@ routing overhead.
 
 ## Multi-Provider Performance Snapshot
 
-Protocol-aligned controlled OpenAI and Anthropic observations across four
-context-intensity tiers.
+Protocol-aligned controlled OpenAI, Anthropic, and Alibaba/Qwen observations
+across four context-intensity tiers. Alibaba/Qwen `standard`, `practical`, and
+`high_context` rows use `repeat=3`, `selection_mode=both`, and
+`max_tokens=240`; the `structural` row remains a single live
+baseline-vs-spatial comparison.
 
-| Tier | OpenAI selected reduction | OpenAI router-inclusive reduction | Anthropic selected reduction | Anthropic router-inclusive reduction |
-| --- | ---: | ---: | ---: | ---: |
-| `standard` [2k-5k tokens] | 81.06% | 21.71% | 80.88% | 19.09% |
-| `practical` [10k-20k tokens] | 88.17% | 63.40% | 88.05% | 62.01% |
-| `high_context` [20k-50k tokens] | 91.11% | 73.38% | 91.02% | 72.02% |
-| `structural` [50k+ tokens] | 94.16% | 84.08% | 93.94% | 83.63% |
+| Tier | OpenAI selected reduction | OpenAI router-inclusive reduction | Anthropic selected reduction | Anthropic router-inclusive reduction | Alibaba/Qwen selected reduction | Alibaba/Qwen router-inclusive reduction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `standard` [2k-5k tokens] | 81.06% | 21.71% | 80.88% | 19.09% | 80.72% | 19.77% |
+| `practical` [10k-20k tokens] | 88.17% | 63.40% | 88.05% | 62.01% | 88.00% | 62.29% |
+| `high_context` [20k-50k tokens] | 91.11% | 73.38% | 91.02% | 72.02% | 90.98% | 72.34% |
+| `structural` [50k+ tokens] | 94.16% | 84.08% | 93.94% | 83.63% | 94.11% | 83.57% |
 
 Selected reduction means executor-visible context reduction. Router-inclusive
 reduction includes selector/router overhead. The standard tier shows router
 overhead clearly; larger tiers show better amortization. Anthropic structural
 required `600` seconds of provider-call pacing because of provider
-input-token-per-minute limits.
+input-token-per-minute limits. Alibaba/Qwen calls used the benchmark-only
+Alibaba provider path with Qwen thinking disabled for usable token accounting;
+the `standard`, `practical`, and `high_context` rows are repeat-3 observations,
+while the `structural` row is a single live baseline-vs-spatial comparison, not
+a repeat campaign.
 
 These are controlled observations, not statistical proof and not production
 commitments. See `docs/provider_comparison_summary.md` for the cross-provider
-summary and `docs/token_cost_metrics.md` for OpenAI token accounting details.
+OpenAI/Anthropic summary, `docs/token_cost_metrics.md` for OpenAI token
+accounting details, and `docs/alibaba_structural_50k_comparison_note.md` plus
+`docs/alibaba_large_contextual_missing_tiers.md` and
+`docs/alibaba_comparable_benchmark_runs.md` for the current Alibaba/Qwen
+observations.
 
 ## Operational Relevance
 
@@ -339,14 +352,19 @@ Generated logs, JSONL streams, SQLite files, and benchmark outputs are written u
 The strongest current cross-provider signal comes from protocol-aligned OpenAI
 and Anthropic large/contextual campaigns. Both show nearly identical
 selected-context reduction patterns, and both show router-inclusive savings
-increasing with context size.
+increasing with context size. Alibaba/Qwen now has repeat-3 `standard`,
+`practical`, and `high_context` observations using the same large/contextual
+fixtures, plus a separate single-run structural baseline-vs-spatial comparison.
 
-Structural 50k+ observations are clean on both providers:
+Structural 50k+ observations are clean in the current controlled runs:
 
 - OpenAI: 94.16% selected reduction and 84.08% router-inclusive reduction.
 - Anthropic: 93.94% selected reduction and 83.63% router-inclusive reduction,
   with `600` seconds provider-call pacing for structural because of Anthropic
   input-token-per-minute limits.
+- Alibaba/Qwen: 94.11% selected reduction and 83.57% router-inclusive
+  reduction in one live structural baseline-vs-spatial comparison, with Qwen
+  thinking disabled for token accounting.
 
 Lemonade remains useful as a local-provider result and historical benchmark
 path. It is no longer the only current headline for token-reduction behavior.
@@ -367,6 +385,9 @@ model intelligence.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
 - `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
 - `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.
+- `docs/alibaba_structural_50k_comparison_note.md`: Alibaba/Qwen single-run structural baseline-vs-spatial comparison.
+- `docs/alibaba_large_contextual_missing_tiers.md`: Alibaba/Qwen repeat-3 standard, practical, and high_context measurements.
+- `docs/alibaba_comparable_benchmark_runs.md`: limited Alibaba/Qwen replay across selected benchmark families.
 - `docs/public_release_technical_report.md`: public-facing technical report for the current release-readiness snapshot.
 - `docs/large_contextual_benchmark_report.md`: detailed large/contextual benchmark notes.
 - `docs/effectiveness.md`: preserved strict Lemonade effectiveness result.
@@ -397,7 +418,9 @@ with broader local tooling or production-like request flows.
 - Repeat campaign sizes are still small relative to production workloads; these
   are not statistical proof.
 - OpenAI and Anthropic token-reduction reproductions cover all four benchmark
-  tiers, but task counts per tier remain limited.
+  tiers, but task counts per tier remain limited. Alibaba/Qwen now has repeat-3
+  `standard`, `practical`, and `high_context` metrics, but its `structural`
+  figure remains a single-run comparison rather than a repeat campaign.
 - Provider-specific rate limits can affect execution strategy.
 - Anthropic structural required `600` seconds provider-call pacing because of
   Anthropic input-token-per-minute limits.
