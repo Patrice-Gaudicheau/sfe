@@ -1,48 +1,75 @@
 # Documentation Index
 
-This repository is a private technical prototype for Spatial Field Engine for
-Cognition (SFE), an experimental architecture that separates selection and
-routing from execution in long-context LLM workflows. The working hypothesis is
-that explicit context selection can make source exposure more auditable and may
-reduce unnecessary executor context in some controlled tasks; this repository
-does not claim general reliability, safety, or contamination prevention.
+This repository is a technical prototype for Spatial Field Engine for Cognition
+(`SFE`), an experimental architecture that separates context selection from
+task execution in long-context LLM workflows. The documentation records
+controlled benchmark methodology, provider-specific observations, and the
+experimental SFE Proxy path. It does not claim production readiness,
+statistical reliability, or general model-safety guarantees.
 
-## Current Status
+## Start Here
 
-The project is source-visible for private review and non-commercial research
-under the repository license. The current benchmark material is mainly
-synthetic, controlled, and methodology-oriented.
+1. [README.md](../README.md): project purpose, architecture, setup, current
+   provider support, Proxy usage, benchmark snapshot, and limitations.
+2. [public_release_technical_report.md](public_release_technical_report.md):
+   public-facing technical report for the current release-readiness snapshot.
+3. [sfe_proxy_mode.md](sfe_proxy_mode.md): detailed SFE Proxy configuration,
+   supported providers, modes, Docker usage, and operational caveats.
+4. [router_contract.md](router_contract.md): router JSON contract and strict
+   output expectations.
 
-Recent high-overlap work added three additional authority-gap fixtures:
+## Current Primary Docs
 
-- Aurelia: scope authority conflict.
-- Borealis: deprecated memo vs active implementation notice.
-- Cassini: policy exception vs active policy.
+- [provider_comparison_summary.md](provider_comparison_summary.md): main
+  cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic
+  campaigns.
+- [token_cost_metrics.md](token_cost_metrics.md): OpenAI token accounting and
+  router-inclusive reduction details.
+- [large_contextual_benchmark_report.md](large_contextual_benchmark_report.md):
+  large/contextual benchmark methodology and report notes.
+- [effectiveness.md](effectiveness.md): preserved strict Lemonade
+  effectiveness result.
+- [decisions.md](decisions.md): project decision notes where applicable.
 
-For these fixtures, deterministic tests pass and limited local OpenAI smoke
-observations were clean. No contamination indicators were observed in those
-local runs. Selected-context execution did not outperform full-context
-execution in the comparison observations because full context also passed. The
-useful signal is local non-regression under controlled conditions, not a
-general reliability claim.
+## Proxy And Provider Docs
 
-## Recommended Reading Path
+- [sfe_proxy_mode.md](sfe_proxy_mode.md): canonical Proxy mode reference. It
+  covers `pass_through`, `shadow`, `dry_run_enabled`, and `enabled` modes, plus
+  OpenAI-compatible, OpenAI, Lemonade, Alibaba/Qwen, and Anthropic proxy
+  providers.
+- [openai_api_benchmark.md](openai_api_benchmark.md): optional direct OpenAI
+  API benchmark path.
+- [openai_validation_report.md](openai_validation_report.md): direct OpenAI API
+  validation summary for large/contextual benchmark work.
+- [openai_paced_equivalent_summary.md](openai_paced_equivalent_summary.md):
+  OpenAI paced-equivalent campaign summary.
+- [anthropic_benchmark_paced_summary.md](anthropic_benchmark_paced_summary.md):
+  Anthropic paced campaign summary, including structural provider-call pacing.
+- [alibaba_progressive_benchmark_note.md](alibaba_progressive_benchmark_note.md):
+  progressive Alibaba/Qwen benchmark note.
+- [alibaba_comparable_benchmark_runs.md](alibaba_comparable_benchmark_runs.md):
+  limited Alibaba/Qwen replay across selected benchmark families.
+- [alibaba_large_contextual_missing_tiers.md](alibaba_large_contextual_missing_tiers.md):
+  Alibaba/Qwen repeat-3 `standard`, `practical`, and `high_context`
+  large/contextual measurements.
+- [alibaba_structural_50k_comparison_note.md](alibaba_structural_50k_comparison_note.md):
+  Alibaba/Qwen single-run structural baseline-vs-spatial comparison.
 
-1. Start with [README.md](../README.md) for the project purpose, architecture,
-   setup, core commands, and limitations.
-2. Read
-   [high_overlap_fixture_expansion_phase_close.md](high_overlap_fixture_expansion_phase_close.md)
-   for the current high-overlap fixture-expansion status and the next planning
-   direction.
-3. Read
-   [high_overlap_diagnostic_bucketing_notes.md](high_overlap_diagnostic_bucketing_notes.md)
-   to understand strict validation, honest pass/fail, and diagnostic failure
-   buckets.
-4. Read
-   [high_overlap_authority_gap_fixture_expansion_design.md](high_overlap_authority_gap_fixture_expansion_design.md)
-   for the design intent behind Aurelia, Borealis, and Cassini.
-5. Inspect representative runners in `runtime/` and matching tests in `tests/`
-   only after the methodology notes are clear.
+## Benchmark Methodology
+
+- [high_overlap_diagnostic_bucketing_notes.md](high_overlap_diagnostic_bucketing_notes.md):
+  strict validation, honest pass/fail criteria, and diagnostic failure buckets.
+- [high_overlap_authority_gap_fixture_expansion_design.md](high_overlap_authority_gap_fixture_expansion_design.md):
+  design intent behind the Aurelia, Borealis, and Cassini authority-gap
+  fixtures.
+- [high_overlap_fixture_expansion_phase_close.md](high_overlap_fixture_expansion_phase_close.md):
+  phase closeout for the high-overlap fixture expansion.
+- [large_real_world_benchmark_progression_summary.md](large_real_world_benchmark_progression_summary.md):
+  progression notes for large real-world-style benchmark work.
+- [structural_benchmark_note.md](structural_benchmark_note.md): exploratory
+  structural 50k+ stress-test notes.
+- [results_structural_50k_openai.md](results_structural_50k_openai.md):
+  OpenAI structural 50k+ result note.
 
 ## Benchmark Families
 
@@ -50,35 +77,19 @@ general reliability claim.
   flow.
 - Large/contextual benchmark: synthetic context-reduction tasks with fixture
   and router selection modes.
-- Large real-world benchmark notes: early OpenAI selector/executor smoke
-  observations over curated real-world-style material.
 - High-overlap authority-gap benchmarks: controlled fixtures where multiple
   documents share similar vocabulary and differ by authority, scope, freshness,
   or evidence.
+- Large real-world-style benchmark notes: early OpenAI selector/executor smoke
+  observations over curated material.
 - Structural 50k+ stress tests: exploratory large-context stress material
   intended to expose routing and answer-completeness limits.
 
-## High-Overlap Fixture Map
+High-overlap remains an important benchmark family, but it should be read as
+methodology and controlled fixture coverage rather than the whole-project
+status.
 
-The high-overlap family currently includes:
-
-- Loud poison-pill fixture: an easier adversarial baseline with overt hostile
-  behavior.
-- Subtle authority-gap fixture: a plausible unauthorized governance update with
-  missing authority evidence.
-- Aurelia scope-authority fixture: official-looking sources apply to different
-  scopes, and only one scope matches the requested case.
-- Borealis deprecated-memo fixture: a formal older memo is superseded by a
-  newer implementation notice.
-- Cassini policy-exception fixture: a general policy looks authoritative, but a
-  narrower active exception controls the requested case.
-
-These fixtures test selection, selected-context execution, full-context
-comparison, and diagnostic reporting under controlled conditions. They do not
-prove that SFE prevents contamination or that selected context generally beats
-full context.
-
-## Runner And Observation Map
+## Runner Map
 
 Use this map before running scripts. Some comparison runner filenames do not
 include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
@@ -86,66 +97,67 @@ include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
 | Category | Typical runner pattern | API key required | Notes |
 | --- | --- | --- | --- |
 | Deterministic runners | `runtime/run_high_overlap_*_benchmark.py` | No | Validate fixtures and report strict deterministic outcomes. |
+| Large/contextual runner | `runtime/run_large_contextual_benchmark.py` | No for `--dry-run`; yes for live providers | Supports `lemonade`, `openai-api`, `alibaba-api`, and `anthropic` executors. |
 | Selector-only OpenAI smokes | `runtime/run_high_overlap_*_openai_selector_smoke.py` | Yes for live run | Use blind `candidate-N` handles and validate selected source. |
-| Selected-context OpenAI executor smokes | `runtime/run_high_overlap_*_openai_executor_smoke.py` | Yes for live run | Executor receives only deterministic authoritative context. |
-| Selected-vs-full OpenAI comparisons | `runtime/run_high_overlap_*_contamination_comparison.py` | Yes for live run | Compare deterministic selected context with full fixture context. |
-| Manual repeat observations | Re-run an existing smoke or comparison runner with separate `/tmp` outputs | Yes if the runner calls OpenAI | Local repeat observations only; not statistical reliability claims. |
+| Selected-context OpenAI executor smokes | `runtime/run_high_overlap_*_openai_executor_smoke.py` | Yes for live run | Executor receives deterministic authoritative context only. |
+| Selected-vs-full OpenAI comparisons | `runtime/run_high_overlap_*_contamination_comparison.py` | Yes for live run | Compare selected authoritative context with full fixture context. |
+| Alibaba/Qwen smoke | `runtime/run_alibaba_smoke.py` | Yes for live run | Tiny provider smoke path; not a benchmark campaign. |
+| Proxy direct run | `python -m sfe_proxy` | Depends on configured upstream provider | Experimental local OpenAI-compatible proxy path. |
+| Proxy Docker run | `make build`, `make start`, `make logs`, `make status`, `make stop` | `make build` no; `make start` depends on provider config | Uses `docker-compose.proxy.yml` and the root `.env` for runtime configuration. |
 
 Generated local reports should stay outside tracked files, preferably under
-`/tmp`.
+`/tmp`, unless a summarized documentation note is intentionally added.
 
-## Metrics And Result Terms
+## Historical And Phase-Specific Notes
+
+These notes preserve narrower experiments, smoke tests, and phase closeouts.
+They are useful for audit trail and context, but they should not be read as the
+current top-level project status.
+
+- [high_overlap_poison_pill_progression_summary.md](high_overlap_poison_pill_progression_summary.md)
+- [high_overlap_subtle_poison_progression_summary.md](high_overlap_subtle_poison_progression_summary.md)
+- [high_overlap_new_fixtures_openai_smoke_notes.md](high_overlap_new_fixtures_openai_smoke_notes.md)
+- [high_overlap_new_fixtures_selector_smoke_notes.md](high_overlap_new_fixtures_selector_smoke_notes.md)
+- [high_overlap_new_fixtures_selector_repeat3_notes.md](high_overlap_new_fixtures_selector_repeat3_notes.md)
+- [high_overlap_new_fixtures_comparison_notes.md](high_overlap_new_fixtures_comparison_notes.md)
+- [large_real_world_openai_selector_smoke.md](large_real_world_openai_selector_smoke.md)
+- [large_real_world_openai_selector_executor_smoke.md](large_real_world_openai_selector_executor_smoke.md)
+- [large_real_world_openai_selector_deterministic_executor.md](large_real_world_openai_selector_deterministic_executor.md)
+- [proxy_shadow_local_smoke_summary.md](proxy_shadow_local_smoke_summary.md)
+- [proxy_shadow_candidate_context_summary.md](proxy_shadow_candidate_context_summary.md)
+- [proxy_shadow_dry_run_enabled_comparison_summary.md](proxy_shadow_dry_run_enabled_comparison_summary.md)
+- [proxy_shadow_live_lemonade_runner_summary.md](proxy_shadow_live_lemonade_runner_summary.md)
+- [proxy_shadow_live_qwen_multifixture_summary.md](proxy_shadow_live_qwen_multifixture_summary.md)
+- [proxy_dry_run_enabled_mode_summary.md](proxy_dry_run_enabled_mode_summary.md)
+- [proxy_enabled_mode_smoke_summary.md](proxy_enabled_mode_smoke_summary.md)
+- [proxy_enabled_mode_controlled_summary.md](proxy_enabled_mode_controlled_summary.md)
+- [proxy_enabled_mode_milestone_summary.md](proxy_enabled_mode_milestone_summary.md)
+- [proxy_enabled_live_lemonade_summary.md](proxy_enabled_live_lemonade_summary.md)
+- [proxy_enabled_live_lemonade_multifixture_summary.md](proxy_enabled_live_lemonade_multifixture_summary.md)
+- [proxy_enabled_live_openai_summary.md](proxy_enabled_live_openai_summary.md)
+- [proxy_enabled_live_openai_router_summary.md](proxy_enabled_live_openai_router_summary.md)
+- [proxy_enabled_live_openai_router_multifixture_summary.md](proxy_enabled_live_openai_router_multifixture_summary.md)
+- [alibaba_router_smoke_note.md](alibaba_router_smoke_note.md)
+- [alibaba_structural_50k_spatial_smoke_note.md](alibaba_structural_50k_spatial_smoke_note.md)
+- [alibaba_deepseek_smoke_note.md](alibaba_deepseek_smoke_note.md)
+- [alibaba_deepseek_structural_spatial_smoke_note.md](alibaba_deepseek_structural_spatial_smoke_note.md)
+- [alibaba_deepseek_structural_50k_comparison_note.md](alibaba_deepseek_structural_50k_comparison_note.md)
+- [roadmap_after_structural_50k.md](roadmap_after_structural_50k.md)
+
+## Terms And Caveats
 
 - Deterministic tests validate fixture logic without live provider calls.
-- Live smoke observations exercise the existing runners with a configured
-  provider and should be read as local observations.
-- Selector-only smoke checks source selection only; it does not test final
-  answer execution.
-- Selected-context executor smoke checks whether the executor can answer from
-  the selected authoritative context only.
-- Selected-vs-full comparison checks two executor conditions with the same
-  task and validator: selected authoritative context and full fixture context.
-- Manual repeat observations repeat existing runners and summarize consistency;
-  they are not statistical reliability benchmarks.
+- Live smoke observations exercise configured providers and should be read as
+  local observations.
+- Manual repeat observations are not statistical reliability benchmarks.
 - Honest pass means the strict output contract passed without fallback, repair,
   provider error, parse failure, or other disqualifying metadata.
 - Diagnostic bucketing separates strict failures into field extraction,
   evidence reference, contamination indicator, provider, parse, fallback, and
   repair categories where the report exposes enough information.
-- Contamination indicators are mechanical signs such as copied excluded values,
-  excluded-source citations, poison instruction following, or mixed
-  authoritative and excluded evidence.
-- Field extraction failure means the source can be correct while the output
-  misses an exact required field.
+- Proxy mode is experimental integration infrastructure, not production
+  deployment guidance.
 
-## What Is Not Claimed
-
-The repository does not claim:
-
-- general robustness;
-- statistical reliability;
-- production readiness;
-- that SFE prevents contamination;
-- that full-context LLM execution is generally unsafe;
-- that selected context always outperforms full context;
-- that authority reasoning is solved;
-- that local OpenAI observations generalize across models, prompts, workloads,
-  or corpora.
-
-## Gateway Or Proxy Planning
-
-Gateway or Proxy planning should start from the phase-close note, then define:
-
-- pass-through mode;
-- SFE-enabled mode;
-- activation thresholds;
-- provider routing boundaries;
-- request and response tracing;
-- how local tools would choose between direct execution and SFE-routed
-  execution;
-- how to preserve non-regression checks when routing through SFE.
-
-The local non-regression signal from the high-overlap fixture expansion is
-useful for this planning because pass-through and SFE-enabled routing must not
-break requests that already work without SFE. It is not a guarantee that future
-Gateway or Proxy behavior will preserve answers in general.
+The repository does not claim general robustness, production readiness,
+contamination prevention, or that selected context generally outperforms full
+context.
