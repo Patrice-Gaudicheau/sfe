@@ -40,6 +40,12 @@ Environment variables:
 - `SFE_PROXY_PROVIDER`, default `openai-compatible`
 - `SFE_PROXY_UPSTREAM_BASE_URL`, provider-specific default
 - `SFE_PROXY_UPSTREAM_API_KEY`, preferred upstream key for proxy mode
+- `ALIBABA_API_KEY`, Alibaba proxy provider key; `DASHSCOPE_API_KEY`
+  is also accepted
+- `SFE_ALIBABA_BASE_URL`, default
+  `https://dashscope-intl.aliyuncs.com/compatible-mode`
+- `SFE_ALIBABA_MODEL`, optional local model hint for scripts; proxy requests
+  still forward the client request `model` unchanged
 - `SFE_ANTHROPIC_API_KEY`, Anthropic proxy provider key; `ANTHROPIC_API_KEY`
   is also accepted
 - `SFE_ANTHROPIC_BASE_URL`, default `https://api.anthropic.com`
@@ -75,6 +81,11 @@ Supported execution providers:
 - `lemonade`: explicit Lemonade alias using the same OpenAI-compatible proxy
   path. It defaults to `http://127.0.0.1:13305` unless
   `SFE_PROXY_UPSTREAM_BASE_URL` is set.
+- `alibaba`: explicit Alibaba Cloud Model Studio / DashScope / Qwen alias
+  using the same OpenAI-compatible proxy path. It defaults to
+  `https://dashscope-intl.aliyuncs.com/compatible-mode` unless
+  `SFE_ALIBABA_BASE_URL` or `SFE_PROXY_UPSTREAM_BASE_URL` is set. The generic
+  `SFE_PROXY_UPSTREAM_BASE_URL` override wins when set.
 - `anthropic`: supported POST requests are converted to Anthropic Messages API
   calls at `${SFE_ANTHROPIC_BASE_URL}/v1/messages`, then text responses are
   converted back to the proxy response shape. This path supports text-only
@@ -87,6 +98,18 @@ when `SFE_PROXY_UPSTREAM_BASE_URL` points to `https://api.openai.com`,
 `OPENAI_API_KEY` can be used as a fallback. If neither key is available, the
 proxy fails clearly at startup. The OpenAI fallback is not applied to non-OpenAI
 upstream URLs.
+
+For `SFE_PROXY_PROVIDER=alibaba`, `SFE_PROXY_UPSTREAM_API_KEY` wins when set.
+Otherwise the proxy uses `ALIBABA_API_KEY`, then `DASHSCOPE_API_KEY`.
+Alibaba uses the OpenAI-compatible proxy path, so request bodies, including
+`model`, are forwarded unchanged. The Alibaba proxy base URL should omit the
+endpoint version suffix because the proxy appends request paths such as
+`/v1/chat/completions`; for example, use
+`https://dashscope-intl.aliyuncs.com/compatible-mode` to reach
+`https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`.
+Alibaba `/v1/responses` has not been live-validated in this proxy path; if a
+DashScope Responses-compatible endpoint uses a different base prefix, configure
+it explicitly with `SFE_PROXY_UPSTREAM_BASE_URL` for that run.
 
 For `SFE_PROXY_PROVIDER=anthropic`, `SFE_ANTHROPIC_API_KEY` or
 `ANTHROPIC_API_KEY` is required. `SFE_ANTHROPIC_MODEL` overrides any incoming

@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import sfe_proxy.server as proxy_server
 import sfe_proxy.shadow_router as shadow_router_module
 from sfe_proxy.config import (
+    DEFAULT_ALIBABA_UPSTREAM_BASE_URL,
     DEFAULT_HOST,
     DEFAULT_LEMONADE_UPSTREAM_BASE_URL,
     DEFAULT_MODE,
@@ -32,7 +33,7 @@ from sfe_proxy.config import (
     ProxyConfig,
 )
 from sfe_proxy.provider_limits import ProviderLimitRegistry, ProviderRateLimiter
-from sfe_proxy.server import _is_sse_response, create_server
+from sfe_proxy.server import _is_sse_response, _request_upstream_url, create_server
 from sfe_proxy.shadow_router import (
     DisabledShadowRouter,
     LemonadeShadowRouter,
@@ -238,6 +239,147 @@ def test_proxy_config_lemonade_alias_keeps_explicit_upstream_override(monkeypatc
 
     assert config.provider == "lemonade"
     assert config.upstream_base_url == "http://127.0.0.1:18080"
+
+
+def test_proxy_config_accepts_alibaba_proxy_provider_alias(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "alibaba"
+    assert config.upstream_base_url == DEFAULT_ALIBABA_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "alibaba-key"
+
+
+def test_proxy_config_alibaba_uses_dashscope_key_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("ALIBABA_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.upstream_base_url == DEFAULT_ALIBABA_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "dashscope-key"
+
+
+def test_proxy_config_prefers_specific_alibaba_key(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.upstream_api_key == "alibaba-key"
+
+
+def test_proxy_config_alibaba_base_url_overrides_default(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("SFE_ALIBABA_BASE_URL", "https://dashscope-us.aliyuncs.com/compatible-mode")
+    monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.upstream_base_url == "https://dashscope-us.aliyuncs.com/compatible-mode"
+
+
+def test_proxy_config_alibaba_keeps_explicit_upstream_override(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("SFE_ALIBABA_BASE_URL", "https://dashscope-us.aliyuncs.com/compatible-mode")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "explicit-proxy-key")
+    monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.upstream_base_url == "https://example.invalid/v1"
+    assert config.upstream_api_key == "explicit-proxy-key"
+
+
+def test_proxy_config_rejects_alibaba_provider_without_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("ALIBABA_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "ALIBABA_API_KEY" in str(exc)
+        assert "DASHSCOPE_API_KEY" in str(exc)
+    else:
+        raise AssertionError("alibaba proxy provider should require an API key")
+
+
+def test_openai_compatible_default_upstream_url_appends_proxy_path() -> None:
+    config = ProxyConfig(upstream_api_key="upstream-secret")
+
+    assert (
+        _request_upstream_url(config, "/v1/chat/completions")
+        == "https://api.openai.com/v1/chat/completions"
+    )
+
+
+def test_lemonade_default_upstream_url_appends_proxy_path() -> None:
+    config = ProxyConfig(
+        provider="lemonade",
+        upstream_base_url=DEFAULT_LEMONADE_UPSTREAM_BASE_URL,
+        upstream_api_key="upstream-secret",
+    )
+
+    assert (
+        _request_upstream_url(config, "/v1/chat/completions")
+        == "http://127.0.0.1:13305/v1/chat/completions"
+    )
+
+
+def test_alibaba_default_upstream_url_appends_proxy_path() -> None:
+    config = ProxyConfig(
+        provider="alibaba",
+        upstream_base_url=DEFAULT_ALIBABA_UPSTREAM_BASE_URL,
+        upstream_api_key="upstream-secret",
+    )
+
+    assert (
+        _request_upstream_url(config, "/v1/chat/completions")
+        == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+    )
+
+
+def test_alibaba_base_url_override_appends_proxy_path() -> None:
+    config = ProxyConfig(
+        provider="alibaba",
+        upstream_base_url="https://dashscope-us.aliyuncs.com/compatible-mode",
+        upstream_api_key="upstream-secret",
+    )
+
+    assert (
+        _request_upstream_url(config, "/v1/chat/completions")
+        == "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions"
+    )
+
+
+def test_alibaba_generic_upstream_override_appends_proxy_path(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_BASE_URL", "https://example.invalid/custom")
+    monkeypatch.setenv("SFE_ALIBABA_BASE_URL", "https://dashscope-us.aliyuncs.com/compatible-mode")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "explicit-proxy-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.upstream_base_url == "https://example.invalid/custom"
+    assert (
+        _request_upstream_url(config, "/v1/chat/completions")
+        == "https://example.invalid/custom/v1/chat/completions"
+    )
 
 
 def test_proxy_config_accepts_shadow_mode(monkeypatch, tmp_path) -> None:
@@ -486,6 +628,7 @@ def test_proxy_config_rejects_unsupported_provider(monkeypatch) -> None:
         assert "openai-compatible" in str(exc)
         assert "openai" in str(exc)
         assert "lemonade" in str(exc)
+        assert "alibaba" in str(exc)
         assert "anthropic" in str(exc)
     else:
         raise AssertionError("unsupported proxy provider should fail")
@@ -541,8 +684,8 @@ def test_pass_through_preserves_json_body_status_and_safe_auth_logging() -> None
     assert '"stream": false' in joined_logs
 
 
-def test_openai_and_lemonade_provider_aliases_use_openai_compatible_path() -> None:
-    for provider in ("openai", "lemonade"):
+def test_openai_lemonade_and_alibaba_provider_aliases_use_openai_compatible_path() -> None:
+    for provider in ("openai", "lemonade", "alibaba"):
         upstream = _start_upstream(
             status=200,
             body=b'{"id":"alias-upstream","object":"chat.completion"}',

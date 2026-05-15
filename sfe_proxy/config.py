@@ -11,19 +11,23 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17891
 DEFAULT_UPSTREAM_BASE_URL = "https://api.openai.com"
 DEFAULT_LEMONADE_UPSTREAM_BASE_URL = "http://127.0.0.1:13305"
+DEFAULT_ALIBABA_UPSTREAM_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode"
 DEFAULT_PROXY_PROVIDER = "openai-compatible"
 OPENAI_PROXY_PROVIDER = "openai"
 LEMONADE_PROXY_PROVIDER = "lemonade"
+ALIBABA_PROXY_PROVIDER = "alibaba"
 ANTHROPIC_PROXY_PROVIDER = "anthropic"
 OPENAI_COMPATIBLE_PROXY_PROVIDERS = (
     DEFAULT_PROXY_PROVIDER,
     OPENAI_PROXY_PROVIDER,
     LEMONADE_PROXY_PROVIDER,
+    ALIBABA_PROXY_PROVIDER,
 )
 SUPPORTED_PROXY_PROVIDERS = (
     DEFAULT_PROXY_PROVIDER,
     OPENAI_PROXY_PROVIDER,
     LEMONADE_PROXY_PROVIDER,
+    ALIBABA_PROXY_PROVIDER,
     ANTHROPIC_PROXY_PROVIDER,
 )
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
@@ -92,6 +96,11 @@ class ProxyConfig:
         if not upstream_base_url:
             upstream_base_url = _default_upstream_base_url(provider)
         upstream_api_key = os.getenv("SFE_PROXY_UPSTREAM_API_KEY", "")
+        if provider == ALIBABA_PROXY_PROVIDER and not upstream_api_key:
+            upstream_api_key = (
+                os.getenv("ALIBABA_API_KEY", "")
+                or os.getenv("DASHSCOPE_API_KEY", "")
+            )
         if (
             provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS
             and not upstream_api_key
@@ -212,6 +221,11 @@ class ProxyConfig:
             raise ValueError("SFE_PROXY_PORT must be between 1 and 65535.")
         if self.provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS and not self.upstream_base_url:
             raise ValueError("SFE_PROXY_UPSTREAM_BASE_URL must not be empty.")
+        if self.provider == ALIBABA_PROXY_PROVIDER and not self.upstream_api_key:
+            raise ValueError(
+                "SFE_PROXY_UPSTREAM_API_KEY, ALIBABA_API_KEY, or DASHSCOPE_API_KEY "
+                "is required for alibaba proxy provider."
+            )
         if self.provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS and not self.upstream_api_key:
             raise ValueError(
                 "SFE_PROXY_UPSTREAM_API_KEY is required for proxy mode; "
@@ -272,6 +286,11 @@ def _is_openai_upstream(base_url: str) -> bool:
 def _default_upstream_base_url(provider: str) -> str:
     if provider == LEMONADE_PROXY_PROVIDER:
         return DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+    if provider == ALIBABA_PROXY_PROVIDER:
+        return (
+            os.getenv("SFE_ALIBABA_BASE_URL", "").strip()
+            or DEFAULT_ALIBABA_UPSTREAM_BASE_URL
+        )
     return DEFAULT_UPSTREAM_BASE_URL
 
 
