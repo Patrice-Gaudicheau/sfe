@@ -37,6 +37,9 @@ statistical reliability, or general model-safety guarantees.
   covers `pass_through`, `shadow`, `dry_run_enabled`, and `enabled` modes, plus
   OpenAI-compatible, OpenAI, Lemonade, Alibaba/Qwen, and Anthropic proxy
   providers.
+- [proxy_milestone_history.md](proxy_milestone_history.md): preferred starting
+  point for historical Proxy milestone notes before reading the individual
+  smoke and controlled-run records.
 - [openai_api_benchmark.md](openai_api_benchmark.md): optional direct OpenAI
   API benchmark path.
 - [openai_validation_report.md](openai_validation_report.md): direct OpenAI API
@@ -114,6 +117,9 @@ These notes preserve narrower experiments, smoke tests, and phase closeouts.
 They are useful for audit trail and context, but they should not be read as the
 current top-level project status.
 
+- [proxy_milestone_history.md](proxy_milestone_history.md): rollup for the
+  historical Proxy shadow, dry-run-enabled, enabled-mode, and live-provider
+  milestone notes below.
 - [high_overlap_poison_pill_progression_summary.md](high_overlap_poison_pill_progression_summary.md)
 - [high_overlap_subtle_poison_progression_summary.md](high_overlap_subtle_poison_progression_summary.md)
 - [high_overlap_new_fixtures_openai_smoke_notes.md](high_overlap_new_fixtures_openai_smoke_notes.md)
