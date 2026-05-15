@@ -422,6 +422,59 @@ curl http://127.0.0.1:17891/v1/chat/completions \
 selected proxy provider has the required local key configuration before starting
 the container.
 
+### Using The Dockerized Proxy From CodexCLI
+
+Start the Dockerized SFE Proxy first, using the Docker commands above. Once it
+is running, verify that the OpenAI-compatible model endpoint is reachable:
+
+```bash
+curl -s http://127.0.0.1:17891/v1/models | jq
+```
+
+Optionally verify the Responses API path:
+
+```bash
+curl -s http://127.0.0.1:17891/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.3-codex",
+    "input": "Say hello from SFE."
+  }' | jq
+```
+
+Add a CodexCLI profile to `~/.codex/config.toml`:
+
+```toml
+[model_providers.sfe]
+name = "SFE Proxy"
+base_url = "http://127.0.0.1:17891/v1"
+wire_api = "responses"
+
+[profiles.sfe]
+model_provider = "sfe"
+model = "gpt-5.3-codex"
+```
+
+Replace `gpt-5.3-codex` with a model ID actually returned by your local
+`/v1/models` response. A virtual model name such as `sfe` will fail unless the
+proxy explicitly exposes a model alias named `sfe`.
+
+Launch CodexCLI with:
+
+```bash
+codex --profile sfe
+```
+
+Troubleshooting:
+
+- If Codex tries to call port `8000`, check for stale `base_url` values in
+  `~/.codex/config.toml` or project-level `.codex/config.toml`.
+- If Codex reports that `wire_api = "chat"` is no longer supported, use
+  `wire_api = "responses"`.
+- If Codex reports `model_not_found`, use a model ID returned by `/v1/models`.
+- Docker Desktop or WSL networking can differ by setup; adjust the host and
+  port if `127.0.0.1:17891` is not reachable from your environment.
+
 ## Benchmarks
 
 Run the deterministic local benchmark:
