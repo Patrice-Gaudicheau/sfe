@@ -384,11 +384,14 @@ commit `.env`.
 Build and run through the Makefile:
 
 ```bash
-make build
+make install
+make remove
+...
+make stop
 make start
 make logs
 make status
-make stop
+
 ```
 
 Direct Compose commands are:
