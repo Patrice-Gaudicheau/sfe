@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 import time
@@ -90,6 +91,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         model, stream = _request_metadata(body)
         upstream_url = _request_upstream_url(self.server.config, self.path)
         status_code = 502
+        sfe_mode = _initial_sfe_mode(self.server.config, self.command, path)
         shadow_event = (
             _build_shadow_event(self.server.config, self.command, path, body)
             if _should_shadow_observe(self.server.config, self.command, path)
@@ -134,6 +136,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if shadow_event is not None:
                     shadow_event.update(enabled_result["event_fields"])
                 if enabled_result["body"] is None:
+                    sfe_mode = "rejected"
                     status_code = 422
                     self._send_json(
                         422,
@@ -149,6 +152,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     )
                     return
                 upstream_body = enabled_result["body"]
+                sfe_mode = "enabled"
             if self.server.config.provider == ANTHROPIC_PROXY_PROVIDER:
                 anthropic_result = self._send_anthropic_provider_response(
                     path,
@@ -184,6 +188,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 latency_ms=latency_ms,
                 model=model,
                 stream=stream,
+                sfe_mode=sfe_mode,
+                shadow_event=shadow_event,
             )
 
     def _read_body(self) -> bytes:
@@ -386,16 +392,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
         latency_ms: int,
         model: str | None,
         stream: bool | None,
+        sfe_mode: str,
+        shadow_event: dict[str, Any] | None,
     ) -> None:
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "method": self.command,
             "path": _path_without_query(self.path),
+            "sfe_mode": sfe_mode,
             "upstream_url": upstream_url,
+            "provider": self.server.config.provider,
             "status_code": status_code,
             "latency_ms": latency_ms,
             "model": model,
             "stream": stream,
+            "router_model": _configured_router_model(self.server.config),
+            "executor_model": _effective_executor_model(self.server.config, model),
+            "fallback_used": False,
+            "selection_applied": _log_selection_applied(sfe_mode, shadow_event),
+            "selected_zones_count": None,
+            "selected_blocks_count": _log_selected_blocks_count(shadow_event),
         }
         self.server.log_sink(json.dumps(event, sort_keys=True))
 
@@ -461,6 +477,87 @@ def _request_upstream_url(config: ProxyConfig, path: str) -> str:
     if config.provider == ANTHROPIC_PROXY_PROVIDER:
         return _anthropic_messages_url(config)
     return _upstream_url(config, path)
+
+
+def _initial_sfe_mode(config: ProxyConfig, method: str, path: str) -> str:
+    if not _should_shadow_observe(config, method, path):
+        return "pass_through"
+    if config.mode in {SHADOW_MODE, DRY_RUN_ENABLED_MODE}:
+        return "shadow"
+    if config.mode == ENABLED_MODE:
+        return "rejected"
+    return "pass_through"
+
+
+def _configured_router_model(config: ProxyConfig) -> str | None:
+    if config.shadow_router_provider == "lemonade":
+        return _first_env_value(("SFE_LEMONADE_MODEL", "SFE_ROUTER_MODEL"))
+    if config.shadow_router_provider == "openai":
+        return _first_env_value(("SFE_OPENAI_ROUTER_MODEL",))
+    if config.provider == "alibaba":
+        return _first_env_value(("SFE_ALIBABA_ROUTER_MODEL",))
+    if config.provider == ANTHROPIC_PROXY_PROVIDER:
+        return _first_env_value(("SFE_ANTHROPIC_ROUTER_MODEL",))
+    return _first_env_value(("SFE_OPENAI_ROUTER_MODEL", "SFE_ROUTER_MODEL"))
+
+
+def _effective_executor_model(config: ProxyConfig, request_model: str | None) -> str | None:
+    if config.provider == ANTHROPIC_PROXY_PROVIDER and config.anthropic_model:
+        return config.anthropic_model
+    return (
+        request_model
+        or _first_env_value(
+            (
+                "SFE_EXECUTOR_MODEL",
+                "SFE_OPENAI_EXECUTOR_MODEL",
+                "SFE_ALIBABA_EXECUTOR_MODEL",
+                "SFE_ANTHROPIC_EXECUTOR_MODEL",
+            )
+        )
+    )
+
+
+def _first_env_value(names: tuple[str, ...]) -> str | None:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _log_selection_applied(
+    sfe_mode: str,
+    shadow_event: dict[str, Any] | None,
+) -> bool:
+    if sfe_mode == "enabled":
+        return True
+    if sfe_mode == "rejected":
+        return False
+    if shadow_event is None:
+        return False
+    return bool(
+        shadow_event.get("shadow_selection_enabled")
+        or shadow_event.get("shadow_router_enabled")
+        or shadow_event.get("enabled_candidate_built")
+        or shadow_event.get("dry_run_enabled_candidate_built")
+    )
+
+
+def _log_selected_blocks_count(shadow_event: dict[str, Any] | None) -> int | None:
+    if shadow_event is None:
+        return None
+    for key in (
+        "enabled_selected_segment_count",
+        "dry_run_enabled_selected_segment_count",
+        "candidate_selected_segment_count",
+    ):
+        value = shadow_event.get(key)
+        if isinstance(value, int):
+            return value
+    selected_ids = shadow_event.get("shadow_router_candidate_selected_segment_ids")
+    if isinstance(selected_ids, list):
+        return len(selected_ids)
+    return None
 
 
 def _anthropic_messages_url(config: ProxyConfig) -> str:
