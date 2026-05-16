@@ -83,6 +83,7 @@ class ProxyConfig:
     shadow_router_dry_run: bool = False
     shadow_router_provider: str = DEFAULT_SHADOW_ROUTER_PROVIDER
     shadow_router_timeout_seconds: int = DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
+    enabled_fallback_to_original: bool = False
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -202,6 +203,10 @@ class ProxyConfig:
             shadow_router_dry_run=shadow_router_dry_run,
             shadow_router_provider=shadow_router_provider,
             shadow_router_timeout_seconds=shadow_router_timeout_seconds,
+            enabled_fallback_to_original=_parse_bool(
+                os.getenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", "false"),
+                "SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL",
+            ),
         ).validated()
 
     def validated(self) -> "ProxyConfig":

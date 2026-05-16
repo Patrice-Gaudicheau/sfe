@@ -159,6 +159,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     try:
@@ -181,6 +182,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.shadow_router_dry_run is False
     assert config.shadow_router_provider == "disabled"
     assert config.shadow_router_timeout_seconds == DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
+    assert config.enabled_fallback_to_original is False
 
 
 def test_proxy_config_accepts_openai_proxy_provider_alias(monkeypatch) -> None:
@@ -417,6 +419,15 @@ def test_proxy_config_accepts_enabled_mode(monkeypatch, tmp_path) -> None:
 
     assert config.mode == "enabled"
     assert config.shadow_log_dir == str(tmp_path)
+
+
+def test_proxy_config_parses_enabled_fallback_to_original(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "upstream-secret")
+    monkeypatch.setenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", "true")
+
+    config = ProxyConfig.from_env()
+
+    assert config.enabled_fallback_to_original is True
 
 
 def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) -> None:
@@ -1725,6 +1736,7 @@ def test_enabled_mode_sends_reduced_candidate_request_to_upstream(
     assert "shadow_router_status" not in event
     request_log = _last_proxy_log(logs)
     assert request_log["sfe_mode"] == "enabled"
+    assert request_log["fallback_used"] is False
     assert request_log["selection_applied"] is True
     assert request_log["selected_blocks_count"] == 1
     assert "placeholder-client-token" not in "\n".join(logs)
@@ -1779,6 +1791,8 @@ def test_enabled_mode_rejects_when_no_candidate_request_is_available(
     assert event["enabled_request_sent"] is False
     assert event["enabled_original_request_sent"] is False
     assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_replaces_upstream_request"] is False
+    assert event["enabled_changes_client_response"] is False
     assert event["enabled_reason"] == "no_selected_segments"
     assert event["upstream_status_code"] == 422
     request_log = _last_proxy_log(logs)
@@ -1786,6 +1800,72 @@ def test_enabled_mode_rejects_when_no_candidate_request_is_available(
     assert request_log["status_code"] == 422
     assert request_log["fallback_used"] is False
     assert request_log["selection_applied"] is False
+
+
+def test_enabled_mode_falls_back_to_original_when_candidate_unavailable_and_enabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"fallback-upstream","object":"chat.completion"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=50000,
+        enabled_fallback_to_original=True,
+    )
+    payload = {
+        "model": "example-model",
+        "messages": [{"role": "user", "content": "short"}],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/chat/completions",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {"id": "fallback-upstream", "object": "chat.completion"}
+    assert len(RecordingUpstreamHandler.records) == 1
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    assert (
+        RecordingUpstreamHandler.records[-1]["headers"]["Authorization"]
+        == "Bearer upstream-secret"
+    )
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "enabled"
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_request_sent"] is True
+    assert event["enabled_original_request_sent"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_replaces_upstream_request"] is False
+    assert event["enabled_changes_client_response"] is False
+    assert event["enabled_fallback_to_original"] is True
+    assert event["enabled_reason"] == "no_selected_segments"
+    assert event["upstream_status_code"] == 200
+
+    request_log = _last_proxy_log(logs)
+    assert request_log["sfe_mode"] == "enabled"
+    assert request_log["status_code"] == 200
+    assert request_log["fallback_used"] is True
+    assert request_log["selection_applied"] is False
+    assert request_log["selected_blocks_count"] == 0
+    joined_logs = "\n".join(logs)
+    assert "placeholder-client-token" not in joined_logs
+    assert "upstream-secret" not in joined_logs
 
 
 def test_shadow_selection_dry_run_below_threshold_does_not_activate(tmp_path) -> None:

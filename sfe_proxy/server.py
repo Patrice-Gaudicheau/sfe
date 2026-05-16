@@ -92,6 +92,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         upstream_url = _request_upstream_url(self.server.config, self.path)
         status_code = 502
         sfe_mode = _initial_sfe_mode(self.server.config, self.command, path)
+        fallback_used = False
         shadow_event = (
             _build_shadow_event(self.server.config, self.command, path, body)
             if _should_shadow_observe(self.server.config, self.command, path)
@@ -136,23 +137,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if shadow_event is not None:
                     shadow_event.update(enabled_result["event_fields"])
                 if enabled_result["body"] is None:
-                    sfe_mode = "rejected"
-                    status_code = 422
-                    self._send_json(
-                        422,
-                        {
-                            "error": {
-                                "message": "SFE enabled candidate request unavailable",
-                                "type": "sfe_enabled_routing_error",
-                                "reason": enabled_result["event_fields"].get(
-                                    "enabled_reason"
-                                ),
-                            }
-                        },
-                    )
-                    return
-                upstream_body = enabled_result["body"]
-                sfe_mode = "enabled"
+                    if self.server.config.enabled_fallback_to_original:
+                        fallback_used = True
+                        sfe_mode = "enabled"
+                        if shadow_event is not None:
+                            shadow_event.update(
+                                _enabled_fallback_to_original_fields(
+                                    enabled_result["event_fields"]
+                                )
+                            )
+                    else:
+                        sfe_mode = "rejected"
+                        status_code = 422
+                        self._send_json(
+                            422,
+                            {
+                                "error": {
+                                    "message": "SFE enabled candidate request unavailable",
+                                    "type": "sfe_enabled_routing_error",
+                                    "reason": enabled_result["event_fields"].get(
+                                        "enabled_reason"
+                                    ),
+                                }
+                            },
+                        )
+                        return
+                else:
+                    upstream_body = enabled_result["body"]
+                    sfe_mode = "enabled"
             if self.server.config.provider == ANTHROPIC_PROXY_PROVIDER:
                 anthropic_result = self._send_anthropic_provider_response(
                     path,
@@ -190,6 +202,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 stream=stream,
                 sfe_mode=sfe_mode,
                 shadow_event=shadow_event,
+                fallback_used=fallback_used,
             )
 
     def _read_body(self) -> bytes:
@@ -394,6 +407,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         stream: bool | None,
         sfe_mode: str,
         shadow_event: dict[str, Any] | None,
+        fallback_used: bool,
     ) -> None:
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -408,8 +422,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "stream": stream,
             "router_model": _configured_router_model(self.server.config),
             "executor_model": _effective_executor_model(self.server.config, model),
-            "fallback_used": False,
-            "selection_applied": _log_selection_applied(sfe_mode, shadow_event),
+            "fallback_used": fallback_used,
+            "selection_applied": _log_selection_applied(
+                sfe_mode,
+                shadow_event,
+                fallback_used=fallback_used,
+            ),
             "selected_zones_count": None,
             "selected_blocks_count": _log_selected_blocks_count(shadow_event),
         }
@@ -528,7 +546,11 @@ def _first_env_value(names: tuple[str, ...]) -> str | None:
 def _log_selection_applied(
     sfe_mode: str,
     shadow_event: dict[str, Any] | None,
+    *,
+    fallback_used: bool = False,
 ) -> bool:
+    if fallback_used:
+        return False
     if sfe_mode == "enabled":
         return True
     if sfe_mode == "rejected":
@@ -558,6 +580,21 @@ def _log_selected_blocks_count(shadow_event: dict[str, Any] | None) -> int | Non
     if isinstance(selected_ids, list):
         return len(selected_ids)
     return None
+
+
+def _enabled_fallback_to_original_fields(
+    event_fields: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "enabled_candidate_built": False,
+        "enabled_request_sent": True,
+        "enabled_original_request_sent": True,
+        "enabled_candidate_request_sent_to_upstream": False,
+        "enabled_replaces_upstream_request": False,
+        "enabled_changes_client_response": False,
+        "enabled_fallback_to_original": True,
+        "enabled_reason": event_fields.get("enabled_reason") or "fallback_to_original",
+    }
 
 
 def _anthropic_messages_url(config: ProxyConfig) -> str:
@@ -673,9 +710,14 @@ def _enabled_upstream_body(
         return {
             "body": None,
             "event_fields": {
+                "enabled_candidate_built": False,
                 "enabled_candidate_request_built": False,
                 "enabled_request_sent": False,
                 "enabled_original_request_sent": False,
+                "enabled_candidate_request_sent_to_upstream": False,
+                "enabled_replaces_upstream_request": False,
+                "enabled_changes_client_response": False,
+                "enabled_fallback_to_original": False,
                 "enabled_error_type": type(exc).__name__,
                 "enabled_reason": "candidate_request_build_error",
             },
@@ -701,6 +743,9 @@ def _enabled_upstream_body(
                 "enabled_candidate_request_built": False,
                 "enabled_candidate_request_sent_to_upstream": False,
                 "enabled_request_sent": False,
+                "enabled_replaces_upstream_request": False,
+                "enabled_changes_client_response": False,
+                "enabled_fallback_to_original": False,
                 "enabled_reason": fields.get("enabled_reason") or "no_selected_segments",
             }
         )
