@@ -128,43 +128,70 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 and self.command == "POST"
                 and path in SUPPORTED_POST_PATHS
             ):
-                enabled_result = _enabled_upstream_body(
-                    self.server.config,
-                    path,
-                    body,
-                    shadow_event or {},
-                )
-                if shadow_event is not None:
-                    shadow_event.update(enabled_result["event_fields"])
-                if enabled_result["body"] is None:
+                if stream is True:
                     if self.server.config.enabled_fallback_to_original:
                         fallback_used = True
                         sfe_mode = "enabled"
                         if shadow_event is not None:
                             shadow_event.update(
-                                _enabled_fallback_to_original_fields(
-                                    enabled_result["event_fields"]
-                                )
+                                _enabled_streaming_bypass_fields(request_sent=True)
                             )
                     else:
                         sfe_mode = "rejected"
                         status_code = 422
+                        if shadow_event is not None:
+                            shadow_event.update(
+                                _enabled_streaming_bypass_fields(request_sent=False)
+                            )
                         self._send_json(
                             422,
                             {
                                 "error": {
-                                    "message": "SFE enabled candidate request unavailable",
+                                    "message": "SFE enabled streaming replacement is not supported",
                                     "type": "sfe_enabled_routing_error",
-                                    "reason": enabled_result["event_fields"].get(
-                                        "enabled_reason"
-                                    ),
+                                    "reason": "streaming_not_supported",
                                 }
                             },
                         )
                         return
                 else:
-                    upstream_body = enabled_result["body"]
-                    sfe_mode = "enabled"
+                    enabled_result = _enabled_upstream_body(
+                        self.server.config,
+                        path,
+                        body,
+                        shadow_event or {},
+                    )
+                    if shadow_event is not None:
+                        shadow_event.update(enabled_result["event_fields"])
+                    if enabled_result["body"] is None:
+                        if self.server.config.enabled_fallback_to_original:
+                            fallback_used = True
+                            sfe_mode = "enabled"
+                            if shadow_event is not None:
+                                shadow_event.update(
+                                    _enabled_fallback_to_original_fields(
+                                        enabled_result["event_fields"]
+                                    )
+                                )
+                        else:
+                            sfe_mode = "rejected"
+                            status_code = 422
+                            self._send_json(
+                                422,
+                                {
+                                    "error": {
+                                        "message": "SFE enabled candidate request unavailable",
+                                        "type": "sfe_enabled_routing_error",
+                                        "reason": enabled_result["event_fields"].get(
+                                            "enabled_reason"
+                                        ),
+                                    }
+                                },
+                            )
+                            return
+                    else:
+                        upstream_body = enabled_result["body"]
+                        sfe_mode = "enabled"
             if self.server.config.provider == ANTHROPIC_PROXY_PROVIDER:
                 anthropic_result = self._send_anthropic_provider_response(
                     path,
@@ -594,6 +621,21 @@ def _enabled_fallback_to_original_fields(
         "enabled_changes_client_response": False,
         "enabled_fallback_to_original": True,
         "enabled_reason": event_fields.get("enabled_reason") or "fallback_to_original",
+    }
+
+
+def _enabled_streaming_bypass_fields(*, request_sent: bool) -> dict[str, Any]:
+    return {
+        "enabled_candidate_built": False,
+        "enabled_request_sent": request_sent,
+        "enabled_original_request_sent": request_sent,
+        "enabled_candidate_request_sent_to_upstream": False,
+        "enabled_replaces_upstream_request": False,
+        "enabled_changes_client_response": False,
+        "enabled_fallback_to_original": request_sent,
+        "enabled_streaming_bypass": True,
+        "enabled_streaming_bypass_reason": "streaming_not_supported",
+        "enabled_reason": "streaming_not_supported",
     }
 
 

@@ -1732,6 +1732,7 @@ def test_enabled_mode_sends_reduced_candidate_request_to_upstream(
     ]
     assert event["enabled_candidate_request_estimated_tokens"] > 0
     assert event["enabled_estimated_token_reduction_pct"] > 0
+    assert "enabled_streaming_bypass" not in event
     assert event["upstream_status_code"] == 200
     assert "shadow_router_status" not in event
     request_log = _last_proxy_log(logs)
@@ -1740,6 +1741,154 @@ def test_enabled_mode_sends_reduced_candidate_request_to_upstream(
     assert request_log["selection_applied"] is True
     assert request_log["selected_blocks_count"] == 1
     assert "placeholder-client-token" not in "\n".join(logs)
+
+
+def test_enabled_mode_streaming_request_falls_back_to_original_when_enabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"streaming-fallback-upstream","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            "SEGMENT A obsolete context.",
+            "SEGMENT B active context.",
+            "Question: which segment is active?",
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["body"] == {
+        "id": "streaming-fallback-upstream",
+        "object": "response",
+    }
+    assert len(RecordingUpstreamHandler.records) == 1
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "enabled"
+    assert event["stream"] is True
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_request_sent"] is True
+    assert event["enabled_original_request_sent"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_replaces_upstream_request"] is False
+    assert event["enabled_changes_client_response"] is False
+    assert event["enabled_fallback_to_original"] is True
+    assert event["enabled_streaming_bypass"] is True
+    assert event["enabled_streaming_bypass_reason"] == "streaming_not_supported"
+    assert event["enabled_reason"] == "streaming_not_supported"
+    assert event["upstream_status_code"] == 200
+
+    request_log = _last_proxy_log(logs)
+    assert request_log["sfe_mode"] == "enabled"
+    assert request_log["status_code"] == 200
+    assert request_log["stream"] is True
+    assert request_log["fallback_used"] is True
+    assert request_log["selection_applied"] is False
+    joined_logs = "\n".join(logs)
+    assert "placeholder-client-token" not in joined_logs
+    assert "upstream-secret" not in joined_logs
+
+
+def test_enabled_mode_streaming_request_rejects_when_fallback_disabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream()
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            "SEGMENT A obsolete context.",
+            "SEGMENT B active context.",
+            "Question: which segment is active?",
+        ],
+    }
+    try:
+        request = urllib.request.Request(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer placeholder-client-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("streaming enabled mode without fallback should fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert status == 422
+    assert body["error"]["type"] == "sfe_enabled_routing_error"
+    assert body["error"]["reason"] == "streaming_not_supported"
+    assert RecordingUpstreamHandler.records == []
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "enabled"
+    assert event["stream"] is True
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_request_sent"] is False
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_replaces_upstream_request"] is False
+    assert event["enabled_changes_client_response"] is False
+    assert event["enabled_fallback_to_original"] is False
+    assert event["enabled_streaming_bypass"] is True
+    assert event["enabled_streaming_bypass_reason"] == "streaming_not_supported"
+    assert event["enabled_reason"] == "streaming_not_supported"
+    assert event["upstream_status_code"] == 422
+
+    request_log = _last_proxy_log(logs)
+    assert request_log["sfe_mode"] == "rejected"
+    assert request_log["status_code"] == 422
+    assert request_log["stream"] is True
+    assert request_log["fallback_used"] is False
+    assert request_log["selection_applied"] is False
+    joined_logs = "\n".join(logs)
+    assert "placeholder-client-token" not in joined_logs
+    assert "upstream-secret" not in joined_logs
 
 
 def test_enabled_mode_rejects_when_no_candidate_request_is_available(
