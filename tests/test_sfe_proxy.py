@@ -1250,7 +1250,8 @@ def test_anthropic_provider_reports_malformed_response_safely() -> None:
 
 def test_models_and_responses_endpoints_are_forwarded() -> None:
     upstream = _start_upstream(body=b'{"data":[{"id":"m"}]}')
-    proxy = _start_proxy(upstream, [])
+    logs: list[str] = []
+    proxy = _start_proxy(upstream, logs)
     try:
         models = _request_raw(
             f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/models",
@@ -1271,6 +1272,16 @@ def test_models_and_responses_endpoints_are_forwarded() -> None:
     assert responses["status"] == 200
     assert RecordingUpstreamHandler.records[-2]["path"] == "/v1/models"
     assert RecordingUpstreamHandler.records[-1]["path"] == "/v1/responses"
+    response_log = _last_proxy_log(logs, path="/v1/responses")
+    assert response_log["sfe_mode"] == "pass_through"
+    assert response_log["model"] == "example-model"
+    assert response_log["path"] == "/v1/responses"
+    assert response_log["status_code"] == 200
+    assert response_log["stream"] is None
+    assert response_log["upstream_url"].endswith("/v1/responses")
+    assert response_log["provider"] == "openai-compatible"
+    assert response_log["fallback_used"] is False
+    assert response_log["selection_applied"] is False
 
 
 def test_upstream_error_status_and_json_body_are_preserved() -> None:
@@ -1415,9 +1426,10 @@ def test_shadow_mode_preserves_upstream_body_status_and_logs_safe_below_threshol
 
 def test_shadow_mode_logs_above_threshold_responses_metadata(tmp_path) -> None:
     upstream = _start_upstream(body=b'{"id":"resp-test","object":"response"}')
+    logs: list[str] = []
     proxy = _start_proxy(
         upstream,
-        [],
+        logs,
         mode="shadow",
         shadow_log_dir=str(tmp_path),
         shadow_min_input_tokens=1,
@@ -1450,6 +1462,10 @@ def test_shadow_mode_logs_above_threshold_responses_metadata(tmp_path) -> None:
     assert event["sfe_routing_eligible"] is True
     assert event["eligibility_reason"] == "rough_estimated_input_tokens_above_threshold"
     assert event["rough_estimated_input_tokens"] >= 1
+    response_log = _last_proxy_log(logs, path="/v1/responses")
+    assert response_log["sfe_mode"] == "shadow"
+    assert response_log["selection_applied"] is False
+    assert response_log["selected_blocks_count"] is None
 
 
 def test_shadow_selection_dry_run_adds_fields_for_above_threshold_chat(tmp_path) -> None:
@@ -1707,6 +1723,10 @@ def test_enabled_mode_sends_reduced_candidate_request_to_upstream(
     assert event["enabled_estimated_token_reduction_pct"] > 0
     assert event["upstream_status_code"] == 200
     assert "shadow_router_status" not in event
+    request_log = _last_proxy_log(logs)
+    assert request_log["sfe_mode"] == "enabled"
+    assert request_log["selection_applied"] is True
+    assert request_log["selected_blocks_count"] == 1
     assert "placeholder-client-token" not in "\n".join(logs)
 
 
@@ -1714,9 +1734,10 @@ def test_enabled_mode_rejects_when_no_candidate_request_is_available(
     tmp_path,
 ) -> None:
     upstream = _start_upstream()
+    logs: list[str] = []
     proxy = _start_proxy(
         upstream,
-        [],
+        logs,
         mode="enabled",
         shadow_log_dir=str(tmp_path),
         shadow_min_input_tokens=50000,
@@ -1760,6 +1781,11 @@ def test_enabled_mode_rejects_when_no_candidate_request_is_available(
     assert event["enabled_candidate_request_sent_to_upstream"] is False
     assert event["enabled_reason"] == "no_selected_segments"
     assert event["upstream_status_code"] == 422
+    request_log = _last_proxy_log(logs)
+    assert request_log["sfe_mode"] == "rejected"
+    assert request_log["status_code"] == 422
+    assert request_log["fallback_used"] is False
+    assert request_log["selection_applied"] is False
 
 
 def test_shadow_selection_dry_run_below_threshold_does_not_activate(tmp_path) -> None:
@@ -3729,3 +3755,11 @@ def _read_shadow_event(log_dir: Path) -> dict[str, Any]:
 def _read_shadow_events(log_dir: Path) -> list[dict[str, Any]]:
     lines = (log_dir / "shadow_events.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines]
+
+
+def _last_proxy_log(logs: list[str], path: str | None = None) -> dict[str, Any]:
+    events = [json.loads(line) for line in logs]
+    if path is not None:
+        events = [event for event in events if event.get("path") == path]
+    assert events
+    return events[-1]
