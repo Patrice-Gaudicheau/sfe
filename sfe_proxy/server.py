@@ -45,6 +45,7 @@ DOWNSTREAM_RESPONSE_HEADERS_TO_STRIP = HOP_BY_HOP_HEADERS | {
     "server",
     "set-cookie",
 }
+ENABLED_MIN_REDUCTION_PCT = 15.0
 
 
 class AnthropicRequestError(Exception):
@@ -867,6 +868,8 @@ def _candidate_request_details(
         return {
             "dry_run_enabled_candidate_built": False,
             "dry_run_enabled_reason": "no_selected_segments",
+            "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
+            "dry_run_enabled_reduction_gate_passed": False,
             "dry_run_enabled_selected_segment_ids": selected_segment_ids,
             "dry_run_enabled_is_real_execution": False,
             "dry_run_enabled_replaces_upstream_request": False,
@@ -878,6 +881,26 @@ def _candidate_request_details(
             "dry_run_enabled_candidate_request_estimated_tokens": None,
             "dry_run_enabled_estimated_token_reduction_pct": None,
             "dry_run_enabled_selected_segment_count": 0,
+            "candidate_request": None,
+        }
+
+    if _would_flatten_structured_responses_input(path, payload):
+        return {
+            "dry_run_enabled_candidate_built": False,
+            "dry_run_enabled_reason": "unsafe_task_envelope",
+            "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
+            "dry_run_enabled_reduction_gate_passed": False,
+            "dry_run_enabled_selected_segment_ids": selected_segment_ids,
+            "dry_run_enabled_is_real_execution": False,
+            "dry_run_enabled_replaces_upstream_request": False,
+            "dry_run_enabled_changes_client_response": False,
+            "dry_run_enabled_candidate_request_sent_to_upstream": False,
+            "dry_run_enabled_experimental_response_exposed": False,
+            "dry_run_enabled_original_upstream_request_unchanged": True,
+            "dry_run_enabled_client_response_unchanged": True,
+            "dry_run_enabled_candidate_request_estimated_tokens": None,
+            "dry_run_enabled_estimated_token_reduction_pct": None,
+            "dry_run_enabled_selected_segment_count": len(selected_segments),
             "candidate_request": None,
         }
 
@@ -896,6 +919,25 @@ def _candidate_request_details(
         if rough_estimated_input_tokens > 0
         else 0.0
     )
+    if reduction_pct < ENABLED_MIN_REDUCTION_PCT:
+        return {
+            "dry_run_enabled_candidate_built": False,
+            "dry_run_enabled_reason": "insufficient_token_reduction",
+            "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
+            "dry_run_enabled_reduction_gate_passed": False,
+            "dry_run_enabled_selected_segment_ids": selected_segment_ids,
+            "dry_run_enabled_is_real_execution": False,
+            "dry_run_enabled_replaces_upstream_request": False,
+            "dry_run_enabled_changes_client_response": False,
+            "dry_run_enabled_candidate_request_sent_to_upstream": False,
+            "dry_run_enabled_experimental_response_exposed": False,
+            "dry_run_enabled_original_upstream_request_unchanged": True,
+            "dry_run_enabled_client_response_unchanged": True,
+            "dry_run_enabled_candidate_request_estimated_tokens": candidate_tokens,
+            "dry_run_enabled_estimated_token_reduction_pct": reduction_pct,
+            "dry_run_enabled_selected_segment_count": len(selected_segments),
+            "candidate_request": None,
+        }
     selected_metadata = [
         {
             "segment_id": segment["segment_id"],
@@ -922,6 +964,8 @@ def _candidate_request_details(
         "dry_run_enabled_full_request_estimated_tokens": rough_estimated_input_tokens,
         "dry_run_enabled_candidate_request_estimated_tokens": candidate_tokens,
         "dry_run_enabled_estimated_token_reduction_pct": reduction_pct,
+        "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
+        "dry_run_enabled_reduction_gate_passed": True,
         "dry_run_enabled_candidate_endpoint": path,
         "dry_run_enabled_candidate_contains_text": bool(
             _iter_text_values(candidate_request)
@@ -956,6 +1000,20 @@ def _last_text_segment(segments: list[dict[str, Any]]) -> str:
         if isinstance(text, str) and text:
             return text
     return ""
+
+
+def _would_flatten_structured_responses_input(
+    path: str,
+    payload: dict[str, Any] | None,
+) -> bool:
+    if path != "/v1/responses" or payload is None:
+        return False
+    input_value = payload.get("input")
+    if isinstance(input_value, dict):
+        return True
+    if not isinstance(input_value, list):
+        return False
+    return any(not isinstance(item, str) for item in input_value)
 
 
 def _candidate_request_for_endpoint(

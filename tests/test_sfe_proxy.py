@@ -33,7 +33,12 @@ from sfe_proxy.config import (
     ProxyConfig,
 )
 from sfe_proxy.provider_limits import ProviderLimitRegistry, ProviderRateLimiter
-from sfe_proxy.server import _is_sse_response, _request_upstream_url, create_server
+from sfe_proxy.server import (
+    ENABLED_MIN_REDUCTION_PCT,
+    _is_sse_response,
+    _request_upstream_url,
+    create_server,
+)
 from sfe_proxy.shadow_router import (
     DisabledShadowRouter,
     LemonadeShadowRouter,
@@ -1653,7 +1658,9 @@ def test_dry_run_enabled_candidate_diagnostics_do_not_require_payload_logging(
                 "model": "example-model",
                 "messages": [
                     {"role": "user", "content": "small"},
-                    {"role": "user", "content": "larger selected segment " * 8},
+                    {"role": "user", "content": "larger selected segment " * 80},
+                    {"role": "user", "content": "distractor context " * 60},
+                    {"role": "user", "content": "What is selected?"},
                 ],
             },
         )
@@ -1904,6 +1911,343 @@ def test_enabled_mode_streaming_request_rejects_when_fallback_disabled(
     assert "upstream-secret" not in joined_logs
 
 
+def test_enabled_mode_low_value_reduction_falls_back_to_original_when_enabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"low-value-fallback","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            "Selected-but-not-worth-reducing context. " * 80,
+            "Tiny distractor.",
+            "What is the answer?",
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert len(RecordingUpstreamHandler.records) == 1
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "insufficient_token_reduction"
+    assert event["enabled_min_reduction_pct"] == ENABLED_MIN_REDUCTION_PCT
+    assert event["enabled_reduction_gate_passed"] is False
+    assert event["enabled_estimated_token_reduction_pct"] < ENABLED_MIN_REDUCTION_PCT
+    assert event["enabled_original_request_sent"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_fallback_to_original"] is True
+
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["sfe_mode"] == "enabled"
+    assert request_log["fallback_used"] is True
+    assert request_log["selection_applied"] is False
+    joined_logs = "\n".join(logs)
+    assert "placeholder-client-token" not in joined_logs
+    assert "Selected-but-not-worth-reducing" not in joined_logs
+
+
+def test_enabled_mode_low_value_reduction_rejects_when_fallback_disabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream()
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            "Selected-but-not-worth-reducing context. " * 80,
+            "Tiny distractor.",
+            "What is the answer?",
+        ],
+    }
+    try:
+        request = urllib.request.Request(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer placeholder-client-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("low-value enabled replacement should fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert status == 422
+    assert body["error"]["reason"] == "insufficient_token_reduction"
+    assert RecordingUpstreamHandler.records == []
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "insufficient_token_reduction"
+    assert event["enabled_min_reduction_pct"] == ENABLED_MIN_REDUCTION_PCT
+    assert event["enabled_reduction_gate_passed"] is False
+    assert event["enabled_request_sent"] is False
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["upstream_status_code"] == 422
+
+
+def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_enabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"unsafe-envelope-fallback","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Read these files: src/alpha.py and src/beta.py.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Large selected background context. " * 120,
+                    }
+                ],
+            },
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert len(RecordingUpstreamHandler.records) == 1
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "unsafe_task_envelope"
+    assert event["enabled_reduction_gate_passed"] is False
+    assert event["enabled_original_request_sent"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["enabled_fallback_to_original"] is True
+    joined_logs = "\n".join(logs)
+    assert "src/alpha.py" not in joined_logs
+    assert "Large selected background" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabled(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream()
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Read these files: src/alpha.py and src/beta.py.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Large selected background context. " * 120,
+                    }
+                ],
+            },
+        ],
+    }
+    try:
+        request = urllib.request.Request(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer placeholder-client-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("unsafe task envelope should fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert status == 422
+    assert body["error"]["reason"] == "unsafe_task_envelope"
+    assert RecordingUpstreamHandler.records == []
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "unsafe_task_envelope"
+    assert event["enabled_reduction_gate_passed"] is False
+    assert event["enabled_request_sent"] is False
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_candidate_request_sent_to_upstream"] is False
+    assert event["upstream_status_code"] == 422
+
+
+def test_enabled_mode_responses_replaces_safe_shape_with_meaningful_reduction(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"safe-replacement","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+    )
+    selected_context = (
+        "SEGMENT B active utility tariff memo. "
+        "UTILITY-RATE-SCHEDULE-DELTA-17 sets the threshold at 42 kilowatts. "
+    ) * 80
+    distractor_a = "SEGMENT A irrelevant cafeteria operations. " * 60
+    distractor_b = "SEGMENT C obsolete billing notes. " * 60
+    final_question = "What threshold does the active utility tariff memo set?"
+    payload = {
+        "model": "example-model",
+        "stream": False,
+        "input": [
+            distractor_a,
+            selected_context,
+            distractor_b,
+            final_question,
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert len(RecordingUpstreamHandler.records) == 1
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload != payload
+    assert upstream_payload["stream"] is False
+    assert isinstance(upstream_payload["input"], str)
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" in upstream_payload["input"]
+    assert final_question in upstream_payload["input"]
+    assert "SEGMENT A irrelevant cafeteria" not in upstream_payload["input"]
+    assert "SEGMENT C obsolete billing" not in upstream_payload["input"]
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_reduction_gate_passed"] is True
+    assert event["enabled_min_reduction_pct"] == ENABLED_MIN_REDUCTION_PCT
+    assert event["enabled_estimated_token_reduction_pct"] >= ENABLED_MIN_REDUCTION_PCT
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    assert event["enabled_original_request_sent"] is False
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["fallback_used"] is False
+    assert request_log["selection_applied"] is True
+
+
 def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_sse(
     tmp_path,
 ) -> None:
@@ -1929,11 +2273,12 @@ def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_s
         shadow_min_input_tokens=1,
         enabled_streaming_replacement=True,
     )
-    unselected_context = "SEGMENT A obsolete cafeteria note. " * 2
+    unselected_context = "SEGMENT A obsolete cafeteria note. " * 60
     selected_context = (
         "SEGMENT B active utility tariff memo. "
         "UTILITY-RATE-SCHEDULE-DELTA-17 sets the threshold at 42 kilowatts. "
-    ) * 8
+    ) * 80
+    second_unselected_context = "SEGMENT C unrelated logistics note. " * 60
     final_question = "What threshold does the active utility tariff memo set?"
     payload = {
         "model": "example-model",
@@ -1958,6 +2303,7 @@ def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_s
         "input": [
             unselected_context,
             selected_context,
+            second_unselected_context,
             final_question,
         ],
     }
@@ -2006,6 +2352,7 @@ def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_s
     assert "UTILITY-RATE-SCHEDULE-DELTA-17" in upstream_payload["input"]
     assert final_question in upstream_payload["input"]
     assert "SEGMENT A obsolete cafeteria" not in upstream_payload["input"]
+    assert "SEGMENT C unrelated logistics" not in upstream_payload["input"]
     assert "placeholder-client-token" not in upstream_payload["input"]
 
     event = _read_shadow_event(tmp_path)
@@ -2016,6 +2363,8 @@ def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_s
     assert event["enabled_replaces_upstream_request"] is True
     assert event["enabled_candidate_request_sent_to_upstream"] is True
     assert event["enabled_original_request_sent"] is False
+    assert event["enabled_reduction_gate_passed"] is True
+    assert event["enabled_estimated_token_reduction_pct"] >= ENABLED_MIN_REDUCTION_PCT
     assert "enabled_streaming_bypass" not in event
     assert "enabled_candidate_request" not in event
     assert event["upstream_status_code"] == 200
@@ -2031,6 +2380,7 @@ def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_s
     assert "upstream-secret" not in joined_logs
     assert "Authorization" not in joined_logs
     assert "SEGMENT A obsolete cafeteria" not in joined_logs
+    assert "SEGMENT C unrelated logistics" not in joined_logs
     assert "UTILITY-RATE-SCHEDULE-DELTA-17" not in joined_logs
     assert "response.completed" not in joined_logs
 
