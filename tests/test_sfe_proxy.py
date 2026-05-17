@@ -162,6 +162,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_ENABLED_STREAMING_REPLACEMENT", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     try:
@@ -185,6 +186,7 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     assert config.shadow_router_provider == "disabled"
     assert config.shadow_router_timeout_seconds == DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS
     assert config.enabled_fallback_to_original is False
+    assert config.enabled_streaming_replacement is False
 
 
 def test_proxy_config_accepts_openai_proxy_provider_alias(monkeypatch) -> None:
@@ -430,6 +432,15 @@ def test_proxy_config_parses_enabled_fallback_to_original(monkeypatch) -> None:
     config = ProxyConfig.from_env()
 
     assert config.enabled_fallback_to_original is True
+
+
+def test_proxy_config_parses_enabled_streaming_replacement(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "upstream-secret")
+    monkeypatch.setenv("SFE_PROXY_ENABLED_STREAMING_REPLACEMENT", "true")
+
+    config = ProxyConfig.from_env()
+
+    assert config.enabled_streaming_replacement is True
 
 
 def test_proxy_config_rejects_unsupported_shadow_router_provider(monkeypatch) -> None:
@@ -1891,6 +1902,137 @@ def test_enabled_mode_streaming_request_rejects_when_fallback_disabled(
     joined_logs = "\n".join(logs)
     assert "placeholder-client-token" not in joined_logs
     assert "upstream-secret" not in joined_logs
+
+
+def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_sse(
+    tmp_path,
+) -> None:
+    sse = (
+        b'event: response.created\n'
+        b'data: {"type":"response.created","response":{"id":"resp-test"}}\n\n'
+        b'event: response.output_text.delta\n'
+        b'data: {"type":"response.output_text.delta","delta":"42"}\n\n'
+        b'event: response.completed\n'
+        b'data: {"type":"response.completed","response":{"id":"resp-test"}}\n\n'
+    )
+    upstream = _start_upstream(
+        status=200,
+        body=sse,
+        headers={"Content-Type": "text/event-stream"},
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_streaming_replacement=True,
+    )
+    unselected_context = "SEGMENT A obsolete cafeteria note. " * 2
+    selected_context = (
+        "SEGMENT B active utility tariff memo. "
+        "UTILITY-RATE-SCHEDULE-DELTA-17 sets the threshold at 42 kilowatts. "
+    ) * 8
+    final_question = "What threshold does the active utility tariff memo set?"
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "instructions": "Answer only from supplied context.",
+        "tools": [{"type": "web_search_preview"}],
+        "tool_choice": "auto",
+        "parallel_tool_calls": False,
+        "reasoning": {"effort": "low"},
+        "text": {"format": {"type": "text"}},
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_output_tokens": 128,
+        "metadata": {"suite": "proxy-test"},
+        "store": False,
+        "include": ["reasoning.encrypted_content"],
+        "previous_response_id": "resp-prev",
+        "truncation": "auto",
+        "service_tier": "auto",
+        "unknown_future_field": {"preserve": True},
+        "input": [
+            unselected_context,
+            selected_context,
+            final_question,
+        ],
+    }
+    try:
+        response = _request_raw(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            method="POST",
+            payload=payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["content_type"] == "text/event-stream"
+    assert response["body"] == sse
+    assert b"response.completed" in response["body"]
+
+    assert len(RecordingUpstreamHandler.records) == 1
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload != payload
+    assert upstream_payload["stream"] is True
+    assert upstream_payload["stream_options"] == payload["stream_options"]
+    assert upstream_payload["instructions"] == payload["instructions"]
+    assert upstream_payload["tools"] == payload["tools"]
+    assert upstream_payload["tool_choice"] == payload["tool_choice"]
+    assert upstream_payload["parallel_tool_calls"] is False
+    assert upstream_payload["reasoning"] == payload["reasoning"]
+    assert upstream_payload["text"] == payload["text"]
+    assert upstream_payload["temperature"] == payload["temperature"]
+    assert upstream_payload["top_p"] == payload["top_p"]
+    assert upstream_payload["max_output_tokens"] == payload["max_output_tokens"]
+    assert upstream_payload["metadata"] == payload["metadata"]
+    assert upstream_payload["store"] is False
+    assert upstream_payload["include"] == payload["include"]
+    assert upstream_payload["previous_response_id"] == payload["previous_response_id"]
+    assert upstream_payload["truncation"] == payload["truncation"]
+    assert upstream_payload["service_tier"] == payload["service_tier"]
+    assert upstream_payload["unknown_future_field"] == payload["unknown_future_field"]
+    assert isinstance(upstream_payload["input"], str)
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" in upstream_payload["input"]
+    assert final_question in upstream_payload["input"]
+    assert "SEGMENT A obsolete cafeteria" not in upstream_payload["input"]
+    assert "placeholder-client-token" not in upstream_payload["input"]
+
+    event = _read_shadow_event(tmp_path)
+    assert event["mode"] == "enabled"
+    assert event["stream"] is True
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_is_real_execution"] is True
+    assert event["enabled_replaces_upstream_request"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    assert event["enabled_original_request_sent"] is False
+    assert "enabled_streaming_bypass" not in event
+    assert "enabled_candidate_request" not in event
+    assert event["upstream_status_code"] == 200
+
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["sfe_mode"] == "enabled"
+    assert request_log["status_code"] == 200
+    assert request_log["stream"] is True
+    assert request_log["fallback_used"] is False
+    assert request_log["selection_applied"] is True
+    joined_logs = "\n".join(logs)
+    assert "placeholder-client-token" not in joined_logs
+    assert "upstream-secret" not in joined_logs
+    assert "Authorization" not in joined_logs
+    assert "SEGMENT A obsolete cafeteria" not in joined_logs
+    assert "UTILITY-RATE-SCHEDULE-DELTA-17" not in joined_logs
+    assert "response.completed" not in joined_logs
 
 
 def test_enabled_mode_rejects_when_no_candidate_request_is_available(

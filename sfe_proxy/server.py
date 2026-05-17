@@ -128,7 +128,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 and self.command == "POST"
                 and path in SUPPORTED_POST_PATHS
             ):
-                if stream is True:
+                if stream is True and not _enabled_streaming_replacement_allowed(
+                    self.server.config,
+                    path,
+                ):
                     if self.server.config.enabled_fallback_to_original:
                         fallback_used = True
                         sfe_mode = "enabled"
@@ -639,6 +642,10 @@ def _enabled_streaming_bypass_fields(*, request_sent: bool) -> dict[str, Any]:
     }
 
 
+def _enabled_streaming_replacement_allowed(config: ProxyConfig, path: str) -> bool:
+    return config.enabled_streaming_replacement and path == "/v1/responses"
+
+
 def _anthropic_messages_url(config: ProxyConfig) -> str:
     return f"{config.normalized_anthropic_base_url}/v1/messages"
 
@@ -972,7 +979,8 @@ def _candidate_request_for_endpoint(
     )
     model = _payload_model(payload)
     if path == "/v1/responses":
-        request: dict[str, Any] = {"input": candidate_text}
+        request: dict[str, Any] = dict(payload or {})
+        request["input"] = candidate_text
         if model is not None:
             request["model"] = model
         return request
