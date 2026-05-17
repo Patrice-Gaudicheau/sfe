@@ -158,6 +158,8 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_DIR", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_LOG_FULL_PAYLOADS", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", raising=False)
+    monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

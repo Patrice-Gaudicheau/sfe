@@ -2,11 +2,11 @@
 
 **Context-governance infrastructure for long-context LLM workflows.**
 
-Spatial Field Engine for Cognition (`SFE`) is source-available
-context-governance infrastructure for long-context LLM workflows. It separates
-context selection from task execution: instead of sending every request as one
-large flat prompt, SFE routes the task through a selector, exposes selected
-authoritative context to the executor, and records the decision path for audit.
+Spatial Field Engine for Cognition (`SFE`) is open source context-governance
+infrastructure for long-context LLM workflows. It separates context selection
+from task execution: instead of sending every request as one large flat prompt,
+SFE routes the task through a selector, exposes selected authoritative context
+to the executor, and records the decision path for audit.
 
 The commercial relevance is strongest where teams run repeated API-heavy
 long-context workflows and need token-budget control, authority governance, and
@@ -124,31 +124,35 @@ when SFE is used.
 
 ## Project Status
 
-This repository is currently a technical prototype. It is source-available, not open source. Pull requests are not currently accepted. Forks are allowed for non-commercial research and experimentation under the PolyForm Noncommercial License 1.0.0.
+This repository is a technical prototype and experimental research-grade
+infrastructure. It is open source under the Apache License 2.0. Forks,
+benchmarks, integrations, issues, and pull requests are welcome when they follow
+the project rules and keep claims grounded in the current evidence.
 
-## Licensing
+## License
 
-SFE is published as a source-visible project under the PolyForm Noncommercial License 1.0.0.
+SFE is open source under the Apache License 2.0. You may use, copy, modify,
+distribute, fork, and build on the project under the terms of that license.
 
-Research and evaluation are source-visible under the PolyForm Noncommercial
-License 1.0.0. SFE encourages exploration, learning, and small-scale
-experimentation by individuals, researchers, and small teams under its
-non-commercial terms.
+Commercial use is permitted under Apache-2.0. Paid support, consulting,
+integration help, hosted deployments, or private enterprise work may be offered
+separately, but they are not required for using, forking, modifying, or
+distributing the project under the license.
 
-Commercial and production use requires a separate commercial license. This
-includes commercial deployment, hosted services, enterprise integration, API
-cost optimization at scale, token-saving infrastructure use, or incorporation
-into commercial products.
-
-For details, see `COMMERCIAL_LICENSE.md`.
+This project is experimental research-grade infrastructure. It is provided
+without warranties or production, safety, security, reliability, or fitness
+claims. See `LICENSE` for the full license text.
 
 ## Contributions
 
-Public feedback is welcome through issues or other public discussion channels.
+Contributions are welcome. Please open issues or pull requests for bug fixes,
+documentation improvements, benchmark additions, provider integrations, and
+focused design changes.
 
-Pull requests are not currently accepted.
-
-Forks for non-commercial research and experimentation are allowed under the license.
+By contributing, you agree that your contribution will be provided under the
+Apache License 2.0. Contributions should include clear rationale, tests or
+reproduction steps where practical, and must not add unsupported production,
+safety, security, reliability, or fitness claims.
 
 ## Where To Start
 

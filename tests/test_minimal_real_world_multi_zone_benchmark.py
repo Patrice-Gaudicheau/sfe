@@ -107,6 +107,16 @@ class MinimalRealWorldBenchmarkTests(unittest.TestCase):
             self.assertEqual(len(source_ids), len(set(source_ids)))
             self.assertTrue(all(source.source_id and source.role for source in task.sources))
 
+    def test_licensing_fixture_reflects_apache_open_contribution_posture(self) -> None:
+        fields = self.licensing_task.expected_fields
+
+        self.assertEqual(fields["license_marker"], "Apache License 2.0")
+        self.assertEqual(
+            fields["commercial_permission"],
+            "commercial use is permitted under Apache-2.0",
+        )
+        self.assertIn("issues and pull requests are welcome", fields["contribution_policy"])
+
     def test_no_single_document_contains_all_required_answer_fields(self) -> None:
         for task in self.tasks:
             required_values = set(task.expected_fields.values())
@@ -162,7 +172,7 @@ class MinimalRealWorldBenchmarkTests(unittest.TestCase):
     def test_wrong_source_role_fails_selection_completeness(self) -> None:
         selection = dict(self.licensing_selection)
         selection["source_roles"] = dict(selection["source_roles"])
-        selection["source_roles"]["doc-commercial-license-intent"] = "readme_license_summary"
+        selection["source_roles"]["doc-optional-services-note"] = "readme_license_summary"
 
         validation = validate_selection(self.licensing_task, selection)
         run = execute_task(
@@ -271,7 +281,7 @@ class MinimalRealWorldBenchmarkTests(unittest.TestCase):
 
     def test_obsolete_or_misleading_answer_rejected(self) -> None:
         obsolete_answer = self.licensing_task.expected_answer.replace(
-            "PolyForm Noncommercial License 1.0.0",
+            "Apache License 2.0",
             "MIT-style license",
         )
 
@@ -295,7 +305,7 @@ class MinimalRealWorldBenchmarkTests(unittest.TestCase):
 
     def test_output_validation_failure_makes_honest_pass_false(self) -> None:
         incomplete_output = self.licensing_task.expected_answer.replace(
-            "contact the repository owner for commercial licensing",
+            "commercial use is permitted under Apache-2.0",
             "",
         )
         run = execute_task(

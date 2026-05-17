@@ -112,17 +112,17 @@ def get_minimal_real_world_tasks() -> list[RealWorldTask]:
 def _licensing_policy_task() -> RealWorldTask:
     required_source_ids = (
         "doc-readme-licensing-note",
-        "doc-polyform-noncommercial-summary",
-        "doc-commercial-license-intent",
+        "doc-apache-license-summary",
+        "doc-optional-services-note",
         "doc-contribution-policy-note",
     )
     expected_fields = {
-        "license_marker": "PolyForm Noncommercial License 1.0.0",
-        "permitted_scope": "research, evaluation, learning, and small-scale experimentation",
-        "commercial_trigger": "commercial deployment, hosted services, enterprise integration, API cost optimization at scale, or incorporation into commercial products",
-        "fork_policy": "forks may be used for non-commercial exploration under the non-commercial terms",
-        "pr_policy": "pull requests may be reviewed, but acceptance does not grant commercial rights",
-        "contact_action": "contact the repository owner for commercial licensing",
+        "license_marker": "Apache License 2.0",
+        "permitted_scope": "use, copy, modify, distribute, fork, and build on the project",
+        "commercial_permission": "commercial use is permitted under Apache-2.0",
+        "services_policy": "paid support, consulting, hosted deployments, or private integrations may be offered separately but are not required",
+        "contribution_policy": "issues and pull requests are welcome under clear project rules",
+        "claim_boundary": "no unsupported production, safety, security, reliability, or fitness claims",
     }
     expected_answer = _answer_from_fields(
         expected_fields,
@@ -133,9 +133,9 @@ def _licensing_policy_task() -> RealWorldTask:
         task_theme="licensing_commercial_use_contribution_policy",
         question=(
             "Using the project-style licensing and contribution notes, determine "
-            "what use is permitted without a commercial license, what commercial "
-            "uses require a separate license, how forks and pull requests should "
-            "be treated, and which sources support the decision."
+            "what use is permitted under the open-source license, how commercial "
+            "use and optional services should be treated, how forks and pull "
+            "requests should be handled, and which sources support the decision."
         ),
         sources=(
             _source(
@@ -143,37 +143,38 @@ def _licensing_policy_task() -> RealWorldTask:
                 "readme_license_summary",
                 "README Licensing Note",
                 (
-                    "The README says SFE is published as a source-visible project "
-                    "under the PolyForm Noncommercial License 1.0.0. It encourages "
-                    "research, evaluation, learning, and small-scale experimentation. "
-                    "The README points commercial readers to the commercial license "
-                    "document but does not define contribution handling."
+                    "The README says SFE is open source under the Apache License "
+                    "2.0. It says users may use, copy, modify, distribute, fork, "
+                    "and build on the project under that license. The README also "
+                    "states that the project is experimental research-grade "
+                    "infrastructure without production, safety, security, "
+                    "reliability, or fitness claims."
                 ),
                 required=True,
             ),
             _source(
-                "doc-polyform-noncommercial-summary",
+                "doc-apache-license-summary",
                 "license_terms_summary",
-                "PolyForm Noncommercial Summary",
+                "Apache License Summary",
                 (
-                    "The non-commercial license summary states that commercial use "
-                    "is not granted by the PolyForm Noncommercial License 1.0.0. "
-                    "It supports non-commercial research and evaluation, but it does "
-                    "not list project-specific commercial contact instructions or "
-                    "pull request policy."
+                    "The Apache-2.0 license summary states that users may use, "
+                    "copy, modify, distribute, fork, and build on the project under "
+                    "the license terms. It does not require a separate license for "
+                    "commercial use, and it does not replace project-specific "
+                    "contribution rules."
                 ),
                 required=True,
             ),
             _source(
-                "doc-commercial-license-intent",
-                "commercial_license_policy",
-                "Commercial License Intent",
+                "doc-optional-services-note",
+                "optional_services_policy",
+                "Optional Services Note",
                 (
-                    "Commercial deployment, hosted services, enterprise integration, "
-                    "API cost optimization at scale, or incorporation into commercial "
-                    "products requires a separate commercial license. Commercial users "
-                    "should contact the repository owner for commercial licensing. "
-                    "This note does not define fork behavior or pull request handling."
+                    "Commercial use is permitted under Apache-2.0. Paid support, "
+                    "consulting, hosted deployments, or private integrations may be "
+                    "offered separately but are not required for using, "
+                    "forking, modifying, or distributing the project under the "
+                    "license. This note does not define pull request quality rules."
                 ),
                 required=True,
             ),
@@ -182,10 +183,13 @@ def _licensing_policy_task() -> RealWorldTask:
                 "contribution_policy",
                 "Contribution Policy Note",
                 (
-                    "Forks may be used for non-commercial exploration under the "
-                    "non-commercial terms. Pull requests may be reviewed, but "
-                    "acceptance does not grant commercial rights. The note does not "
-                    "replace the license and does not describe hosted service terms."
+                    "issues and pull requests are welcome under clear project rules "
+                    "for bug fixes, docs, benchmarks, provider integrations, and "
+                    "focused design changes. Contributions are provided under "
+                    "Apache-2.0 and should include clear rationale plus tests or "
+                    "reproduction steps where practical. The contribution rules make "
+                    "no unsupported production, safety, security, reliability, or "
+                    "fitness claims."
                 ),
                 required=True,
             ),
@@ -195,9 +199,9 @@ def _licensing_policy_task() -> RealWorldTask:
                 "Legacy MIT License Note",
                 (
                     "An old planning note proposed using an MIT-style license for "
-                    "early prototypes and broad commercial reuse. The note is marked "
-                    "obsolete after the repository adopted PolyForm Noncommercial "
-                    "License 1.0.0 and cannot support current licensing decisions."
+                    "early prototypes and broad reuse. The note is marked obsolete "
+                    "after the repository adopted Apache License 2.0 and cannot "
+                    "support current licensing decisions."
                 ),
                 distractor=True,
             ),
@@ -208,8 +212,8 @@ def _licensing_policy_task() -> RealWorldTask:
                 (
                     "A demo operations note describes a private hosted evaluation "
                     "instance used by maintainers for testing. It is useful operational "
-                    "background but is not an authority for commercial licensing, forks, "
-                    "or pull request rights."
+                    "background but is not an authority for licensing, forks, or pull "
+                    "request rights."
                 ),
                 distractor=True,
             ),
@@ -219,9 +223,9 @@ def _licensing_policy_task() -> RealWorldTask:
                 "Community Fork FAQ Draft",
                 (
                     "A draft FAQ says community forks are welcome and asks contributors "
-                    "to open pull requests. It omits the non-commercial limitation, "
-                    "does not mention commercial licensing, and is not the accepted "
-                    "contribution policy."
+                    "to open pull requests. It omits the Apache-2.0 contribution "
+                    "terms, does not mention the experimental claim boundaries, and "
+                    "is not the accepted contribution policy."
                 ),
                 distractor=True,
             ),
