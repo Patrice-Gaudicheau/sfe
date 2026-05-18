@@ -151,6 +151,7 @@ current top-level project status.
 - [proxy_enabled_mode_smoke_summary.md](history/proxy/proxy_enabled_mode_smoke_summary.md)
 - [proxy_enabled_mode_controlled_summary.md](history/proxy/proxy_enabled_mode_controlled_summary.md)
 - [proxy_enabled_mode_milestone_summary.md](history/proxy/proxy_enabled_mode_milestone_summary.md)
+- [proxy_structured_responses_builder_diagnostics_note.md](history/proxy/proxy_structured_responses_builder_diagnostics_note.md)
 - [proxy_enabled_live_lemonade_summary.md](history/proxy/proxy_enabled_live_lemonade_summary.md)
 - [proxy_enabled_live_lemonade_multifixture_summary.md](history/proxy/proxy_enabled_live_lemonade_multifixture_summary.md)
 - [proxy_enabled_live_openai_summary.md](history/proxy/proxy_enabled_live_openai_summary.md)

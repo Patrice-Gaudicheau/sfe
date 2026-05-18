@@ -2110,6 +2110,28 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
     assert event["enabled_original_request_sent"] is True
     assert event["enabled_candidate_request_sent_to_upstream"] is False
     assert event["enabled_fallback_to_original"] is True
+    assert event["responses_input_envelope_kind"] == "structured_list"
+    assert event["responses_input_item_count"] == 3
+    assert event["responses_input_role_distribution"] == {"user": 3}
+    assert event["responses_input_content_part_counts"] == [1, 1, 1]
+    assert event["responses_input_content_part_type_distribution"] == {
+        "input_image": 1,
+        "input_text": 2,
+    }
+    assert event["responses_input_unsupported_item_count"] == 1
+    assert event["responses_input_candidate_rejected"] is True
+    assert event["responses_input_candidate_rejection_reason"] == "unsafe_task_envelope"
+    topology = event["responses_input_topology_items"]
+    assert topology[0]["appears_context_like"] is False
+    assert topology[0]["selected"] is True
+    assert topology[1]["content_part_types"] == ["input_image"]
+    assert topology[1]["is_protected"] is True
+    assert topology[1]["unsupported_reason"] == "unsupported_content_part_type"
+    assert topology[2]["is_latest_user_task"] is True
+    assert topology[2]["appears_task_like"] is True
+    serialized_event = json.dumps(event)
+    assert "Large selected background" not in serialized_event
+    assert "example.invalid/image.png" not in serialized_event
     request_log = _last_proxy_log(logs, path="/v1/responses")
     assert request_log["enabled_reason"] == "unsafe_task_envelope"
     assert request_log["enabled_reduction_gate_passed"] is False
@@ -2791,6 +2813,18 @@ def test_enabled_mode_codexcli_like_structured_responses_replaces_streaming_cont
     assert event["enabled_selected_segment_count"] == 1
     assert event["enabled_reduction_gate_passed"] is True
     assert event["enabled_estimated_token_reduction_pct"] >= ENABLED_MIN_REDUCTION_PCT
+    assert event["responses_input_candidate_rejected"] is False
+    assert event["responses_input_candidate_rejection_reason"] is None
+    topology = event["responses_input_topology_items"]
+    assert topology[1]["has_file_path"] is True
+    assert topology[1]["is_protected"] is True
+    assert topology[3]["selected"] is True
+    assert topology[3]["appears_context_like"] is True
+    assert topology[4]["is_latest_user_task"] is True
+    assert topology[4]["is_protected"] is True
+    serialized_event = json.dumps(event)
+    assert "src/proxy.py" not in serialized_event
+    assert "CONTROLLED_STRUCTURED_VALUE" not in serialized_event
 
     request_log = _last_proxy_log(logs, path="/v1/responses")
     assert request_log["fallback_used"] is False

@@ -64,6 +64,10 @@ explicit no-silent-fallback behavior.
   controlled enabled-mode behavior and fallback boundary.
 - [proxy_enabled_mode_milestone_summary.md](history/proxy/proxy_enabled_mode_milestone_summary.md):
   rollup of mode semantics plus Lemonade and OpenAI enabled-mode validation.
+- [proxy_structured_responses_builder_diagnostics_note.md](history/proxy/proxy_structured_responses_builder_diagnostics_note.md):
+  controlled structured `/v1/responses` builder validation, the current
+  `unsafe_task_envelope` fallback boundary for realistic CodexCLI envelopes,
+  and the sanitized topology-diagnostics next step.
 
 ## Live Provider Observations
 

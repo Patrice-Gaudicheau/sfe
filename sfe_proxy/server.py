@@ -47,6 +47,16 @@ DOWNSTREAM_RESPONSE_HEADERS_TO_STRIP = HOP_BY_HOP_HEADERS | {
 }
 ENABLED_MIN_REDUCTION_PCT = 15.0
 ENABLED_PRESERVED_TEXT_MAX_TOKENS = 2000
+SAFE_RESPONSES_ROLES = {"system", "developer", "user", "assistant", "tool"}
+SAFE_RESPONSES_CONTENT_PART_TYPES = {
+    "input_text",
+    "text",
+    "input_image",
+    "image_url",
+    "input_file",
+    "tool_call",
+    "tool_result",
+}
 
 
 class AnthropicRequestError(Exception):
@@ -748,6 +758,7 @@ def _build_shadow_event(
         "full_payload_logging_enabled": False,
         "full_payload_logging_requested": config.shadow_log_full_payloads,
     }
+    event.update(_structured_responses_input_diagnostics(path, payload))
     if config.shadow_selection_dry_run or config.mode in {DRY_RUN_ENABLED_MODE, ENABLED_MODE}:
         event.update(_safe_shadow_selection_fields(config, path, payload, rough_estimated_input_tokens))
     if config.shadow_router_dry_run:
@@ -875,6 +886,11 @@ def _candidate_request_details(
     rough_estimated_input_tokens: int,
 ) -> dict[str, Any]:
     selected_segment_ids = _selected_segment_ids_for_dry_run(event)
+    diagnostics = _structured_responses_input_diagnostics(
+        path,
+        payload,
+        selected_segment_ids=selected_segment_ids,
+    )
     segments = _extract_candidate_text_segments(path, payload)
     segment_by_id = {segment["segment_id"]: segment for segment in segments}
     selected_segments = [
@@ -901,6 +917,10 @@ def _candidate_request_details(
             "dry_run_enabled_estimated_token_reduction_pct": None,
             "dry_run_enabled_selected_segment_count": 0,
             "candidate_request": None,
+            **_structured_candidate_rejection_diagnostics(
+                diagnostics,
+                "no_selected_segments",
+            ),
         }
 
     success_reason = "candidate_request_built_for_diagnostics"
@@ -914,6 +934,10 @@ def _candidate_request_details(
                 reason=str(structured_result["reason"]),
                 selected_segment_ids=selected_segment_ids,
                 selected_segment_count=len(selected_segments),
+                extra_fields=_structured_candidate_rejection_diagnostics(
+                    diagnostics,
+                    str(structured_result["reason"]),
+                ),
             )
         candidate_request = structured_result["candidate_request"]
         success_reason = str(structured_result["reason"])
@@ -951,6 +975,10 @@ def _candidate_request_details(
             "dry_run_enabled_estimated_token_reduction_pct": reduction_pct,
             "dry_run_enabled_selected_segment_count": len(selected_segments),
             "candidate_request": None,
+            **_structured_candidate_rejection_diagnostics(
+                diagnostics,
+                "insufficient_token_reduction",
+            ),
         }
     selected_metadata = [
         {
@@ -984,6 +1012,7 @@ def _candidate_request_details(
         "dry_run_enabled_candidate_contains_text": bool(
             _iter_text_values(candidate_request)
         ),
+        **_structured_candidate_acceptance_diagnostics(diagnostics),
     }
     if config.shadow_log_full_payloads:
         fields["dry_run_enabled_candidate_request"] = candidate_request
@@ -1023,8 +1052,9 @@ def _unavailable_candidate_details(
     selected_segment_count: int,
     candidate_tokens: int | None = None,
     reduction_pct: float | None = None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    details = {
         "dry_run_enabled_candidate_built": False,
         "dry_run_enabled_reason": reason,
         "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
@@ -1042,6 +1072,9 @@ def _unavailable_candidate_details(
         "dry_run_enabled_selected_segment_count": selected_segment_count,
         "candidate_request": None,
     }
+    if extra_fields:
+        details.update(extra_fields)
+    return details
 
 
 def _is_structured_responses_input(
@@ -1056,6 +1089,263 @@ def _is_structured_responses_input(
     return isinstance(input_value, list) and any(
         not isinstance(item, str) for item in input_value
     )
+
+
+def _structured_responses_input_diagnostics(
+    path: str,
+    payload: dict[str, Any] | None,
+    *,
+    selected_segment_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    if path != "/v1/responses" or payload is None:
+        return {}
+    input_value = payload.get("input")
+    if isinstance(input_value, list):
+        items = input_value
+        envelope_kind = (
+            "structured_list"
+            if any(not isinstance(item, str) for item in input_value)
+            else "text_list"
+        )
+    elif input_value is None:
+        return {
+            "responses_input_envelope_kind": "missing",
+            "responses_input_item_count": None,
+            "responses_input_topology_items": [],
+            "responses_input_role_distribution": {},
+            "responses_input_item_type_distribution": {},
+            "responses_input_content_part_type_distribution": {},
+            "responses_input_content_part_counts": [],
+            "responses_input_text_length_buckets": [],
+            "responses_input_unsupported_item_count": 0,
+        }
+    else:
+        items = [input_value]
+        envelope_kind = "text" if isinstance(input_value, str) else "structured_single"
+
+    selected_ids = set(selected_segment_ids or [])
+    latest_user_index = _latest_user_role_index(items)
+    segment_ids_by_index = _structured_responses_segment_ids_by_input_index(items)
+    topology_items = []
+    role_distribution: dict[str, int] = {}
+    item_type_distribution: dict[str, int] = {}
+    part_type_distribution: dict[str, int] = {}
+    part_counts = []
+    text_length_buckets = []
+    unsupported_count = 0
+
+    for index, item in enumerate(items):
+        item_text = item if isinstance(item, str) else _structured_responses_item_text(item)
+        text_tokens = _estimated_text_tokens(item_text) if item_text else 0
+        text_length_bucket = _text_length_bucket(len(item_text))
+        role = _responses_item_role_category(item)
+        item_type = _responses_item_type_category(item)
+        part_types = _responses_content_part_types(item)
+        part_count = _responses_content_part_count(item)
+        unsupported_reason = _structured_responses_item_unsupported_reason(item)
+        if unsupported_reason is not None:
+            unsupported_count += 1
+        has_file_path = bool(item_text and _contains_file_path(item_text))
+        is_latest_user_task = index == latest_user_index
+        appears_context_like = (
+            bool(item_text)
+            and text_tokens > ENABLED_PRESERVED_TEXT_MAX_TOKENS
+            and not is_latest_user_task
+            and not has_file_path
+        )
+        appears_task_like = (
+            is_latest_user_task
+            or (
+                role == "user"
+                and bool(item_text)
+                and not appears_context_like
+            )
+        )
+        is_protected = (
+            is_latest_user_task
+            or has_file_path
+            or role in {"system", "developer"}
+            or unsupported_reason is not None
+        )
+        segment_id = segment_ids_by_index.get(index)
+        topology_item = {
+            "index": index,
+            "item_type": item_type,
+            "role": role,
+            "content_part_count": part_count,
+            "content_part_types": part_types,
+            "text_length_bucket": text_length_bucket,
+            "approx_text_chars": _approx_text_chars(len(item_text)),
+            "is_latest_user_task": is_latest_user_task,
+            "appears_task_like": appears_task_like,
+            "appears_context_like": appears_context_like,
+            "is_protected": is_protected,
+            "has_file_path": has_file_path,
+            "selected": segment_id in selected_ids if segment_id is not None else False,
+            "unsupported_reason": unsupported_reason,
+        }
+        if segment_id is not None:
+            topology_item["segment_id"] = segment_id
+        topology_items.append(topology_item)
+        role_distribution[role] = role_distribution.get(role, 0) + 1
+        item_type_distribution[item_type] = item_type_distribution.get(item_type, 0) + 1
+        for part_type in part_types:
+            part_type_distribution[part_type] = part_type_distribution.get(part_type, 0) + 1
+        part_counts.append(part_count)
+        text_length_buckets.append(text_length_bucket)
+
+    return {
+        "responses_input_envelope_kind": envelope_kind,
+        "responses_input_item_count": len(items),
+        "responses_input_topology_items": topology_items,
+        "responses_input_role_distribution": dict(sorted(role_distribution.items())),
+        "responses_input_item_type_distribution": dict(sorted(item_type_distribution.items())),
+        "responses_input_content_part_type_distribution": dict(
+            sorted(part_type_distribution.items())
+        ),
+        "responses_input_content_part_counts": part_counts,
+        "responses_input_text_length_buckets": text_length_buckets,
+        "responses_input_unsupported_item_count": unsupported_count,
+    }
+
+
+def _structured_candidate_rejection_diagnostics(
+    diagnostics: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    if not diagnostics:
+        return {}
+    fields = dict(diagnostics)
+    fields["responses_input_candidate_rejected"] = True
+    fields["responses_input_candidate_rejection_reason"] = reason
+    return fields
+
+
+def _structured_candidate_acceptance_diagnostics(
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    if not diagnostics:
+        return {}
+    fields = dict(diagnostics)
+    fields["responses_input_candidate_rejected"] = False
+    fields["responses_input_candidate_rejection_reason"] = None
+    return fields
+
+
+def _latest_user_role_index(items: list[Any]) -> int | None:
+    for index in range(len(items) - 1, -1, -1):
+        item = items[index]
+        if isinstance(item, dict) and item.get("role") == "user":
+            return index
+        if isinstance(item, str):
+            return index
+    return None
+
+
+def _responses_item_role_category(item: Any) -> str:
+    if isinstance(item, str):
+        return "user"
+    if not isinstance(item, dict):
+        return "non_message"
+    role = item.get("role")
+    if role is None:
+        return "missing"
+    if not isinstance(role, str):
+        return "non_string"
+    return role if role in SAFE_RESPONSES_ROLES else "other"
+
+
+def _responses_item_type_category(item: Any) -> str:
+    if isinstance(item, str):
+        return "string"
+    if not isinstance(item, dict):
+        return "non_dict"
+    if isinstance(item.get("role"), str):
+        return "message"
+    return "dict"
+
+
+def _responses_content_part_types(item: Any) -> list[str]:
+    if isinstance(item, str):
+        return ["text"]
+    if not isinstance(item, dict):
+        return []
+    content = item.get("content")
+    if isinstance(content, str):
+        return ["text"]
+    if not isinstance(content, list):
+        return []
+    return [_safe_responses_content_part_type(part) for part in content]
+
+
+def _safe_responses_content_part_type(part: Any) -> str:
+    if not isinstance(part, dict):
+        return "non_dict"
+    part_type = part.get("type")
+    if part_type is None:
+        return "missing"
+    if not isinstance(part_type, str):
+        return "non_string"
+    return part_type if part_type in SAFE_RESPONSES_CONTENT_PART_TYPES else "other"
+
+
+def _responses_content_part_count(item: Any) -> int:
+    if isinstance(item, str):
+        return 1
+    if not isinstance(item, dict):
+        return 0
+    content = item.get("content")
+    if isinstance(content, str):
+        return 1
+    if isinstance(content, list):
+        return len(content)
+    return 0
+
+
+def _structured_responses_item_unsupported_reason(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return "non_dict_item"
+    role = item.get("role")
+    if not isinstance(role, str):
+        return "missing_or_non_string_role"
+    content = item.get("content")
+    if isinstance(content, str):
+        return None
+    if not isinstance(content, list):
+        return "unsupported_content_shape"
+    for block in content:
+        if not isinstance(block, dict):
+            return "non_dict_content_part"
+        block_type = block.get("type")
+        if block_type not in {"input_text", "text"}:
+            return "unsupported_content_part_type"
+        if not isinstance(block.get("text"), str):
+            return "missing_or_non_string_text"
+        if any(key not in {"type", "text"} for key in block):
+            return "content_part_extra_keys"
+    return None
+
+
+def _text_length_bucket(text_chars: int) -> str:
+    if text_chars <= 0:
+        return "0"
+    if text_chars <= 128:
+        return "1-128"
+    if text_chars <= 512:
+        return "129-512"
+    if text_chars <= 2_048:
+        return "513-2048"
+    if text_chars <= 8_192:
+        return "2049-8192"
+    return "8193+"
+
+
+def _approx_text_chars(text_chars: int) -> int:
+    if text_chars <= 0:
+        return 0
+    if text_chars <= 100:
+        return 100
+    return ((text_chars + 99) // 100) * 100
 
 
 def _structured_responses_candidate_request(
