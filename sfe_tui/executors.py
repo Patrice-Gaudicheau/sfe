@@ -14,7 +14,7 @@ from providers.openai_api import (
 )
 
 
-DEFAULT_MAX_OUTPUT_TOKENS = 800
+DEFAULT_MAX_OUTPUT_TOKENS = 1500
 READ_ONLY_SYSTEM_INSTRUCTION = (
     "You are the read-only SFE TUI executor. Answer only from the selected "
     "context and the user's task. Do not claim to edit files, run commands, "

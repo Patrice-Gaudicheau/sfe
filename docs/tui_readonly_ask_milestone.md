@@ -29,6 +29,14 @@ limitation: for a router-specific task, docs/tests/renderer content could outran
 the router implementation file. The next local-router improvement is
 source/path-aware lexical ranking.
 
+After source/path-aware lexical ranking, the same router-focused 7-file smoke
+selected `sfe_tui/routers.py` as a high-scoring segment, alongside the tests and
+DirectBackend strategy note. The observed estimated reduction was 40.83%, and
+the answer was more grounded in the router implementation. The answer still
+appeared to end abruptly, so the TUI read-only executor default output budget
+was raised from 800 to 1500 tokens. This change is local to the first-party TUI
+read-only executor and does not alter benchmark or proxy defaults.
+
 No write tools, shell execution, proxy calls, backend switching, or agent loop
 are part of this milestone. The next phases remain context inspection, patch
 generation, and only later carefully scoped write tools.

@@ -29,7 +29,11 @@ from sfe_tui.contracts import (
     resolve_context_path,
     resolve_workspace,
 )
-from sfe_tui.executors import ExecutorResponse, OpenAIReadOnlyExecutor
+from sfe_tui.executors import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    ExecutorResponse,
+    OpenAIReadOnlyExecutor,
+)
 from sfe_tui.renderer import (
     render_context_summary,
     render_dry_run_summary,
@@ -900,6 +904,23 @@ def test_openai_executor_returns_invalid_response_category() -> None:
     assert result.provider_calls_made == 1
 
 
+def test_openai_executor_uses_tui_default_output_token_budget() -> None:
+    provider = FakeProvider()
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.execute(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    assert result.answer == "provider answer"
+    assert DEFAULT_MAX_OUTPUT_TOKENS == 1500
+    assert provider.calls[0]["max_tokens"] == 1500
+
+
 def test_local_segment_router_selects_matching_segment() -> None:
     alpha = ContextSegment(
         id="ctx_alpha",
@@ -1445,6 +1466,8 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "selected 3 of 7 context segments" in milestone
     assert "38.92%" in milestone
     assert "36.58%" in milestone
+    assert "40.83%" in milestone
+    assert "raised from 800 to 1500 tokens" in milestone
     assert "source/path-aware lexical ranking" in milestone
     assert "not a benchmark" in milestone
     assert "tui_readonly_ask_milestone.md" in index
