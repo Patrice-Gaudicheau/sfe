@@ -2110,6 +2110,14 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
     assert event["responses_input_content_part_counts"] == [1, 1, 1]
     assert event["responses_input_content_part_type_distribution"] == {"input_text": 3}
     assert event["responses_input_unsupported_item_count"] == 1
+    assert event["responses_input_preserve_only_item_count"] == 1
+    assert event["responses_input_preserve_only_large_text_like_count"] == 1
+    assert event["responses_input_selected_item_count"] == 1
+    assert event["responses_input_selected_preserve_only_count"] == 1
+    assert (
+        event["responses_input_no_reducible_context_reason"]
+        == "candidate_segments_preserve_only"
+    )
     assert event["responses_input_candidate_rejected"] is True
     assert event["responses_input_candidate_rejection_reason"] == "selected_segment_not_reducible"
     topology = event["responses_input_topology_items"]
@@ -2441,10 +2449,95 @@ def test_enabled_mode_structured_responses_requires_reducible_context(
     event = _read_shadow_event(tmp_path)
     assert event["enabled_candidate_built"] is False
     assert event["enabled_reason"] == "no_reducible_context_segments"
+    assert event["responses_input_supported_role_text_item_count"] == 3
+    assert event["responses_input_supported_role_text_by_role"] == {
+        "developer": 1,
+        "user": 2,
+    }
+    assert event["responses_input_supported_role_text_protected_count"] == 3
+    assert event["responses_input_supported_role_text_file_path_like_count"] == 1
+    assert event["responses_input_supported_role_text_latest_user_task_count"] == 1
+    assert (
+        event["responses_input_no_reducible_context_reason"]
+        == "all_supported_text_protected"
+    )
     request_log = _last_proxy_log(logs, path="/v1/responses")
     assert request_log["enabled_reason"] == "no_reducible_context_segments"
     joined_logs = "\n".join(logs)
     assert "src/alpha.py" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_diagnoses_supported_text_below_threshold(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"below-threshold-diagnostics","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    assistant_context = "SHORT_SUPPORTED_CONTEXT below threshold. " * 20
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Keep diagnostic answers short."),
+            _responses_text_item("assistant", assistant_context),
+            _responses_text_item("user", "What is the current diagnostic state?"),
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "no_reducible_context_segments"
+    assert event["responses_input_supported_role_text_item_count"] == 3
+    assert event["responses_input_supported_role_text_by_role"] == {
+        "assistant": 1,
+        "developer": 1,
+        "user": 1,
+    }
+    assert event["responses_input_supported_role_text_below_reducible_threshold_count"] == 3
+    assert event["responses_input_supported_role_text_above_reducible_threshold_count"] == 0
+    assert event["responses_input_supported_role_text_context_like_count"] == 0
+    assert event["responses_input_supported_role_text_size_buckets_by_role"][
+        "assistant"
+    ] == {"513-2048": 1}
+    assert (
+        event["responses_input_no_reducible_context_reason"]
+        == "all_supported_text_below_threshold"
+    )
+    serialized_event = json.dumps(event)
+    assert "SHORT_SUPPORTED_CONTEXT" not in serialized_event
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "no_reducible_context_segments"
+    assert not any(key.startswith("responses_input_") for key in request_log)
+    joined_logs = "\n".join(logs)
+    assert "SHORT_SUPPORTED_CONTEXT" not in joined_logs
+    assert "placeholder-client-token" not in joined_logs
+    assert "Authorization" not in joined_logs
 
 
 def test_enabled_mode_structured_responses_no_reducible_context_rejects_when_strict(
@@ -2932,6 +3025,14 @@ def test_enabled_mode_structured_responses_preserves_unsupported_items_and_reduc
     assert event["responses_input_candidate_rejected"] is False
     assert event["responses_input_candidate_rejection_reason"] is None
     assert event["responses_input_unsupported_item_count"] == 3
+    assert event["responses_input_preserve_only_item_count"] == 3
+    assert event["responses_input_preserve_only_has_text_payload_count"] == 2
+    assert event["responses_input_preserve_only_large_text_like_count"] == 0
+    assert event["responses_input_supported_role_text_item_count"] == 6
+    assert event["responses_input_supported_role_text_context_like_count"] == 2
+    assert event["responses_input_selected_item_count"] == 1
+    assert event["responses_input_selected_preserve_only_count"] == 0
+    assert event["responses_input_selected_unprotected_context_like_count"] == 1
     topology = event["responses_input_topology_items"]
     assert topology[1]["unsupported_reason"] == "missing_or_non_string_role"
     assert topology[2]["unsupported_reason"] == "missing_or_non_string_role"

@@ -1119,6 +1119,7 @@ def _structured_responses_input_diagnostics(
             "responses_input_content_part_counts": [],
             "responses_input_text_length_buckets": [],
             "responses_input_unsupported_item_count": 0,
+            **_empty_reducible_context_absence_diagnostics(),
         }
     else:
         items = [input_value]
@@ -1134,6 +1135,25 @@ def _structured_responses_input_diagnostics(
     part_counts = []
     text_length_buckets = []
     unsupported_count = 0
+    supported_role_text_count = 0
+    supported_role_text_by_role: dict[str, int] = {}
+    supported_role_text_size_buckets_by_role: dict[str, dict[str, int]] = {}
+    supported_role_text_protected_count = 0
+    supported_role_text_task_like_count = 0
+    supported_role_text_latest_user_task_count = 0
+    supported_role_text_file_path_like_count = 0
+    supported_role_text_context_like_count = 0
+    supported_role_text_below_reducible_threshold_count = 0
+    supported_role_text_above_reducible_threshold_count = 0
+    supported_role_text_max_size_bucket = "0"
+    preserve_only_count = 0
+    preserve_only_size_buckets: dict[str, int] = {}
+    preserve_only_has_text_payload_count = 0
+    preserve_only_large_text_like_count = 0
+    selected_item_count = 0
+    selected_preserve_only_count = 0
+    selected_supported_context_like_count = 0
+    selected_unprotected_context_like_count = 0
 
     for index, item in enumerate(items):
         item_text = item if isinstance(item, str) else _structured_responses_item_text(item)
@@ -1188,6 +1208,58 @@ def _structured_responses_input_diagnostics(
         if segment_id is not None:
             topology_item["segment_id"] = segment_id
         topology_items.append(topology_item)
+        if topology_item["selected"] is True:
+            selected_item_count += 1
+        is_supported_role_text = (
+            unsupported_reason is None
+            and isinstance(item, dict)
+            and isinstance(item.get("role"), str)
+            and bool(item_text)
+        )
+        if is_supported_role_text:
+            supported_role_text_count += 1
+            supported_role_text_by_role[role] = supported_role_text_by_role.get(role, 0) + 1
+            _increment_nested_count(
+                supported_role_text_size_buckets_by_role,
+                role,
+                text_length_bucket,
+            )
+            supported_role_text_max_size_bucket = _max_text_length_bucket(
+                supported_role_text_max_size_bucket,
+                text_length_bucket,
+            )
+            if is_protected:
+                supported_role_text_protected_count += 1
+            if appears_task_like:
+                supported_role_text_task_like_count += 1
+            if is_latest_user_task:
+                supported_role_text_latest_user_task_count += 1
+            if has_file_path:
+                supported_role_text_file_path_like_count += 1
+            if appears_context_like:
+                supported_role_text_context_like_count += 1
+                if topology_item["selected"] is True:
+                    selected_supported_context_like_count += 1
+                    if not is_protected:
+                        selected_unprotected_context_like_count += 1
+            if text_tokens > ENABLED_PRESERVED_TEXT_MAX_TOKENS:
+                supported_role_text_above_reducible_threshold_count += 1
+            else:
+                supported_role_text_below_reducible_threshold_count += 1
+        is_preserve_only = unsupported_reason is not None
+        if is_preserve_only:
+            preserve_only_count += 1
+            preserve_only_size_buckets[text_length_bucket] = (
+                preserve_only_size_buckets.get(text_length_bucket, 0) + 1
+            )
+            if item_text:
+                preserve_only_has_text_payload_count += 1
+            if text_tokens > ENABLED_PRESERVED_TEXT_MAX_TOKENS:
+                preserve_only_large_text_like_count += 1
+            if topology_item["selected"] is True:
+                selected_preserve_only_count += 1
+        elif topology_item["selected"] is True and is_protected:
+            selected_preserve_only_count += 1
         role_distribution[role] = role_distribution.get(role, 0) + 1
         item_type_distribution[item_type] = item_type_distribution.get(item_type, 0) + 1
         for part_type in part_types:
@@ -1207,6 +1279,77 @@ def _structured_responses_input_diagnostics(
         "responses_input_content_part_counts": part_counts,
         "responses_input_text_length_buckets": text_length_buckets,
         "responses_input_unsupported_item_count": unsupported_count,
+        "responses_input_supported_role_text_item_count": supported_role_text_count,
+        "responses_input_supported_role_text_by_role": dict(
+            sorted(supported_role_text_by_role.items())
+        ),
+        "responses_input_supported_role_text_size_buckets_by_role": {
+            role: dict(sorted(buckets.items()))
+            for role, buckets in sorted(supported_role_text_size_buckets_by_role.items())
+        },
+        "responses_input_supported_role_text_protected_count": (
+            supported_role_text_protected_count
+        ),
+        "responses_input_supported_role_text_task_like_count": (
+            supported_role_text_task_like_count
+        ),
+        "responses_input_supported_role_text_latest_user_task_count": (
+            supported_role_text_latest_user_task_count
+        ),
+        "responses_input_supported_role_text_file_path_like_count": (
+            supported_role_text_file_path_like_count
+        ),
+        "responses_input_supported_role_text_context_like_count": (
+            supported_role_text_context_like_count
+        ),
+        "responses_input_supported_role_text_below_reducible_threshold_count": (
+            supported_role_text_below_reducible_threshold_count
+        ),
+        "responses_input_supported_role_text_above_reducible_threshold_count": (
+            supported_role_text_above_reducible_threshold_count
+        ),
+        "responses_input_supported_role_text_max_size_bucket": (
+            supported_role_text_max_size_bucket
+        ),
+        "responses_input_preserve_only_item_count": preserve_only_count,
+        "responses_input_preserve_only_size_buckets": dict(
+            sorted(preserve_only_size_buckets.items())
+        ),
+        "responses_input_preserve_only_has_text_payload_count": (
+            preserve_only_has_text_payload_count
+        ),
+        "responses_input_preserve_only_large_text_like_count": (
+            preserve_only_large_text_like_count
+        ),
+        "responses_input_selected_item_count": selected_item_count,
+        "responses_input_selected_preserve_only_count": selected_preserve_only_count,
+        "responses_input_selected_supported_context_like_count": (
+            selected_supported_context_like_count
+        ),
+        "responses_input_selected_unprotected_context_like_count": (
+            selected_unprotected_context_like_count
+        ),
+        "responses_input_no_reducible_context_reason": (
+            _no_reducible_context_reason(
+                supported_role_text_count=supported_role_text_count,
+                supported_role_text_protected_count=supported_role_text_protected_count,
+                supported_role_text_task_like_count=supported_role_text_task_like_count,
+                supported_role_text_latest_user_task_count=(
+                    supported_role_text_latest_user_task_count
+                ),
+                supported_role_text_file_path_like_count=(
+                    supported_role_text_file_path_like_count
+                ),
+                supported_role_text_context_like_count=(
+                    supported_role_text_context_like_count
+                ),
+                supported_role_text_above_reducible_threshold_count=(
+                    supported_role_text_above_reducible_threshold_count
+                ),
+                selected_segment_count=selected_item_count,
+                selected_preserve_only_count=selected_preserve_only_count,
+            )
+        ),
     }
 
 
@@ -1231,6 +1374,86 @@ def _structured_candidate_acceptance_diagnostics(
     fields["responses_input_candidate_rejected"] = False
     fields["responses_input_candidate_rejection_reason"] = None
     return fields
+
+
+def _empty_reducible_context_absence_diagnostics() -> dict[str, Any]:
+    return {
+        "responses_input_supported_role_text_item_count": 0,
+        "responses_input_supported_role_text_by_role": {},
+        "responses_input_supported_role_text_size_buckets_by_role": {},
+        "responses_input_supported_role_text_protected_count": 0,
+        "responses_input_supported_role_text_task_like_count": 0,
+        "responses_input_supported_role_text_latest_user_task_count": 0,
+        "responses_input_supported_role_text_file_path_like_count": 0,
+        "responses_input_supported_role_text_context_like_count": 0,
+        "responses_input_supported_role_text_below_reducible_threshold_count": 0,
+        "responses_input_supported_role_text_above_reducible_threshold_count": 0,
+        "responses_input_supported_role_text_max_size_bucket": "0",
+        "responses_input_preserve_only_item_count": 0,
+        "responses_input_preserve_only_size_buckets": {},
+        "responses_input_preserve_only_has_text_payload_count": 0,
+        "responses_input_preserve_only_large_text_like_count": 0,
+        "responses_input_selected_item_count": 0,
+        "responses_input_selected_preserve_only_count": 0,
+        "responses_input_selected_supported_context_like_count": 0,
+        "responses_input_selected_unprotected_context_like_count": 0,
+        "responses_input_no_reducible_context_reason": "no_supported_role_text_items",
+    }
+
+
+def _increment_nested_count(
+    values: dict[str, dict[str, int]],
+    outer_key: str,
+    inner_key: str,
+) -> None:
+    bucket = values.setdefault(outer_key, {})
+    bucket[inner_key] = bucket.get(inner_key, 0) + 1
+
+
+def _max_text_length_bucket(left: str, right: str) -> str:
+    order = {
+        "0": 0,
+        "1-128": 1,
+        "129-512": 2,
+        "513-2048": 3,
+        "2049-8192": 4,
+        "8193+": 5,
+    }
+    return right if order.get(right, 0) > order.get(left, 0) else left
+
+
+def _no_reducible_context_reason(
+    *,
+    supported_role_text_count: int,
+    supported_role_text_protected_count: int,
+    supported_role_text_task_like_count: int,
+    supported_role_text_latest_user_task_count: int,
+    supported_role_text_file_path_like_count: int,
+    supported_role_text_context_like_count: int,
+    supported_role_text_above_reducible_threshold_count: int,
+    selected_segment_count: int,
+    selected_preserve_only_count: int,
+) -> str:
+    if supported_role_text_count <= 0:
+        return "no_supported_role_text_items"
+    if supported_role_text_protected_count == supported_role_text_count:
+        return "all_supported_text_protected"
+    if supported_role_text_latest_user_task_count == supported_role_text_count:
+        return "all_supported_text_latest_task"
+    if supported_role_text_file_path_like_count == supported_role_text_count:
+        return "all_supported_text_file_path_like"
+    if supported_role_text_task_like_count == supported_role_text_count:
+        return "all_supported_text_task_like"
+    if supported_role_text_above_reducible_threshold_count <= 0:
+        return "all_supported_text_below_threshold"
+    if supported_role_text_context_like_count <= 0:
+        return "supported_text_not_context_like"
+    if (
+        selected_segment_count > 0
+        and selected_preserve_only_count == selected_segment_count
+    ):
+        return "candidate_segments_preserve_only"
+    return "unknown"
 
 
 def _latest_user_role_index(items: list[Any]) -> int | None:
