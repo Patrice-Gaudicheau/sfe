@@ -39,8 +39,8 @@ run the SFE flow.
 - ProxyBackend may remain as an internal experimental stub.
 - The TUI should not expose backend switching yet.
 - No `/backend` command is planned until a concrete need is proven.
-- The deterministic preview is not an LLM router result and must be labeled as
-  a local preview.
+- The local lexical preview is not an LLM router result and must be labeled as
+  a provider-free local preview.
 
 ## Router Before Executor
 
@@ -50,13 +50,17 @@ can pass explicit reducible `context_segments` through a safe routing boundary,
 record selected opaque segment ids, and report token estimates without exposing
 file contents.
 
-The current `deterministic_preview` path remains only a pipeline preview. The
-existing generic SFE router paths are provider-backed, and the benchmark
+The current `local_lexical_preview` path is the first provider-free DirectBackend
+routing implementation for explicit TUI `context_segments`. It tokenizes the
+protected task and reducible context segments locally, selects matching segment
+ids deterministically, and reports only safe counts, opaque ids, token
+estimates, and score categories. It is lexical and deterministic; it is not an
+LLM router result.
+
+The existing generic SFE router paths remain provider-backed, and the benchmark
 dry-run selector depends on fixture oracle labels rather than arbitrary
-first-party TUI context. Until a provider-free first-party segment router exists,
-the TUI records `router_available=false` and
-`router_unavailable_reason=provider_required` while keeping deterministic
-preview as the active selector.
+first-party TUI context. Provider-backed router integration remains future work
+after the local explicit-segment router path is validated.
 
 Real SFE router integration should be introduced before any executor
 integration. Executor calls remain out of scope for the current TUI dry-run

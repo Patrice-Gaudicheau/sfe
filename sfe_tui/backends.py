@@ -6,11 +6,10 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .contracts import ContextSegment, SFEContract
-
-
-DETERMINISTIC_PREVIEW_MODE = "deterministic_preview"
-MAX_PREVIEW_SEGMENTS = 3
-ROUTER_UNAVAILABLE_REASON = "provider_required"
+from .routers import (
+    LOCAL_LEXICAL_PREVIEW_MODE,
+    LocalSegmentRouter,
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +47,7 @@ class RouterPreviewDiagnostics:
     estimated_selected_tokens: int
     estimated_reduction_pct: float | None
     fallback_reason: str | None
+    score_category_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class DirectBackend:
     name = "direct"
 
     def dry_run(self, contract: SFEContract) -> BackendResult:
-        return _deterministic_preview_result(self.name, contract)
+        return _local_router_preview_result(self.name, contract)
 
     def run(self, contract: SFEContract) -> BackendResult:
         raise NotImplementedError("Direct backend execution is not implemented yet.")
@@ -100,48 +100,45 @@ def backend_by_name(name: str) -> BackendAdapter:
     raise ValueError("unsupported_backend")
 
 
-def _deterministic_preview_result(name: str, contract: SFEContract) -> BackendResult:
-    eligible = [
-        segment
-        for segment in contract.context_segments
-        if segment.reducible and bool(segment.text)
+def _local_router_preview_result(name: str, contract: SFEContract) -> BackendResult:
+    task_text = contract.task.text if contract.task is not None else ""
+    router_result = LocalSegmentRouter().route(task_text, contract.context_segments)
+    segments_by_id = {segment.id: segment for segment in contract.context_segments}
+    selected_segments = [
+        segments_by_id[segment_id]
+        for segment_id in router_result.selected_segment_ids
+        if segment_id in segments_by_id
     ]
-    selected = eligible[:MAX_PREVIEW_SEGMENTS]
-    selected_ids = [segment.id for segment in selected]
-    eligible_ids = [segment.id for segment in eligible]
-    input_tokens = sum(segment.approx_tokens for segment in contract.context_segments)
-    selected_tokens = sum(segment.approx_tokens for segment in selected)
-    reduction_pct = _estimated_reduction_pct(input_tokens, selected_tokens)
-    fallback_reason = None if selected else "no_reducible_context_segments"
     audit = {
         **contract.audit,
-        "selected_segment_ids": selected_ids,
-        "selector_mode": DETERMINISTIC_PREVIEW_MODE,
-        "router_mode": DETERMINISTIC_PREVIEW_MODE,
-        "router_available": False,
-        "router_unavailable_reason": ROUTER_UNAVAILABLE_REASON,
-        "router_provider_calls_made": 0,
-        "router_input_segment_ids": eligible_ids,
-        "fallback_reason": fallback_reason,
-        "input_segment_count": len(contract.context_segments),
-        "eligible_segment_count": len(eligible),
-        "selected_segment_count": len(selected),
-        "estimated_input_tokens": input_tokens,
-        "estimated_selected_tokens": selected_tokens,
-        "estimated_reduction_pct": reduction_pct,
+        "selected_segment_ids": router_result.selected_segment_ids,
+        "selector_mode": LOCAL_LEXICAL_PREVIEW_MODE,
+        "router_mode": router_result.router_mode,
+        "router_available": router_result.router_available,
+        "router_unavailable_reason": None,
+        "router_provider_calls_made": router_result.provider_calls_made,
+        "router_input_segment_ids": router_result.router_input_segment_ids,
+        "router_score_category_counts": router_result.score_category_counts,
+        "fallback_reason": router_result.fallback_reason,
+        "input_segment_count": router_result.input_segment_count,
+        "eligible_segment_count": router_result.eligible_segment_count,
+        "selected_segment_count": router_result.selected_segment_count,
+        "estimated_input_tokens": router_result.estimated_input_tokens,
+        "estimated_selected_tokens": router_result.estimated_selected_tokens,
+        "estimated_reduction_pct": router_result.estimated_reduction_pct,
         "provider_calls_made": 0,
     }
     updated = replace(contract, audit=audit)
     execution_preview = _build_execution_preview(
         name=name,
         contract=updated,
-        selected_segments=selected,
+        selected_segments=selected_segments,
     )
     router_preview = _build_router_preview(updated)
     return _dry_run_result(
         name,
         updated,
-        selector_mode=DETERMINISTIC_PREVIEW_MODE,
+        selector_mode=LOCAL_LEXICAL_PREVIEW_MODE,
         execution_preview=execution_preview,
         router_preview=router_preview,
     )
@@ -183,6 +180,9 @@ def _dry_run_result(
             "router_provider_calls_made": contract.audit.get(
                 "router_provider_calls_made"
             ),
+            "router_score_category_counts": contract.audit.get(
+                "router_score_category_counts"
+            ),
         },
         contract=contract,
         execution_preview=execution_preview,
@@ -203,7 +203,7 @@ def _build_execution_preview(
     total_tokens = int(contract.metadata.get("total_approx_context_tokens") or 0)
     return DirectExecutionPreview(
         backend_name=name,
-        selector_mode=DETERMINISTIC_PREVIEW_MODE,
+        selector_mode=str(contract.audit.get("selector_mode") or ""),
         protected_instruction_count=len(contract.instructions),
         task_present=contract.task is not None,
         selected_segment_ids=selected_ids,
@@ -227,7 +227,7 @@ def _build_execution_preview(
 
 def _build_router_preview(contract: SFEContract) -> RouterPreviewDiagnostics:
     return RouterPreviewDiagnostics(
-        router_mode=str(contract.audit.get("router_mode") or DETERMINISTIC_PREVIEW_MODE),
+        router_mode=str(contract.audit.get("router_mode") or LOCAL_LEXICAL_PREVIEW_MODE),
         router_available=bool(contract.audit.get("router_available")),
         router_unavailable_reason=contract.audit.get("router_unavailable_reason"),
         router_provider_calls_made=int(
@@ -246,13 +246,7 @@ def _build_router_preview(contract: SFEContract) -> RouterPreviewDiagnostics:
         ),
         estimated_reduction_pct=contract.audit.get("estimated_reduction_pct"),
         fallback_reason=contract.audit.get("fallback_reason"),
+        score_category_counts=dict(
+            contract.audit.get("router_score_category_counts") or {}
+        ),
     )
-
-
-def _estimated_reduction_pct(
-    input_tokens: int,
-    selected_tokens: int,
-) -> float | None:
-    if input_tokens <= 0:
-        return None
-    return round((1 - (selected_tokens / input_tokens)) * 100, 2)

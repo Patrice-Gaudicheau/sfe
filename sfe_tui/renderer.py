@@ -113,7 +113,7 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
                 f"  provider calls made: {preview.provider_calls_made}",
                 f"  writes enabled: {str(preview.writes_enabled).lower()}",
                 f"  shell enabled: {str(preview.shell_enabled).lower()}",
-                "  note: deterministic preview only, not an LLM router result",
+                "  note: local preview only, not an LLM router result",
             ]
         )
     if result.router_preview is not None:
@@ -133,7 +133,8 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
                 f"  estimated selected tokens: {router.estimated_selected_tokens}",
                 f"  estimated reduction pct: {router.estimated_reduction_pct}",
                 f"  fallback reason: {router.fallback_reason}",
-                "  note: real SFE router not invoked; provider-backed router integration is a later phase",
+                f"  score categories: {router.score_category_counts}",
+                "  note: provider-free lexical preview only, not an LLM router result",
             ]
         )
     return "\n".join(lines)

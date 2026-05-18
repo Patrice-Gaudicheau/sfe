@@ -15,10 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
-    DETERMINISTIC_PREVIEW_MODE,
     DirectBackend,
     ProxyBackend,
-    ROUTER_UNAVAILABLE_REASON,
     backend_by_name,
 )
 from sfe_tui.contracts import (
@@ -31,6 +29,12 @@ from sfe_tui.contracts import (
     resolve_workspace,
 )
 from sfe_tui.renderer import render_dry_run_summary, render_help, render_status
+from sfe_tui.routers import (
+    LOCAL_LEXICAL_PREVIEW_MODE,
+    NO_MATCHING_CONTEXT_TERMS,
+    NO_REDUCIBLE_CONTEXT_SEGMENTS,
+    LocalSegmentRouter,
+)
 
 
 class FakeInput:
@@ -273,7 +277,7 @@ def test_dry_run_summary_does_not_include_file_contents(tmp_path) -> None:
     assert "SECRET_TASK_TEXT" not in rendered
     assert "requested files: 1" in rendered
     assert "loaded files: 1" in rendered
-    assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
     assert "request body" not in rendered.lower()
     assert "Authorization" not in rendered
 
@@ -312,7 +316,7 @@ def test_app_loop_handles_mocked_commands_and_quit(tmp_path) -> None:
     assert "Context sources loaded: 1; skipped: 0" in rendered
     assert "Task stored." in rendered
     assert "SFE dry-run summary" in rendered
-    assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
     assert "selected segment ids: ['ctx_" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
@@ -431,6 +435,77 @@ def test_backend_dry_run_makes_no_provider_calls(tmp_path) -> None:
     assert ProxyBackend().dry_run(contract).provider_calls_made == 0
 
 
+def test_local_segment_router_selects_matching_segment() -> None:
+    alpha = ContextSegment(
+        id="ctx_alpha",
+        source_ref="alpha.txt",
+        text="routing context alpha",
+        approx_size=21,
+        approx_tokens=6,
+    )
+    beta = ContextSegment(
+        id="ctx_beta",
+        source_ref="beta.txt",
+        text="unrelated material",
+        approx_size=18,
+        approx_tokens=5,
+    )
+
+    result = LocalSegmentRouter().route("Explain alpha routing", [beta, alpha])
+
+    assert result.router_mode == LOCAL_LEXICAL_PREVIEW_MODE
+    assert result.router_available is True
+    assert result.provider_calls_made == 0
+    assert result.selected_segment_ids == ["ctx_alpha"]
+    assert result.selected_segment_count == 1
+    assert result.fallback_reason is None
+
+
+def test_local_segment_router_only_considers_reducible_segments() -> None:
+    protected_like = ContextSegment(
+        id="ctx_protected_like",
+        source_ref="protected.txt",
+        text="alpha routing",
+        reducible=False,
+        approx_size=13,
+        approx_tokens=4,
+    )
+    reducible = ContextSegment(
+        id="ctx_reducible",
+        source_ref="context.txt",
+        text="alpha routing",
+        approx_size=13,
+        approx_tokens=4,
+    )
+
+    result = LocalSegmentRouter().route("alpha routing", [protected_like, reducible])
+
+    assert result.router_input_segment_ids == ["ctx_reducible"]
+    assert result.selected_segment_ids == ["ctx_reducible"]
+
+
+def test_local_segment_router_returns_safe_no_match_fallback() -> None:
+    segment = ContextSegment(
+        id="ctx_beta",
+        source_ref="beta.txt",
+        text="unrelated material",
+        approx_size=18,
+        approx_tokens=5,
+    )
+
+    result = LocalSegmentRouter().route("alpha routing", [segment])
+
+    assert result.selected_segment_ids == []
+    assert result.selected_segment_count == 0
+    assert result.fallback_reason == NO_MATCHING_CONTEXT_TERMS
+    assert result.score_category_counts == {
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "zero": 1,
+    }
+
+
 def test_direct_backend_selects_only_reducible_context_segments(tmp_path) -> None:
     first = tmp_path / "first.txt"
     second = tmp_path / "second.txt"
@@ -438,7 +513,7 @@ def test_direct_backend_selects_only_reducible_context_segments(tmp_path) -> Non
     second.write_text("second safe text", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Use both files.",
+        task="Find first and second text.",
         file_paths=[],
         context_files=[
             load_context_file(tmp_path, "first.txt"),
@@ -473,7 +548,7 @@ def test_direct_backend_never_selects_instructions_task_or_protected_segments(
     source.write_text("safe context text", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="SECRET_TASK_TEXT",
+        task="Find context text.",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -506,15 +581,12 @@ def test_direct_backend_sets_fallback_when_no_context_loaded(tmp_path) -> None:
 
     result = DirectBackend().dry_run(contract)
 
-    assert result.contract.audit["selector_mode"] == DETERMINISTIC_PREVIEW_MODE
-    assert result.contract.audit["fallback_reason"] == "no_reducible_context_segments"
+    assert result.contract.audit["selector_mode"] == LOCAL_LEXICAL_PREVIEW_MODE
+    assert result.contract.audit["fallback_reason"] == NO_REDUCIBLE_CONTEXT_SEGMENTS
     assert result.contract.audit["selected_segment_ids"] == []
     assert result.contract.audit["eligible_segment_count"] == 0
-    assert result.contract.audit["router_available"] is False
-    assert (
-        result.contract.audit["router_unavailable_reason"]
-        == ROUTER_UNAVAILABLE_REASON
-    )
+    assert result.contract.audit["router_available"] is True
+    assert result.contract.audit["router_unavailable_reason"] is None
     assert result.contract.audit["router_provider_calls_made"] == 0
 
 
@@ -523,7 +595,7 @@ def test_direct_backend_exposes_router_preview_metadata(tmp_path) -> None:
     source.write_text("safe context text", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="Find safe context.",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -532,31 +604,34 @@ def test_direct_backend_exposes_router_preview_metadata(tmp_path) -> None:
     router = result.router_preview
 
     assert router is not None
-    assert router.router_mode == DETERMINISTIC_PREVIEW_MODE
-    assert router.router_available is False
-    assert router.router_unavailable_reason == ROUTER_UNAVAILABLE_REASON
+    assert router.router_mode == LOCAL_LEXICAL_PREVIEW_MODE
+    assert router.router_available is True
+    assert router.router_unavailable_reason is None
     assert router.router_provider_calls_made == 0
     assert router.input_segment_count == 1
     assert router.eligible_segment_count == 1
     assert router.selected_segment_count == 1
     assert router.selected_segment_ids == [contract.context_segments[0].id]
     assert router.router_input_segment_ids == [contract.context_segments[0].id]
+    assert router.score_category_counts["medium"] == 1
 
 
-def test_direct_backend_populates_selected_segment_ids_deterministically(
+def test_direct_backend_populates_selected_segment_ids_by_lexical_score(
     tmp_path,
 ) -> None:
-    for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
-        (tmp_path / name).write_text(name * 10, encoding="utf-8")
+    (tmp_path / "alpha.txt").write_text("alpha beta gamma", encoding="utf-8")
+    (tmp_path / "beta.txt").write_text("beta gamma", encoding="utf-8")
+    (tmp_path / "gamma.txt").write_text("gamma", encoding="utf-8")
+    (tmp_path / "delta.txt").write_text("unmatched", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="alpha beta gamma",
         file_paths=[],
         context_files=[
-            load_context_file(tmp_path, "a.txt"),
-            load_context_file(tmp_path, "b.txt"),
-            load_context_file(tmp_path, "c.txt"),
-            load_context_file(tmp_path, "d.txt"),
+            load_context_file(tmp_path, "alpha.txt"),
+            load_context_file(tmp_path, "beta.txt"),
+            load_context_file(tmp_path, "gamma.txt"),
+            load_context_file(tmp_path, "delta.txt"),
         ],
     )
 
@@ -568,6 +643,12 @@ def test_direct_backend_populates_selected_segment_ids_deterministically(
     assert second.contract.audit["selected_segment_ids"] == expected
     assert first.contract.audit["selected_segment_count"] == 3
     assert first.contract.audit["eligible_segment_count"] == 4
+    assert first.contract.audit["router_score_category_counts"] == {
+        "high": 0,
+        "medium": 2,
+        "low": 1,
+        "zero": 1,
+    }
 
 
 def test_direct_backend_estimates_tokens_and_reduction_pct(tmp_path) -> None:
@@ -577,7 +658,7 @@ def test_direct_backend_estimates_tokens_and_reduction_pct(tmp_path) -> None:
     second.write_text("b" * 40, encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="first second.",
         file_paths=[],
         context_files=[
             load_context_file(tmp_path, "first.txt"),
@@ -599,7 +680,7 @@ def test_direct_backend_dry_run_returns_execution_preview(tmp_path) -> None:
     source.write_text("safe context text", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="Find context.",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -608,7 +689,7 @@ def test_direct_backend_dry_run_returns_execution_preview(tmp_path) -> None:
 
     assert result.execution_preview is not None
     assert result.execution_preview.backend_name == "direct"
-    assert result.execution_preview.selector_mode == DETERMINISTIC_PREVIEW_MODE
+    assert result.execution_preview.selector_mode == LOCAL_LEXICAL_PREVIEW_MODE
 
 
 def test_execution_preview_includes_selected_ids_counts_and_estimates(
@@ -620,7 +701,7 @@ def test_execution_preview_includes_selected_ids_counts_and_estimates(
     second.write_text("b" * 40, encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="first second.",
         file_paths=[],
         context_files=[
             load_context_file(tmp_path, "first.txt"),
@@ -649,7 +730,7 @@ def test_execution_preview_reports_disabled_capabilities_and_no_provider_calls(
     source.write_text("safe context text", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="Find context.",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -669,7 +750,7 @@ def test_execution_preview_keeps_internal_payload_without_rendering_it(
     source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="SECRET_TASK_TEXT",
+        task="SECRET_TASK_TEXT context",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -679,7 +760,7 @@ def test_execution_preview_keeps_internal_payload_without_rendering_it(
     rendered = render_dry_run_summary(contract, result)
 
     assert preview is not None
-    assert preview.executor_payload["task"].text == "SECRET_TASK_TEXT"
+    assert preview.executor_payload["task"].text == "SECRET_TASK_TEXT context"
     assert (
         preview.executor_payload["selected_context_segments"][0].text
         == "SECRET_FILE_CONTENT"
@@ -702,7 +783,7 @@ def test_execution_preview_handles_no_context_with_fallback(tmp_path) -> None:
     assert preview is not None
     assert preview.selected_segment_ids == []
     assert preview.selected_segment_count == 0
-    assert preview.fallback_reason == "no_reducible_context_segments"
+    assert preview.fallback_reason == NO_REDUCIBLE_CONTEXT_SEGMENTS
     assert preview.selected_context_token_estimate == 0
 
 
@@ -711,7 +792,7 @@ def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
     source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="Find context.",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -719,11 +800,11 @@ def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
 
     rendered = render_dry_run_summary(contract, result)
 
-    assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
     assert "DirectBackend execution preview" in rendered
     assert "DirectBackend router preview" in rendered
-    assert "router available: False" in rendered
-    assert f"router unavailable reason: {ROUTER_UNAVAILABLE_REASON}" in rendered
+    assert "router available: True" in rendered
+    assert "router unavailable reason: None" in rendered
     assert "router provider calls made: 0" in rendered
     assert "selected segment ids: ['ctx_" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
@@ -739,7 +820,7 @@ def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
     source.write_text("safe context text", encoding="utf-8")
     contract = build_contract(
         workspace_root=tmp_path,
-        task="Task.",
+        task="Find context.",
         file_paths=[],
         context_files=[load_context_file(tmp_path, "context.txt")],
     )
@@ -770,10 +851,10 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
     rendered = render_dry_run_summary(contract, result)
 
     assert "DirectBackend router preview" in rendered
-    assert f"router mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
-    assert "router available: False" in rendered
-    assert f"router unavailable reason: {ROUTER_UNAVAILABLE_REASON}" in rendered
-    assert "provider-backed router integration is a later phase" in rendered
+    assert f"router mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
+    assert "router available: True" in rendered
+    assert "router unavailable reason: None" in rendered
+    assert "provider-free lexical preview only" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "SECRET_TASK_TEXT" not in rendered
     assert str(tmp_path) not in rendered
@@ -806,5 +887,6 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "No `/backend` command" in note
     assert "CodexCLI path remain compatibility and stress-test" in note
     assert "Router integration comes before executor integration" in note
-    assert "`router_unavailable_reason=provider_required`" in note
+    assert "`local_lexical_preview`" in note
+    assert "not an LLM router result" in note
     assert "tui_direct_backend_strategy.md" in index
