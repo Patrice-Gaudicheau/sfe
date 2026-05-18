@@ -66,6 +66,20 @@ Real SFE router integration should be introduced before any executor
 integration. Executor calls remain out of scope for the current TUI dry-run
 path.
 
+## Read-Only Ask Phase
+
+`/ask` is the first read-only executor phase. It uses DirectBackend only,
+routes explicit `context_segments` through `local_lexical_preview`, and sends
+only the selected context segments plus protected instructions and the protected
+task to the executor.
+
+This path may call the configured OpenAI executor provider, but it does not use
+the proxy, write files, execute shell commands, expose backend switching, or run
+an agent loop. The assistant answer is displayed to the user; diagnostics remain
+sanitized to counts, opaque ids, token estimates, provider call count, and
+disabled capability flags. Write tools and shell/tool execution remain later
+phases.
+
 ## Safety Posture
 
 The TUI should continue to avoid:

@@ -18,6 +18,7 @@ def render_help() -> str:
             "  /files <paths...>  Add context source files or directories",
             "  /task <text>       Set the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
+            "  /ask               Ask a read-only question using selected context",
             "  /quit, /exit       Exit",
         ]
     )
@@ -138,4 +139,29 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
                 "  note: provider-free lexical preview only, not an LLM router result",
             ]
         )
+    return "\n".join(lines)
+
+
+def render_ask_result(result: BackendResult) -> str:
+    lines: list[str] = []
+    if result.answer:
+        lines.extend(["SFE answer", result.answer])
+    else:
+        lines.extend(["SFE ask failed", f"  reason: {result.error_category}"])
+    audit = result.contract.audit
+    lines.extend(
+        [
+            "SFE ask summary",
+            f"  router mode: {audit.get('router_mode')}",
+            f"  selected segment count: {audit.get('selected_segment_count')}",
+            f"  selected segment ids: {audit.get('selected_segment_ids')}",
+            f"  estimated input tokens: {audit.get('estimated_input_tokens')}",
+            f"  estimated selected tokens: {audit.get('estimated_selected_tokens')}",
+            f"  estimated reduction pct: {audit.get('estimated_reduction_pct')}",
+            f"  fallback reason: {audit.get('fallback_reason')}",
+            f"  provider calls made: {result.provider_calls_made}",
+            "  writes enabled: no",
+            "  shell enabled: no",
+        ]
+    )
     return "\n".join(lines)

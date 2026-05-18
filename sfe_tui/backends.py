@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .contracts import ContextSegment, SFEContract
+from .executors import ExecutorResponse, OpenAIReadOnlyExecutor, ReadOnlyExecutor
 from .routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
     LocalSegmentRouter,
@@ -59,6 +60,8 @@ class BackendResult:
     contract: SFEContract
     execution_preview: DirectExecutionPreview | None = None
     router_preview: RouterPreviewDiagnostics | None = None
+    answer: str | None = None
+    error_category: str | None = None
 
 
 class BackendAdapter(Protocol):
@@ -74,11 +77,22 @@ class BackendAdapter(Protocol):
 class DirectBackend:
     name = "direct"
 
+    def __init__(self, executor: ReadOnlyExecutor | None = None) -> None:
+        self.executor = executor or OpenAIReadOnlyExecutor()
+
     def dry_run(self, contract: SFEContract) -> BackendResult:
         return _local_router_preview_result(self.name, contract)
 
     def run(self, contract: SFEContract) -> BackendResult:
-        raise NotImplementedError("Direct backend execution is not implemented yet.")
+        routed = self.dry_run(contract)
+        if contract.task is None:
+            return ask_error_result(routed, "missing_task")
+        if not contract.context_segments:
+            return ask_error_result(routed, "no_context_loaded")
+        if routed.execution_preview is None or not routed.execution_preview.selected_segment_ids:
+            return ask_error_result(routed, "no_selected_context")
+        executor_response = self.executor.execute(routed.execution_preview.executor_payload)
+        return _ask_result_from_executor_response(routed, executor_response)
 
 
 class ProxyBackend:
@@ -98,6 +112,42 @@ def backend_by_name(name: str) -> BackendAdapter:
     if normalized == "proxy":
         return ProxyBackend()
     raise ValueError("unsupported_backend")
+
+
+def ask_error_result(result: BackendResult, error_category: str) -> BackendResult:
+    return BackendResult(
+        backend=result.backend,
+        status="ask_failed",
+        provider_calls_made=0,
+        summary={**result.summary, "ask_error_category": error_category},
+        contract=result.contract,
+        execution_preview=result.execution_preview,
+        router_preview=result.router_preview,
+        answer=None,
+        error_category=error_category,
+    )
+
+
+def _ask_result_from_executor_response(
+    routed: BackendResult,
+    executor_response: ExecutorResponse,
+) -> BackendResult:
+    status = "ask_completed" if executor_response.answer else "ask_failed"
+    return BackendResult(
+        backend=routed.backend,
+        status=status,
+        provider_calls_made=executor_response.provider_calls_made,
+        summary={
+            **routed.summary,
+            "provider_calls_made": executor_response.provider_calls_made,
+            "ask_error_category": executor_response.error_category,
+        },
+        contract=routed.contract,
+        execution_preview=routed.execution_preview,
+        router_preview=routed.router_preview,
+        answer=executor_response.answer,
+        error_category=executor_response.error_category,
+    )
 
 
 def _local_router_preview_result(name: str, contract: SFEContract) -> BackendResult:

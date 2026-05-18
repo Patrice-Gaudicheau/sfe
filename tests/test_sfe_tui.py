@@ -29,6 +29,7 @@ from sfe_tui.contracts import (
     resolve_context_path,
     resolve_workspace,
 )
+from sfe_tui.executors import ExecutorResponse, OpenAIReadOnlyExecutor
 from sfe_tui.renderer import render_dry_run_summary, render_help, render_status
 from sfe_tui.routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
@@ -47,6 +48,48 @@ class FakeInput:
             return default
         value = self.values.pop(0)
         return value if value else default
+
+
+class FakeExecutor:
+    def __init__(
+        self,
+        response: ExecutorResponse | None = None,
+    ) -> None:
+        self.response = response or ExecutorResponse(
+            answer="mock answer",
+            error_category=None,
+            provider_calls_made=1,
+        )
+        self.calls: list[dict[str, object]] = []
+
+    def execute(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        self.calls.append(executor_payload)
+        return self.response
+
+
+class FakeProvider:
+    def __init__(
+        self,
+        *,
+        ok: bool = True,
+        response: dict[str, object] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.ok = ok
+        self.response = response or {
+            "choices": [{"message": {"content": "provider answer"}}]
+        }
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def health(self) -> dict[str, object]:
+        return {"ok": self.ok, "error": "sk-SECRET_SHOULD_NOT_RENDER_123456"}
+
+    def chat(self, messages: list[dict[str, str]], **kwargs: object) -> dict[str, object]:
+        self.calls.append({"messages": messages, **kwargs})
+        if self.error is not None:
+            raise self.error
+        return self.response
 
 
 def test_startup_accepts_empty_workspace_input_and_uses_cwd(tmp_path) -> None:
@@ -436,6 +479,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     rendered = render_help()
 
     assert "/status" in rendered
+    assert "/ask" in rendered
     assert "/backend" not in rendered
 
 
@@ -486,6 +530,214 @@ def test_backend_dry_run_makes_no_provider_calls(tmp_path) -> None:
 
     assert DirectBackend().dry_run(contract).provider_calls_made == 0
     assert ProxyBackend().dry_run(contract).provider_calls_made == 0
+
+
+def test_ask_requires_task(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("context", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files context.txt", "/ask", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "building contract" in rendered
+    assert "Error: missing_task" in rendered
+    assert not executor.calls
+
+
+def test_ask_requires_loaded_context(tmp_path) -> None:
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Explain context", "/ask", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: no_context_loaded" in rendered
+    assert not executor.calls
+
+
+def test_ask_refuses_when_router_selects_no_context(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("unrelated material", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task database migrations", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "routing context" in rendered
+    assert "SFE ask failed" in rendered
+    assert "reason: no_selected_context" in rendered
+    assert "calling provider" not in rendered
+    assert not executor.calls
+
+
+def test_direct_backend_run_uses_selected_context_only(tmp_path) -> None:
+    alpha = tmp_path / "alpha.txt"
+    beta = tmp_path / "beta.txt"
+    alpha.write_text("ALPHA_SECRET_CONTENT alpha routing", encoding="utf-8")
+    beta.write_text("BETA_SECRET_CONTENT unrelated", encoding="utf-8")
+    executor = FakeExecutor()
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Explain alpha routing.",
+        file_paths=[],
+        context_files=[
+            load_context_file(tmp_path, "alpha.txt"),
+            load_context_file(tmp_path, "beta.txt"),
+        ],
+    )
+
+    result = DirectBackend(executor=executor).run(contract)
+
+    assert result.answer == "mock answer"
+    assert result.provider_calls_made == 1
+    assert len(executor.calls) == 1
+    selected = executor.calls[0]["selected_context_segments"]
+    assert [segment.id for segment in selected] == [contract.context_segments[0].id]
+    assert selected[0].text == "ALPHA_SECRET_CONTENT alpha routing"
+    assert all("BETA_SECRET_CONTENT" not in segment.text for segment in selected)
+
+
+def test_direct_backend_run_does_not_send_protected_segments_as_context(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    executor = FakeExecutor()
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Explain selected context.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+    contract = replace(
+        contract,
+        protected_segments=[
+            ProtectedText(id="protected_segment", text="PROTECTED_SEGMENT_SECRET"),
+        ],
+    )
+
+    DirectBackend(executor=executor).run(contract)
+
+    payload = executor.calls[0]
+    assert "protected_segments" not in payload
+    assert payload["instructions"]
+    assert payload["task"] is contract.task
+    assert payload["selected_context_segments"] == contract.context_segments
+
+
+def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT context", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain context", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=FakeExecutor()),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    summary = rendered.split("SFE ask summary", 1)[1]
+    assert "calling provider" in rendered
+    assert "answer received" in rendered
+    assert "SFE answer\nmock answer" in rendered
+    assert "router mode: local_lexical_preview" in summary
+    assert "selected segment ids: ['ctx_" in summary
+    assert "provider calls made: 1" in summary
+    assert "writes enabled: no" in summary
+    assert "shell enabled: no" in summary
+    assert "SECRET_FILE_CONTENT" not in summary
+    assert "Explain context" not in summary
+    assert str(tmp_path) not in summary
+
+
+def test_ask_provider_failure_is_category_only(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("context", encoding="utf-8")
+    api_key = "sk-SECRET_SHOULD_NOT_RENDER_123456"
+    executor = FakeExecutor(
+        ExecutorResponse(
+            answer=None,
+            error_category="provider_error",
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain context", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE ask failed" in rendered
+    assert "reason: provider_error" in rendered
+    assert api_key not in rendered
+    assert "Authorization" not in rendered
+    assert "request body" not in rendered.lower()
+    assert "provider payload" not in rendered.lower()
+
+
+def test_openai_executor_reports_provider_not_configured_without_key_leak() -> None:
+    provider = FakeProvider(ok=False)
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.execute(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    assert result.answer is None
+    assert result.error_category == "provider_not_configured"
+    assert result.provider_calls_made == 0
+    assert not provider.calls
+
+
+def test_openai_executor_returns_invalid_response_category() -> None:
+    provider = FakeProvider(response={"choices": [{"message": {"content": ""}}]})
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.execute(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    assert result.answer is None
+    assert result.error_category == "invalid_response"
+    assert result.provider_calls_made == 1
 
 
 def test_local_segment_router_selects_matching_segment() -> None:
@@ -941,5 +1193,8 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "CodexCLI path remain compatibility and stress-test" in note
     assert "Router integration comes before executor integration" in note
     assert "`local_lexical_preview`" in note
+    assert "`/ask` is the first read-only executor phase" in note
+    assert "does not use" in note
+    assert "the proxy, write files, execute shell commands" in note
     assert "not an LLM router result" in note
     assert "tui_direct_backend_strategy.md" in index

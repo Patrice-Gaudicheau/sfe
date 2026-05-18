@@ -6,8 +6,13 @@ import shlex
 from pathlib import Path
 from typing import Callable
 
-from .backends import BackendAdapter, backend_by_name
-from .contracts import ContextLoadResult, build_contract, load_context_file, resolve_workspace
+from .backends import BackendAdapter, ask_error_result, backend_by_name
+from .contracts import (
+    ContextLoadResult,
+    build_contract,
+    load_context_file,
+    resolve_workspace,
+)
 from .input import TerminalInput
 from . import renderer
 
@@ -94,6 +99,9 @@ class SfeTuiApp:
         if name == "/dry-run":
             self._handle_dry_run()
             return False
+        if name == "/ask":
+            self._handle_ask()
+            return False
         self.output(renderer.render_error("unknown_command"))
         return False
 
@@ -123,6 +131,35 @@ class SfeTuiApp:
         )
         result = self.backend.dry_run(contract)
         self.output(renderer.render_dry_run_summary(contract, result))
+
+    def _handle_ask(self) -> None:
+        self.output("building contract")
+        contract = build_contract(
+            workspace_root=self.workspace_root,
+            task=self.task,
+            file_paths=[],
+            context_files=self.context_files,
+        )
+        if contract.task is None:
+            self.output(renderer.render_error("missing_task"))
+            return
+        if not contract.context_segments:
+            self.output(renderer.render_error("no_context_loaded"))
+            return
+        self.output("routing context")
+        routed = self.backend.dry_run(contract)
+        if not routed.contract.audit.get("selected_segment_ids"):
+            self.output(
+                renderer.render_ask_result(
+                    ask_error_result(routed, "no_selected_context")
+                )
+            )
+            return
+        self.output("calling provider")
+        result = self.backend.run(contract)
+        if result.answer:
+            self.output("answer received")
+        self.output(renderer.render_ask_result(result))
 
 
 def main() -> int:
