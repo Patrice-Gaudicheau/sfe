@@ -10,6 +10,7 @@ from .contracts import ContextSegment, SFEContract
 
 DETERMINISTIC_PREVIEW_MODE = "deterministic_preview"
 MAX_PREVIEW_SEGMENTS = 3
+ROUTER_UNAVAILABLE_REASON = "provider_required"
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,23 @@ class DirectExecutionPreview:
 
 
 @dataclass(frozen=True)
+class RouterPreviewDiagnostics:
+    router_mode: str
+    router_available: bool
+    router_unavailable_reason: str | None
+    router_provider_calls_made: int
+    input_segment_count: int
+    eligible_segment_count: int
+    selected_segment_count: int
+    selected_segment_ids: list[str]
+    router_input_segment_ids: list[str]
+    estimated_input_tokens: int
+    estimated_selected_tokens: int
+    estimated_reduction_pct: float | None
+    fallback_reason: str | None
+
+
+@dataclass(frozen=True)
 class BackendResult:
     backend: str
     status: str
@@ -40,6 +58,7 @@ class BackendResult:
     summary: dict[str, object]
     contract: SFEContract
     execution_preview: DirectExecutionPreview | None = None
+    router_preview: RouterPreviewDiagnostics | None = None
 
 
 class BackendAdapter(Protocol):
@@ -89,6 +108,7 @@ def _deterministic_preview_result(name: str, contract: SFEContract) -> BackendRe
     ]
     selected = eligible[:MAX_PREVIEW_SEGMENTS]
     selected_ids = [segment.id for segment in selected]
+    eligible_ids = [segment.id for segment in eligible]
     input_tokens = sum(segment.approx_tokens for segment in contract.context_segments)
     selected_tokens = sum(segment.approx_tokens for segment in selected)
     reduction_pct = _estimated_reduction_pct(input_tokens, selected_tokens)
@@ -98,6 +118,10 @@ def _deterministic_preview_result(name: str, contract: SFEContract) -> BackendRe
         "selected_segment_ids": selected_ids,
         "selector_mode": DETERMINISTIC_PREVIEW_MODE,
         "router_mode": DETERMINISTIC_PREVIEW_MODE,
+        "router_available": False,
+        "router_unavailable_reason": ROUTER_UNAVAILABLE_REASON,
+        "router_provider_calls_made": 0,
+        "router_input_segment_ids": eligible_ids,
         "fallback_reason": fallback_reason,
         "input_segment_count": len(contract.context_segments),
         "eligible_segment_count": len(eligible),
@@ -113,11 +137,13 @@ def _deterministic_preview_result(name: str, contract: SFEContract) -> BackendRe
         contract=updated,
         selected_segments=selected,
     )
+    router_preview = _build_router_preview(updated)
     return _dry_run_result(
         name,
         updated,
         selector_mode=DETERMINISTIC_PREVIEW_MODE,
         execution_preview=execution_preview,
+        router_preview=router_preview,
     )
 
 
@@ -127,6 +153,7 @@ def _dry_run_result(
     *,
     selector_mode: str,
     execution_preview: DirectExecutionPreview | None = None,
+    router_preview: RouterPreviewDiagnostics | None = None,
 ) -> BackendResult:
     return BackendResult(
         backend=name,
@@ -149,9 +176,17 @@ def _dry_run_result(
             "estimated_input_tokens": contract.audit.get("estimated_input_tokens"),
             "estimated_selected_tokens": contract.audit.get("estimated_selected_tokens"),
             "estimated_reduction_pct": contract.audit.get("estimated_reduction_pct"),
+            "router_available": contract.audit.get("router_available"),
+            "router_unavailable_reason": contract.audit.get(
+                "router_unavailable_reason"
+            ),
+            "router_provider_calls_made": contract.audit.get(
+                "router_provider_calls_made"
+            ),
         },
         contract=contract,
         execution_preview=execution_preview,
+        router_preview=router_preview,
     )
 
 
@@ -187,6 +222,30 @@ def _build_execution_preview(
             "task": contract.task,
             "selected_context_segments": selected_segments,
         },
+    )
+
+
+def _build_router_preview(contract: SFEContract) -> RouterPreviewDiagnostics:
+    return RouterPreviewDiagnostics(
+        router_mode=str(contract.audit.get("router_mode") or DETERMINISTIC_PREVIEW_MODE),
+        router_available=bool(contract.audit.get("router_available")),
+        router_unavailable_reason=contract.audit.get("router_unavailable_reason"),
+        router_provider_calls_made=int(
+            contract.audit.get("router_provider_calls_made") or 0
+        ),
+        input_segment_count=int(contract.audit.get("input_segment_count") or 0),
+        eligible_segment_count=int(contract.audit.get("eligible_segment_count") or 0),
+        selected_segment_count=int(contract.audit.get("selected_segment_count") or 0),
+        selected_segment_ids=list(contract.audit.get("selected_segment_ids") or []),
+        router_input_segment_ids=list(
+            contract.audit.get("router_input_segment_ids") or []
+        ),
+        estimated_input_tokens=int(contract.audit.get("estimated_input_tokens") or 0),
+        estimated_selected_tokens=int(
+            contract.audit.get("estimated_selected_tokens") or 0
+        ),
+        estimated_reduction_pct=contract.audit.get("estimated_reduction_pct"),
+        fallback_reason=contract.audit.get("fallback_reason"),
     )
 
 

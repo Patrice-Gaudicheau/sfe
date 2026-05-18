@@ -42,6 +42,26 @@ run the SFE flow.
 - The deterministic preview is not an LLM router result and must be labeled as
   a local preview.
 
+## Router Before Executor
+
+Router integration comes before executor integration because SFE's core value
+is explicit context routing and reduction. The TUI should first prove that it
+can pass explicit reducible `context_segments` through a safe routing boundary,
+record selected opaque segment ids, and report token estimates without exposing
+file contents.
+
+The current `deterministic_preview` path remains only a pipeline preview. The
+existing generic SFE router paths are provider-backed, and the benchmark
+dry-run selector depends on fixture oracle labels rather than arbitrary
+first-party TUI context. Until a provider-free first-party segment router exists,
+the TUI records `router_available=false` and
+`router_unavailable_reason=provider_required` while keeping deterministic
+preview as the active selector.
+
+Real SFE router integration should be introduced before any executor
+integration. Executor calls remain out of scope for the current TUI dry-run
+path.
+
 ## Safety Posture
 
 The TUI should continue to avoid:

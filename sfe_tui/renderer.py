@@ -116,4 +116,24 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
                 "  note: deterministic preview only, not an LLM router result",
             ]
         )
+    if result.router_preview is not None:
+        router = result.router_preview
+        lines.extend(
+            [
+                "DirectBackend router preview",
+                f"  router mode: {router.router_mode}",
+                f"  router available: {router.router_available}",
+                f"  router unavailable reason: {router.router_unavailable_reason}",
+                f"  router provider calls made: {router.router_provider_calls_made}",
+                f"  input segments: {router.input_segment_count}",
+                f"  eligible segments: {router.eligible_segment_count}",
+                f"  selected segments: {router.selected_segment_count}",
+                f"  selected segment ids: {router.selected_segment_ids}",
+                f"  estimated input tokens: {router.estimated_input_tokens}",
+                f"  estimated selected tokens: {router.estimated_selected_tokens}",
+                f"  estimated reduction pct: {router.estimated_reduction_pct}",
+                f"  fallback reason: {router.fallback_reason}",
+                "  note: real SFE router not invoked; provider-backed router integration is a later phase",
+            ]
+        )
     return "\n".join(lines)

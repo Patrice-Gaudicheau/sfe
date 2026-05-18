@@ -18,6 +18,7 @@ from sfe_tui.backends import (
     DETERMINISTIC_PREVIEW_MODE,
     DirectBackend,
     ProxyBackend,
+    ROUTER_UNAVAILABLE_REASON,
     backend_by_name,
 )
 from sfe_tui.contracts import (
@@ -460,6 +461,7 @@ def test_direct_backend_selects_only_reducible_context_segments(tmp_path) -> Non
     result = DirectBackend().dry_run(contract)
 
     assert "ctx_nonreducible" not in result.contract.audit["selected_segment_ids"]
+    assert "ctx_nonreducible" not in result.contract.audit["router_input_segment_ids"]
     assert result.contract.audit["eligible_segment_count"] == 2
     assert result.contract.audit["selected_segment_count"] == 2
 
@@ -488,6 +490,9 @@ def test_direct_backend_never_selects_instructions_task_or_protected_segments(
     assert "instructions_default" not in selected_ids
     assert "task_current" not in selected_ids
     assert "protected_segment" not in selected_ids
+    assert result.contract.audit["router_input_segment_ids"] == [
+        contract.context_segments[0].id
+    ]
     assert selected_ids == [contract.context_segments[0].id]
 
 
@@ -505,6 +510,37 @@ def test_direct_backend_sets_fallback_when_no_context_loaded(tmp_path) -> None:
     assert result.contract.audit["fallback_reason"] == "no_reducible_context_segments"
     assert result.contract.audit["selected_segment_ids"] == []
     assert result.contract.audit["eligible_segment_count"] == 0
+    assert result.contract.audit["router_available"] is False
+    assert (
+        result.contract.audit["router_unavailable_reason"]
+        == ROUTER_UNAVAILABLE_REASON
+    )
+    assert result.contract.audit["router_provider_calls_made"] == 0
+
+
+def test_direct_backend_exposes_router_preview_metadata(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("safe context text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+
+    result = DirectBackend().dry_run(contract)
+    router = result.router_preview
+
+    assert router is not None
+    assert router.router_mode == DETERMINISTIC_PREVIEW_MODE
+    assert router.router_available is False
+    assert router.router_unavailable_reason == ROUTER_UNAVAILABLE_REASON
+    assert router.router_provider_calls_made == 0
+    assert router.input_segment_count == 1
+    assert router.eligible_segment_count == 1
+    assert router.selected_segment_count == 1
+    assert router.selected_segment_ids == [contract.context_segments[0].id]
+    assert router.router_input_segment_ids == [contract.context_segments[0].id]
 
 
 def test_direct_backend_populates_selected_segment_ids_deterministically(
@@ -685,6 +721,10 @@ def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
 
     assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
     assert "DirectBackend execution preview" in rendered
+    assert "DirectBackend router preview" in rendered
+    assert "router available: False" in rendered
+    assert f"router unavailable reason: {ROUTER_UNAVAILABLE_REASON}" in rendered
+    assert "router provider calls made: 0" in rendered
     assert "selected segment ids: ['ctx_" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert str(tmp_path) not in rendered
@@ -708,11 +748,35 @@ def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
     rendered = render_dry_run_summary(contract, result)
 
     assert "DirectBackend execution preview" in rendered
+    assert "DirectBackend router preview" in rendered
     assert "backend name: direct" in rendered
     assert "provider calls made: 0" in rendered
     assert "writes enabled: false" in rendered
     assert "shell enabled: false" in rendered
     assert "not an LLM router result" in rendered
+
+
+def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="SECRET_TASK_TEXT",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+    result = DirectBackend().dry_run(contract)
+
+    rendered = render_dry_run_summary(contract, result)
+
+    assert "DirectBackend router preview" in rendered
+    assert f"router mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert "router available: False" in rendered
+    assert f"router unavailable reason: {ROUTER_UNAVAILABLE_REASON}" in rendered
+    assert "provider-backed router integration is a later phase" in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+    assert "SECRET_TASK_TEXT" not in rendered
+    assert str(tmp_path) not in rendered
 
 
 def test_proxy_backend_dry_run_remains_safe_and_does_not_call_proxy(tmp_path) -> None:
@@ -741,4 +805,6 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "DirectBackend is the default and only exposed backend" in note
     assert "No `/backend` command" in note
     assert "CodexCLI path remain compatibility and stress-test" in note
+    assert "Router integration comes before executor integration" in note
+    assert "`router_unavailable_reason=provider_required`" in note
     assert "tui_direct_backend_strategy.md" in index
