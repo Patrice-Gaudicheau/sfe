@@ -462,6 +462,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "selected_zones_count": None,
             "selected_blocks_count": _log_selected_blocks_count(shadow_event),
         }
+        event.update(_enabled_compact_log_fields(shadow_event))
         self.server.log_sink(json.dumps(event, sort_keys=True))
 
     def _write_shadow_event(self, event: dict[str, Any]) -> None:
@@ -611,6 +612,23 @@ def _log_selected_blocks_count(shadow_event: dict[str, Any] | None) -> int | Non
     if isinstance(selected_ids, list):
         return len(selected_ids)
     return None
+
+
+def _enabled_compact_log_fields(shadow_event: dict[str, Any] | None) -> dict[str, Any]:
+    if shadow_event is None:
+        return {}
+    fields: dict[str, Any] = {}
+    for key in (
+        "enabled_reason",
+        "enabled_reduction_gate_passed",
+        "enabled_estimated_token_reduction_pct",
+        "enabled_min_reduction_pct",
+        "enabled_streaming_bypass",
+        "enabled_streaming_bypass_reason",
+    ):
+        if key in shadow_event:
+            fields[key] = shadow_event[key]
+    return fields
 
 
 def _enabled_fallback_to_original_fields(

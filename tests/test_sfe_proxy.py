@@ -1831,6 +1831,9 @@ def test_enabled_mode_streaming_request_falls_back_to_original_when_enabled(
     assert request_log["stream"] is True
     assert request_log["fallback_used"] is True
     assert request_log["selection_applied"] is False
+    assert request_log["enabled_reason"] == "streaming_not_supported"
+    assert request_log["enabled_streaming_bypass"] is True
+    assert request_log["enabled_streaming_bypass_reason"] == "streaming_not_supported"
     joined_logs = "\n".join(logs)
     assert "placeholder-client-token" not in joined_logs
     assert "upstream-secret" not in joined_logs
@@ -1969,8 +1972,14 @@ def test_enabled_mode_low_value_reduction_falls_back_to_original_when_enabled(
     assert request_log["sfe_mode"] == "enabled"
     assert request_log["fallback_used"] is True
     assert request_log["selection_applied"] is False
+    assert request_log["enabled_reason"] == "insufficient_token_reduction"
+    assert request_log["enabled_min_reduction_pct"] == ENABLED_MIN_REDUCTION_PCT
+    assert request_log["enabled_reduction_gate_passed"] is False
+    assert request_log["enabled_estimated_token_reduction_pct"] < ENABLED_MIN_REDUCTION_PCT
     joined_logs = "\n".join(logs)
     assert "placeholder-client-token" not in joined_logs
+    assert "Authorization" not in joined_logs
+    assert "input" not in joined_logs
     assert "Selected-but-not-worth-reducing" not in joined_logs
 
 
@@ -2100,9 +2109,13 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
     assert event["enabled_original_request_sent"] is True
     assert event["enabled_candidate_request_sent_to_upstream"] is False
     assert event["enabled_fallback_to_original"] is True
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "unsafe_task_envelope"
+    assert request_log["enabled_reduction_gate_passed"] is False
     joined_logs = "\n".join(logs)
     assert "src/alpha.py" not in joined_logs
     assert "Large selected background" not in joined_logs
+    assert "Authorization" not in joined_logs
 
 
 def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabled(
@@ -2246,6 +2259,9 @@ def test_enabled_mode_responses_replaces_safe_shape_with_meaningful_reduction(
     request_log = _last_proxy_log(logs, path="/v1/responses")
     assert request_log["fallback_used"] is False
     assert request_log["selection_applied"] is True
+    assert request_log["enabled_reduction_gate_passed"] is True
+    assert request_log["enabled_min_reduction_pct"] == ENABLED_MIN_REDUCTION_PCT
+    assert request_log["enabled_estimated_token_reduction_pct"] >= ENABLED_MIN_REDUCTION_PCT
 
 
 def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_sse(
@@ -2375,6 +2391,8 @@ def test_enabled_mode_opt_in_streaming_responses_replaces_context_and_forwards_s
     assert request_log["stream"] is True
     assert request_log["fallback_used"] is False
     assert request_log["selection_applied"] is True
+    assert request_log["enabled_reduction_gate_passed"] is True
+    assert request_log["enabled_estimated_token_reduction_pct"] >= ENABLED_MIN_REDUCTION_PCT
     joined_logs = "\n".join(logs)
     assert "placeholder-client-token" not in joined_logs
     assert "upstream-secret" not in joined_logs
