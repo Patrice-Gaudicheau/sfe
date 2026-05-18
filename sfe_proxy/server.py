@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from copy import deepcopy
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1364,13 +1365,20 @@ def _structured_responses_candidate_request(
     selected_ids = {segment["segment_id"] for segment in selected_segments}
     reducible_indices: set[int] = set()
     file_path_segment_ids: set[str] = set()
+    preserve_only_segment_ids: set[str] = set()
     segment_ids_by_index = _structured_responses_segment_ids_by_input_index(input_value)
     first_reducible_index: int | None = None
     for index, item in enumerate(input_value):
         if not _is_supported_text_only_responses_item(item):
-            return {"candidate_request": None, "reason": "unsafe_task_envelope"}
+            segment_id = segment_ids_by_index.get(index)
+            if segment_id is not None:
+                preserve_only_segment_ids.add(segment_id)
+            continue
         item_text = _structured_responses_item_text(item)
         if index == latest_user_index:
+            segment_id = segment_ids_by_index.get(index)
+            if segment_id is not None:
+                preserve_only_segment_ids.add(segment_id)
             continue
         if not item_text:
             continue
@@ -1378,11 +1386,15 @@ def _structured_responses_candidate_request(
             segment_id = segment_ids_by_index.get(index)
             if segment_id is not None:
                 file_path_segment_ids.add(segment_id)
+                preserve_only_segment_ids.add(segment_id)
             continue
         if (
             _estimated_text_tokens(item_text)
             <= ENABLED_PRESERVED_TEXT_MAX_TOKENS
         ):
+            segment_id = segment_ids_by_index.get(index)
+            if segment_id is not None:
+                preserve_only_segment_ids.add(segment_id)
             continue
         reducible_indices.add(index)
         if first_reducible_index is None:
@@ -1398,6 +1410,8 @@ def _structured_responses_candidate_request(
     }
     if selected_ids & file_path_segment_ids:
         return {"candidate_request": None, "reason": "file_paths_in_dropped_context"}
+    if selected_ids & preserve_only_segment_ids:
+        return {"candidate_request": None, "reason": "selected_segment_not_reducible"}
     if selected_ids - reducible_segment_ids:
         return {"candidate_request": None, "reason": "selected_segment_not_reducible"}
 
@@ -1414,7 +1428,7 @@ def _structured_responses_candidate_request(
             inserted_selected_context = True
         if index in reducible_indices:
             continue
-        preserved_input.append(item)
+        preserved_input.append(deepcopy(item))
     if not inserted_selected_context:
         preserved_input.insert(
             latest_user_index,

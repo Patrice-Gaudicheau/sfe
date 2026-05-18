@@ -2061,28 +2061,21 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
         enabled_fallback_to_original=True,
         enabled_streaming_replacement=True,
     )
+    unsupported_selected_context = "UNSUPPORTED_SELECTED_CONTEXT preserve only. " * 520
+    safe_reducible_context = "SAFE_REDUCIBLE_CONTEXT should not be selected. " * 260
     payload = {
         "model": "example-model",
         "stream": True,
         "input": [
             {
-                "role": "user",
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "Large selected background context. " * 120,
+                        "text": unsupported_selected_context,
                     }
                 ],
             },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_image",
-                        "image_url": "https://example.invalid/image.png",
-                    }
-                ],
-            },
+            _responses_text_item("user", safe_reducible_context),
             _responses_text_item("user", "Summarize the selected text."),
         ],
     }
@@ -2106,40 +2099,36 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
 
     event = _read_shadow_event(tmp_path)
     assert event["enabled_candidate_built"] is False
-    assert event["enabled_reason"] == "unsafe_task_envelope"
+    assert event["enabled_reason"] == "selected_segment_not_reducible"
     assert event["enabled_reduction_gate_passed"] is False
     assert event["enabled_original_request_sent"] is True
     assert event["enabled_candidate_request_sent_to_upstream"] is False
     assert event["enabled_fallback_to_original"] is True
     assert event["responses_input_envelope_kind"] == "structured_list"
     assert event["responses_input_item_count"] == 3
-    assert event["responses_input_role_distribution"] == {"user": 3}
+    assert event["responses_input_role_distribution"] == {"missing": 1, "user": 2}
     assert event["responses_input_content_part_counts"] == [1, 1, 1]
-    assert event["responses_input_content_part_type_distribution"] == {
-        "input_image": 1,
-        "input_text": 2,
-    }
+    assert event["responses_input_content_part_type_distribution"] == {"input_text": 3}
     assert event["responses_input_unsupported_item_count"] == 1
     assert event["responses_input_candidate_rejected"] is True
-    assert event["responses_input_candidate_rejection_reason"] == "unsafe_task_envelope"
+    assert event["responses_input_candidate_rejection_reason"] == "selected_segment_not_reducible"
     topology = event["responses_input_topology_items"]
-    assert topology[0]["appears_context_like"] is False
+    assert topology[0]["role"] == "missing"
     assert topology[0]["selected"] is True
-    assert topology[1]["content_part_types"] == ["input_image"]
-    assert topology[1]["is_protected"] is True
-    assert topology[1]["unsupported_reason"] == "unsupported_content_part_type"
+    assert topology[0]["is_protected"] is True
+    assert topology[0]["unsupported_reason"] == "missing_or_non_string_role"
     assert topology[2]["is_latest_user_task"] is True
     assert topology[2]["appears_task_like"] is True
     serialized_event = json.dumps(event)
-    assert "Large selected background" not in serialized_event
-    assert "example.invalid/image.png" not in serialized_event
+    assert "UNSUPPORTED_SELECTED_CONTEXT" not in serialized_event
+    assert "SAFE_REDUCIBLE_CONTEXT" not in serialized_event
     request_log = _last_proxy_log(logs, path="/v1/responses")
-    assert request_log["enabled_reason"] == "unsafe_task_envelope"
+    assert request_log["enabled_reason"] == "selected_segment_not_reducible"
     assert request_log["enabled_reduction_gate_passed"] is False
     assert not any(key.startswith("responses_input_") for key in request_log)
     joined_logs = "\n".join(logs)
-    assert "Large selected background" not in joined_logs
-    assert "example.invalid/image.png" not in joined_logs
+    assert "UNSUPPORTED_SELECTED_CONTEXT" not in joined_logs
+    assert "SAFE_REDUCIBLE_CONTEXT" not in joined_logs
     assert "Authorization" not in joined_logs
 
 
@@ -2156,28 +2145,21 @@ def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabl
         shadow_min_input_tokens=1,
         enabled_streaming_replacement=True,
     )
+    unsupported_selected_context = "UNSUPPORTED_SELECTED_CONTEXT strict reject. " * 520
+    safe_reducible_context = "SAFE_REDUCIBLE_CONTEXT strict path. " * 260
     payload = {
         "model": "example-model",
         "stream": True,
         "input": [
             {
-                "role": "user",
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "Large selected background context. " * 120,
+                        "text": unsupported_selected_context,
                     }
                 ],
             },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_image",
-                        "image_url": "https://example.invalid/image.png",
-                    }
-                ],
-            },
+            _responses_text_item("user", safe_reducible_context),
             _responses_text_item("user", "Summarize the selected text."),
         ],
     }
@@ -2205,12 +2187,12 @@ def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabl
         upstream.server_close()
 
     assert status == 422
-    assert body["error"]["reason"] == "unsafe_task_envelope"
+    assert body["error"]["reason"] == "selected_segment_not_reducible"
     assert RecordingUpstreamHandler.records == []
 
     event = _read_shadow_event(tmp_path)
     assert event["enabled_candidate_built"] is False
-    assert event["enabled_reason"] == "unsafe_task_envelope"
+    assert event["enabled_reason"] == "selected_segment_not_reducible"
     assert event["enabled_reduction_gate_passed"] is False
     assert event["enabled_request_sent"] is False
     assert event["enabled_original_request_sent"] is False
@@ -2837,6 +2819,141 @@ def test_enabled_mode_codexcli_like_structured_responses_replaces_streaming_cont
     assert "tests/test_proxy.py" not in joined_logs
     assert "CODEXCLI_SELECTED_REDUCIBLE_BACKGROUND" not in joined_logs
     assert "CODEXCLI_STALE_REDUCIBLE_TRANSCRIPT" not in joined_logs
+    assert "response.completed" not in joined_logs
+    assert "placeholder-client-token" not in joined_logs
+    assert "Authorization" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_preserves_unsupported_items_and_reduces_safe_text(
+    tmp_path,
+) -> None:
+    sse = (
+        b'event: response.created\n'
+        b'data: {"type":"response.created","response":{"id":"resp-preserve-unsupported"}}\n\n'
+        b'event: response.output_text.delta\n'
+        b'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+        b'event: response.completed\n'
+        b'data: {"type":"response.completed","response":{"id":"resp-preserve-unsupported"}}\n\n'
+    )
+    upstream = _start_upstream(
+        status=200,
+        body=sse,
+        headers={"Content-Type": "text/event-stream"},
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    no_role_metadata = {"type": "reasoning", "summary": []}
+    no_role_tool_item = {
+        "content": [
+            {
+                "type": "output_text",
+                "text": "UNSUPPORTED_TOOL_PAYLOAD preserve this exactly. " * 8,
+            }
+        ],
+        "status": "completed",
+    }
+    unsupported_part_item = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "output_text",
+                "text": "UNSUPPORTED_ASSISTANT_PART preserve this exactly. " * 8,
+            }
+        ],
+    }
+    preserved_file_task = "Review only src/proxy.py and tests/test_proxy.py."
+    stale_context = "CODEXCLI_STALE_REDUCIBLE_TRANSCRIPT remove this context. " * 280
+    selected_context = (
+        "CODEXCLI_SELECTED_SAFE_TEXT_CONTEXT authoritative context. "
+        "PRESERVED_UNSUPPORTED_VALUE is present. "
+    ) * 460
+    latest_task = "Use the selected safe text context and preserve the final task."
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Keep the task envelope intact."),
+            no_role_metadata,
+            no_role_tool_item,
+            _responses_text_item("user", preserved_file_task),
+            _responses_text_item("user", stale_context),
+            unsupported_part_item,
+            _responses_text_item("user", selected_context),
+            _responses_text_item("assistant", "Prior short assistant note."),
+            _responses_text_item("user", latest_task),
+        ],
+    }
+    try:
+        response = _request_raw(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            method="POST",
+            payload=payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["content_type"] == "text/event-stream"
+    assert b"response.completed" in response["body"]
+
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload != payload
+    assert upstream_payload["stream"] is True
+    assert no_role_metadata in upstream_payload["input"]
+    assert no_role_tool_item in upstream_payload["input"]
+    assert unsupported_part_item in upstream_payload["input"]
+    assert _responses_text_item("user", preserved_file_task) in upstream_payload["input"]
+    assert upstream_payload["input"][-1] == _responses_text_item("user", latest_task)
+    candidate_text = json.dumps(upstream_payload["input"])
+    assert "SFE selected context" in candidate_text
+    assert "PRESERVED_UNSUPPORTED_VALUE is present" in candidate_text
+    assert "CODEXCLI_STALE_REDUCIBLE_TRANSCRIPT" not in candidate_text
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_reason"] == "structured_candidate_request_built_for_diagnostics"
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_reduction_gate_passed"] is True
+    assert event["responses_input_candidate_rejected"] is False
+    assert event["responses_input_candidate_rejection_reason"] is None
+    assert event["responses_input_unsupported_item_count"] == 3
+    topology = event["responses_input_topology_items"]
+    assert topology[1]["unsupported_reason"] == "missing_or_non_string_role"
+    assert topology[2]["unsupported_reason"] == "missing_or_non_string_role"
+    assert topology[5]["unsupported_reason"] == "unsupported_content_part_type"
+    assert topology[6]["selected"] is True
+    assert topology[6]["appears_context_like"] is True
+    assert topology[8]["is_latest_user_task"] is True
+    serialized_event = json.dumps(event)
+    assert "UNSUPPORTED_TOOL_PAYLOAD" not in serialized_event
+    assert "UNSUPPORTED_ASSISTANT_PART" not in serialized_event
+    assert "src/proxy.py" not in serialized_event
+    assert "PRESERVED_UNSUPPORTED_VALUE" not in serialized_event
+
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["fallback_used"] is False
+    assert request_log["selection_applied"] is True
+    assert not any(key.startswith("responses_input_") for key in request_log)
+    joined_logs = "\n".join(logs)
+    assert "UNSUPPORTED_TOOL_PAYLOAD" not in joined_logs
+    assert "UNSUPPORTED_ASSISTANT_PART" not in joined_logs
+    assert "src/proxy.py" not in joined_logs
+    assert "PRESERVED_UNSUPPORTED_VALUE" not in joined_logs
     assert "response.completed" not in joined_logs
     assert "placeholder-client-token" not in joined_logs
     assert "Authorization" not in joined_logs
