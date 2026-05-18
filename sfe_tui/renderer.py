@@ -26,8 +26,24 @@ def render_help() -> str:
     )
 
 
-def render_workspace_selected(workspace_root: Path) -> str:
-    return f"Workspace: {workspace_root}"
+def safe_workspace_label(workspace_root: Path, launch_cwd: Path | None = None) -> str:
+    root = workspace_root.resolve()
+    if launch_cwd is not None:
+        cwd = launch_cwd.resolve()
+        if root == cwd:
+            return "."
+        try:
+            return root.relative_to(cwd).as_posix()
+        except ValueError:
+            pass
+    return root.name or "<workspace>"
+
+
+def render_workspace_selected(
+    workspace_root: Path,
+    launch_cwd: Path | None = None,
+) -> str:
+    return f"Workspace: {safe_workspace_label(workspace_root, launch_cwd)}"
 
 
 def render_file_selection(results: list[ContextLoadResult]) -> str:

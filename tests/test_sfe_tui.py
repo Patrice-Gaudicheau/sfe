@@ -41,6 +41,8 @@ from sfe_tui.renderer import (
     render_dry_run_summary,
     render_help,
     render_status,
+    render_workspace_selected,
+    safe_workspace_label,
 )
 from sfe_tui.routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
@@ -149,8 +151,37 @@ def test_pwd_reports_selected_workspace_safely(tmp_path) -> None:
     assert app.run() == 0
     pwd_outputs = [line for line in output if line.startswith("Workspace:")]
     assert pwd_outputs
-    assert str(tmp_path.resolve()) in pwd_outputs[-1]
+    assert pwd_outputs[-1] == "Workspace: ."
+    assert str(tmp_path.resolve()) not in "\n".join(output)
     assert "Authorization" not in "\n".join(output)
+
+
+def test_workspace_root_remains_absolute_resolved_internally(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_root == tmp_path.resolve()
+    assert app.workspace_root.is_absolute()
+    assert str(tmp_path.resolve()) not in "\n".join(output)
+
+
+def test_workspace_label_uses_relative_or_basename_without_absolute_path(
+    tmp_path,
+) -> None:
+    child = tmp_path / "child"
+    child.mkdir()
+    outside = tmp_path.parent / "outside-workspace-label"
+    outside.mkdir(exist_ok=True)
+
+    assert safe_workspace_label(tmp_path, tmp_path) == "."
+    assert safe_workspace_label(child, tmp_path) == "child"
+    assert safe_workspace_label(outside, tmp_path) == "outside-workspace-label"
+    assert str(tmp_path) not in render_workspace_selected(child, tmp_path)
 
 
 def test_files_reads_text_file_and_populates_context_segment_text(tmp_path) -> None:
@@ -480,6 +511,7 @@ def test_status_renders_state_without_file_contents(tmp_path) -> None:
     assert "task present: True" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
+    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
@@ -850,6 +882,7 @@ def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
     assert "SECRET_FILE_CONTENT" not in summary
     assert "Explain context" not in summary
     assert str(tmp_path) not in summary
+    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_ask_provider_failure_is_category_only(tmp_path) -> None:
@@ -1027,6 +1060,7 @@ def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
     assert "SECRET_FILE_CONTENT" not in summary
     assert "Patch context" not in summary
     assert str(tmp_path) not in summary
+    assert str(tmp_path.resolve()) not in rendered
     assert "request body" not in summary.lower()
     assert "provider payload" not in summary.lower()
     assert "Authorization" not in summary

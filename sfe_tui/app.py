@@ -57,7 +57,7 @@ class SfeTuiApp:
 
     def _select_workspace(self) -> bool:
         raw = self.input_provider.prompt(
-            f"Workspace [{self.cwd}]: ",
+            f"Workspace [{renderer.safe_workspace_label(self.cwd, self.cwd)}]: ",
             default="",
         )
         try:
@@ -65,7 +65,7 @@ class SfeTuiApp:
         except ValueError as exc:
             self.output(renderer.render_error(str(exc)))
             return False
-        self.output(renderer.render_workspace_selected(self.workspace_root))
+        self.output(renderer.render_workspace_selected(self.workspace_root, self.cwd))
         return True
 
     def _handle_command(self, command: str) -> bool:
@@ -79,7 +79,9 @@ class SfeTuiApp:
             if self.workspace_root is None:
                 self.output("Workspace: not selected")
             else:
-                self.output(renderer.render_workspace_selected(self.workspace_root))
+                self.output(
+                    renderer.render_workspace_selected(self.workspace_root, self.cwd)
+                )
             return False
         if name == "/status":
             self.output(
