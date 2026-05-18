@@ -79,6 +79,7 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
         f"  loaded files: {contract.metadata['loaded_context_file_count']}",
         f"  skipped files: {contract.metadata['skipped_file_count']}",
         f"  skipped reasons: {contract.metadata['skipped_reason_counts']}",
+        f"  warning reasons: {contract.metadata['warning_reason_counts']}",
         f"  total approximate characters: {contract.metadata['total_approx_context_chars']}",
         f"  total approximate tokens: {contract.metadata['total_approx_context_tokens']}",
         f"  size buckets: {contract.metadata['context_size_buckets']}",

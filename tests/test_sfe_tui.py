@@ -22,6 +22,7 @@ from sfe_tui.backends import (
 from sfe_tui.contracts import (
     ContextSegment,
     MAX_CONTEXT_FILE_BYTES,
+    PRIVATE_KEY_MARKERS,
     ProtectedText,
     build_contract,
     load_context_file,
@@ -181,17 +182,41 @@ def test_files_rejects_files_under_ssh_directory(tmp_path) -> None:
     assert loaded.reason == "secret_like_file"
 
 
-def test_files_rejects_private_key_marker(tmp_path) -> None:
-    source = tmp_path / "key.txt"
+def test_files_rejects_private_key_marker_in_non_source_file(tmp_path) -> None:
+    source = tmp_path / "key.pem"
     source.write_text(
-        "-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET",
+        f"{PRIVATE_KEY_MARKERS[0]}\nSECRET",
         encoding="utf-8",
     )
 
-    loaded = load_context_file(tmp_path, "key.txt")
+    loaded = load_context_file(tmp_path, "key.pem")
 
     assert loaded.loaded is False
     assert loaded.reason == "secret_like_file"
+
+
+def test_files_loads_source_file_with_secret_marker_literal(tmp_path) -> None:
+    source = tmp_path / "scanner.py"
+    source.write_text(
+        f"MARKER = {PRIVATE_KEY_MARKERS[0]!r}\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_context_file(tmp_path, "scanner.py")
+
+    assert loaded.loaded is True
+    assert loaded.reason is None
+    assert loaded.warning_reason == "secret_marker_literal_in_source"
+    assert loaded.source_ref == "scanner.py"
+
+
+def test_files_loads_real_contracts_source_with_secret_marker_literals() -> None:
+    loaded = load_context_file(PROJECT_ROOT, "sfe_tui/contracts.py")
+
+    assert loaded.loaded is True
+    assert loaded.reason is None
+    assert loaded.warning_reason == "secret_marker_literal_in_source"
+    assert loaded.source_ref == "sfe_tui/contracts.py"
 
 
 def test_generated_context_source_ref_does_not_expose_absolute_path(tmp_path) -> None:
@@ -277,9 +302,37 @@ def test_dry_run_summary_does_not_include_file_contents(tmp_path) -> None:
     assert "SECRET_TASK_TEXT" not in rendered
     assert "requested files: 1" in rendered
     assert "loaded files: 1" in rendered
+    assert "warning reasons: {}" in rendered
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
     assert "request body" not in rendered.lower()
     assert "Authorization" not in rendered
+
+
+def test_dry_run_summary_reports_source_marker_warning_safely(tmp_path) -> None:
+    source = tmp_path / "scanner.py"
+    source.write_text(
+        f"MARKER = {PRIVATE_KEY_MARKERS[0]!r}\nSECRET_FILE_CONTENT",
+        encoding="utf-8",
+    )
+    loaded = load_context_file(tmp_path, "scanner.py")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Explain scanner source.",
+        file_paths=[],
+        context_files=[loaded],
+    )
+    result = DirectBackend().dry_run(contract)
+
+    rendered = render_dry_run_summary(contract, result)
+
+    assert loaded.loaded is True
+    assert contract.metadata["warning_reason_counts"] == {
+        "secret_marker_literal_in_source": 1
+    }
+    assert "warning reasons: {'secret_marker_literal_in_source': 1}" in rendered
+    assert PRIVATE_KEY_MARKERS[0] not in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+    assert str(tmp_path) not in rendered
 
 
 def test_renderer_can_render_help_and_dry_run_summary(tmp_path) -> None:

@@ -11,6 +11,37 @@ from typing import Any
 
 MAX_CONTEXT_FILE_BYTES = 1_000_000
 SECRET_FILE_NAMES = {"id_rsa", "id_dsa", "id_ed25519", "known_hosts"}
+SOURCE_OR_DOCUMENTATION_EXTENSIONS = {
+    ".bash",
+    ".c",
+    ".cfg",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".h",
+    ".hpp",
+    ".ini",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".md",
+    ".php",
+    ".ps1",
+    ".py",
+    ".pyi",
+    ".rb",
+    ".rs",
+    ".rst",
+    ".sh",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".yaml",
+    ".yml",
+    ".zsh",
+}
 PRIVATE_KEY_MARKERS = (
     "-----BEGIN OPENSSH PRIVATE KEY-----",
     "-----BEGIN RSA PRIVATE KEY-----",
@@ -52,6 +83,7 @@ class ContextLoadResult:
     approx_chars: int = 0
     approx_tokens: int = 0
     size_bucket: str = "0"
+    warning_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -152,12 +184,16 @@ def load_context_file(
             reason="binary_or_non_text",
             source_ref=source_ref,
         )
-    if _contains_private_key_marker(prefix_text):
+    marker_found = _contains_private_key_marker(prefix_text) or (
+        _contains_private_key_marker(text)
+    )
+    if marker_found and not _is_source_or_documentation_path(source_ref):
         return ContextLoadResult(
             loaded=False,
             reason="secret_like_file",
             source_ref=source_ref,
         )
+    warning_reason = "secret_marker_literal_in_source" if marker_found else None
     approx_chars = len(text)
     return ContextLoadResult(
         loaded=True,
@@ -167,6 +203,7 @@ def load_context_file(
         approx_chars=approx_chars,
         approx_tokens=approximate_token_count(text),
         size_bucket=text_length_bucket(approx_chars),
+        warning_reason=warning_reason,
     )
 
 
@@ -253,6 +290,7 @@ def build_contract(
         "loaded_context_file_count": sum(1 for item in load_results if item.loaded),
         "skipped_file_count": sum(1 for item in load_results if not item.loaded),
         "skipped_reason_counts": _skipped_reason_counts(load_results),
+        "warning_reason_counts": _warning_reason_counts(load_results),
         "context_size_buckets": _size_bucket_counts(context_segments),
     }
     audit = {
@@ -311,6 +349,10 @@ def _is_secret_like_path(source_ref: str) -> bool:
     )
 
 
+def _is_source_or_documentation_path(source_ref: str) -> bool:
+    return Path(source_ref).suffix.lower() in SOURCE_OR_DOCUMENTATION_EXTENSIONS
+
+
 def _contains_private_key_marker(text: str) -> bool:
     return any(marker in text for marker in PRIVATE_KEY_MARKERS)
 
@@ -322,6 +364,15 @@ def _skipped_reason_counts(results: list[ContextLoadResult]) -> dict[str, int]:
             continue
         reason = result.reason or "read_error"
         counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _warning_reason_counts(results: list[ContextLoadResult]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for result in results:
+        if not result.loaded or result.warning_reason is None:
+            continue
+        counts[result.warning_reason] = counts.get(result.warning_reason, 0) + 1
     return dict(sorted(counts.items()))
 
 
