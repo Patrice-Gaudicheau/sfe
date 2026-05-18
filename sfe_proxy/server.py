@@ -46,6 +46,7 @@ DOWNSTREAM_RESPONSE_HEADERS_TO_STRIP = HOP_BY_HOP_HEADERS | {
     "set-cookie",
 }
 ENABLED_MIN_REDUCTION_PCT = 15.0
+ENABLED_PRESERVED_TEXT_MAX_TOKENS = 2000
 
 
 class AnthropicRequestError(Exception):
@@ -902,32 +903,25 @@ def _candidate_request_details(
             "candidate_request": None,
         }
 
-    if _would_flatten_structured_responses_input(path, payload):
-        return {
-            "dry_run_enabled_candidate_built": False,
-            "dry_run_enabled_reason": "unsafe_task_envelope",
-            "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
-            "dry_run_enabled_reduction_gate_passed": False,
-            "dry_run_enabled_selected_segment_ids": selected_segment_ids,
-            "dry_run_enabled_is_real_execution": False,
-            "dry_run_enabled_replaces_upstream_request": False,
-            "dry_run_enabled_changes_client_response": False,
-            "dry_run_enabled_candidate_request_sent_to_upstream": False,
-            "dry_run_enabled_experimental_response_exposed": False,
-            "dry_run_enabled_original_upstream_request_unchanged": True,
-            "dry_run_enabled_client_response_unchanged": True,
-            "dry_run_enabled_candidate_request_estimated_tokens": None,
-            "dry_run_enabled_estimated_token_reduction_pct": None,
-            "dry_run_enabled_selected_segment_count": len(selected_segments),
-            "candidate_request": None,
-        }
-
-    candidate_request = _candidate_request_for_endpoint(
-        path,
-        payload,
-        selected_segments,
-        question_text,
-    )
+    if _is_structured_responses_input(path, payload):
+        structured_result = _structured_responses_candidate_request(
+            payload,
+            selected_segments,
+        )
+        if structured_result["candidate_request"] is None:
+            return _unavailable_candidate_details(
+                reason=str(structured_result["reason"]),
+                selected_segment_ids=selected_segment_ids,
+                selected_segment_count=len(selected_segments),
+            )
+        candidate_request = structured_result["candidate_request"]
+    else:
+        candidate_request = _candidate_request_for_endpoint(
+            path,
+            payload,
+            selected_segments,
+            question_text,
+        )
     candidate_tokens = _rough_estimate_tokens_from_texts(
         _iter_text_values(candidate_request),
         json.dumps(candidate_request, sort_keys=True).encode("utf-8"),
@@ -1020,7 +1014,35 @@ def _last_text_segment(segments: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _would_flatten_structured_responses_input(
+def _unavailable_candidate_details(
+    *,
+    reason: str,
+    selected_segment_ids: list[str],
+    selected_segment_count: int,
+    candidate_tokens: int | None = None,
+    reduction_pct: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "dry_run_enabled_candidate_built": False,
+        "dry_run_enabled_reason": reason,
+        "dry_run_enabled_min_reduction_pct": ENABLED_MIN_REDUCTION_PCT,
+        "dry_run_enabled_reduction_gate_passed": False,
+        "dry_run_enabled_selected_segment_ids": selected_segment_ids,
+        "dry_run_enabled_is_real_execution": False,
+        "dry_run_enabled_replaces_upstream_request": False,
+        "dry_run_enabled_changes_client_response": False,
+        "dry_run_enabled_candidate_request_sent_to_upstream": False,
+        "dry_run_enabled_experimental_response_exposed": False,
+        "dry_run_enabled_original_upstream_request_unchanged": True,
+        "dry_run_enabled_client_response_unchanged": True,
+        "dry_run_enabled_candidate_request_estimated_tokens": candidate_tokens,
+        "dry_run_enabled_estimated_token_reduction_pct": reduction_pct,
+        "dry_run_enabled_selected_segment_count": selected_segment_count,
+        "candidate_request": None,
+    }
+
+
+def _is_structured_responses_input(
     path: str,
     payload: dict[str, Any] | None,
 ) -> bool:
@@ -1029,9 +1051,181 @@ def _would_flatten_structured_responses_input(
     input_value = payload.get("input")
     if isinstance(input_value, dict):
         return True
-    if not isinstance(input_value, list):
+    return isinstance(input_value, list) and any(
+        not isinstance(item, str) for item in input_value
+    )
+
+
+def _structured_responses_candidate_request(
+    payload: dict[str, Any] | None,
+    selected_segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if payload is None:
+        return {"candidate_request": None, "reason": "unsafe_task_envelope"}
+    input_value = payload.get("input")
+    if not isinstance(input_value, list) or not input_value:
+        return {"candidate_request": None, "reason": "unsafe_task_envelope"}
+    latest_user_index = _latest_structured_user_item_index(input_value)
+    if latest_user_index is None:
+        return {"candidate_request": None, "reason": "latest_task_not_identified"}
+
+    selected_ids = {segment["segment_id"] for segment in selected_segments}
+    reducible_indices: set[int] = set()
+    file_path_segment_ids: set[str] = set()
+    segment_ids_by_index = _structured_responses_segment_ids_by_input_index(input_value)
+    first_reducible_index: int | None = None
+    for index, item in enumerate(input_value):
+        if not _is_supported_text_only_responses_item(item):
+            return {"candidate_request": None, "reason": "unsafe_task_envelope"}
+        item_text = _structured_responses_item_text(item)
+        if index == latest_user_index:
+            continue
+        if not item_text:
+            continue
+        if _contains_file_path(item_text):
+            segment_id = segment_ids_by_index.get(index)
+            if segment_id is not None:
+                file_path_segment_ids.add(segment_id)
+            continue
+        if (
+            _estimated_text_tokens(item_text)
+            <= ENABLED_PRESERVED_TEXT_MAX_TOKENS
+        ):
+            continue
+        reducible_indices.add(index)
+        if first_reducible_index is None:
+            first_reducible_index = index
+
+    if not reducible_indices:
+        return {"candidate_request": None, "reason": "no_reducible_context_segments"}
+
+    reducible_segment_ids = {
+        segment_ids_by_index[index]
+        for index in reducible_indices
+        if index in segment_ids_by_index
+    }
+    if selected_ids & file_path_segment_ids:
+        return {"candidate_request": None, "reason": "file_paths_in_dropped_context"}
+    if selected_ids - reducible_segment_ids:
+        return {"candidate_request": None, "reason": "selected_segment_not_reducible"}
+
+    preserved_input = []
+    inserted_selected_context = False
+    insert_at = (
+        first_reducible_index
+        if first_reducible_index is not None
+        else latest_user_index
+    )
+    for index, item in enumerate(input_value):
+        if index == insert_at and not inserted_selected_context:
+            preserved_input.append(_selected_context_responses_item(selected_segments))
+            inserted_selected_context = True
+        if index in reducible_indices:
+            continue
+        preserved_input.append(item)
+    if not inserted_selected_context:
+        preserved_input.insert(
+            latest_user_index,
+            _selected_context_responses_item(selected_segments),
+        )
+
+    request = dict(payload)
+    request["input"] = preserved_input
+    return {
+        "candidate_request": request,
+        "reason": "candidate_request_built_for_diagnostics",
+    }
+
+
+def _structured_responses_segment_ids_by_input_index(
+    items: list[Any],
+) -> dict[int, str]:
+    segment_ids: dict[int, str] = {}
+    segment_index = 1
+    for input_index, item in enumerate(items):
+        if _structured_responses_item_text(item):
+            segment_ids[input_index] = f"segment-{segment_index}"
+            segment_index += 1
+    return segment_ids
+
+
+def _latest_structured_user_item_index(items: list[Any]) -> int | None:
+    for index in range(len(items) - 1, -1, -1):
+        item = items[index]
+        if isinstance(item, dict) and item.get("role") == "user":
+            if _is_supported_text_only_responses_item(item):
+                return index
+            return None
+    return None
+
+
+def _is_supported_text_only_responses_item(item: Any) -> bool:
+    if not isinstance(item, dict):
         return False
-    return any(not isinstance(item, str) for item in input_value)
+    role = item.get("role")
+    if not isinstance(role, str):
+        return False
+    content = item.get("content")
+    if isinstance(content, str):
+        return True
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if not isinstance(block, dict):
+            return False
+        block_type = block.get("type")
+        if block_type not in {"input_text", "text"}:
+            return False
+        if not isinstance(block.get("text"), str):
+            return False
+        if any(key not in {"type", "text"} for key in block):
+            return False
+    return True
+
+
+def _structured_responses_item_text(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    content = item.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        ]
+        return "\n".join(part for part in parts if part)
+    return ""
+
+
+def _contains_file_path(text: str) -> bool:
+    tokens = text.replace("\\", "/").split()
+    return any(
+        "/" in token and "." in token.strip(".,;:()[]{}<>\"'")
+        for token in tokens
+    )
+
+
+def _estimated_text_tokens(text: str) -> int:
+    return (len(text) + 3) // 4
+
+
+def _selected_context_responses_item(
+    selected_segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_context = "\n\n".join(
+        f"[{segment['segment_id']}]\n{segment['text']}" for segment in selected_segments
+    )
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": f"SFE selected context:\n\n{selected_context}",
+            }
+        ],
+    }
 
 
 def _candidate_request_for_endpoint(

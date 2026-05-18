@@ -2069,7 +2069,7 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "Read these files: src/alpha.py and src/beta.py.",
+                        "text": "Large selected background context. " * 120,
                     }
                 ],
             },
@@ -2077,11 +2077,12 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
                 "role": "user",
                 "content": [
                     {
-                        "type": "input_text",
-                        "text": "Large selected background context. " * 120,
+                        "type": "input_image",
+                        "image_url": "https://example.invalid/image.png",
                     }
                 ],
             },
+            _responses_text_item("user", "Summarize the selected text."),
         ],
     }
     try:
@@ -2113,8 +2114,8 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
     assert request_log["enabled_reason"] == "unsafe_task_envelope"
     assert request_log["enabled_reduction_gate_passed"] is False
     joined_logs = "\n".join(logs)
-    assert "src/alpha.py" not in joined_logs
     assert "Large selected background" not in joined_logs
+    assert "example.invalid/image.png" not in joined_logs
     assert "Authorization" not in joined_logs
 
 
@@ -2140,7 +2141,7 @@ def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabl
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "Read these files: src/alpha.py and src/beta.py.",
+                        "text": "Large selected background context. " * 120,
                     }
                 ],
             },
@@ -2148,11 +2149,12 @@ def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabl
                 "role": "user",
                 "content": [
                     {
-                        "type": "input_text",
-                        "text": "Large selected background context. " * 120,
+                        "type": "input_image",
+                        "image_url": "https://example.invalid/image.png",
                     }
                 ],
             },
+            _responses_text_item("user", "Summarize the selected text."),
         ],
     }
     try:
@@ -2190,6 +2192,498 @@ def test_enabled_mode_structured_responses_envelope_rejects_when_fallback_disabl
     assert event["enabled_original_request_sent"] is False
     assert event["enabled_candidate_request_sent_to_upstream"] is False
     assert event["upstream_status_code"] == 422
+
+
+def test_enabled_mode_structured_responses_preserves_task_envelope(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"structured-safe","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    file_list = "Review these files only: src/alpha.py, src/beta.py, and tests/test_alpha.py."
+    unselected_context = "UNSELECTED_BACKGROUND obsolete release note. " * 260
+    selected_context = (
+        "SELECTED_BACKGROUND authoritative review note. "
+        "ACTIVE_REVIEW_VALUE is 42. "
+    ) * 340
+    latest_task = "Use the authoritative review note and answer with ACTIVE_REVIEW_VALUE."
+    latest_item = _responses_text_item("user", latest_task)
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "instructions": "Preserve the user task.",
+        "input": [
+            _responses_text_item("developer", "Keep the task constraints intact."),
+            _responses_text_item("user", file_list),
+            _responses_text_item("user", unselected_context),
+            _responses_text_item("user", selected_context),
+            latest_item,
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert len(RecordingUpstreamHandler.records) == 1
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload != payload
+    assert upstream_payload["stream"] is True
+    assert upstream_payload["instructions"] == payload["instructions"]
+    assert isinstance(upstream_payload["input"], list)
+    assert upstream_payload["input"][-1] == latest_item
+    assert _responses_text_item("user", file_list) in upstream_payload["input"]
+    candidate_text = json.dumps(upstream_payload["input"])
+    assert "SFE selected context" in candidate_text
+    assert "ACTIVE_REVIEW_VALUE is 42" in candidate_text
+    assert "UNSELECTED_BACKGROUND obsolete" not in candidate_text
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_reduction_gate_passed"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    assert event["enabled_original_request_sent"] is False
+    serialized_event = json.dumps(event)
+    assert "src/alpha.py" not in serialized_event
+    assert "ACTIVE_REVIEW_VALUE" not in serialized_event
+    assert "UNSELECTED_BACKGROUND" not in serialized_event
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["fallback_used"] is False
+    assert request_log["selection_applied"] is True
+    assert request_log["enabled_reduction_gate_passed"] is True
+    joined_logs = "\n".join(logs)
+    assert "src/alpha.py" not in joined_logs
+    assert "ACTIVE_REVIEW_VALUE" not in joined_logs
+    assert "UNSELECTED_BACKGROUND" not in joined_logs
+    assert "placeholder-client-token" not in joined_logs
+    assert "Authorization" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_selected_segment_must_be_reducible(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"selected-not-reducible","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    reducible_context = "REDUCIBLE_BACKGROUND safe to reduce. " * 260
+    latest_task = "LATEST_TASK_NOT_REDUCIBLE keep this instruction. " * 360
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("user", reducible_context),
+            _responses_text_item("user", latest_task),
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "selected_segment_not_reducible"
+    assert event["enabled_fallback_to_original"] is True
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "selected_segment_not_reducible"
+    joined_logs = "\n".join(logs)
+    assert "LATEST_TASK_NOT_REDUCIBLE" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_rejects_selected_file_path_context(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"selected-file-path-context","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    file_path_context = (
+        "FILE_PATH_CONTEXT review src/alpha.py and src/beta.py before changing "
+        "behavior. "
+    ) * 360
+    reducible_context = "REDUCIBLE_BACKGROUND safe to reduce. " * 260
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("user", file_path_context),
+            _responses_text_item("user", reducible_context),
+            _responses_text_item("user", "What should be reviewed?"),
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "file_paths_in_dropped_context"
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "file_paths_in_dropped_context"
+    joined_logs = "\n".join(logs)
+    assert "src/alpha.py" not in joined_logs
+    assert "FILE_PATH_CONTEXT" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_requires_reducible_context(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"no-reducible","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Keep answers short."),
+            _responses_text_item("user", "Read src/alpha.py and src/beta.py."),
+            _responses_text_item("user", "What should be reviewed?"),
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "no_reducible_context_segments"
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "no_reducible_context_segments"
+    joined_logs = "\n".join(logs)
+    assert "src/alpha.py" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_no_reducible_context_rejects_when_strict(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream()
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Keep answers short."),
+            _responses_text_item("user", "Read src/alpha.py and src/beta.py."),
+            _responses_text_item("user", "What should be reviewed?"),
+        ],
+    }
+    try:
+        request = urllib.request.Request(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer placeholder-client-token",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("strict no-reducible structured request should fail")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert status == 422
+    assert body["error"]["reason"] == "no_reducible_context_segments"
+    assert RecordingUpstreamHandler.records == []
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "no_reducible_context_segments"
+    assert event["enabled_request_sent"] is False
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "no_reducible_context_segments"
+    joined_logs = "\n".join(logs)
+    assert "src/alpha.py" not in joined_logs
+    assert "placeholder-client-token" not in joined_logs
+
+
+def test_enabled_mode_structured_responses_requires_latest_user_task(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"latest-task-missing","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Large background without user task. " * 360),
+            _responses_text_item("assistant", "Prior assistant text."),
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "latest_task_not_identified"
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "latest_task_not_identified"
+
+
+def test_enabled_mode_structured_responses_low_reduction_still_blocks(
+    tmp_path,
+) -> None:
+    upstream = _start_upstream(
+        status=200,
+        body=b'{"id":"structured-low-reduction","object":"response"}',
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    selected_context = "SELECTED_ONLY_BACKGROUND retained context. " * 260
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("user", selected_context),
+            _responses_text_item("user", "What is in the retained context?"),
+        ],
+    }
+    try:
+        response = _request_json(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    ) == payload
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is False
+    assert event["enabled_reason"] == "insufficient_token_reduction"
+    assert event["enabled_estimated_token_reduction_pct"] < ENABLED_MIN_REDUCTION_PCT
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["enabled_reason"] == "insufficient_token_reduction"
+    assert request_log["enabled_estimated_token_reduction_pct"] < ENABLED_MIN_REDUCTION_PCT
+
+
+def test_enabled_mode_structured_responses_streaming_forwards_sse(
+    tmp_path,
+) -> None:
+    sse = (
+        b'event: response.created\n'
+        b'data: {"type":"response.created","response":{"id":"resp-structured"}}\n\n'
+        b'event: response.output_text.delta\n'
+        b'data: {"type":"response.output_text.delta","delta":"42"}\n\n'
+        b'event: response.completed\n'
+        b'data: {"type":"response.completed","response":{"id":"resp-structured"}}\n\n'
+    )
+    upstream = _start_upstream(
+        status=200,
+        body=sse,
+        headers={"Content-Type": "text/event-stream"},
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    unselected_context = "STRUCTURED_UNSELECTED obsolete background. " * 260
+    selected_context = (
+        "STRUCTURED_SELECTED authoritative streaming context. "
+        "STREAMING_STRUCTURED_VALUE is 42. "
+    ) * 340
+    latest_task = "Answer with STREAMING_STRUCTURED_VALUE."
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Do not alter the latest task."),
+            _responses_text_item("user", "Inspect docs/smoke.md only."),
+            _responses_text_item("user", unselected_context),
+            _responses_text_item("user", selected_context),
+            _responses_text_item("user", latest_task),
+        ],
+    }
+    try:
+        response = _request_raw(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            method="POST",
+            payload=payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["content_type"] == "text/event-stream"
+    assert response["body"] == sse
+    assert b"response.completed" in response["body"]
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload["stream"] is True
+    assert isinstance(upstream_payload["input"], list)
+    assert upstream_payload["input"][-1] == _responses_text_item("user", latest_task)
+    assert _responses_text_item("user", "Inspect docs/smoke.md only.") in upstream_payload["input"]
+    candidate_text = json.dumps(upstream_payload["input"])
+    assert "SFE selected context" in candidate_text
+    assert "STREAMING_STRUCTURED_VALUE is 42" in candidate_text
+    assert "STRUCTURED_UNSELECTED obsolete" not in candidate_text
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_reduction_gate_passed"] is True
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["fallback_used"] is False
+    assert request_log["enabled_reduction_gate_passed"] is True
+    joined_logs = "\n".join(logs)
+    assert "docs/smoke.md" not in joined_logs
+    assert "STREAMING_STRUCTURED_VALUE" not in joined_logs
+    assert "response.completed" not in joined_logs
+    assert "placeholder-client-token" not in joined_logs
+    assert "Authorization" not in joined_logs
 
 
 def test_enabled_mode_responses_replaces_safe_shape_with_meaningful_reduction(
@@ -4432,6 +4926,13 @@ def _lemonade_router_body(
     if text is not None:
         choice["text"] = text
     return json.dumps({"choices": [choice]}).encode("utf-8")
+
+
+def _responses_text_item(role: str, text: str) -> dict[str, Any]:
+    return {
+        "role": role,
+        "content": [{"type": "input_text", "text": text}],
+    }
 
 
 def _start_proxy(
