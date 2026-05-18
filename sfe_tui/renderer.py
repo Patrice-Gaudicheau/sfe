@@ -21,7 +21,7 @@ def render_help() -> str:
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /ask               Ask a read-only question using selected context",
             "  /patch             Propose a patch without applying it",
-            "  /reset             Clear task, context, and routing state",
+            "  /reset             Clear task, context, and routing; preserve workspace",
             "  /quit, /exit       Exit",
         ]
     )

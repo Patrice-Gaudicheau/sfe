@@ -13,6 +13,9 @@ from .routers import (
 )
 
 
+MISSING_TASK = "missing_task"
+
+
 @dataclass(frozen=True)
 class DirectExecutionPreview:
     backend_name: str
@@ -218,15 +221,26 @@ def _patch_result_from_executor_response(
 def _local_router_preview_result(name: str, contract: SFEContract) -> BackendResult:
     task_text = contract.task.text if contract.task is not None else ""
     router_result = LocalSegmentRouter().route(task_text, contract.context_segments)
+    selected_segment_ids = router_result.selected_segment_ids
+    selected_segment_count = router_result.selected_segment_count
+    estimated_selected_tokens = router_result.estimated_selected_tokens
+    estimated_reduction_pct = router_result.estimated_reduction_pct
+    fallback_reason = router_result.fallback_reason
+    if contract.task is None:
+        selected_segment_ids = []
+        selected_segment_count = 0
+        estimated_selected_tokens = 0
+        estimated_reduction_pct = None
+        fallback_reason = MISSING_TASK
     segments_by_id = {segment.id: segment for segment in contract.context_segments}
     selected_segments = [
         segments_by_id[segment_id]
-        for segment_id in router_result.selected_segment_ids
+        for segment_id in selected_segment_ids
         if segment_id in segments_by_id
     ]
     audit = {
         **contract.audit,
-        "selected_segment_ids": router_result.selected_segment_ids,
+        "selected_segment_ids": selected_segment_ids,
         "selector_mode": LOCAL_LEXICAL_PREVIEW_MODE,
         "router_mode": router_result.router_mode,
         "router_available": router_result.router_available,
@@ -237,13 +251,13 @@ def _local_router_preview_result(name: str, contract: SFEContract) -> BackendRes
         "router_score_categories_by_segment_id": (
             router_result.score_categories_by_segment_id
         ),
-        "fallback_reason": router_result.fallback_reason,
+        "fallback_reason": fallback_reason,
         "input_segment_count": router_result.input_segment_count,
         "eligible_segment_count": router_result.eligible_segment_count,
-        "selected_segment_count": router_result.selected_segment_count,
+        "selected_segment_count": selected_segment_count,
         "estimated_input_tokens": router_result.estimated_input_tokens,
-        "estimated_selected_tokens": router_result.estimated_selected_tokens,
-        "estimated_reduction_pct": router_result.estimated_reduction_pct,
+        "estimated_selected_tokens": estimated_selected_tokens,
+        "estimated_reduction_pct": estimated_reduction_pct,
         "provider_calls_made": 0,
     }
     updated = replace(contract, audit=audit)

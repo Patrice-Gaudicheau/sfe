@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
     DirectBackend,
+    MISSING_TASK,
     ProxyBackend,
     backend_by_name,
 )
@@ -451,6 +452,32 @@ def test_dry_run_summary_reports_source_marker_warning_safely(tmp_path) -> None:
     assert str(tmp_path) not in rendered
 
 
+def test_dry_run_with_context_but_missing_task_does_not_fake_reduction(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files context.txt", "/dry-run", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
+    assert "task present: False" in dry_run_block
+    assert "selected segments: 0" in dry_run_block
+    assert f"fallback reason: {MISSING_TASK}" in dry_run_block
+    assert "estimated selected tokens: 0" in dry_run_block
+    assert "estimated reduction pct: None" in dry_run_block
+    assert "estimated reduction pct: 100.0" not in dry_run_block
+    assert "provider calls made: 0" in dry_run_block
+    assert "SECRET_FILE_CONTENT" not in dry_run_block
+    assert str(tmp_path.resolve()) not in rendered
+
+
 def test_renderer_can_render_help_and_dry_run_summary(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("content", encoding="utf-8")
@@ -557,6 +584,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/ask" in rendered
     assert "/patch" in rendered
     assert "/reset" in rendered
+    assert "Clear task, context, and routing; preserve workspace" in rendered
     assert "/backend" not in rendered
 
 
@@ -1617,6 +1645,33 @@ def test_direct_backend_estimates_tokens_and_reduction_pct(tmp_path) -> None:
     assert audit["estimated_selected_tokens"] == 20
     assert audit["estimated_reduction_pct"] == 0.0
     assert audit["provider_calls_made"] == 0
+
+
+def test_direct_backend_dry_run_missing_task_has_no_reduction_pct(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+
+    result = DirectBackend().dry_run(contract)
+    audit = result.contract.audit
+
+    assert audit["fallback_reason"] == MISSING_TASK
+    assert audit["selected_segment_ids"] == []
+    assert audit["selected_segment_count"] == 0
+    assert audit["eligible_segment_count"] == 1
+    assert audit["estimated_input_tokens"] == contract.context_segments[0].approx_tokens
+    assert audit["estimated_selected_tokens"] == 0
+    assert audit["estimated_reduction_pct"] is None
+    assert audit["provider_calls_made"] == 0
+    assert result.router_preview is not None
+    assert result.router_preview.fallback_reason == MISSING_TASK
+    assert result.execution_preview is not None
+    assert result.execution_preview.estimated_reduction_pct is None
 
 
 def test_direct_backend_dry_run_returns_execution_preview(tmp_path) -> None:
