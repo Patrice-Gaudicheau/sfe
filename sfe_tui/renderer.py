@@ -21,6 +21,7 @@ def render_help() -> str:
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /ask               Ask a read-only question using selected context",
             "  /patch             Propose a patch without applying it",
+            "  /reset             Clear task, context, and routing state",
             "  /quit, /exit       Exit",
         ]
     )
@@ -54,6 +55,10 @@ def render_file_selection(results: list[ContextLoadResult]) -> str:
 
 def render_task_set() -> str:
     return "Task stored."
+
+
+def render_reset() -> str:
+    return "Session reset."
 
 
 def render_error(message: str) -> str:

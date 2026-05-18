@@ -44,7 +44,14 @@ edit can be proposed from the selected context. The TUI labels this output as
 "Patch proposal only, not applied" and reports sanitized routing diagnostics.
 It does not write files, apply patches, execute shell commands, call the proxy,
 switch backends, or run an agent loop. This is the step before any future
-write/apply workflow.
+write/apply workflow. Patch proposals use a larger local output budget than
+`/ask` because unified diffs are longer-form output; the `/ask` budget remains
+unchanged.
+
+`/reset` exists as a session comfort command. It clears the current task, loaded
+and skipped context file records, warning records tied to those files, and the
+latest routing or ask/patch result. It preserves the selected workspace,
+DirectBackend, and disabled write/shell posture.
 
 No write tools, shell execution, proxy calls, backend switching, or agent loop
 are part of this milestone. The next phases remain context inspection, patch

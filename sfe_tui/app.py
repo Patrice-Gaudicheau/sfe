@@ -57,7 +57,7 @@ class SfeTuiApp:
 
     def _select_workspace(self) -> bool:
         raw = self.input_provider.prompt(
-            f"Workspace [{renderer.safe_workspace_label(self.cwd, self.cwd)}]: ",
+            "Workspace [current]: ",
             default="",
         )
         try:
@@ -118,6 +118,9 @@ class SfeTuiApp:
         if name == "/patch":
             self._handle_patch()
             return False
+        if name == "/reset":
+            self._handle_reset()
+            return False
         self.output(renderer.render_error("unknown_command"))
         return False
 
@@ -138,6 +141,12 @@ class SfeTuiApp:
         ]
         self.latest_result = None
         self.output(renderer.render_file_selection(self.context_files))
+
+    def _handle_reset(self) -> None:
+        self.context_files = []
+        self.task = ""
+        self.latest_result = None
+        self.output(renderer.render_reset())
 
     def _handle_context(self) -> None:
         contract = build_contract(

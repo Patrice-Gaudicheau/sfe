@@ -15,6 +15,7 @@ from providers.openai_api import (
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
+DEFAULT_PATCH_OUTPUT_TOKENS = 4000
 READ_ONLY_SYSTEM_INSTRUCTION = (
     "You are the read-only SFE TUI executor. Answer only from the selected "
     "context and the user's task. Do not claim to edit files, run commands, "
@@ -53,6 +54,7 @@ class OpenAIReadOnlyExecutor:
         provider: OpenAIAPIProvider | None = None,
         model: str | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        max_patch_output_tokens: int = DEFAULT_PATCH_OUTPUT_TOKENS,
     ) -> None:
         self.provider = provider or OpenAIAPIProvider()
         self.model = (
@@ -61,17 +63,20 @@ class OpenAIReadOnlyExecutor:
             or DEFAULT_EXECUTOR_MODEL
         )
         self.max_output_tokens = max_output_tokens
+        self.max_patch_output_tokens = max_patch_output_tokens
 
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return self._execute_with_instruction(
             executor_payload,
             system_instruction=READ_ONLY_SYSTEM_INSTRUCTION,
+            max_tokens=self.max_output_tokens,
         )
 
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return self._execute_with_instruction(
             executor_payload,
             system_instruction=PATCH_SYSTEM_INSTRUCTION,
+            max_tokens=self.max_patch_output_tokens,
         )
 
     def _execute_with_instruction(
@@ -79,6 +84,7 @@ class OpenAIReadOnlyExecutor:
         executor_payload: dict[str, Any],
         *,
         system_instruction: str,
+        max_tokens: int,
     ) -> ExecutorResponse:
         health = self.provider.health()
         if not health.get("ok"):
@@ -91,7 +97,7 @@ class OpenAIReadOnlyExecutor:
             response = self.provider.chat(
                 [{"role": "user", "content": _build_user_prompt(executor_payload)}],
                 model=self.model,
-                max_tokens=self.max_output_tokens,
+                max_tokens=max_tokens,
                 temperature=None,
                 system_instruction=system_instruction,
             )

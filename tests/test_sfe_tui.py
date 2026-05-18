@@ -31,6 +31,7 @@ from sfe_tui.contracts import (
 )
 from sfe_tui.executors import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_PATCH_OUTPUT_TOKENS,
     ExecutorResponse,
     OpenAIReadOnlyExecutor,
     PATCH_SYSTEM_INSTRUCTION,
@@ -55,8 +56,10 @@ from sfe_tui.routers import (
 class FakeInput:
     def __init__(self, values: list[str]) -> None:
         self.values = list(values)
+        self.prompts: list[str] = []
 
     def prompt(self, message: str, default: str = "") -> str:
+        self.prompts.append(message)
         if not self.values:
             return default
         value = self.values.pop(0)
@@ -118,6 +121,23 @@ class FakeProvider:
 
 def test_startup_accepts_empty_workspace_input_and_uses_cwd(tmp_path) -> None:
     assert resolve_workspace("", tmp_path) == tmp_path.resolve()
+
+
+def test_startup_prompt_uses_current_without_absolute_path(tmp_path) -> None:
+    input_provider = FakeInput(["", "/quit"])
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=input_provider,
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    assert input_provider.prompts[0] == "Workspace [current]: "
+    assert "Workspace: ." in output
+    assert str(tmp_path.resolve()) not in input_provider.prompts[0]
+    assert str(tmp_path.resolve()) not in "\n".join(output)
+    assert app.workspace_root == tmp_path.resolve()
 
 
 def test_startup_accepts_valid_explicit_workspace_directory(tmp_path) -> None:
@@ -536,6 +556,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/context" in rendered
     assert "/ask" in rendered
     assert "/patch" in rendered
+    assert "/reset" in rendered
     assert "/backend" not in rendered
 
 
@@ -620,6 +641,113 @@ def test_context_after_dry_run_marks_selected_segments(tmp_path) -> None:
     assert "selected=no" in context_block
     assert "score=high" in context_block
     assert "score=zero" in context_block
+
+
+def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    outside = tmp_path.parent / "outside-reset.txt"
+    outside.write_text("outside", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                f"/files context.txt {outside}",
+                "/task Explain selected context",
+                "/dry-run",
+                "/reset",
+                "/dry-run",
+                "/status",
+                "/context",
+                "/pwd",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    dry_run_block = rendered.rsplit("SFE dry-run summary", 1)[1].split(
+        "SFE TUI status",
+        1,
+    )[0]
+    status_block = rendered.split("SFE TUI status", 1)[1].split("SFE context", 1)[0]
+    context_block = rendered.split("SFE context", 1)[1]
+    assert "Session reset." in rendered
+    assert app.workspace_root == tmp_path.resolve()
+    assert app.context_files == []
+    assert app.task == ""
+    assert "loaded context files: 0" in status_block
+    assert "skipped context files: 0" in status_block
+    assert "task present: False" in status_block
+    assert "task present: False" in dry_run_block
+    assert "context segments: 0" in dry_run_block
+    assert "loaded context segments: 0" in context_block
+    assert "empty: no context loaded" in context_block
+    assert "selected=yes" not in context_block
+    assert "Workspace: ." in rendered
+    assert str(tmp_path.resolve()) not in rendered
+    assert str(outside) not in rendered
+
+
+def test_reset_clears_latest_result_internally(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/dry-run",
+                "/reset",
+                "/quit",
+            ]
+        ),
+        output=lambda _message: None,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_root == tmp_path.resolve()
+    assert app.context_files == []
+    assert app.task == ""
+    assert app.latest_result is None
+
+
+def test_ask_and_patch_fail_safely_after_reset(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/dry-run",
+                "/reset",
+                "/ask",
+                "/patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert rendered.count("Error: missing_task") == 2
+    assert not executor.calls
+    assert not executor.patch_calls
+    assert "calling provider" not in rendered
+    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_context_after_ask_marks_selected_segments(tmp_path) -> None:
@@ -1164,9 +1292,10 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     )
 
     assert result.answer == "provider answer"
+    assert DEFAULT_PATCH_OUTPUT_TOKENS == 4000
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["system_instruction"] != READ_ONLY_SYSTEM_INSTRUCTION
-    assert provider.calls[0]["max_tokens"] == 1500
+    assert provider.calls[0]["max_tokens"] == 4000
 
 
 def test_local_segment_router_selects_matching_segment() -> None:
@@ -1720,5 +1849,8 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "`/patch` is the next proposal-only phase" in milestone
     assert "Patch proposal only, not applied" in milestone
     assert "does not write files, apply patches, execute shell commands" in milestone
+    assert "larger local output budget than" in milestone
+    assert "`/reset` exists as a session comfort command" in milestone
+    assert "preserves the selected workspace" in milestone
     assert "not a benchmark" in milestone
     assert "tui_readonly_ask_milestone.md" in index
