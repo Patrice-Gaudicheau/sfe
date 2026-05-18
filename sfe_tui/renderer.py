@@ -41,6 +41,7 @@ def render_error(message: str) -> str:
 
 
 def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
+    audit = result.contract.audit
     return "\n".join(
         [
             "SFE dry-run summary",
@@ -58,6 +59,14 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
             f"  total approximate characters: {contract.metadata['total_approx_context_chars']}",
             f"  total approximate tokens: {contract.metadata['total_approx_context_tokens']}",
             f"  size buckets: {contract.metadata['context_size_buckets']}",
+            f"  selector mode: {audit.get('selector_mode')}",
+            f"  eligible segments: {audit.get('eligible_segment_count')}",
+            f"  selected segments: {audit.get('selected_segment_count')}",
+            f"  estimated input tokens: {audit.get('estimated_input_tokens')}",
+            f"  estimated selected tokens: {audit.get('estimated_selected_tokens')}",
+            f"  estimated reduction pct: {audit.get('estimated_reduction_pct')}",
+            f"  fallback reason: {audit.get('fallback_reason')}",
+            f"  selected segment ids: {audit.get('selected_segment_ids')}",
             f"  provider calls made: {result.provider_calls_made}",
             f"  status: {result.status}",
         ]

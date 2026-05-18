@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,16 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sfe_tui.app import SfeTuiApp
-from sfe_tui.backends import DirectBackend, ProxyBackend, backend_by_name
+from sfe_tui.backends import (
+    DETERMINISTIC_PREVIEW_MODE,
+    DirectBackend,
+    ProxyBackend,
+    backend_by_name,
+)
 from sfe_tui.contracts import (
+    ContextSegment,
     MAX_CONTEXT_FILE_BYTES,
+    ProtectedText,
     build_contract,
     load_context_file,
     resolve_context_path,
@@ -264,6 +272,7 @@ def test_dry_run_summary_does_not_include_file_contents(tmp_path) -> None:
     assert "SECRET_TASK_TEXT" not in rendered
     assert "requested files: 1" in rendered
     assert "loaded files: 1" in rendered
+    assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
     assert "request body" not in rendered.lower()
     assert "Authorization" not in rendered
 
@@ -302,8 +311,12 @@ def test_app_loop_handles_mocked_commands_and_quit(tmp_path) -> None:
     assert "Context sources loaded: 1; skipped: 0" in rendered
     assert "Task stored." in rendered
     assert "SFE dry-run summary" in rendered
+    assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert "selected segment ids: ['ctx_" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
+    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
+    assert str(tmp_path) not in dry_run_block
 
 
 def test_app_loop_reports_skipped_reason_counts_without_raw_paths(tmp_path) -> None:
@@ -357,3 +370,168 @@ def test_backend_dry_run_makes_no_provider_calls(tmp_path) -> None:
 
     assert DirectBackend().dry_run(contract).provider_calls_made == 0
     assert ProxyBackend().dry_run(contract).provider_calls_made == 0
+
+
+def test_direct_backend_selects_only_reducible_context_segments(tmp_path) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("first safe text", encoding="utf-8")
+    second.write_text("second safe text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Use both files.",
+        file_paths=[],
+        context_files=[
+            load_context_file(tmp_path, "first.txt"),
+            load_context_file(tmp_path, "second.txt"),
+        ],
+    )
+    non_reducible = ContextSegment(
+        id="ctx_nonreducible",
+        source_ref="internal/nonreducible",
+        text="non reducible text",
+        reducible=False,
+        approx_size=18,
+        approx_tokens=5,
+    )
+    contract = replace(
+        contract,
+        context_segments=[non_reducible, *contract.context_segments],
+    )
+
+    result = DirectBackend().dry_run(contract)
+
+    assert "ctx_nonreducible" not in result.contract.audit["selected_segment_ids"]
+    assert result.contract.audit["eligible_segment_count"] == 2
+    assert result.contract.audit["selected_segment_count"] == 2
+
+
+def test_direct_backend_never_selects_instructions_task_or_protected_segments(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("safe context text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="SECRET_TASK_TEXT",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+    contract = replace(
+        contract,
+        protected_segments=[
+            ProtectedText(id="protected_segment", text="PROTECTED_TEXT"),
+        ],
+    )
+
+    result = DirectBackend().dry_run(contract)
+    selected_ids = result.contract.audit["selected_segment_ids"]
+
+    assert "instructions_default" not in selected_ids
+    assert "task_current" not in selected_ids
+    assert "protected_segment" not in selected_ids
+    assert selected_ids == [contract.context_segments[0].id]
+
+
+def test_direct_backend_sets_fallback_when_no_context_loaded(tmp_path) -> None:
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[],
+    )
+
+    result = DirectBackend().dry_run(contract)
+
+    assert result.contract.audit["selector_mode"] == DETERMINISTIC_PREVIEW_MODE
+    assert result.contract.audit["fallback_reason"] == "no_reducible_context_segments"
+    assert result.contract.audit["selected_segment_ids"] == []
+    assert result.contract.audit["eligible_segment_count"] == 0
+
+
+def test_direct_backend_populates_selected_segment_ids_deterministically(
+    tmp_path,
+) -> None:
+    for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
+        (tmp_path / name).write_text(name * 10, encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[
+            load_context_file(tmp_path, "a.txt"),
+            load_context_file(tmp_path, "b.txt"),
+            load_context_file(tmp_path, "c.txt"),
+            load_context_file(tmp_path, "d.txt"),
+        ],
+    )
+
+    first = DirectBackend().dry_run(contract)
+    second = DirectBackend().dry_run(contract)
+    expected = [segment.id for segment in contract.context_segments[:3]]
+
+    assert first.contract.audit["selected_segment_ids"] == expected
+    assert second.contract.audit["selected_segment_ids"] == expected
+    assert first.contract.audit["selected_segment_count"] == 3
+    assert first.contract.audit["eligible_segment_count"] == 4
+
+
+def test_direct_backend_estimates_tokens_and_reduction_pct(tmp_path) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("a" * 40, encoding="utf-8")
+    second.write_text("b" * 40, encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[
+            load_context_file(tmp_path, "first.txt"),
+            load_context_file(tmp_path, "second.txt"),
+        ],
+    )
+
+    result = DirectBackend().dry_run(contract)
+    audit = result.contract.audit
+
+    assert audit["estimated_input_tokens"] == 20
+    assert audit["estimated_selected_tokens"] == 20
+    assert audit["estimated_reduction_pct"] == 0.0
+    assert audit["provider_calls_made"] == 0
+
+
+def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+    result = DirectBackend().dry_run(contract)
+
+    rendered = render_dry_run_summary(contract, result)
+
+    assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert "selected segment ids: ['ctx_" in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+    assert str(tmp_path) not in rendered
+    assert "request body" not in rendered.lower()
+
+
+def test_proxy_backend_dry_run_remains_safe_and_does_not_call_proxy(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("safe context", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+
+    result = ProxyBackend().dry_run(contract)
+
+    assert result.provider_calls_made == 0
+    assert result.summary["selector_mode"] == "proxy_not_connected"
+    assert result.contract.audit["selected_segment_ids"] == []
