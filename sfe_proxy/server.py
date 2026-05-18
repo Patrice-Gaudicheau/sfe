@@ -1595,7 +1595,7 @@ def _safe_shadow_router_fields(
             "shadow_router_provider": config.shadow_router_provider,
             "shadow_router_name": config.shadow_router_provider,
             "shadow_router_status": "error",
-            "shadow_router_reason": "shadow_router_contract_error",
+            "shadow_router_reason": "router_call_failed",
             "shadow_router_latency_ms": 0,
             "shadow_router_candidate_selected_segment_ids": [],
             "shadow_router_estimated_selected_input_tokens": None,

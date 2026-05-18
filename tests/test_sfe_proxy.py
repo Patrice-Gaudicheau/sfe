@@ -42,6 +42,7 @@ from sfe_proxy.server import (
 from sfe_proxy.shadow_router import (
     DisabledShadowRouter,
     LemonadeShadowRouter,
+    SAFE_SHADOW_ROUTER_REASONS,
     ShadowRouterInput,
     ShadowRouterResult,
 )
@@ -2135,6 +2136,7 @@ def test_enabled_mode_structured_responses_envelope_falls_back_to_original_when_
     request_log = _last_proxy_log(logs, path="/v1/responses")
     assert request_log["enabled_reason"] == "unsafe_task_envelope"
     assert request_log["enabled_reduction_gate_passed"] is False
+    assert not any(key.startswith("responses_input_") for key in request_log)
     joined_logs = "\n".join(logs)
     assert "Large selected background" not in joined_logs
     assert "example.invalid/image.png" not in joined_logs
@@ -3264,7 +3266,7 @@ def test_shadow_router_contract_objects_are_safe_json_metadata() -> None:
         "shadow_router_provider": "disabled",
         "shadow_router_name": "disabled",
         "shadow_router_status": "disabled",
-        "shadow_router_reason": "shadow_router_provider_disabled",
+        "shadow_router_reason": "disabled",
         "shadow_router_latency_ms": 0,
         "shadow_router_candidate_selected_segment_ids": [],
         "shadow_router_estimated_selected_input_tokens": None,
@@ -3288,7 +3290,31 @@ def test_shadow_router_result_serializes_error_metadata() -> None:
 
     json.dumps(event_fields)
     assert event_fields["shadow_router_error_type"] == "RuntimeError"
+    assert event_fields["shadow_router_reason"] == "router_call_failed"
     assert event_fields["shadow_router_dry_run_only"] is True
+
+
+def test_shadow_router_reason_is_category_only() -> None:
+    raw_reason = (
+        "Use docs/private/path.py because the prompt says internal details "
+        "and arbitrary router prose."
+    )
+    result = ShadowRouterResult(
+        router_enabled=True,
+        router_name="openai",
+        router_status="candidate_selected",
+        router_reason=raw_reason,
+        router_latency_ms=12,
+        candidate_selected_segment_ids=["segment-1"],
+    )
+
+    event_fields = result.to_event_fields("openai")
+
+    assert event_fields["shadow_router_reason"] == "router_call_succeeded"
+    assert event_fields["shadow_router_reason"] in SAFE_SHADOW_ROUTER_REASONS
+    assert raw_reason not in json.dumps(event_fields)
+    assert "docs/private/path.py" not in json.dumps(event_fields)
+    assert "arbitrary router prose" not in json.dumps(event_fields)
 
 
 def test_shadow_router_dry_run_disabled_provider_preserves_pass_through(tmp_path) -> None:
@@ -3334,7 +3360,7 @@ def test_shadow_router_dry_run_disabled_provider_preserves_pass_through(tmp_path
     assert event["shadow_router_provider"] == "disabled"
     assert event["shadow_router_name"] == "disabled"
     assert event["shadow_router_status"] == "disabled"
-    assert event["shadow_router_reason"] == "shadow_router_provider_disabled"
+    assert event["shadow_router_reason"] == "disabled"
     assert event["shadow_router_dry_run_only"] is True
     assert event["shadow_router_candidate_selected_segment_ids"] == []
 
@@ -3430,7 +3456,7 @@ def test_shadow_router_lemonade_success_adds_safe_metadata(monkeypatch, tmp_path
     assert event["shadow_router_provider"] == "lemonade"
     assert event["shadow_router_name"] == "lemonade"
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "metadata_only_dry_run_selection"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
     assert event["shadow_router_candidate_selected_segment_ids"] == ["segment-1"]
     assert event["shadow_router_estimated_selected_input_tokens"] == 12
     assert event["shadow_router_estimated_token_reduction_pct"] == 80.0
@@ -3452,9 +3478,13 @@ def test_shadow_router_openai_success_adds_safe_metadata(monkeypatch, tmp_path) 
         status=208,
         body=b'{"id":"openai-router-test","object":"chat.completion"}',
     )
+    raw_router_reason = (
+        "Select docs/private/router_note.md because the prompt contains "
+        "arbitrary router free text."
+    )
     router_response = {
         "router_status": "candidate_selected",
-        "router_reason": "openai_router_selected_tariff_segment",
+        "router_reason": raw_router_reason,
         "candidate_selected_segment_ids": ["segment-3"],
         "estimated_router_selected_input_tokens": 42,
         "estimated_router_token_reduction_pct": 75.5,
@@ -3536,7 +3566,8 @@ def test_shadow_router_openai_success_adds_safe_metadata(monkeypatch, tmp_path) 
     assert event["shadow_router_provider"] == "openai"
     assert event["shadow_router_name"] == "openai"
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "openai_router_selected_tariff_segment"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
+    assert event["shadow_router_reason"] in SAFE_SHADOW_ROUTER_REASONS
     assert event["shadow_router_candidate_selected_segment_ids"] == ["segment-3"]
     assert event["shadow_router_estimated_selected_input_tokens"] == 42
     assert event["shadow_router_estimated_token_reduction_pct"] == 75.5
@@ -3547,6 +3578,12 @@ def test_shadow_router_openai_success_adds_safe_metadata(monkeypatch, tmp_path) 
     serialized_event = json.dumps(event)
     joined_logs = "\n".join(logs)
     assert "UTILITY-RATE-SCHEDULE-DELTA-17" not in serialized_event
+    assert raw_router_reason not in serialized_event
+    assert "docs/private/router_note.md" not in serialized_event
+    assert "arbitrary router free text" not in serialized_event
+    assert raw_router_reason not in joined_logs
+    assert "docs/private/router_note.md" not in joined_logs
+    assert "arbitrary router free text" not in joined_logs
     assert "placeholder-openai-router-key" not in serialized_event
     assert "placeholder-client-token" not in serialized_event
     assert "Authorization" not in serialized_event
@@ -3605,7 +3642,7 @@ def test_shadow_router_openai_missing_api_key_records_safe_error(monkeypatch, tm
     assert event["shadow_router_enabled"] is True
     assert event["shadow_router_provider"] == "openai"
     assert event["shadow_router_status"] == "provider_error"
-    assert event["shadow_router_reason"] == "openai_router_missing_api_key"
+    assert event["shadow_router_reason"] == "router_call_failed"
     assert event["shadow_router_error_type"] == "MissingAPIKey"
     assert event["shadow_router_candidate_selected_segment_ids"] == []
     assert event["shadow_router_dry_run_only"] is True
@@ -3732,7 +3769,7 @@ def test_shadow_router_lemonade_multisegment_smoke_selects_expected_segment(
     assert event["shadow_router_enabled"] is True
     assert event["shadow_router_provider"] == "lemonade"
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "selected_tariff_policy_segment_for_question"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
     assert event["shadow_router_candidate_selected_segment_ids"] == [expected_segment_id]
     assert event["shadow_router_estimated_selected_input_tokens"] > 0
     assert event["shadow_router_estimated_token_reduction_pct"] is not None
@@ -3796,7 +3833,7 @@ def test_shadow_router_lemonade_json_code_fence_succeeds(monkeypatch, tmp_path) 
     assert json.loads(RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")) == payload
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "fenced_json_selection"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
     serialized_event = json.dumps(event)
     assert "```json" not in serialized_event
     assert prompt not in serialized_event
@@ -3845,7 +3882,7 @@ def test_shadow_router_lemonade_prose_wrapped_json_succeeds_without_logging_raw_
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "prose_wrapped_json_selection"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
     serialized_event = json.dumps(event)
     assert raw_prefix not in serialized_event
     assert raw_suffix not in serialized_event
@@ -3889,7 +3926,7 @@ def test_shadow_router_lemonade_reasoning_content_fallback_succeeds(monkeypatch,
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "reasoning_content_selection"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
 
 
 def test_shadow_router_lemonade_choice_text_fallback_succeeds(monkeypatch, tmp_path) -> None:
@@ -3926,7 +3963,7 @@ def test_shadow_router_lemonade_choice_text_fallback_succeeds(monkeypatch, tmp_p
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "choice_text_selection"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
 
 
 def test_shadow_router_lemonade_uses_router_model_fallback(monkeypatch, tmp_path) -> None:
@@ -4080,7 +4117,7 @@ def test_shadow_router_lemonade_missing_model_is_safe_and_skips_call(monkeypatch
     assert len(RecordingLemonadeRouterHandler.records) == 0
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "provider_error"
-    assert event["shadow_router_reason"] == "lemonade_router_missing_model"
+    assert event["shadow_router_reason"] == "router_call_failed"
     assert event["shadow_router_error_type"] == "MissingModel"
     serialized_event = json.dumps(event)
     assert prompt not in serialized_event
@@ -4119,7 +4156,7 @@ def test_shadow_router_lemonade_below_threshold_skips_call(tmp_path) -> None:
     assert len(RecordingLemonadeRouterHandler.records) == 0
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "not_eligible"
-    assert event["shadow_router_reason"] == "sfe_routing_eligible_false"
+    assert event["shadow_router_reason"] == "not_eligible_below_threshold"
 
 
 def test_shadow_router_lemonade_invalid_json_is_safe(monkeypatch, tmp_path) -> None:
@@ -4157,7 +4194,7 @@ def test_shadow_router_lemonade_invalid_json_is_safe(monkeypatch, tmp_path) -> N
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "invalid_output"
-    assert event["shadow_router_reason"] == "lemonade_router_invalid_json"
+    assert event["shadow_router_reason"] == "router_response_invalid"
     assert event["shadow_router_error_type"] == "JSONDecodeError"
 
 
@@ -4202,7 +4239,7 @@ def test_shadow_router_lemonade_reasoning_prose_without_json_stays_invalid_outpu
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "invalid_output"
-    assert event["shadow_router_reason"] == "lemonade_router_invalid_json"
+    assert event["shadow_router_reason"] == "router_response_invalid"
     assert event["shadow_router_error_type"] == "JSONDecodeError"
     serialized_event = json.dumps(event)
     assert reasoning_prose not in serialized_event
@@ -4245,7 +4282,7 @@ def test_shadow_router_lemonade_missing_required_fields_is_safe(monkeypatch, tmp
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "invalid_output"
-    assert event["shadow_router_reason"] == "lemonade_router_malformed_result"
+    assert event["shadow_router_reason"] == "router_response_invalid"
     assert event["shadow_router_error_type"] == "KeyError"
 
 
@@ -4295,7 +4332,7 @@ def test_shadow_router_lemonade_unknown_segment_id_is_safe(monkeypatch, tmp_path
     assert response["status"] == 200
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "invalid_output"
-    assert event["shadow_router_reason"] == "lemonade_router_malformed_result"
+    assert event["shadow_router_reason"] == "router_response_invalid"
     assert event["shadow_router_error_type"] == "ValueError"
     assert event["shadow_router_candidate_selected_segment_ids"] == []
 
@@ -4346,7 +4383,7 @@ def test_shadow_router_lemonade_uses_generic_timeout(monkeypatch, tmp_path) -> N
     assert observed["timeout_seconds"] == 77
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "candidate_selected"
-    assert event["shadow_router_reason"] == "timeout_config_seen"
+    assert event["shadow_router_reason"] == "router_call_succeeded"
 
 
 def test_shadow_router_lemonade_timeout_is_safe(monkeypatch, tmp_path) -> None:
@@ -4384,7 +4421,7 @@ def test_shadow_router_lemonade_timeout_is_safe(monkeypatch, tmp_path) -> None:
     assert response["body"] == {"ok": True}
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "provider_error"
-    assert event["shadow_router_reason"] == "lemonade_router_timeout"
+    assert event["shadow_router_reason"] == "router_timeout"
     assert event["shadow_router_error_type"] == "TimeoutError"
 
 
@@ -4423,7 +4460,7 @@ def test_shadow_router_lemonade_provider_error_is_safe(monkeypatch, tmp_path) ->
     assert response["body"] == {"ok": True}
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "provider_error"
-    assert event["shadow_router_reason"] == "lemonade_router_provider_error"
+    assert event["shadow_router_reason"] == "router_call_failed"
     assert event["shadow_router_error_type"] == "URLError"
 
 
@@ -4461,7 +4498,7 @@ def test_shadow_router_lemonade_rate_limit_reject_skips_call(monkeypatch, tmp_pa
     assert len(RecordingLemonadeRouterHandler.records) == 0
     event = _read_shadow_event(tmp_path)
     assert event["shadow_router_status"] == "rate_limited"
-    assert event["shadow_router_reason"] == "max_input_tokens_exceeded"
+    assert event["shadow_router_reason"] == "skipped_for_safety"
     assert event["shadow_router_rate_limit_decision"]["rejected"] is True
 
 
@@ -4516,7 +4553,7 @@ def test_shadow_router_lemonade_rate_limit_wait_skips_call_without_sleeping(monk
     events = _read_shadow_events(tmp_path)
     assert events[0]["shadow_router_status"] == "candidate_selected"
     assert events[1]["shadow_router_status"] == "rate_limited"
-    assert events[1]["shadow_router_reason"] == "min_interval_ms_not_elapsed"
+    assert events[1]["shadow_router_reason"] == "skipped_for_safety"
     assert events[1]["shadow_router_rate_limit_decision"]["wait_required"] is True
 
 

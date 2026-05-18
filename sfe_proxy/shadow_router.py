@@ -24,6 +24,19 @@ LEMONADE_MODEL_ENV_NAMES = (
     "SFE_LEMONADE_MODEL",
     "SFE_ROUTER_MODEL",
 )
+SAFE_SHADOW_ROUTER_REASONS = {
+    "disabled",
+    "not_eligible_below_threshold",
+    "router_call_succeeded",
+    "router_call_failed",
+    "router_response_invalid",
+    "router_selection_empty",
+    "router_selection_unusable",
+    "router_timeout",
+    "unsupported_provider",
+    "skipped_for_safety",
+    "unknown",
+}
 
 
 @dataclass(frozen=True)
@@ -64,7 +77,11 @@ class ShadowRouterResult:
             "shadow_router_provider": provider,
             "shadow_router_name": self.router_name,
             "shadow_router_status": self.router_status,
-            "shadow_router_reason": self.router_reason,
+            "shadow_router_reason": _safe_shadow_router_reason(
+                self.router_status,
+                self.router_reason,
+                self.error_type,
+            ),
             "shadow_router_latency_ms": self.router_latency_ms,
             "shadow_router_candidate_selected_segment_ids": self.candidate_selected_segment_ids,
             "shadow_router_estimated_selected_input_tokens": (
@@ -88,6 +105,34 @@ class ShadowRouter(Protocol):
 
     def analyze(self, router_input: ShadowRouterInput) -> ShadowRouterResult:
         """Return shadow router dry-run metadata without changing proxy behavior."""
+
+
+def _safe_shadow_router_reason(
+    router_status: str,
+    raw_reason: str,
+    error_type: str | None,
+) -> str:
+    if router_status == "disabled":
+        return "disabled"
+    if router_status == "not_eligible":
+        return "not_eligible_below_threshold"
+    if router_status == "rate_limited":
+        return "skipped_for_safety"
+    if router_status == "provider_error":
+        if error_type == "TimeoutError" or raw_reason.endswith("_timeout"):
+            return "router_timeout"
+        return "router_call_failed"
+    if router_status == "invalid_output":
+        return "router_response_invalid"
+    if router_status == "candidate_selected":
+        return "router_call_succeeded"
+    if router_status == "no_selection":
+        return "router_selection_empty"
+    if router_status == "selection_unusable":
+        return "router_selection_unusable"
+    if router_status == "error":
+        return "router_call_failed"
+    return "unknown"
 
 
 class DisabledShadowRouter:
