@@ -33,6 +33,8 @@ from sfe_tui.executors import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     ExecutorResponse,
     OpenAIReadOnlyExecutor,
+    PATCH_SYSTEM_INSTRUCTION,
+    READ_ONLY_SYSTEM_INSTRUCTION,
 )
 from sfe_tui.renderer import (
     render_context_summary,
@@ -63,17 +65,28 @@ class FakeExecutor:
     def __init__(
         self,
         response: ExecutorResponse | None = None,
+        patch_response: ExecutorResponse | None = None,
     ) -> None:
         self.response = response or ExecutorResponse(
             answer="mock answer",
             error_category=None,
             provider_calls_made=1,
         )
+        self.patch_response = patch_response or ExecutorResponse(
+            answer="diff --git a/context.txt b/context.txt\n--- a/context.txt\n+++ b/context.txt",
+            error_category=None,
+            provider_calls_made=1,
+        )
         self.calls: list[dict[str, object]] = []
+        self.patch_calls: list[dict[str, object]] = []
 
     def execute(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.calls.append(executor_payload)
         return self.response
+
+    def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        self.patch_calls.append(executor_payload)
+        return self.patch_response
 
 
 class FakeProvider:
@@ -490,6 +503,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/status" in rendered
     assert "/context" in rendered
     assert "/ask" in rendered
+    assert "/patch" in rendered
     assert "/backend" not in rendered
 
 
@@ -869,6 +883,188 @@ def test_ask_provider_failure_is_category_only(tmp_path) -> None:
     assert "provider payload" not in rendered.lower()
 
 
+def test_patch_requires_task(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("context", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files context.txt", "/patch", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "building contract" in rendered
+    assert "Error: missing_task" in rendered
+    assert not executor.patch_calls
+
+
+def test_patch_requires_loaded_context(tmp_path) -> None:
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Update context", "/patch", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: no_context_loaded" in rendered
+    assert not executor.patch_calls
+
+
+def test_patch_refuses_when_router_selects_no_context(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("unrelated material", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task database migrations", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "routing context" in rendered
+    assert "SFE patch failed" in rendered
+    assert "reason: no_selected_context" in rendered
+    assert "calling provider" not in rendered
+    assert not executor.patch_calls
+
+
+def test_direct_backend_patch_uses_selected_context_only(tmp_path) -> None:
+    alpha = tmp_path / "alpha.txt"
+    beta = tmp_path / "beta.txt"
+    alpha.write_text("ALPHA_SECRET_CONTENT alpha routing", encoding="utf-8")
+    beta.write_text("BETA_SECRET_CONTENT unrelated", encoding="utf-8")
+    executor = FakeExecutor()
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Patch alpha routing.",
+        file_paths=[],
+        context_files=[
+            load_context_file(tmp_path, "alpha.txt"),
+            load_context_file(tmp_path, "beta.txt"),
+        ],
+    )
+
+    result = DirectBackend(executor=executor).patch(contract)
+
+    assert result.status == "patch_proposed"
+    assert result.answer is not None
+    assert result.provider_calls_made == 1
+    assert result.summary["patch_applied"] is False
+    assert not executor.calls
+    assert len(executor.patch_calls) == 1
+    selected = executor.patch_calls[0]["selected_context_segments"]
+    assert [segment.id for segment in selected] == [contract.context_segments[0].id]
+    assert selected[0].text == "ALPHA_SECRET_CONTENT alpha routing"
+    assert all("BETA_SECRET_CONTENT" not in segment.text for segment in selected)
+
+
+def test_direct_backend_patch_does_not_send_protected_segments_as_context(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    executor = FakeExecutor()
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Patch selected context.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+    contract = replace(
+        contract,
+        protected_segments=[
+            ProtectedText(id="protected_segment", text="PROTECTED_SEGMENT_SECRET"),
+        ],
+    )
+
+    DirectBackend(executor=executor).patch(contract)
+
+    payload = executor.patch_calls[0]
+    assert "protected_segments" not in payload
+    assert payload["instructions"]
+    assert payload["task"] is contract.task
+    assert payload["selected_context_segments"] == contract.context_segments
+
+
+def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT context", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=FakeExecutor()),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    summary = rendered.split("SFE patch summary", 1)[1]
+    assert "calling provider" in rendered
+    assert "Patch proposal only, not applied" in rendered
+    assert "diff --git a/context.txt b/context.txt" in rendered
+    assert "router mode: local_lexical_preview" in summary
+    assert "selected segment ids: ['ctx_" in summary
+    assert "provider calls made: 1" in summary
+    assert "writes enabled: no" in summary
+    assert "shell enabled: no" in summary
+    assert "patch applied: no" in summary
+    assert "SECRET_FILE_CONTENT" not in summary
+    assert "Patch context" not in summary
+    assert str(tmp_path) not in summary
+    assert "request body" not in summary.lower()
+    assert "provider payload" not in summary.lower()
+    assert "Authorization" not in summary
+    assert "API_KEY" not in summary
+
+
+def test_patch_provider_failure_is_category_only(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("context", encoding="utf-8")
+    api_key = "sk-SECRET_SHOULD_NOT_RENDER_123456"
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=None,
+            error_category="provider_error",
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE patch failed" in rendered
+    assert "reason: provider_error" in rendered
+    assert "patch applied: no" in rendered
+    assert api_key not in rendered
+    assert "Authorization" not in rendered
+    assert "request body" not in rendered.lower()
+    assert "provider payload" not in rendered.lower()
+
+
 def test_openai_executor_reports_provider_not_configured_without_key_leak() -> None:
     provider = FakeProvider(ok=False)
     executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
@@ -918,6 +1114,24 @@ def test_openai_executor_uses_tui_default_output_token_budget() -> None:
 
     assert result.answer == "provider answer"
     assert DEFAULT_MAX_OUTPUT_TOKENS == 1500
+    assert provider.calls[0]["max_tokens"] == 1500
+
+
+def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> None:
+    provider = FakeProvider()
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.propose_patch(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["system_instruction"] != READ_ONLY_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == 1500
 
 
@@ -1469,5 +1683,8 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "40.83%" in milestone
     assert "raised from 800 to 1500 tokens" in milestone
     assert "source/path-aware lexical ranking" in milestone
+    assert "`/patch` is the next proposal-only phase" in milestone
+    assert "Patch proposal only, not applied" in milestone
+    assert "does not write files, apply patches, execute shell commands" in milestone
     assert "not a benchmark" in milestone
     assert "tui_readonly_ask_milestone.md" in index

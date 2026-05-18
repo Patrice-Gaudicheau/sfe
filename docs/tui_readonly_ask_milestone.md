@@ -37,6 +37,15 @@ appeared to end abruptly, so the TUI read-only executor default output budget
 was raised from 800 to 1500 tokens. This change is local to the first-party TUI
 read-only executor and does not alter benchmark or proxy defaults.
 
+`/patch` is the next proposal-only phase. It uses the same DirectBackend,
+explicit `context_segments`, and `local_lexical_preview` selected context as
+`/ask`, but asks the read-only executor for a unified diff when a safe concrete
+edit can be proposed from the selected context. The TUI labels this output as
+"Patch proposal only, not applied" and reports sanitized routing diagnostics.
+It does not write files, apply patches, execute shell commands, call the proxy,
+switch backends, or run an agent loop. This is the step before any future
+write/apply workflow.
+
 No write tools, shell execution, proxy calls, backend switching, or agent loop
 are part of this milestone. The next phases remain context inspection, patch
 generation, and only later carefully scoped write tools.

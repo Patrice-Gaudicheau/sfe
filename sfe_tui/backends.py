@@ -74,6 +74,9 @@ class BackendAdapter(Protocol):
     def run(self, contract: SFEContract) -> BackendResult:
         ...
 
+    def patch(self, contract: SFEContract) -> BackendResult:
+        ...
+
 
 class DirectBackend:
     name = "direct"
@@ -90,10 +93,31 @@ class DirectBackend:
             return ask_error_result(routed, "missing_task")
         if not contract.context_segments:
             return ask_error_result(routed, "no_context_loaded")
-        if routed.execution_preview is None or not routed.execution_preview.selected_segment_ids:
+        if (
+            routed.execution_preview is None
+            or not routed.execution_preview.selected_segment_ids
+        ):
             return ask_error_result(routed, "no_selected_context")
-        executor_response = self.executor.execute(routed.execution_preview.executor_payload)
+        executor_response = self.executor.execute(
+            routed.execution_preview.executor_payload
+        )
         return _ask_result_from_executor_response(routed, executor_response)
+
+    def patch(self, contract: SFEContract) -> BackendResult:
+        routed = self.dry_run(contract)
+        if contract.task is None:
+            return patch_error_result(routed, "missing_task")
+        if not contract.context_segments:
+            return patch_error_result(routed, "no_context_loaded")
+        if (
+            routed.execution_preview is None
+            or not routed.execution_preview.selected_segment_ids
+        ):
+            return patch_error_result(routed, "no_selected_context")
+        executor_response = self.executor.propose_patch(
+            routed.execution_preview.executor_payload
+        )
+        return _patch_result_from_executor_response(routed, executor_response)
 
 
 class ProxyBackend:
@@ -104,6 +128,9 @@ class ProxyBackend:
 
     def run(self, contract: SFEContract) -> BackendResult:
         raise NotImplementedError("Proxy backend execution is not implemented yet.")
+
+    def patch(self, contract: SFEContract) -> BackendResult:
+        raise NotImplementedError("Proxy backend patching is not implemented yet.")
 
 
 def backend_by_name(name: str) -> BackendAdapter:
@@ -129,6 +156,20 @@ def ask_error_result(result: BackendResult, error_category: str) -> BackendResul
     )
 
 
+def patch_error_result(result: BackendResult, error_category: str) -> BackendResult:
+    return BackendResult(
+        backend=result.backend,
+        status="patch_failed",
+        provider_calls_made=0,
+        summary={**result.summary, "patch_error_category": error_category},
+        contract=result.contract,
+        execution_preview=result.execution_preview,
+        router_preview=result.router_preview,
+        answer=None,
+        error_category=error_category,
+    )
+
+
 def _ask_result_from_executor_response(
     routed: BackendResult,
     executor_response: ExecutorResponse,
@@ -142,6 +183,29 @@ def _ask_result_from_executor_response(
             **routed.summary,
             "provider_calls_made": executor_response.provider_calls_made,
             "ask_error_category": executor_response.error_category,
+        },
+        contract=routed.contract,
+        execution_preview=routed.execution_preview,
+        router_preview=routed.router_preview,
+        answer=executor_response.answer,
+        error_category=executor_response.error_category,
+    )
+
+
+def _patch_result_from_executor_response(
+    routed: BackendResult,
+    executor_response: ExecutorResponse,
+) -> BackendResult:
+    status = "patch_proposed" if executor_response.answer else "patch_failed"
+    return BackendResult(
+        backend=routed.backend,
+        status=status,
+        provider_calls_made=executor_response.provider_calls_made,
+        summary={
+            **routed.summary,
+            "provider_calls_made": executor_response.provider_calls_made,
+            "patch_error_category": executor_response.error_category,
+            "patch_applied": False,
         },
         contract=routed.contract,
         execution_preview=routed.execution_preview,

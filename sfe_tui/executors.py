@@ -20,6 +20,13 @@ READ_ONLY_SYSTEM_INSTRUCTION = (
     "context and the user's task. Do not claim to edit files, run commands, "
     "or use tools."
 )
+PATCH_SYSTEM_INSTRUCTION = (
+    "You are the SFE TUI patch proposal executor. Propose a unified diff when "
+    "a safe concrete edit can be made from the selected context. Do not use "
+    "markdown fences when a clean diff is possible. If no safe diff can be "
+    "proposed, explain why briefly. Do not claim files were modified. Do not "
+    "invent file contents outside the selected context."
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,9 @@ class ExecutorResponse:
 
 class ReadOnlyExecutor(Protocol):
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        ...
+
+    def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         ...
 
 
@@ -53,6 +63,23 @@ class OpenAIReadOnlyExecutor:
         self.max_output_tokens = max_output_tokens
 
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return self._execute_with_instruction(
+            executor_payload,
+            system_instruction=READ_ONLY_SYSTEM_INSTRUCTION,
+        )
+
+    def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return self._execute_with_instruction(
+            executor_payload,
+            system_instruction=PATCH_SYSTEM_INSTRUCTION,
+        )
+
+    def _execute_with_instruction(
+        self,
+        executor_payload: dict[str, Any],
+        *,
+        system_instruction: str,
+    ) -> ExecutorResponse:
         health = self.provider.health()
         if not health.get("ok"):
             return ExecutorResponse(
@@ -66,7 +93,7 @@ class OpenAIReadOnlyExecutor:
                 model=self.model,
                 max_tokens=self.max_output_tokens,
                 temperature=None,
-                system_instruction=READ_ONLY_SYSTEM_INSTRUCTION,
+                system_instruction=system_instruction,
             )
         except MissingOpenAIAPIKeyError:
             return ExecutorResponse(

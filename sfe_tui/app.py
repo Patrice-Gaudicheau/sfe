@@ -6,7 +6,13 @@ import shlex
 from pathlib import Path
 from typing import Callable
 
-from .backends import BackendAdapter, BackendResult, ask_error_result, backend_by_name
+from .backends import (
+    BackendAdapter,
+    BackendResult,
+    ask_error_result,
+    backend_by_name,
+    patch_error_result,
+)
 from .contracts import (
     ContextLoadResult,
     build_contract,
@@ -107,6 +113,9 @@ class SfeTuiApp:
         if name == "/ask":
             self._handle_ask()
             return False
+        if name == "/patch":
+            self._handle_patch()
+            return False
         self.output(renderer.render_error("unknown_command"))
         return False
 
@@ -180,6 +189,31 @@ class SfeTuiApp:
         if result.answer:
             self.output("answer received")
         self.output(renderer.render_ask_result(result))
+
+    def _handle_patch(self) -> None:
+        self.output("building contract")
+        contract = build_contract(
+            workspace_root=self.workspace_root,
+            task=self.task,
+            file_paths=[],
+            context_files=self.context_files,
+        )
+        if contract.task is None:
+            self.output(renderer.render_error("missing_task"))
+            return
+        if not contract.context_segments:
+            self.output(renderer.render_error("no_context_loaded"))
+            return
+        self.output("routing context")
+        routed = self.backend.dry_run(contract)
+        if not routed.contract.audit.get("selected_segment_ids"):
+            self.latest_result = patch_error_result(routed, "no_selected_context")
+            self.output(renderer.render_patch_result(self.latest_result))
+            return
+        self.output("calling provider")
+        result = self.backend.patch(contract)
+        self.latest_result = result
+        self.output(renderer.render_patch_result(result))
 
 
 def main() -> int:

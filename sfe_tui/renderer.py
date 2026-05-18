@@ -20,6 +20,7 @@ def render_help() -> str:
             "  /task <text>       Set the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /ask               Ask a read-only question using selected context",
+            "  /patch             Propose a patch without applying it",
             "  /quit, /exit       Exit",
         ]
     )
@@ -217,6 +218,32 @@ def render_ask_result(result: BackendResult) -> str:
             f"  provider calls made: {result.provider_calls_made}",
             "  writes enabled: no",
             "  shell enabled: no",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_patch_result(result: BackendResult) -> str:
+    lines: list[str] = []
+    if result.answer:
+        lines.extend(["Patch proposal only, not applied", result.answer])
+    else:
+        lines.extend(["SFE patch failed", f"  reason: {result.error_category}"])
+    audit = result.contract.audit
+    lines.extend(
+        [
+            "SFE patch summary",
+            f"  router mode: {audit.get('router_mode')}",
+            f"  selected segment count: {audit.get('selected_segment_count')}",
+            f"  selected segment ids: {audit.get('selected_segment_ids')}",
+            f"  estimated input tokens: {audit.get('estimated_input_tokens')}",
+            f"  estimated selected tokens: {audit.get('estimated_selected_tokens')}",
+            f"  estimated reduction pct: {audit.get('estimated_reduction_pct')}",
+            f"  fallback reason: {audit.get('fallback_reason')}",
+            f"  provider calls made: {result.provider_calls_made}",
+            "  writes enabled: no",
+            "  shell enabled: no",
+            "  patch applied: no",
         ]
     )
     return "\n".join(lines)
