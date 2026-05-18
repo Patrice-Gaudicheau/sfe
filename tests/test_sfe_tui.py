@@ -558,6 +558,118 @@ def test_direct_backend_estimates_tokens_and_reduction_pct(tmp_path) -> None:
     assert audit["provider_calls_made"] == 0
 
 
+def test_direct_backend_dry_run_returns_execution_preview(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("safe context text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+
+    result = DirectBackend().dry_run(contract)
+
+    assert result.execution_preview is not None
+    assert result.execution_preview.backend_name == "direct"
+    assert result.execution_preview.selector_mode == DETERMINISTIC_PREVIEW_MODE
+
+
+def test_execution_preview_includes_selected_ids_counts_and_estimates(
+    tmp_path,
+) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("a" * 40, encoding="utf-8")
+    second.write_text("b" * 40, encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[
+            load_context_file(tmp_path, "first.txt"),
+            load_context_file(tmp_path, "second.txt"),
+        ],
+    )
+
+    preview = DirectBackend().dry_run(contract).execution_preview
+
+    assert preview is not None
+    assert preview.selected_segment_ids == [
+        segment.id for segment in contract.context_segments
+    ]
+    assert preview.selected_segment_count == 2
+    assert preview.selected_context_char_count == 80
+    assert preview.selected_context_token_estimate == 20
+    assert preview.total_context_char_count == 80
+    assert preview.total_context_token_estimate == 20
+    assert preview.estimated_reduction_pct == 0.0
+
+
+def test_execution_preview_reports_disabled_capabilities_and_no_provider_calls(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("safe context text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+
+    preview = DirectBackend().dry_run(contract).execution_preview
+
+    assert preview is not None
+    assert preview.provider_calls_made == 0
+    assert preview.writes_enabled is False
+    assert preview.shell_enabled is False
+
+
+def test_execution_preview_keeps_internal_payload_without_rendering_it(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="SECRET_TASK_TEXT",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+
+    result = DirectBackend().dry_run(contract)
+    preview = result.execution_preview
+    rendered = render_dry_run_summary(contract, result)
+
+    assert preview is not None
+    assert preview.executor_payload["task"].text == "SECRET_TASK_TEXT"
+    assert (
+        preview.executor_payload["selected_context_segments"][0].text
+        == "SECRET_FILE_CONTENT"
+    )
+    assert "SECRET_TASK_TEXT" not in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+
+
+def test_execution_preview_handles_no_context_with_fallback(tmp_path) -> None:
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[],
+    )
+
+    result = DirectBackend().dry_run(contract)
+    preview = result.execution_preview
+
+    assert preview is not None
+    assert preview.selected_segment_ids == []
+    assert preview.selected_segment_count == 0
+    assert preview.fallback_reason == "no_reducible_context_segments"
+    assert preview.selected_context_token_estimate == 0
+
+
 def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
@@ -572,10 +684,35 @@ def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
     rendered = render_dry_run_summary(contract, result)
 
     assert f"selector mode: {DETERMINISTIC_PREVIEW_MODE}" in rendered
+    assert "DirectBackend execution preview" in rendered
     assert "selected segment ids: ['ctx_" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert str(tmp_path) not in rendered
     assert "request body" not in rendered.lower()
+    assert "provider payload" not in rendered.lower()
+    assert "Authorization" not in rendered
+    assert "API_KEY" not in rendered
+
+
+def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("safe context text", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Task.",
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
+    )
+    result = DirectBackend().dry_run(contract)
+
+    rendered = render_dry_run_summary(contract, result)
+
+    assert "DirectBackend execution preview" in rendered
+    assert "backend name: direct" in rendered
+    assert "provider calls made: 0" in rendered
+    assert "writes enabled: false" in rendered
+    assert "shell enabled: false" in rendered
+    assert "not an LLM router result" in rendered
 
 
 def test_proxy_backend_dry_run_remains_safe_and_does_not_call_proxy(tmp_path) -> None:

@@ -3,13 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Any, Protocol
 
-from .contracts import SFEContract
+from .contracts import ContextSegment, SFEContract
 
 
 DETERMINISTIC_PREVIEW_MODE = "deterministic_preview"
 MAX_PREVIEW_SEGMENTS = 3
+
+
+@dataclass(frozen=True)
+class DirectExecutionPreview:
+    backend_name: str
+    selector_mode: str
+    protected_instruction_count: int
+    task_present: bool
+    selected_segment_ids: list[str]
+    selected_segment_count: int
+    selected_context_char_count: int
+    selected_context_token_estimate: int
+    total_context_char_count: int
+    total_context_token_estimate: int
+    estimated_reduction_pct: float | None
+    fallback_reason: str | None
+    provider_calls_made: int
+    writes_enabled: bool
+    shell_enabled: bool
+    executor_payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -19,6 +39,7 @@ class BackendResult:
     provider_calls_made: int
     summary: dict[str, object]
     contract: SFEContract
+    execution_preview: DirectExecutionPreview | None = None
 
 
 class BackendAdapter(Protocol):
@@ -87,10 +108,16 @@ def _deterministic_preview_result(name: str, contract: SFEContract) -> BackendRe
         "provider_calls_made": 0,
     }
     updated = replace(contract, audit=audit)
+    execution_preview = _build_execution_preview(
+        name=name,
+        contract=updated,
+        selected_segments=selected,
+    )
     return _dry_run_result(
         name,
         updated,
         selector_mode=DETERMINISTIC_PREVIEW_MODE,
+        execution_preview=execution_preview,
     )
 
 
@@ -99,6 +126,7 @@ def _dry_run_result(
     contract: SFEContract,
     *,
     selector_mode: str,
+    execution_preview: DirectExecutionPreview | None = None,
 ) -> BackendResult:
     return BackendResult(
         backend=name,
@@ -123,6 +151,42 @@ def _dry_run_result(
             "estimated_reduction_pct": contract.audit.get("estimated_reduction_pct"),
         },
         contract=contract,
+        execution_preview=execution_preview,
+    )
+
+
+def _build_execution_preview(
+    *,
+    name: str,
+    contract: SFEContract,
+    selected_segments: list[ContextSegment],
+) -> DirectExecutionPreview:
+    selected_ids = [segment.id for segment in selected_segments]
+    selected_chars = sum(segment.approx_size for segment in selected_segments)
+    selected_tokens = sum(segment.approx_tokens for segment in selected_segments)
+    total_chars = int(contract.metadata.get("total_approx_context_chars") or 0)
+    total_tokens = int(contract.metadata.get("total_approx_context_tokens") or 0)
+    return DirectExecutionPreview(
+        backend_name=name,
+        selector_mode=DETERMINISTIC_PREVIEW_MODE,
+        protected_instruction_count=len(contract.instructions),
+        task_present=contract.task is not None,
+        selected_segment_ids=selected_ids,
+        selected_segment_count=len(selected_segments),
+        selected_context_char_count=selected_chars,
+        selected_context_token_estimate=selected_tokens,
+        total_context_char_count=total_chars,
+        total_context_token_estimate=total_tokens,
+        estimated_reduction_pct=contract.audit.get("estimated_reduction_pct"),
+        fallback_reason=contract.audit.get("fallback_reason"),
+        provider_calls_made=0,
+        writes_enabled=False,
+        shell_enabled=False,
+        executor_payload={
+            "instructions": contract.instructions,
+            "task": contract.task,
+            "selected_context_segments": selected_segments,
+        },
     )
 
 
