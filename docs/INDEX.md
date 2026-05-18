@@ -26,6 +26,8 @@ statistical reliability, or general model-safety guarantees.
 - [tui_direct_backend_strategy.md](tui_direct_backend_strategy.md): current
   first-party TUI direction, with DirectBackend as the canonical exposed path
   and the Proxy/CodexCLI path frozen as compatibility infrastructure.
+- [tui_readonly_ask_milestone.md](tui_readonly_ask_milestone.md): first
+  read-only `/ask` milestone for the first-party SFE-aware TUI.
 - [token_cost_metrics.md](token_cost_metrics.md): OpenAI token accounting and
   router-inclusive reduction details.
 - [large_contextual_benchmark_report.md](large_contextual_benchmark_report.md):

@@ -49,6 +49,7 @@ class RouterPreviewDiagnostics:
     estimated_reduction_pct: float | None
     fallback_reason: str | None
     score_category_counts: dict[str, int]
+    score_categories_by_segment_id: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,9 @@ def _local_router_preview_result(name: str, contract: SFEContract) -> BackendRes
         "router_provider_calls_made": router_result.provider_calls_made,
         "router_input_segment_ids": router_result.router_input_segment_ids,
         "router_score_category_counts": router_result.score_category_counts,
+        "router_score_categories_by_segment_id": (
+            router_result.score_categories_by_segment_id
+        ),
         "fallback_reason": router_result.fallback_reason,
         "input_segment_count": router_result.input_segment_count,
         "eligible_segment_count": router_result.eligible_segment_count,
@@ -298,5 +302,8 @@ def _build_router_preview(contract: SFEContract) -> RouterPreviewDiagnostics:
         fallback_reason=contract.audit.get("fallback_reason"),
         score_category_counts=dict(
             contract.audit.get("router_score_category_counts") or {}
+        ),
+        score_categories_by_segment_id=dict(
+            contract.audit.get("router_score_categories_by_segment_id") or {}
         ),
     )

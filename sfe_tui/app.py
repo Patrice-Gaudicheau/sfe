@@ -6,7 +6,7 @@ import shlex
 from pathlib import Path
 from typing import Callable
 
-from .backends import BackendAdapter, ask_error_result, backend_by_name
+from .backends import BackendAdapter, BackendResult, ask_error_result, backend_by_name
 from .contracts import (
     ContextLoadResult,
     build_contract,
@@ -36,6 +36,7 @@ class SfeTuiApp:
         self.workspace_root: Path | None = None
         self.context_files: list[ContextLoadResult] = []
         self.task = ""
+        self.latest_result: BackendResult | None = None
 
     def run(self) -> int:
         if not self._select_workspace():
@@ -89,11 +90,15 @@ class SfeTuiApp:
                 )
             )
             return False
+        if name == "/context":
+            self._handle_context()
+            return False
         if name == "/files":
             self._handle_files(rest)
             return False
         if name == "/task":
             self.task = rest.strip()
+            self.latest_result = None
             self.output(renderer.render_task_set())
             return False
         if name == "/dry-run":
@@ -120,7 +125,23 @@ class SfeTuiApp:
         self.context_files = [
             load_context_file(self.workspace_root, value) for value in values
         ]
+        self.latest_result = None
         self.output(renderer.render_file_selection(self.context_files))
+
+    def _handle_context(self) -> None:
+        contract = build_contract(
+            workspace_root=self.workspace_root,
+            task=self.task,
+            file_paths=[],
+            context_files=self.context_files,
+        )
+        self.output(
+            renderer.render_context_summary(
+                contract=contract,
+                context_files=self.context_files,
+                latest_result=self.latest_result,
+            )
+        )
 
     def _handle_dry_run(self) -> None:
         contract = build_contract(
@@ -130,6 +151,7 @@ class SfeTuiApp:
             context_files=self.context_files,
         )
         result = self.backend.dry_run(contract)
+        self.latest_result = result
         self.output(renderer.render_dry_run_summary(contract, result))
 
     def _handle_ask(self) -> None:
@@ -149,14 +171,12 @@ class SfeTuiApp:
         self.output("routing context")
         routed = self.backend.dry_run(contract)
         if not routed.contract.audit.get("selected_segment_ids"):
-            self.output(
-                renderer.render_ask_result(
-                    ask_error_result(routed, "no_selected_context")
-                )
-            )
+            self.latest_result = ask_error_result(routed, "no_selected_context")
+            self.output(renderer.render_ask_result(self.latest_result))
             return
         self.output("calling provider")
         result = self.backend.run(contract)
+        self.latest_result = result
         if result.answer:
             self.output("answer received")
         self.output(renderer.render_ask_result(result))

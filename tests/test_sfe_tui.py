@@ -30,7 +30,12 @@ from sfe_tui.contracts import (
     resolve_workspace,
 )
 from sfe_tui.executors import ExecutorResponse, OpenAIReadOnlyExecutor
-from sfe_tui.renderer import render_dry_run_summary, render_help, render_status
+from sfe_tui.renderer import (
+    render_context_summary,
+    render_dry_run_summary,
+    render_help,
+    render_status,
+)
 from sfe_tui.routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
     NO_MATCHING_CONTEXT_TERMS,
@@ -479,6 +484,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     rendered = render_help()
 
     assert "/status" in rendered
+    assert "/context" in rendered
     assert "/ask" in rendered
     assert "/backend" not in rendered
 
@@ -497,6 +503,130 @@ def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
     assert "proxy_not_connected" not in rendered
 
 
+def test_context_empty_state_is_safe(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/context", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE context" in rendered
+    assert "loaded context segments: 0" in rendered
+    assert "empty: no context loaded" in rendered
+    assert str(tmp_path) not in rendered.split("SFE context", 1)[1]
+
+
+def test_context_after_files_shows_ids_and_relative_refs_only(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files context.txt", "/context", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    context_block = rendered.split("SFE context", 1)[1]
+    assert "id=ctx_" in context_block
+    assert "ref=context.txt" in context_block
+    assert "selected=no" in context_block
+    assert "score=unrouted" in context_block
+    assert "SECRET_FILE_CONTENT" not in context_block
+    assert str(tmp_path) not in context_block
+
+
+def test_context_after_dry_run_marks_selected_segments(tmp_path) -> None:
+    first = tmp_path / "alpha.txt"
+    second = tmp_path / "beta.txt"
+    first.write_text("alpha routing", encoding="utf-8")
+    second.write_text("unrelated", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files alpha.txt beta.txt",
+                "/task Explain alpha routing",
+                "/dry-run",
+                "/context",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    context_block = rendered.split("SFE context", 1)[1]
+    assert "ref=alpha.txt" in context_block
+    assert "ref=beta.txt" in context_block
+    assert "selected=yes" in context_block
+    assert "selected=no" in context_block
+    assert "score=medium" in context_block
+    assert "score=zero" in context_block
+
+
+def test_context_after_ask_marks_selected_segments(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context text", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/ask",
+                "/context",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=FakeExecutor()),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    context_block = rendered.split("SFE context", 1)[1]
+    assert "selected=yes" in context_block
+    assert "score=medium" in context_block
+    assert "mock answer" not in context_block
+    assert "selected context text" not in context_block
+
+
+def test_context_shows_warning_category_without_marker_or_content(tmp_path) -> None:
+    source = tmp_path / "scanner.py"
+    source.write_text(
+        f"MARKER = {PRIVATE_KEY_MARKERS[0]!r}\nSECRET_FILE_CONTENT",
+        encoding="utf-8",
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files scanner.py", "/context", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    context_block = rendered.split("SFE context", 1)[1]
+    assert "warning=secret_marker_literal_in_source" in context_block
+    assert PRIVATE_KEY_MARKERS[0] not in context_block
+    assert "SECRET_FILE_CONTENT" not in context_block
+    assert str(tmp_path) not in context_block
+    assert "request body" not in context_block.lower()
+    assert "provider payload" not in context_block.lower()
+    assert "Authorization" not in context_block
+    assert "API_KEY" not in context_block
+
+
 def test_app_loop_quit_exits_cleanly(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
@@ -506,6 +636,36 @@ def test_app_loop_quit_exits_cleanly(tmp_path) -> None:
     )
 
     assert app.run() == 0
+
+
+def test_render_context_summary_uses_latest_result_selection(tmp_path) -> None:
+    first = tmp_path / "alpha.txt"
+    second = tmp_path / "beta.txt"
+    first.write_text("alpha routing", encoding="utf-8")
+    second.write_text("unrelated", encoding="utf-8")
+    context_files = [
+        load_context_file(tmp_path, "alpha.txt"),
+        load_context_file(tmp_path, "beta.txt"),
+    ]
+    contract = build_contract(
+        workspace_root=tmp_path,
+        task="Explain alpha routing.",
+        file_paths=[],
+        context_files=context_files,
+    )
+    result = DirectBackend().dry_run(contract)
+
+    rendered = render_context_summary(
+        contract=contract,
+        context_files=context_files,
+        latest_result=result,
+    )
+
+    assert "selected=yes" in rendered
+    assert "selected=no" in rendered
+    assert "score=medium" in rendered
+    assert "score=zero" in rendered
+    assert str(tmp_path) not in rendered
 
 
 def test_backend_adapters_can_be_selected_or_instantiated() -> None:
@@ -1198,3 +1358,10 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "the proxy, write files, execute shell commands" in note
     assert "not an LLM router result" in note
     assert "tui_direct_backend_strategy.md" in index
+    milestone = (
+        PROJECT_ROOT / "docs" / "tui_readonly_ask_milestone.md"
+    ).read_text(encoding="utf-8")
+    assert "selected 3 of 7 context segments" in milestone
+    assert "38.92%" in milestone
+    assert "not a benchmark" in milestone
+    assert "tui_readonly_ask_milestone.md" in index

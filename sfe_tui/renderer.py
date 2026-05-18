@@ -15,6 +15,7 @@ def render_help() -> str:
             "  /help              Show this help",
             "  /pwd               Show selected workspace",
             "  /status            Show safe TUI state and disabled capabilities",
+            "  /context           Show safe loaded/selected context metadata",
             "  /files <paths...>  Add context source files or directories",
             "  /task <text>       Set the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
@@ -63,6 +64,60 @@ def render_status(
             "  shell enabled: no",
         ]
     )
+
+
+def render_context_summary(
+    *,
+    contract: SFEContract,
+    context_files: list[ContextLoadResult],
+    latest_result: BackendResult | None,
+) -> str:
+    if not contract.context_segments:
+        return "\n".join(
+            [
+                "SFE context",
+                "  loaded context segments: 0",
+                "  empty: no context loaded",
+            ]
+        )
+    warning_by_ref = {
+        result.source_ref: result.warning_reason
+        for result in context_files
+        if result.loaded and result.source_ref and result.warning_reason
+    }
+    selected_ids = set()
+    score_by_id: dict[str, str] = {}
+    if latest_result is not None:
+        selected_ids = set(latest_result.contract.audit.get("selected_segment_ids") or [])
+        score_by_id = dict(
+            latest_result.contract.audit.get("router_score_categories_by_segment_id")
+            or {}
+        )
+    lines = [
+        "SFE context",
+        f"  loaded context segments: {len(contract.context_segments)}",
+    ]
+    for segment in contract.context_segments:
+        warning = warning_by_ref.get(segment.source_ref) or "none"
+        score = score_by_id.get(segment.id) or "unrouted"
+        selected = "yes" if segment.id in selected_ids else "no"
+        lines.append(
+            "  "
+            + " | ".join(
+                [
+                    f"id={segment.id}",
+                    f"ref={segment.source_ref}",
+                    f"chars={segment.approx_size}",
+                    f"tokens={segment.approx_tokens}",
+                    f"bucket={_context_size_bucket(segment.approx_size)}",
+                    f"reducible={_yes_no(segment.reducible)}",
+                    f"selected={selected}",
+                    f"score={score}",
+                    f"warning={warning}",
+                ]
+            )
+        )
+    return "\n".join(lines)
 
 
 def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
@@ -165,3 +220,21 @@ def render_ask_result(result: BackendResult) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _context_size_bucket(text_chars: int) -> str:
+    if text_chars <= 0:
+        return "0"
+    if text_chars <= 128:
+        return "1-128"
+    if text_chars <= 512:
+        return "129-512"
+    if text_chars <= 2_048:
+        return "513-2048"
+    if text_chars <= 8_192:
+        return "2049-8192"
+    return "8193+"
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
