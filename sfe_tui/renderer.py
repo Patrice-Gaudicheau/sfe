@@ -14,6 +14,7 @@ def render_help() -> str:
             "SFE TUI commands:",
             "  /help              Show this help",
             "  /pwd               Show selected workspace",
+            "  /status            Show safe TUI state and disabled capabilities",
             "  /files <paths...>  Add context source files or directories",
             "  /task <text>       Set the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
@@ -38,6 +39,29 @@ def render_task_set() -> str:
 
 def render_error(message: str) -> str:
     return f"Error: {message}"
+
+
+def render_status(
+    *,
+    workspace_selected: bool,
+    loaded_context_files: int,
+    skipped_context_files: int,
+    task_present: bool,
+    backend_name: str,
+) -> str:
+    return "\n".join(
+        [
+            "SFE TUI status",
+            f"  workspace selected: {workspace_selected}",
+            f"  loaded context files: {loaded_context_files}",
+            f"  skipped context files: {skipped_context_files}",
+            f"  task present: {task_present}",
+            f"  backend: {backend_name}",
+            "  provider calls made: 0",
+            "  writes enabled: no",
+            "  shell enabled: no",
+        ]
+    )
 
 
 def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:

@@ -69,6 +69,21 @@ class SfeTuiApp:
             else:
                 self.output(renderer.render_workspace_selected(self.workspace_root))
             return False
+        if name == "/status":
+            self.output(
+                renderer.render_status(
+                    workspace_selected=self.workspace_root is not None,
+                    loaded_context_files=sum(
+                        1 for result in self.context_files if result.loaded
+                    ),
+                    skipped_context_files=sum(
+                        1 for result in self.context_files if not result.loaded
+                    ),
+                    task_present=bool(self.task.strip()),
+                    backend_name=self.backend.name,
+                )
+            )
+            return False
         if name == "/files":
             self._handle_files(rest)
             return False

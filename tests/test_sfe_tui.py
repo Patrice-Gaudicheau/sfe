@@ -29,7 +29,7 @@ from sfe_tui.contracts import (
     resolve_context_path,
     resolve_workspace,
 )
-from sfe_tui.renderer import render_dry_run_summary, render_help
+from sfe_tui.renderer import render_dry_run_summary, render_help, render_status
 
 
 class FakeInput:
@@ -337,6 +337,64 @@ def test_app_loop_reports_skipped_reason_counts_without_raw_paths(tmp_path) -> N
     assert "outside-app.txt" not in rendered
 
 
+def test_status_renders_state_without_file_contents(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain the context", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE TUI status" in rendered
+    assert "loaded context files: 1" in rendered
+    assert "skipped context files: 0" in rendered
+    assert "task present: True" in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+    assert "Explain the context" not in rendered
+
+
+def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
+    rendered = render_status(
+        workspace_selected=True,
+        loaded_context_files=2,
+        skipped_context_files=1,
+        task_present=True,
+        backend_name="direct",
+    )
+
+    assert "backend: direct" in rendered
+    assert "provider calls made: 0" in rendered
+    assert "writes enabled: no" in rendered
+    assert "shell enabled: no" in rendered
+
+
+def test_help_does_not_advertise_backend_switching() -> None:
+    rendered = render_help()
+
+    assert "/status" in rendered
+    assert "/backend" not in rendered
+
+
+def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/backend proxy", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: unknown_command" in rendered
+    assert "proxy_not_connected" not in rendered
+
+
 def test_app_loop_quit_exits_cleanly(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
@@ -535,3 +593,15 @@ def test_proxy_backend_dry_run_remains_safe_and_does_not_call_proxy(tmp_path) ->
     assert result.provider_calls_made == 0
     assert result.summary["selector_mode"] == "proxy_not_connected"
     assert result.contract.audit["selected_segment_ids"] == []
+
+
+def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
+    note = (PROJECT_ROOT / "docs" / "tui_direct_backend_strategy.md").read_text(
+        encoding="utf-8"
+    )
+    index = (PROJECT_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
+
+    assert "DirectBackend is the default and only exposed backend" in note
+    assert "No `/backend` command" in note
+    assert "CodexCLI path remain compatibility and stress-test" in note
+    assert "tui_direct_backend_strategy.md" in index
