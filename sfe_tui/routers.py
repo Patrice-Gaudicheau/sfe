@@ -12,6 +12,7 @@ LOCAL_LEXICAL_PREVIEW_MODE = "local_lexical_preview"
 NO_MATCHING_CONTEXT_TERMS = "no_matching_context_terms"
 NO_REDUCIBLE_CONTEXT_SEGMENTS = "no_reducible_context_segments"
 MAX_LOCAL_ROUTER_SEGMENTS = 3
+SOURCE_REF_MATCH_WEIGHT = 3
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _STOP_WORDS = {
@@ -85,9 +86,9 @@ class LocalSegmentRouter:
         score_category_counts = {"high": 0, "medium": 0, "low": 0, "zero": 0}
         score_categories_by_segment_id: dict[str, str] = {}
         for index, segment in enumerate(eligible):
-            segment_terms = _tokenize(segment.text)
-            segment_terms.update(_tokenize(segment.source_ref))
-            score = len(task_terms.intersection(segment_terms))
+            content_score = len(task_terms.intersection(_tokenize(segment.text)))
+            source_ref_score = len(task_terms.intersection(_tokenize(segment.source_ref)))
+            score = content_score + (source_ref_score * SOURCE_REF_MATCH_WEIGHT)
             score_category = _score_category(score)
             score_category_counts[score_category] += 1
             score_categories_by_segment_id[segment.id] = score_category
@@ -127,10 +128,24 @@ class LocalSegmentRouter:
 
 def _tokenize(text: str) -> set[str]:
     return {
-        token
+        normalized
         for token in (match.group(0).lower() for match in _TOKEN_RE.finditer(text))
-        if len(token) >= 3 and token not in _STOP_WORDS
+        if len(token) >= 3
+        for normalized in (_normalize_token(token),)
+        if normalized and normalized not in _STOP_WORDS
     }
+
+
+def _normalize_token(token: str) -> str:
+    if token.endswith("ies") and len(token) > 4:
+        return token[:-3] + "y"
+    if token.endswith("ing") and len(token) > 5:
+        return token[:-3]
+    if token.endswith("ed") and len(token) > 4:
+        return token[:-2]
+    if token.endswith("s") and len(token) > 3:
+        return token[:-1]
+    return token
 
 
 def _score_category(score: int) -> str:

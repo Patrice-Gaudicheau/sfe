@@ -568,7 +568,7 @@ def test_context_after_dry_run_marks_selected_segments(tmp_path) -> None:
     assert "ref=beta.txt" in context_block
     assert "selected=yes" in context_block
     assert "selected=no" in context_block
-    assert "score=medium" in context_block
+    assert "score=high" in context_block
     assert "score=zero" in context_block
 
 
@@ -596,7 +596,7 @@ def test_context_after_ask_marks_selected_segments(tmp_path) -> None:
     rendered = "\n".join(output)
     context_block = rendered.split("SFE context", 1)[1]
     assert "selected=yes" in context_block
-    assert "score=medium" in context_block
+    assert "score=high" in context_block
     assert "mock answer" not in context_block
     assert "selected context text" not in context_block
 
@@ -663,7 +663,7 @@ def test_render_context_summary_uses_latest_result_selection(tmp_path) -> None:
 
     assert "selected=yes" in rendered
     assert "selected=no" in rendered
-    assert "score=medium" in rendered
+    assert "score=high" in rendered
     assert "score=zero" in rendered
     assert str(tmp_path) not in rendered
 
@@ -926,6 +926,48 @@ def test_local_segment_router_selects_matching_segment() -> None:
     assert result.fallback_reason is None
 
 
+def test_local_segment_router_boosts_source_ref_relevance() -> None:
+    source_named = ContextSegment(
+        id="ctx_router",
+        source_ref="sfe_tui/routers.py",
+        text="small implementation file",
+        approx_size=25,
+        approx_tokens=7,
+    )
+    content_named = ContextSegment(
+        id="ctx_notes",
+        source_ref="docs/notes.md",
+        text="router concepts appear here",
+        approx_size=27,
+        approx_tokens=7,
+    )
+
+    result = LocalSegmentRouter().route(
+        "Explain router selection.",
+        [content_named, source_named],
+    )
+
+    assert result.selected_segment_ids[0] == "ctx_router"
+    assert result.score_categories_by_segment_id["ctx_router"] == "medium"
+    assert result.score_categories_by_segment_id["ctx_notes"] == "low"
+
+
+def test_local_segment_router_source_ref_match_requires_non_empty_context() -> None:
+    empty_named = ContextSegment(
+        id="ctx_router",
+        source_ref="sfe_tui/routers.py",
+        text="",
+        approx_size=0,
+        approx_tokens=0,
+    )
+
+    result = LocalSegmentRouter().route("Explain router selection.", [empty_named])
+
+    assert result.selected_segment_ids == []
+    assert result.eligible_segment_count == 0
+    assert result.fallback_reason == NO_REDUCIBLE_CONTEXT_SEGMENTS
+
+
 def test_local_segment_router_only_considers_reducible_segments() -> None:
     protected_like = ContextSegment(
         id="ctx_protected_like",
@@ -969,6 +1011,45 @@ def test_local_segment_router_returns_safe_no_match_fallback() -> None:
         "low": 0,
         "zero": 1,
     }
+
+
+def test_local_segment_router_selects_router_source_for_router_task() -> None:
+    routers = ContextSegment(
+        id="ctx_routers",
+        source_ref="sfe_tui/routers.py",
+        text="route local segments",
+        approx_size=20,
+        approx_tokens=5,
+    )
+    tests = ContextSegment(
+        id="ctx_tests",
+        source_ref="tests/test_sfe_tui.py",
+        text="local lexical router selects context segments before executor",
+        approx_size=62,
+        approx_tokens=16,
+    )
+    docs = ContextSegment(
+        id="ctx_docs",
+        source_ref="docs/tui_direct_backend_strategy.md",
+        text="context routing before executor integration",
+        approx_size=44,
+        approx_tokens=11,
+    )
+    renderer = ContextSegment(
+        id="ctx_renderer",
+        source_ref="sfe_tui/renderer.py",
+        text="render selected context diagnostics",
+        approx_size=35,
+        approx_tokens=9,
+    )
+
+    result = LocalSegmentRouter().route(
+        "Explain how the local lexical router selects context segments before the read-only executor call.",
+        [tests, docs, renderer, routers],
+    )
+
+    assert "ctx_routers" in result.selected_segment_ids
+    assert result.score_categories_by_segment_id["ctx_routers"] == "high"
 
 
 def test_direct_backend_selects_only_reducible_context_segments(tmp_path) -> None:
@@ -1078,7 +1159,7 @@ def test_direct_backend_exposes_router_preview_metadata(tmp_path) -> None:
     assert router.selected_segment_count == 1
     assert router.selected_segment_ids == [contract.context_segments[0].id]
     assert router.router_input_segment_ids == [contract.context_segments[0].id]
-    assert router.score_category_counts["medium"] == 1
+    assert router.score_category_counts["high"] == 1
 
 
 def test_direct_backend_populates_selected_segment_ids_by_lexical_score(
@@ -1109,9 +1190,9 @@ def test_direct_backend_populates_selected_segment_ids_by_lexical_score(
     assert first.contract.audit["selected_segment_count"] == 3
     assert first.contract.audit["eligible_segment_count"] == 4
     assert first.contract.audit["router_score_category_counts"] == {
-        "high": 0,
-        "medium": 2,
-        "low": 1,
+        "high": 2,
+        "medium": 1,
+        "low": 0,
         "zero": 1,
     }
 
@@ -1363,5 +1444,7 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     ).read_text(encoding="utf-8")
     assert "selected 3 of 7 context segments" in milestone
     assert "38.92%" in milestone
+    assert "36.58%" in milestone
+    assert "source/path-aware lexical ranking" in milestone
     assert "not a benchmark" in milestone
     assert "tui_readonly_ask_milestone.md" in index
