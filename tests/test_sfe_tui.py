@@ -676,7 +676,7 @@ def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
     )[0]
     status_block = rendered.split("SFE TUI status", 1)[1].split("SFE context", 1)[0]
     context_block = rendered.split("SFE context", 1)[1]
-    assert "Session reset." in rendered
+    assert "Session reset. Workspace is preserved." in rendered
     assert app.workspace_root == tmp_path.resolve()
     assert app.context_files == []
     assert app.task == ""

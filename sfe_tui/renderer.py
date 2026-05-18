@@ -58,7 +58,7 @@ def render_task_set() -> str:
 
 
 def render_reset() -> str:
-    return "Session reset."
+    return "Session reset. Workspace is preserved."
 
 
 def render_error(message: str) -> str:
