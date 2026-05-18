@@ -1,0 +1,119 @@
+"""Blocking application loop for the first-party SFE-aware TUI."""
+
+from __future__ import annotations
+
+import shlex
+from pathlib import Path
+from typing import Callable
+
+from .backends import BackendAdapter, backend_by_name
+from .contracts import build_contract, resolve_context_path, resolve_workspace
+from .input import TerminalInput
+from . import renderer
+
+
+OutputFunc = Callable[[str], None]
+
+
+class SfeTuiApp:
+    def __init__(
+        self,
+        *,
+        input_provider: TerminalInput | None = None,
+        output: OutputFunc = print,
+        cwd: Path | None = None,
+        backend: BackendAdapter | None = None,
+    ) -> None:
+        self.input_provider = input_provider or TerminalInput()
+        self.output = output
+        self.cwd = (cwd or Path.cwd()).resolve()
+        self.backend = backend or backend_by_name("direct")
+        self.workspace_root: Path | None = None
+        self.file_paths: list[Path] = []
+        self.task = ""
+
+    def run(self) -> int:
+        if not self._select_workspace():
+            return 1
+        self.output(renderer.render_help())
+        while True:
+            command = self.input_provider.prompt("sfe> ").strip()
+            if not command:
+                continue
+            if self._handle_command(command):
+                return 0
+
+    def _select_workspace(self) -> bool:
+        raw = self.input_provider.prompt(
+            f"Workspace [{self.cwd}]: ",
+            default="",
+        )
+        try:
+            self.workspace_root = resolve_workspace(raw, self.cwd)
+        except ValueError as exc:
+            self.output(renderer.render_error(str(exc)))
+            return False
+        self.output(renderer.render_workspace_selected(self.workspace_root))
+        return True
+
+    def _handle_command(self, command: str) -> bool:
+        name, _, rest = command.partition(" ")
+        if name == "/help":
+            self.output(renderer.render_help())
+            return False
+        if name in {"/quit", "/exit"}:
+            return True
+        if name == "/pwd":
+            if self.workspace_root is None:
+                self.output("Workspace: not selected")
+            else:
+                self.output(renderer.render_workspace_selected(self.workspace_root))
+            return False
+        if name == "/files":
+            self._handle_files(rest)
+            return False
+        if name == "/task":
+            self.task = rest.strip()
+            self.output(renderer.render_task_set())
+            return False
+        if name == "/dry-run":
+            self._handle_dry_run()
+            return False
+        self.output(renderer.render_error("unknown_command"))
+        return False
+
+    def _handle_files(self, rest: str) -> None:
+        if self.workspace_root is None:
+            self.output(renderer.render_error("workspace_not_selected"))
+            return
+        try:
+            values = shlex.split(rest)
+        except ValueError:
+            self.output(renderer.render_error("invalid_file_command"))
+            return
+        if not values:
+            self.output(renderer.render_error("no_files_provided"))
+            return
+        resolved: list[Path] = []
+        try:
+            for value in values:
+                resolved.append(resolve_context_path(self.workspace_root, value))
+        except ValueError as exc:
+            self.output(renderer.render_error(str(exc)))
+            return
+        self.file_paths = resolved
+        self.output(renderer.render_file_selection(len(self.file_paths)))
+
+    def _handle_dry_run(self) -> None:
+        contract = build_contract(
+            workspace_root=self.workspace_root,
+            task=self.task,
+            file_paths=self.file_paths,
+        )
+        result = self.backend.dry_run(contract)
+        self.output(renderer.render_dry_run_summary(contract, result))
+
+
+def main() -> int:
+    app = SfeTuiApp()
+    return app.run()

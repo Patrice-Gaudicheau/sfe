@@ -9,10 +9,12 @@ description = "Spatial Field Engine for Cognition"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-dependencies = []
+dependencies = [
+    "prompt_toolkit>=3.0.0",
+]
 
 [tool.setuptools]
-packages = ["sfe", "cognitive_map", "sfe_proxy"]
+packages = ["sfe", "cognitive_map", "sfe_proxy", "sfe_tui"]
 
 [tool.pytest.ini_options]
 addopts = "--capture=sys"
