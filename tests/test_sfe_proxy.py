@@ -2686,6 +2686,126 @@ def test_enabled_mode_structured_responses_streaming_forwards_sse(
     assert "Authorization" not in joined_logs
 
 
+def test_enabled_mode_codexcli_like_structured_responses_replaces_streaming_context(
+    tmp_path,
+) -> None:
+    sse = (
+        b'event: response.created\n'
+        b'data: {"type":"response.created","response":{"id":"resp-codexlike"}}\n\n'
+        b'event: response.output_text.delta\n'
+        b'data: {"type":"response.output_text.delta","delta":"done"}\n\n'
+        b'event: response.completed\n'
+        b'data: {"type":"response.completed","response":{"id":"resp-codexlike"}}\n\n'
+    )
+    upstream = _start_upstream(
+        status=200,
+        body=sse,
+        headers={"Content-Type": "text/event-stream"},
+    )
+    logs: list[str] = []
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="enabled",
+        shadow_log_dir=str(tmp_path),
+        shadow_min_input_tokens=1,
+        enabled_fallback_to_original=True,
+        enabled_streaming_replacement=True,
+    )
+    preserved_file_task = "Review only src/proxy.py and tests/test_proxy.py."
+    # The selected block is reinserted, so this dropped block makes the
+    # reduction gate exercise meaningful instead of falling back.
+    stale_context = "CODEXCLI_STALE_REDUCIBLE_TRANSCRIPT remove this context. " * 260
+    selected_context = (
+        "CODEXCLI_SELECTED_REDUCIBLE_BACKGROUND authoritative context. "
+        "CONTROLLED_STRUCTURED_VALUE is present. "
+    ) * 420
+    latest_task = "Preserve this final task and answer from the selected context."
+    payload = {
+        "model": "example-model",
+        "stream": True,
+        "input": [
+            _responses_text_item("developer", "Keep the current user task intact."),
+            _responses_text_item("user", preserved_file_task),
+            _responses_text_item("user", stale_context),
+            _responses_text_item("user", selected_context),
+            _responses_text_item("user", latest_task),
+        ],
+    }
+    try:
+        response = _request_raw(
+            f"http://{proxy.server_address[0]}:{proxy.server_address[1]}/v1/responses",
+            method="POST",
+            payload=payload,
+            api_key="placeholder-client-token",
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    assert response["content_type"] == "text/event-stream"
+    assert b"response.completed" in response["body"]
+
+    upstream_payload = json.loads(
+        RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
+    )
+    assert upstream_payload != payload
+    assert upstream_payload["stream"] is True
+    assert isinstance(upstream_payload["input"], list)
+    assert all(isinstance(item, dict) for item in upstream_payload["input"])
+    assert (
+        _responses_text_item("developer", "Keep the current user task intact.")
+        in upstream_payload["input"]
+    )
+    assert _responses_text_item("user", preserved_file_task) in upstream_payload["input"]
+    assert upstream_payload["input"][-1] == _responses_text_item("user", latest_task)
+
+    selected_items = [
+        item
+        for item in upstream_payload["input"]
+        if isinstance(item, dict)
+        and item.get("role") == "user"
+        and "SFE selected context" in json.dumps(item)
+    ]
+    assert len(selected_items) == 1
+    selected_item = selected_items[0]
+    assert selected_item["content"][0]["type"] == "input_text"
+    assert (
+        "CODEXCLI_SELECTED_REDUCIBLE_BACKGROUND"
+        in selected_item["content"][0]["text"]
+    )
+    candidate_text = json.dumps(upstream_payload["input"])
+    assert "CONTROLLED_STRUCTURED_VALUE is present" in candidate_text
+    assert "CODEXCLI_STALE_REDUCIBLE_TRANSCRIPT" not in candidate_text
+
+    event = _read_shadow_event(tmp_path)
+    assert event["enabled_candidate_built"] is True
+    assert event["enabled_reason"] == "structured_candidate_request_built_for_diagnostics"
+    assert event["enabled_replaces_upstream_request"] is True
+    assert event["enabled_original_request_sent"] is False
+    assert event["enabled_candidate_request_sent_to_upstream"] is True
+    assert event["enabled_selected_segment_ids"] == ["segment-4"]
+    assert event["enabled_selected_segment_count"] == 1
+    assert event["enabled_reduction_gate_passed"] is True
+    assert event["enabled_estimated_token_reduction_pct"] >= ENABLED_MIN_REDUCTION_PCT
+
+    request_log = _last_proxy_log(logs, path="/v1/responses")
+    assert request_log["fallback_used"] is False
+    assert request_log["enabled_reason"] == "structured_candidate_request_built_for_diagnostics"
+    assert request_log["enabled_reduction_gate_passed"] is True
+    joined_logs = "\n".join(logs)
+    assert "src/proxy.py" not in joined_logs
+    assert "tests/test_proxy.py" not in joined_logs
+    assert "CODEXCLI_SELECTED_REDUCIBLE_BACKGROUND" not in joined_logs
+    assert "CODEXCLI_STALE_REDUCIBLE_TRANSCRIPT" not in joined_logs
+    assert "response.completed" not in joined_logs
+    assert "placeholder-client-token" not in joined_logs
+    assert "Authorization" not in joined_logs
+
+
 def test_enabled_mode_responses_replaces_safe_shape_with_meaningful_reduction(
     tmp_path,
 ) -> None:

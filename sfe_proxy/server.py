@@ -903,6 +903,7 @@ def _candidate_request_details(
             "candidate_request": None,
         }
 
+    success_reason = "candidate_request_built_for_diagnostics"
     if _is_structured_responses_input(path, payload):
         structured_result = _structured_responses_candidate_request(
             payload,
@@ -915,6 +916,7 @@ def _candidate_request_details(
                 selected_segment_count=len(selected_segments),
             )
         candidate_request = structured_result["candidate_request"]
+        success_reason = str(structured_result["reason"])
     else:
         candidate_request = _candidate_request_for_endpoint(
             path,
@@ -962,7 +964,7 @@ def _candidate_request_details(
     ]
     fields: dict[str, Any] = {
         "dry_run_enabled_candidate_built": True,
-        "dry_run_enabled_reason": "candidate_request_built_for_diagnostics",
+        "dry_run_enabled_reason": success_reason,
         "dry_run_enabled_is_real_execution": False,
         "dry_run_enabled_replaces_upstream_request": False,
         "dry_run_enabled_changes_client_response": False,
@@ -1133,7 +1135,7 @@ def _structured_responses_candidate_request(
     request["input"] = preserved_input
     return {
         "candidate_request": request,
-        "reason": "candidate_request_built_for_diagnostics",
+        "reason": "structured_candidate_request_built_for_diagnostics",
     }
 
 
