@@ -15,7 +15,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import DirectBackend, ProxyBackend, backend_by_name
 from sfe_tui.contracts import (
+    MAX_CONTEXT_FILE_BYTES,
     build_contract,
+    load_context_file,
     resolve_context_path,
     resolve_workspace,
 )
@@ -72,20 +74,24 @@ def test_pwd_reports_selected_workspace_safely(tmp_path) -> None:
     assert "Authorization" not in "\n".join(output)
 
 
-def test_files_stores_paths_relative_to_workspace_root(tmp_path) -> None:
+def test_files_reads_text_file_and_populates_context_segment_text(tmp_path) -> None:
     source = tmp_path / "notes.md"
     source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
 
-    resolved = resolve_context_path(tmp_path, "notes.md")
+    loaded = load_context_file(tmp_path, "notes.md")
     contract = build_contract(
         workspace_root=tmp_path,
         task="Summarize the notes.",
-        file_paths=[resolved],
+        file_paths=[],
+        context_files=[loaded],
     )
 
+    assert loaded.loaded is True
     assert contract.context_segments[0].source_ref == "notes.md"
     assert contract.context_segments[0].reducible is True
-    assert contract.context_segments[0].text == ""
+    assert contract.context_segments[0].text == "SECRET_FILE_CONTENT"
+    assert contract.context_segments[0].approx_size == len("SECRET_FILE_CONTENT")
+    assert contract.context_segments[0].approx_tokens > 0
 
 
 def test_files_rejects_traversal_outside_workspace(tmp_path) -> None:
@@ -94,6 +100,9 @@ def test_files_rejects_traversal_outside_workspace(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="path_outside_workspace"):
         resolve_context_path(tmp_path, "../outside.txt")
+    loaded = load_context_file(tmp_path, "../outside.txt")
+    assert loaded.loaded is False
+    assert loaded.reason == "outside_workspace"
 
 
 def test_files_rejects_absolute_paths_outside_workspace(tmp_path) -> None:
@@ -102,6 +111,74 @@ def test_files_rejects_absolute_paths_outside_workspace(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="path_outside_workspace"):
         resolve_context_path(tmp_path, str(outside))
+    loaded = load_context_file(tmp_path, str(outside))
+    assert loaded.loaded is False
+    assert loaded.reason == "outside_workspace"
+
+
+def test_files_rejects_directories(tmp_path) -> None:
+    directory = tmp_path / "docs"
+    directory.mkdir()
+
+    loaded = load_context_file(tmp_path, "docs")
+
+    assert loaded.loaded is False
+    assert loaded.reason == "not_a_file"
+
+
+def test_files_rejects_file_above_max_size_limit(tmp_path) -> None:
+    source = tmp_path / "large.txt"
+    source.write_bytes(b"a" * (MAX_CONTEXT_FILE_BYTES + 1))
+
+    loaded = load_context_file(tmp_path, "large.txt")
+
+    assert loaded.loaded is False
+    assert loaded.reason == "file_too_large"
+
+
+def test_files_rejects_binary_file(tmp_path) -> None:
+    source = tmp_path / "image.bin"
+    source.write_bytes(b"safe-prefix\x00binary")
+
+    loaded = load_context_file(tmp_path, "image.bin")
+
+    assert loaded.loaded is False
+    assert loaded.reason == "binary_or_non_text"
+
+
+def test_files_rejects_secret_like_env_file(tmp_path) -> None:
+    source = tmp_path / ".env"
+    source.write_text("OPENAI_API_KEY=SECRET", encoding="utf-8")
+
+    loaded = load_context_file(tmp_path, ".env")
+
+    assert loaded.loaded is False
+    assert loaded.reason == "secret_like_file"
+
+
+def test_files_rejects_files_under_ssh_directory(tmp_path) -> None:
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    source = ssh_dir / "config"
+    source.write_text("Host example", encoding="utf-8")
+
+    loaded = load_context_file(tmp_path, ".ssh/config")
+
+    assert loaded.loaded is False
+    assert loaded.reason == "secret_like_file"
+
+
+def test_files_rejects_private_key_marker(tmp_path) -> None:
+    source = tmp_path / "key.txt"
+    source.write_text(
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET",
+        encoding="utf-8",
+    )
+
+    loaded = load_context_file(tmp_path, "key.txt")
+
+    assert loaded.loaded is False
+    assert loaded.reason == "secret_like_file"
 
 
 def test_generated_context_source_ref_does_not_expose_absolute_path(tmp_path) -> None:
@@ -113,7 +190,8 @@ def test_generated_context_source_ref_does_not_expose_absolute_path(tmp_path) ->
     contract = build_contract(
         workspace_root=tmp_path,
         task="Read alpha.",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "src/alpha.py")],
     )
 
     segment = contract.context_segments[0]
@@ -130,7 +208,8 @@ def test_contract_builder_separates_protected_task_from_reducible_context(
     contract = build_contract(
         workspace_root=tmp_path,
         task="Use the context.",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
     )
 
     assert contract.instructions[0].protected is True
@@ -151,12 +230,14 @@ def test_context_segment_ids_are_stable_opaque_and_do_not_expose_paths(
     first = build_contract(
         workspace_root=tmp_path,
         task="Task.",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
     )
     second = build_contract(
         workspace_root=tmp_path,
         task="Task.",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
     )
 
     first_id = first.context_segments[0].id
@@ -172,7 +253,8 @@ def test_dry_run_summary_does_not_include_file_contents(tmp_path) -> None:
     contract = build_contract(
         workspace_root=tmp_path,
         task="Task containing SECRET_TASK_TEXT",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
     )
     result = DirectBackend().dry_run(contract)
 
@@ -180,6 +262,8 @@ def test_dry_run_summary_does_not_include_file_contents(tmp_path) -> None:
 
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "SECRET_TASK_TEXT" not in rendered
+    assert "requested files: 1" in rendered
+    assert "loaded files: 1" in rendered
     assert "request body" not in rendered.lower()
     assert "Authorization" not in rendered
 
@@ -190,7 +274,8 @@ def test_renderer_can_render_help_and_dry_run_summary(tmp_path) -> None:
     contract = build_contract(
         workspace_root=tmp_path,
         task="Task.",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
     )
     result = DirectBackend().dry_run(contract)
 
@@ -214,11 +299,29 @@ def test_app_loop_handles_mocked_commands_and_quit(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "Context sources selected: 1" in rendered
+    assert "Context sources loaded: 1; skipped: 0" in rendered
     assert "Task stored." in rendered
     assert "SFE dry-run summary" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
+
+
+def test_app_loop_reports_skipped_reason_counts_without_raw_paths(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-app.txt"
+    outside.write_text("outside", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", f"/files {outside}", "/dry-run", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Context sources loaded: 0; skipped: 1" in rendered
+    assert "outside_workspace" in rendered
+    assert str(outside) not in rendered
+    assert "outside-app.txt" not in rendered
 
 
 def test_app_loop_quit_exits_cleanly(tmp_path) -> None:
@@ -248,7 +351,8 @@ def test_backend_dry_run_makes_no_provider_calls(tmp_path) -> None:
     contract = build_contract(
         workspace_root=tmp_path,
         task="Task.",
-        file_paths=[source],
+        file_paths=[],
+        context_files=[load_context_file(tmp_path, "context.txt")],
     )
 
     assert DirectBackend().dry_run(contract).provider_calls_made == 0

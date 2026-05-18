@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from .backends import BackendAdapter, backend_by_name
-from .contracts import build_contract, resolve_context_path, resolve_workspace
+from .contracts import ContextLoadResult, build_contract, load_context_file, resolve_workspace
 from .input import TerminalInput
 from . import renderer
 
@@ -29,7 +29,7 @@ class SfeTuiApp:
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
         self.workspace_root: Path | None = None
-        self.file_paths: list[Path] = []
+        self.context_files: list[ContextLoadResult] = []
         self.task = ""
 
     def run(self) -> int:
@@ -94,21 +94,17 @@ class SfeTuiApp:
         if not values:
             self.output(renderer.render_error("no_files_provided"))
             return
-        resolved: list[Path] = []
-        try:
-            for value in values:
-                resolved.append(resolve_context_path(self.workspace_root, value))
-        except ValueError as exc:
-            self.output(renderer.render_error(str(exc)))
-            return
-        self.file_paths = resolved
-        self.output(renderer.render_file_selection(len(self.file_paths)))
+        self.context_files = [
+            load_context_file(self.workspace_root, value) for value in values
+        ]
+        self.output(renderer.render_file_selection(self.context_files))
 
     def _handle_dry_run(self) -> None:
         contract = build_contract(
             workspace_root=self.workspace_root,
             task=self.task,
-            file_paths=self.file_paths,
+            file_paths=[],
+            context_files=self.context_files,
         )
         result = self.backend.dry_run(contract)
         self.output(renderer.render_dry_run_summary(contract, result))

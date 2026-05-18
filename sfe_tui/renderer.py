@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .backends import BackendResult
-from .contracts import SFEContract
+from .contracts import ContextLoadResult, SFEContract
 
 
 def render_help() -> str:
@@ -26,8 +26,10 @@ def render_workspace_selected(workspace_root: Path) -> str:
     return f"Workspace: {workspace_root}"
 
 
-def render_file_selection(count: int) -> str:
-    return f"Context sources selected: {count}"
+def render_file_selection(results: list[ContextLoadResult]) -> str:
+    loaded = sum(1 for result in results if result.loaded)
+    skipped = len(results) - loaded
+    return f"Context sources loaded: {loaded}; skipped: {skipped}"
 
 
 def render_task_set() -> str:
@@ -49,6 +51,13 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
             f"  backend selected: {result.backend}",
             f"  reducible segments: {contract.metadata['reducible_segment_count']}",
             f"  protected instructions: {contract.metadata['protected_instruction_count']}",
+            f"  requested files: {contract.metadata['requested_file_count']}",
+            f"  loaded files: {contract.metadata['loaded_context_file_count']}",
+            f"  skipped files: {contract.metadata['skipped_file_count']}",
+            f"  skipped reasons: {contract.metadata['skipped_reason_counts']}",
+            f"  total approximate characters: {contract.metadata['total_approx_context_chars']}",
+            f"  total approximate tokens: {contract.metadata['total_approx_context_tokens']}",
+            f"  size buckets: {contract.metadata['context_size_buckets']}",
             f"  provider calls made: {result.provider_calls_made}",
             f"  status: {result.status}",
         ]
