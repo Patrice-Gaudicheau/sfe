@@ -437,8 +437,9 @@ def test_dry_run_summary_does_not_include_file_contents(tmp_path) -> None:
     assert "SECRET_TASK_TEXT" not in rendered
     assert "requested files: 1" in rendered
     assert "loaded files: 1" in rendered
-    assert "warning reasons: {}" in rendered
+    assert "warning reasons: none" in rendered
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
+    assert "executor/provider called: no" in rendered
     assert "request body" not in rendered.lower()
     assert "Authorization" not in rendered
 
@@ -464,7 +465,7 @@ def test_dry_run_summary_reports_source_marker_warning_safely(tmp_path) -> None:
     assert contract.metadata["warning_reason_counts"] == {
         "secret_marker_literal_in_source": 1
     }
-    assert "warning reasons: {'secret_marker_literal_in_source': 1}" in rendered
+    assert "warning reasons: secret_marker_literal_in_source: 1" in rendered
     assert PRIVATE_KEY_MARKERS[0] not in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert str(tmp_path) not in rendered
@@ -485,15 +486,99 @@ def test_dry_run_with_context_but_missing_task_does_not_fake_reduction(
     assert app.run() == 0
     rendered = "\n".join(output)
     dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
-    assert "task present: False" in dry_run_block
+    assert "task present: no" in dry_run_block
     assert "selected segments: 0" in dry_run_block
     assert f"fallback reason: {MISSING_TASK}" in dry_run_block
+    assert "action: missing task; set one with /task <text>" in dry_run_block
     assert "estimated selected tokens: 0" in dry_run_block
-    assert "estimated reduction pct: None" in dry_run_block
+    assert "estimated reduction pct: unknown" in dry_run_block
+    assert "None" not in dry_run_block
     assert "estimated reduction pct: 100.0" not in dry_run_block
     assert "provider calls made: 0" in dry_run_block
+    assert "executor/provider called: no" in dry_run_block
+    assert "writes disabled" in dry_run_block
+    assert "shell disabled" in dry_run_block
+    assert "patch application disabled" in dry_run_block
     assert "SECRET_FILE_CONTENT" not in dry_run_block
     assert str(tmp_path.resolve()) not in rendered
+
+
+def test_dry_run_with_no_context_suggests_files_command(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Explain context", "/dry-run", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
+    assert "context loaded: no" in dry_run_block
+    assert "loaded context segments: 0" in dry_run_block
+    assert f"fallback reason: {NO_REDUCIBLE_CONTEXT_SEGMENTS}" in dry_run_block
+    assert "action: no context loaded; replace context with /files <path>" in dry_run_block
+    assert "provider calls made: 0" in dry_run_block
+    assert "executor/provider called: no" in dry_run_block
+    assert "ProxyBackend" not in dry_run_block
+    assert "/backend" not in dry_run_block
+
+
+def test_dry_run_with_no_selected_context_is_actionable(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("unrelated material", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task database migrations", "/dry-run", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
+    assert "context loaded: yes" in dry_run_block
+    assert "selected segments: 0" in dry_run_block
+    assert f"fallback reason: {NO_MATCHING_CONTEXT_TERMS}" in dry_run_block
+    assert "routing found no relevant context segments" in dry_run_block
+    assert "selected segment ids: none" in dry_run_block
+    assert "selected source refs: none" in dry_run_block
+
+
+def test_dry_run_with_skipped_inputs_reports_rejections_safely(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    outside = tmp_path.parent / "outside-dry-run.txt"
+    outside.write_text("OUTSIDE_SECRET", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                f"/files context.txt {outside}",
+                "/task Explain selected context",
+                "/dry-run",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
+    assert "Skipped/rejected context" in dry_run_block
+    assert "skipped files: 1" in dry_run_block
+    assert "skipped reasons: outside_workspace: 1" in dry_run_block
+    assert "selected source refs: context.txt" in dry_run_block
+    assert "OUTSIDE_SECRET" not in dry_run_block
+    assert "outside-dry-run.txt" not in dry_run_block
+    assert str(outside) not in dry_run_block
+    assert str(tmp_path.resolve()) not in dry_run_block
+    assert "{}" not in dry_run_block
 
 
 def test_renderer_can_render_help_and_dry_run_summary(tmp_path) -> None:
@@ -510,7 +595,7 @@ def test_renderer_can_render_help_and_dry_run_summary(tmp_path) -> None:
     assert "/dry-run" in render_help()
     summary = render_dry_run_summary(contract, result)
     assert "SFE dry-run summary" in summary
-    assert "context segments: 1" in summary
+    assert "loaded context segments: 1" in summary
 
 
 def test_app_loop_handles_mocked_commands_and_quit(tmp_path) -> None:
@@ -531,7 +616,7 @@ def test_app_loop_handles_mocked_commands_and_quit(tmp_path) -> None:
     assert "Task stored." in rendered
     assert "SFE dry-run summary" in rendered
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
-    assert "selected segment ids: ['ctx_" in rendered
+    assert "selected segment ids: ctx_" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
     dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
@@ -2043,12 +2128,13 @@ def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
     rendered = render_dry_run_summary(contract, result)
 
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
-    assert "DirectBackend execution preview" in rendered
-    assert "DirectBackend router preview" in rendered
-    assert "router available: True" in rendered
-    assert "router unavailable reason: None" in rendered
-    assert "router provider calls made: 0" in rendered
-    assert "selected segment ids: ['ctx_" in rendered
+    assert "Local routing preview" in rendered
+    assert "Selected context" in rendered
+    assert "Safety guarantees" in rendered
+    assert "selected segment ids: ctx_" in rendered
+    assert "selected source refs: context.txt" in rendered
+    assert "None" not in rendered
+    assert "{}" not in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert str(tmp_path) not in rendered
     assert "request body" not in rendered.lower()
@@ -2070,12 +2156,17 @@ def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
 
     rendered = render_dry_run_summary(contract, result)
 
-    assert "DirectBackend execution preview" in rendered
-    assert "DirectBackend router preview" in rendered
-    assert "backend name: direct" in rendered
+    assert "Preflight state" in rendered
+    assert "Local routing preview" in rendered
+    assert "Selected context" in rendered
+    assert "Skipped/rejected context" in rendered
+    assert "Safety guarantees" in rendered
+    assert "backend: direct" in rendered
     assert "provider calls made: 0" in rendered
-    assert "writes enabled: false" in rendered
-    assert "shell enabled: false" in rendered
+    assert "executor/provider called: no" in rendered
+    assert "writes disabled" in rendered
+    assert "shell disabled" in rendered
+    assert "patch application disabled" in rendered
     assert "not an LLM router result" in rendered
 
 
@@ -2092,11 +2183,9 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
 
     rendered = render_dry_run_summary(contract, result)
 
-    assert "DirectBackend router preview" in rendered
-    assert f"router mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
-    assert "router available: True" in rendered
-    assert "router unavailable reason: None" in rendered
-    assert "provider-free lexical preview only" in rendered
+    assert "Local routing preview" in rendered
+    assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
+    assert "local preview only, not an LLM router result" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "SECRET_TASK_TEXT" not in rendered
     assert str(tmp_path) not in rendered

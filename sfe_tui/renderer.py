@@ -194,78 +194,64 @@ def render_context_summary(
 
 def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
     audit = result.contract.audit
+    selected_ids = list(audit.get("selected_segment_ids") or [])
+    selected_refs = _selected_source_refs(result.contract, selected_ids)
+    task_present = contract.task is not None
+    context_loaded = bool(contract.context_segments)
+    selected_count = int(audit.get("selected_segment_count") or 0)
+    fallback_reason = audit.get("fallback_reason")
     lines = [
         "SFE dry-run summary",
-        f"  workspace selected: {contract.metadata['workspace_root_present']}",
-        f"  task present: {contract.task is not None}",
-        f"  context segments: {len(contract.context_segments)}",
-        f"  protected segments: {len(contract.protected_segments)}",
-        f"  backend selected: {result.backend}",
-        f"  reducible segments: {contract.metadata['reducible_segment_count']}",
-        f"  protected instructions: {contract.metadata['protected_instruction_count']}",
+        "Preflight state",
+        f"  workspace selected: {_yes_no(bool(contract.metadata['workspace_root_present']))}",
+        f"  task present: {_yes_no(task_present)}",
+        f"  context loaded: {_yes_no(context_loaded)}",
         f"  requested files: {contract.metadata['requested_file_count']}",
+        f"  loaded context segments: {len(contract.context_segments)}",
         f"  loaded files: {contract.metadata['loaded_context_file_count']}",
         f"  skipped files: {contract.metadata['skipped_file_count']}",
-        f"  skipped reasons: {contract.metadata['skipped_reason_counts']}",
-        f"  warning reasons: {contract.metadata['warning_reason_counts']}",
-        f"  total approximate characters: {contract.metadata['total_approx_context_chars']}",
         f"  total approximate tokens: {contract.metadata['total_approx_context_tokens']}",
-        f"  size buckets: {contract.metadata['context_size_buckets']}",
-        f"  selector mode: {audit.get('selector_mode')}",
-        f"  eligible segments: {audit.get('eligible_segment_count')}",
-        f"  selected segments: {audit.get('selected_segment_count')}",
-        f"  estimated input tokens: {audit.get('estimated_input_tokens')}",
-        f"  estimated selected tokens: {audit.get('estimated_selected_tokens')}",
-        f"  estimated reduction pct: {audit.get('estimated_reduction_pct')}",
-        f"  fallback reason: {audit.get('fallback_reason')}",
-        f"  selected segment ids: {audit.get('selected_segment_ids')}",
-        f"  provider calls made: {result.provider_calls_made}",
-        f"  status: {result.status}",
+        "Local routing preview",
+        f"  selector mode: {_display_value(audit.get('selector_mode'))}",
+        "  note: local preview only, not an LLM router result",
+        f"  eligible segments: {_display_value(audit.get('eligible_segment_count'))}",
+        f"  selected segments: {selected_count}",
+        f"  selected segment ids: {_format_string_list(selected_ids)}",
+        f"  selected source refs: {_format_string_list(selected_refs)}",
+        f"  estimated input tokens: {_display_value(audit.get('estimated_input_tokens'))}",
+        f"  estimated selected tokens: {_display_value(audit.get('estimated_selected_tokens'))}",
+        f"  estimated reduction pct: {_display_value(audit.get('estimated_reduction_pct'))}",
+        f"  fallback reason: {_display_value(fallback_reason)}",
     ]
-    if result.execution_preview is not None:
-        preview = result.execution_preview
-        lines.extend(
-            [
-                "DirectBackend execution preview",
-                f"  backend name: {preview.backend_name}",
-                f"  selector mode: {preview.selector_mode}",
-                f"  protected instructions: {preview.protected_instruction_count}",
-                f"  task present: {preview.task_present}",
-                f"  selected segment count: {preview.selected_segment_count}",
-                f"  selected segment ids: {preview.selected_segment_ids}",
-                f"  selected context characters: {preview.selected_context_char_count}",
-                f"  selected context token estimate: {preview.selected_context_token_estimate}",
-                f"  total context characters: {preview.total_context_char_count}",
-                f"  total context token estimate: {preview.total_context_token_estimate}",
-                f"  estimated reduction pct: {preview.estimated_reduction_pct}",
-                f"  fallback reason: {preview.fallback_reason}",
-                f"  provider calls made: {preview.provider_calls_made}",
-                f"  writes enabled: {str(preview.writes_enabled).lower()}",
-                f"  shell enabled: {str(preview.shell_enabled).lower()}",
-                "  note: local preview only, not an LLM router result",
-            ]
+    if not task_present:
+        lines.append("  action: missing task; set one with /task <text>")
+    elif not context_loaded:
+        lines.append("  action: no context loaded; replace context with /files <path>")
+    elif selected_count == 0:
+        lines.append(
+            "  action: routing found no relevant context segments; revise the task or loaded files"
         )
-    if result.router_preview is not None:
-        router = result.router_preview
-        lines.extend(
-            [
-                "DirectBackend router preview",
-                f"  router mode: {router.router_mode}",
-                f"  router available: {router.router_available}",
-                f"  router unavailable reason: {router.router_unavailable_reason}",
-                f"  router provider calls made: {router.router_provider_calls_made}",
-                f"  input segments: {router.input_segment_count}",
-                f"  eligible segments: {router.eligible_segment_count}",
-                f"  selected segments: {router.selected_segment_count}",
-                f"  selected segment ids: {router.selected_segment_ids}",
-                f"  estimated input tokens: {router.estimated_input_tokens}",
-                f"  estimated selected tokens: {router.estimated_selected_tokens}",
-                f"  estimated reduction pct: {router.estimated_reduction_pct}",
-                f"  fallback reason: {router.fallback_reason}",
-                f"  score categories: {router.score_category_counts}",
-                "  note: provider-free lexical preview only, not an LLM router result",
-            ]
-        )
+
+    lines.extend(
+        [
+            "Selected context",
+            f"  selected segment ids: {_format_string_list(selected_ids)}",
+            f"  selected source refs: {_format_string_list(selected_refs)}",
+            f"  selected context token estimate: {_display_value(audit.get('estimated_selected_tokens'))}",
+            "Skipped/rejected context",
+            f"  skipped files: {contract.metadata['skipped_file_count']}",
+            f"  skipped reasons: {_format_reason_counts(contract.metadata['skipped_reason_counts'])}",
+            f"  warning reasons: {_format_reason_counts(contract.metadata['warning_reason_counts'])}",
+            "Safety guarantees",
+            f"  backend: {result.backend}",
+            f"  provider calls made: {result.provider_calls_made}",
+            "  executor/provider called: no",
+            "  writes disabled",
+            "  shell disabled",
+            "  patch application disabled",
+            f"  status: {result.status}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -348,6 +334,27 @@ def _format_reason_counts(counts: dict[str, int]) -> str:
     if not counts:
         return "none"
     return ", ".join(f"{reason}: {count}" for reason, count in counts.items())
+
+
+def _format_string_list(values: list[str]) -> str:
+    if not values:
+        return "none"
+    return ", ".join(values)
+
+
+def _display_value(value: object) -> str:
+    if value is None:
+        return "unknown"
+    return str(value)
+
+
+def _selected_source_refs(contract: SFEContract, selected_ids: list[str]) -> list[str]:
+    selected = set(selected_ids)
+    return [
+        segment.source_ref
+        for segment in contract.context_segments
+        if segment.id in selected
+    ]
 
 
 def _skip_reason_guidance(reason: str) -> str:
