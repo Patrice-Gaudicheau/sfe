@@ -11,11 +11,14 @@ statistical reliability, or general model-safety guarantees.
 
 1. [README.md](../README.md): project purpose, architecture, setup, current
    provider support, Proxy usage, benchmark snapshot, and limitations.
-2. [public_release_technical_report.md](public_release_technical_report.md):
+2. [current_architecture_status.md](current_architecture_status.md): compact
+   current-status note freezing the TUI + DirectBackend path as canonical and
+   the Proxy/CodexCLI path as experimental compatibility infrastructure.
+3. [public_release_technical_report.md](public_release_technical_report.md):
    public-facing technical report for the current release-readiness snapshot.
-3. [sfe_proxy_mode.md](sfe_proxy_mode.md): detailed SFE Proxy configuration,
+4. [sfe_proxy_mode.md](sfe_proxy_mode.md): detailed SFE Proxy configuration,
    supported providers, modes, Docker usage, and operational caveats.
-4. [router_contract.md](router_contract.md): router JSON contract and strict
+5. [router_contract.md](router_contract.md): router JSON contract and strict
    output expectations.
 
 ## Current Primary Docs
@@ -23,6 +26,9 @@ statistical reliability, or general model-safety guarantees.
 - [provider_comparison_summary.md](provider_comparison_summary.md): main
   cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic
   campaigns.
+- [current_architecture_status.md](current_architecture_status.md): short
+  current-status boundary for the canonical TUI + DirectBackend path, the
+  experimental proxy path, and what remains unproven.
 - [tui_direct_backend_strategy.md](tui_direct_backend_strategy.md): current
   first-party TUI direction, with DirectBackend as the canonical exposed path
   and the Proxy/CodexCLI path frozen as compatibility infrastructure.
