@@ -73,6 +73,7 @@ class EnvConfigTests(unittest.TestCase):
         text = env_example.read_text(encoding="utf-8")
 
         self.assertIn("OPENAI_API_KEY=", text)
+        self.assertIn("SFE_PROVIDER=openai", text)
         self.assertIn("SFE_OPENAI_ROUTER_MODEL=", text)
         self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=", text)
         self.assertIn("ALIBABA_API_KEY=", text)

@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -153,6 +155,11 @@ class RecordingAnthropicHandler(BaseHTTPRequestHandler):
         return
 
 
+@pytest.fixture(autouse=True)
+def _clear_global_sfe_provider(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
+
+
 def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_HOST", raising=False)
     monkeypatch.delenv("SFE_PROXY_PORT", raising=False)
@@ -208,6 +215,20 @@ def test_proxy_config_accepts_openai_proxy_provider_alias(monkeypatch) -> None:
     assert config.upstream_api_key == "openai-fallback-key"
 
 
+def test_proxy_config_uses_sfe_provider_for_openai(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-fallback-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "openai"
+    assert config.upstream_base_url == DEFAULT_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "openai-fallback-key"
+
+
 def test_proxy_config_openai_alias_keeps_explicit_upstream_override(monkeypatch) -> None:
     monkeypatch.setenv("SFE_PROXY_PROVIDER", "openai")
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_BASE_URL", "https://example.invalid")
@@ -230,6 +251,59 @@ def test_proxy_config_accepts_lemonade_proxy_provider_alias(monkeypatch) -> None
     assert config.provider == "lemonade"
     assert config.upstream_base_url == DEFAULT_LEMONADE_UPSTREAM_BASE_URL
     assert config.upstream_api_key == "local-placeholder-key"
+
+
+def test_proxy_config_uses_sfe_provider_for_lemonade(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "lemonade")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "local-placeholder-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "lemonade"
+    assert config.upstream_base_url == DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "local-placeholder-key"
+
+
+def test_proxy_config_sfe_provider_wins_over_legacy_proxy_provider(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "lemonade")
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "openai")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "local-placeholder-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-fallback-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "lemonade"
+    assert config.upstream_base_url == DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+
+
+def test_proxy_config_legacy_proxy_provider_fallback_still_works(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.setenv("SFE_PROXY_PROVIDER", "lemonade")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "local-placeholder-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "lemonade"
+    assert config.upstream_base_url == DEFAULT_LEMONADE_UPSTREAM_BASE_URL
+
+
+def test_proxy_config_normalizes_sfe_provider_aliases(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "alibaba-api")
+    monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "alibaba"
+    assert config.upstream_base_url == DEFAULT_ALIBABA_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "alibaba-key"
 
 
 def test_proxy_config_empty_upstream_uses_provider_default(monkeypatch) -> None:
@@ -258,6 +332,21 @@ def test_proxy_config_accepts_alibaba_proxy_provider_alias(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.setenv("SFE_PROXY_PROVIDER", "alibaba")
+    monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "alibaba"
+    assert config.upstream_base_url == DEFAULT_ALIBABA_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "alibaba-key"
+
+
+def test_proxy_config_uses_sfe_provider_for_alibaba(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "alibaba")
     monkeypatch.setenv("ALIBABA_API_KEY", "alibaba-key")
 
     config = ProxyConfig.from_env()
@@ -521,6 +610,20 @@ def test_proxy_config_accepts_anthropic_provider_from_env(monkeypatch) -> None:
     assert config.anthropic_max_retry_sleep_seconds == 4.5
 
 
+def test_proxy_config_uses_sfe_provider_for_anthropic(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    monkeypatch.setenv("SFE_ANTHROPIC_MODEL", "claude-test")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "anthropic"
+    assert config.anthropic_api_key == "anthropic-key"
+    assert config.anthropic_model == "claude-test"
+
+
 def test_proxy_config_prefers_specific_anthropic_api_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
     monkeypatch.setenv("SFE_PROXY_PROVIDER", "anthropic")
@@ -648,20 +751,36 @@ def test_proxy_config_does_not_use_openai_key_for_non_openai_upstream(monkeypatc
 
 
 def test_proxy_config_rejects_unsupported_provider(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROVIDER", "unsupported-provider")
+    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
+
+    try:
+        ProxyConfig.from_env()
+    except ValueError as exc:
+        assert "Unsupported SFE provider" in str(exc)
+        assert "openai-compatible" in str(exc)
+        assert "openai" in str(exc)
+        assert "lemonade" in str(exc)
+        assert "alibaba" in str(exc)
+        assert "anthropic" in str(exc)
+        assert "SFE_PROXY_UPSTREAM_API_KEY" not in str(exc)
+    else:
+        raise AssertionError("unsupported proxy provider should fail")
+
+
+def test_proxy_config_rejects_unsupported_legacy_proxy_provider(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
     monkeypatch.setenv("SFE_PROXY_PROVIDER", "unsupported-provider")
     monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
 
     try:
         ProxyConfig.from_env()
     except ValueError as exc:
-        assert "Unsupported SFE_PROXY_PROVIDER" in str(exc)
+        assert "Unsupported SFE provider" in str(exc)
         assert "openai-compatible" in str(exc)
-        assert "openai" in str(exc)
-        assert "lemonade" in str(exc)
-        assert "alibaba" in str(exc)
         assert "anthropic" in str(exc)
     else:
-        raise AssertionError("unsupported proxy provider should fail")
+        raise AssertionError("unsupported legacy proxy provider should fail")
 
 
 def test_proxy_config_rejects_unsupported_mode(monkeypatch) -> None:

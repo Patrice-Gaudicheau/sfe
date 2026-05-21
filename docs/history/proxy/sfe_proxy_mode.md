@@ -45,7 +45,10 @@ Environment variables:
 
 - `SFE_PROXY_HOST`, default `127.0.0.1`
 - `SFE_PROXY_PORT`, default `17891`
-- `SFE_PROXY_PROVIDER`, default `openai-compatible`
+- `SFE_PROVIDER`, canonical provider selector for the standby proxy; default
+  `openai-compatible`
+- `SFE_PROXY_PROVIDER`, legacy proxy-only fallback used only when
+  `SFE_PROVIDER` is unset
 - `SFE_PROXY_UPSTREAM_BASE_URL`, provider-specific default
 - `SFE_PROXY_UPSTREAM_API_KEY`, preferred upstream key for proxy mode
 - `ALIBABA_API_KEY`, Alibaba proxy provider key; `DASHSCOPE_API_KEY`
@@ -77,6 +80,12 @@ Proxy mode uses the repository root `.env`. Do not create a separate proxy
 environment file and do not duplicate secrets unless you need a proxy-specific
 upstream key.
 
+Status note: this proxy mode document is historical/standby documentation. The
+current canonical user-facing path is the TUI with `DirectBackend`, not the
+proxy. For provider selection, use `SFE_PROVIDER`. Existing proxy users may keep
+`SFE_PROXY_PROVIDER` only as a legacy fallback; precedence is
+`SFE_PROVIDER > SFE_PROXY_PROVIDER > openai-compatible`.
+
 Supported execution providers:
 
 - `openai-compatible`: the existing default behavior. Supported requests are
@@ -107,7 +116,7 @@ when `SFE_PROXY_UPSTREAM_BASE_URL` points to `https://api.openai.com`,
 proxy fails clearly at startup. The OpenAI fallback is not applied to non-OpenAI
 upstream URLs.
 
-For `SFE_PROXY_PROVIDER=alibaba`, `SFE_PROXY_UPSTREAM_API_KEY` wins when set.
+For `SFE_PROVIDER=alibaba`, `SFE_PROXY_UPSTREAM_API_KEY` wins when set.
 Otherwise the proxy uses `ALIBABA_API_KEY`, then `DASHSCOPE_API_KEY`.
 Alibaba uses the OpenAI-compatible proxy path, so request bodies, including
 `model`, are forwarded unchanged. The Alibaba proxy base URL should omit the
@@ -119,7 +128,7 @@ Alibaba `/v1/responses` has not been live-validated in this proxy path; if a
 DashScope Responses-compatible endpoint uses a different base prefix, configure
 it explicitly with `SFE_PROXY_UPSTREAM_BASE_URL` for that run.
 
-For `SFE_PROXY_PROVIDER=anthropic`, `SFE_ANTHROPIC_API_KEY` or
+For `SFE_PROVIDER=anthropic`, `SFE_ANTHROPIC_API_KEY` or
 `ANTHROPIC_API_KEY` is required. `SFE_ANTHROPIC_MODEL` overrides any incoming
 request model when set; otherwise the request model is used. Anthropic requires
 `max_tokens`, so the proxy sends `SFE_ANTHROPIC_MAX_TOKENS`.

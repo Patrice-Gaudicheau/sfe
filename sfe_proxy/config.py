@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from sfe.provider_config import resolve_sfe_provider_with_legacy_fallback
+
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17891
@@ -93,7 +95,9 @@ class ProxyConfig:
             port = int(port_raw)
         except ValueError as exc:
             raise ValueError("SFE_PROXY_PORT must be an integer.") from exc
-        provider = os.getenv("SFE_PROXY_PROVIDER", DEFAULT_PROXY_PROVIDER)
+        provider = resolve_sfe_provider_with_legacy_fallback(
+            default=DEFAULT_PROXY_PROVIDER
+        )
         upstream_base_url = os.getenv("SFE_PROXY_UPSTREAM_BASE_URL", "").strip()
         if not upstream_base_url:
             upstream_base_url = _default_upstream_base_url(provider)

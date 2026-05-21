@@ -251,6 +251,8 @@ python -m pip install -e .
 ```
 
 Copy `.env.example` to `.env` for local provider configuration. `.env` is ignored and must not be committed.
+Use `SFE_PROVIDER` as the canonical provider selector for SFE surfaces,
+including the TUI and standby proxy compatibility path.
 
 ## Minimal Verification
 
@@ -289,7 +291,9 @@ and Anthropic. They do not all have identical maturity or API shape.
 | Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
 
 Proxy-specific variables remain in `.env.example` for historical and standby
-work, but the proxy is not the recommended active path for TUI V0.1.
+work, but the proxy is not the recommended active path for TUI V0.1. For the
+standby proxy, `SFE_PROVIDER` is the current provider selector;
+`SFE_PROXY_PROVIDER` is a legacy proxy-only fallback.
 
 Lemonade is used here as a local OpenAI-compatible inference server. Configure it with:
 

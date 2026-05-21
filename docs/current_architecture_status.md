@@ -64,6 +64,10 @@ interface.
 Dockerized proxy operation is also standby infrastructure, not the recommended
 current user path.
 
+Provider selection is shared across SFE surfaces through `SFE_PROVIDER`.
+Standby proxy compatibility still accepts `SFE_PROXY_PROVIDER` as a legacy
+fallback, but new configuration should use `SFE_PROVIDER`.
+
 `ProxyBackend` may remain in the TUI codebase as an internal experimental stub,
 but it must not be exposed as a user-facing backend yet. The TUI should not
 offer backend switching until a concrete need is proven.
