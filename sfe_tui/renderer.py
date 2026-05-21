@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sfe.discovery import DiscoveryResult
+
 from .backends import BackendResult
 from .contracts import ContextLoadResult, SFEContract
 
@@ -16,11 +18,12 @@ def render_help() -> str:
             "  /pwd               Show selected workspace",
             "  /status            Show safe TUI state and disabled capabilities",
             "  /context           Show safe loaded/selected context metadata",
-            "  /files <paths...>  Replace loaded context with text files",
             "  /task <text>       Set the current task",
+            "  /discover          Discover workspace context for the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /ask               Ask a read-only question using selected context",
             "  /patch             Propose a patch without applying it",
+            "  /files <paths...>  Replace context manually for debug/design",
             "  /reset             Clear task, context, and routing; preserve workspace",
             "  /quit, /exit       Exit",
         ]
@@ -77,7 +80,8 @@ def render_error(message: str) -> str:
     guidance = {
         "unknown_command": "unknown command; use /help to list commands",
         "missing_task": "missing task; set one with /task <text>",
-        "no_context_loaded": "no context loaded; replace context with /files <path>",
+        "discovery_not_run": "run /discover after /task before this command",
+        "no_context_loaded": "no context loaded; run /discover or use /files <path>",
         "no_files_provided": "no files provided; use /files <path>",
         "invalid_file_command": "invalid file command; quote paths that contain spaces",
         "workspace_not_selected": "workspace not selected",
@@ -100,12 +104,14 @@ def render_status(
     backend_name: str,
     executor_provider_name: str | None = None,
     latest_result: BackendResult | None = None,
+    discovery_result: DiscoveryResult | None = None,
 ) -> str:
     latest_result_present = latest_result is not None
     latest_result_kind = latest_result.status if latest_result is not None else "none"
     latest_provider_calls = (
         latest_result.provider_calls_made if latest_result is not None else 0
     )
+    discovery_present = discovery_result is not None
     lines = [
         "SFE TUI status",
         f"  workspace selected: {workspace_selected}",
@@ -114,6 +120,9 @@ def render_status(
         f"  skipped context files: {skipped_context_files}",
         f"  loaded context segments: {loaded_context_segments}",
         f"  task present: {task_present}",
+        f"  discovery result present: {_yes_no(discovery_present)}",
+        f"  discovered candidates: {_discovery_count(discovery_result, 'candidate_count')}",
+        f"  discovered loaded candidates: {_discovery_count(discovery_result, 'loaded_candidate_count')}",
         f"  backend: {backend_name}",
     ]
     if executor_provider_name:
@@ -136,6 +145,7 @@ def render_context_summary(
     contract: SFEContract,
     context_files: list[ContextLoadResult],
     latest_result: BackendResult | None,
+    discovery_result: DiscoveryResult | None = None,
 ) -> str:
     skipped_count = sum(1 for result in context_files if not result.loaded)
     skipped_reasons = _skipped_reason_counts(context_files)
@@ -145,16 +155,16 @@ def render_context_summary(
             latest_result.contract.audit.get("selected_segment_ids") or []
         )
     if not contract.context_segments:
-        return "\n".join(
-            [
-                "SFE context",
-                "  loaded context segments: 0",
-                f"  skipped context files: {skipped_count}",
-                f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
-                f"  latest selected segment ids: {latest_selected_ids}",
-                "  empty: no context loaded",
-            ]
-        )
+        lines = [
+            "SFE context",
+            *_discovery_context_lines(discovery_result),
+            "  loaded context segments: 0",
+            f"  skipped context files: {skipped_count}",
+            f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
+            f"  latest selected segment ids: {latest_selected_ids}",
+            "  empty: no context loaded",
+        ]
+        return "\n".join(lines)
     warning_by_ref = {
         result.source_ref: result.warning_reason
         for result in context_files
@@ -170,6 +180,7 @@ def render_context_summary(
         )
     lines = [
         "SFE context",
+        *_discovery_context_lines(discovery_result),
         f"  loaded context segments: {len(contract.context_segments)}",
         f"  skipped context files: {skipped_count}",
         f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
@@ -196,6 +207,33 @@ def render_context_summary(
             )
         )
     return "\n".join(lines)
+
+
+def render_discovery_summary(discovery_result: DiscoveryResult | None) -> str:
+    if discovery_result is None:
+        return "\n".join(
+            [
+                "SFE discovery",
+                "  discovery ran: no",
+            ]
+        )
+    top_refs = [candidate.source_ref for candidate in discovery_result.candidates[:5]]
+    return "\n".join(
+        [
+            "SFE discovery",
+            "  discovery ran: yes",
+            f"  workspace selected: {_yes_no(discovery_result.workspace_root_present)}",
+            f"  task present: {_yes_no(discovery_result.task_present)}",
+            f"  scanned files: {discovery_result.scanned_file_count}",
+            f"  candidates: {discovery_result.candidate_count}",
+            f"  loaded candidate count: {discovery_result.loaded_candidate_count}",
+            f"  skipped candidate count: {discovery_result.skipped_candidate_count}",
+            f"  stop reason: {_display_value(discovery_result.stop_reason)}",
+            f"  top candidate source refs: {_format_string_list(top_refs)}",
+            f"  skipped reasons: {_format_reason_counts(discovery_result.skipped_reason_counts)}",
+            f"  warning reasons: {_format_reason_counts(discovery_result.warning_reason_counts)}",
+        ]
+    )
 
 
 def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
@@ -232,7 +270,7 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
     if not task_present:
         lines.append("  action: missing task; set one with /task <text>")
     elif not context_loaded:
-        lines.append("  action: no context loaded; replace context with /files <path>")
+        lines.append("  action: no context loaded; run /discover or use /files <path>")
     elif selected_count == 0:
         lines.append(
             "  action: routing found no relevant context segments; revise the task or loaded files"
@@ -433,7 +471,8 @@ def _patch_provider_status(result: BackendResult) -> str:
 def _failure_guidance(error_category: str | None) -> str:
     return {
         "missing_task": "set a task with /task <text>",
-        "no_context_loaded": "replace context with /files <path>",
+        "discovery_not_run": "run /discover after /task before this command",
+        "no_context_loaded": "run /discover or use /files <path>",
         "no_selected_context": (
             "routing found no relevant context segments; revise the task or loaded files"
         ),
@@ -466,3 +505,26 @@ def _skip_reason_guidance(reason: str) -> str:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _discovery_count(
+    discovery_result: DiscoveryResult | None,
+    attr_name: str,
+) -> int:
+    if discovery_result is None:
+        return 0
+    return int(getattr(discovery_result, attr_name))
+
+
+def _discovery_context_lines(
+    discovery_result: DiscoveryResult | None,
+) -> list[str]:
+    if discovery_result is None:
+        return ["  discovery result present: no"]
+    top_refs = [candidate.source_ref for candidate in discovery_result.candidates[:5]]
+    return [
+        "  discovery result present: yes",
+        f"  discovered candidates: {discovery_result.candidate_count}",
+        f"  discovered loaded candidates: {discovery_result.loaded_candidate_count}",
+        f"  discovered source refs: {_format_string_list(top_refs)}",
+    ]

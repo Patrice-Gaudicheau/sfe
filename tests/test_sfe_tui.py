@@ -521,7 +521,7 @@ def test_dry_run_with_context_but_missing_task_does_not_fake_reduction(
     assert str(tmp_path.resolve()) not in rendered
 
 
-def test_dry_run_with_no_context_suggests_files_command(tmp_path) -> None:
+def test_dry_run_after_task_requires_discovery_without_manual_context(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(["", "/task Explain context", "/dry-run", "/quit"]),
@@ -531,15 +531,14 @@ def test_dry_run_with_no_context_suggests_files_command(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
-    assert "context loaded: no" in dry_run_block
-    assert "loaded context segments: 0" in dry_run_block
-    assert f"fallback reason: {NO_REDUCIBLE_CONTEXT_SEGMENTS}" in dry_run_block
-    assert "action: no context loaded; replace context with /files <path>" in dry_run_block
-    assert "provider calls made: 0" in dry_run_block
-    assert "executor/provider called: no" in dry_run_block
-    assert "ProxyBackend" not in dry_run_block
-    assert "/backend" not in dry_run_block
+    assert (
+        "Error: discovery_not_run - run /discover after /task before this command"
+        in rendered
+    )
+    assert "SFE dry-run summary" not in rendered
+    assert "calling provider" not in rendered
+    assert "ProxyBackend" not in rendered
+    assert "/backend" not in rendered
 
 
 def test_dry_run_with_no_selected_context_is_actionable(tmp_path) -> None:
@@ -818,6 +817,29 @@ def test_status_after_ask_reports_latest_provider_calls(tmp_path) -> None:
     assert "patch application enabled: no" in status_block
 
 
+def test_status_reports_discovery_state_without_content(tmp_path) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Explain context", "/discover", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "discovery result present: yes" in status_block
+    assert "discovered candidates: 1" in status_block
+    assert "discovered loaded candidates: 1" in status_block
+    assert "SECRET_FILE_CONTENT" not in status_block
+    assert "Explain context" not in status_block
+    assert str(tmp_path.resolve()) not in status_block
+
+
 def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
     rendered = render_status(
         workspace_selected=True,
@@ -845,10 +867,11 @@ def test_help_does_not_advertise_backend_switching() -> None:
 
     assert "/status" in rendered
     assert "/context" in rendered
+    assert "/discover" in rendered
     assert "/ask" in rendered
     assert "/patch" in rendered
     assert "/reset" in rendered
-    assert "/files <paths...>  Replace loaded context with text files" in rendered
+    assert "/files <paths...>  Replace context manually for debug/design" in rendered
     assert "files or directories" not in rendered
     assert "Add context" not in rendered
     assert "ProxyBackend" not in rendered
@@ -903,6 +926,339 @@ def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
     assert "Error: unknown_command" in rendered
     assert "use /help to list commands" in rendered
     assert "proxy_not_connected" not in rendered
+
+
+def test_discover_without_task_reports_missing_task(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/discover", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: missing_task - missing task; set one with /task <text>" in rendered
+    assert "SFE discovery" not in rendered
+
+
+def test_discover_after_task_reports_safe_summary(tmp_path) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("SECRET_FILE_CONTENT alpha routing", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task SECRET_TASK_TEXT alpha", "/discover", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    discovery_block = rendered.split("SFE discovery", 1)[1]
+    assert "discovery ran: yes" in discovery_block
+    assert "workspace selected: yes" in discovery_block
+    assert "task present: yes" in discovery_block
+    assert "scanned files: 1" in discovery_block
+    assert "candidates: 1" in discovery_block
+    assert "loaded candidate count: 1" in discovery_block
+    assert "top candidate source refs: context.md" in discovery_block
+    assert "SECRET_FILE_CONTENT" not in discovery_block
+    assert "SECRET_TASK_TEXT" not in discovery_block
+    assert str(tmp_path.resolve()) not in discovery_block
+    assert "Authorization" not in discovery_block
+    assert "API_KEY" not in discovery_block
+
+
+def test_ask_before_discover_reports_error_and_makes_zero_provider_calls(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("alpha routing content", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task alpha routing", "/ask", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: discovery_not_run" in rendered
+    assert "calling provider" not in rendered
+    assert executor.calls == []
+
+
+def test_patch_before_discover_reports_error_and_makes_zero_provider_calls(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("alpha routing content", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task alpha routing", "/patch", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: discovery_not_run" in rendered
+    assert "calling provider" not in rendered
+    assert executor.patch_calls == []
+
+
+def test_discover_then_dry_run_reloads_full_text_for_routing(tmp_path) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("alpha routing content", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task alpha routing", "/discover", "/dry-run", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    dry_run_block = rendered.split("SFE dry-run summary", 1)[1]
+    assert "context loaded: yes" in dry_run_block
+    assert "selected segments: 1" in dry_run_block
+    assert "selected source refs: context.md" in dry_run_block
+    assert "alpha routing content" not in rendered
+    assert str(tmp_path.resolve()) not in rendered
+
+
+def test_discover_with_no_candidates_allows_dry_run_but_not_provider_call(
+    tmp_path,
+) -> None:
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task missing context",
+                "/discover",
+                "/dry-run",
+                "/ask",
+                "/patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "candidates: 0" in rendered
+    assert "SFE dry-run summary" in rendered
+    assert "context loaded: no" in rendered
+    assert f"fallback reason: {NO_REDUCIBLE_CONTEXT_SEGMENTS}" in rendered
+    assert rendered.count("Error: no_context_loaded") == 2
+    assert "calling provider" not in rendered
+    assert executor.calls == []
+    assert executor.patch_calls == []
+
+
+def test_discover_then_ask_can_call_executor_when_context_is_selected(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("alpha routing content", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task alpha routing", "/discover", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "calling provider" in rendered
+    assert "answer received" in rendered
+    assert len(executor.calls) == 1
+    selected_segments = executor.calls[0]["selected_context_segments"]
+    assert selected_segments[0].text == "alpha routing content"
+    assert "alpha routing content" not in rendered
+
+
+def test_task_after_discover_invalidates_discovery_until_rerun(tmp_path) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("alpha routing content", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task alpha routing",
+                "/discover",
+                "/task beta routing",
+                "/dry-run",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert rendered.count("Task stored.") == 2
+    assert "Error: discovery_not_run" in rendered
+
+
+def test_manual_files_context_still_works_without_discover(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("manual alpha routing", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task manual alpha", "/dry-run", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE dry-run summary" in rendered
+    assert "selected source refs: context.txt" in rendered
+    assert "Error: discovery_not_run" not in rendered
+
+
+def test_manual_files_context_takes_precedence_over_discovered_context(
+    tmp_path,
+) -> None:
+    manual = tmp_path / "manual.txt"
+    discovered = tmp_path / "auto.md"
+    manual.write_text("manual-only context", encoding="utf-8")
+    discovered.write_text("auto unique context", encoding="utf-8")
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files manual.txt",
+                "/task auto unique",
+                "/discover",
+                "/dry-run",
+                "/quit",
+            ]
+        ),
+        output=lambda _message: None,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    assert app.latest_result is not None
+    refs = [segment.source_ref for segment in app.latest_result.contract.context_segments]
+    assert refs == ["manual.txt"]
+
+
+def test_reset_clears_discovery_state(tmp_path) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("alpha routing content", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task alpha routing",
+                "/discover",
+                "/reset",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert app.discovery_result is None
+    assert "discovery result present: no" in status_block
+    assert "discovered candidates: 0" in status_block
+
+
+def test_discovery_excludes_sensitive_generated_and_non_text_files_in_tui(
+    tmp_path,
+) -> None:
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=SECRET", encoding="utf-8")
+    hidden = tmp_path / ".hidden"
+    hidden.mkdir()
+    (hidden / "hidden.md").write_text("hidden content", encoding="utf-8")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "app.log").write_text("log content", encoding="utf-8")
+    cache = tmp_path / ".pytest_cache"
+    cache.mkdir()
+    (cache / "cache.md").write_text("cache content", encoding="utf-8")
+    (tmp_path / "data.txt").write_bytes(b"safe\x00binary")
+    (tmp_path / "safe.md").write_text("safe alpha context", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task safe alpha", "/discover", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    discovery_block = rendered.split("SFE discovery", 1)[1]
+    assert "top candidate source refs: safe.md" in discovery_block
+    assert ".env" not in discovery_block
+    assert "hidden.md" not in discovery_block
+    assert "app.log" not in discovery_block
+    assert "cache.md" not in discovery_block
+    assert "data.txt" not in discovery_block
+    assert "secret_like_file" in discovery_block
+    assert "binary_or_non_text" in discovery_block
+    assert "safe alpha context" not in discovery_block
+
+
+def test_discovered_context_summary_is_content_safe(tmp_path) -> None:
+    source = tmp_path / "context.md"
+    source.write_text("SECRET_FILE_CONTENT alpha routing", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task SECRET_TASK_TEXT alpha",
+                "/discover",
+                "/dry-run",
+                "/context",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "discovery result present: yes" in rendered
+    assert "discovered source refs: context.md" in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+    assert "SECRET_TASK_TEXT" not in rendered
+    assert str(tmp_path.resolve()) not in rendered
+    assert "Authorization" not in rendered
+    assert "request body" not in rendered.lower()
 
 
 def test_context_empty_state_is_safe(tmp_path) -> None:
@@ -1272,8 +1628,8 @@ def test_ask_requires_loaded_context(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "Error: no_context_loaded" in rendered
-    assert "replace context with /files <path>" in rendered
+    assert "Error: discovery_not_run" in rendered
+    assert "run /discover after /task before this command" in rendered
     assert not executor.calls
 
 
@@ -1485,8 +1841,8 @@ def test_patch_requires_loaded_context(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "Error: no_context_loaded" in rendered
-    assert "replace context with /files <path>" in rendered
+    assert "Error: discovery_not_run" in rendered
+    assert "run /discover after /task before this command" in rendered
     assert not executor.patch_calls
 
 

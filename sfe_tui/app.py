@@ -6,6 +6,12 @@ import shlex
 from pathlib import Path
 from typing import Callable
 
+from sfe.discovery import (
+    DiscoveryResult,
+    discover_workspace_context,
+    load_discovered_context,
+)
+
 from .backends import (
     BackendAdapter,
     BackendResult,
@@ -15,6 +21,7 @@ from .backends import (
 )
 from .contracts import (
     ContextLoadResult,
+    SFEContract,
     build_contract,
     load_context_file,
     resolve_workspace,
@@ -41,6 +48,7 @@ class SfeTuiApp:
         self.backend = backend or backend_by_name("direct")
         self.workspace_root: Path | None = None
         self.context_files: list[ContextLoadResult] = []
+        self.discovery_result: DiscoveryResult | None = None
         self.task = ""
         self.latest_result: BackendResult | None = None
 
@@ -102,6 +110,7 @@ class SfeTuiApp:
                     skipped_context_files=skipped_context_files,
                     loaded_context_segments=loaded_context_files,
                     task_present=bool(self.task.strip()),
+                    discovery_result=self.discovery_result,
                     backend_name=self.backend.name,
                     executor_provider_name=getattr(
                         self.backend,
@@ -124,8 +133,12 @@ class SfeTuiApp:
                 self.output(renderer.render_error("missing_task"))
                 return False
             self.task = task
+            self.discovery_result = None
             self.latest_result = None
             self.output(renderer.render_task_set())
+            return False
+        if name == "/discover":
+            self._handle_discover()
             return False
         if name == "/dry-run":
             self._handle_dry_run()
@@ -160,46 +173,65 @@ class SfeTuiApp:
         self.latest_result = None
         self.output(renderer.render_file_selection(self.context_files))
 
+    def _handle_discover(self) -> None:
+        if self.workspace_root is None:
+            self.output(renderer.render_error("workspace_not_selected"))
+            return
+        if not self.task.strip():
+            self.output(renderer.render_error("missing_task"))
+            return
+        self.discovery_result = discover_workspace_context(
+            workspace_root=self.workspace_root,
+            task=self.task,
+        )
+        self.latest_result = None
+        self.output(renderer.render_discovery_summary(self.discovery_result))
+
     def _handle_reset(self) -> None:
         self.context_files = []
+        self.discovery_result = None
         self.task = ""
         self.latest_result = None
         self.output(renderer.render_reset())
 
     def _handle_context(self) -> None:
-        contract = build_contract(
-            workspace_root=self.workspace_root,
-            task=self.task,
-            file_paths=[],
-            context_files=self.context_files,
-        )
+        contract = self._build_contract_for_current_state(require_discovery=False)[0]
+        if contract is None:
+            contract = self._empty_contract()
         self.output(
             renderer.render_context_summary(
                 contract=contract,
-                context_files=self.context_files,
+                context_files=self._active_context_files(require_discovery=False),
                 latest_result=self.latest_result,
+                discovery_result=self.discovery_result,
             )
         )
 
     def _handle_dry_run(self) -> None:
-        contract = build_contract(
-            workspace_root=self.workspace_root,
-            task=self.task,
-            file_paths=[],
-            context_files=self.context_files,
+        contract, error = self._build_contract_for_current_state(
+            require_discovery=True,
         )
+        if error is not None:
+            self.output(renderer.render_error(error))
+            return
+        if contract is None:
+            contract = self._empty_contract()
         result = self.backend.dry_run(contract)
         self.latest_result = result
+        if self._using_discovered_context():
+            self.output(renderer.render_discovery_summary(self.discovery_result))
         self.output(renderer.render_dry_run_summary(contract, result))
 
     def _handle_ask(self) -> None:
         self.output("building contract")
-        contract = build_contract(
-            workspace_root=self.workspace_root,
-            task=self.task,
-            file_paths=[],
-            context_files=self.context_files,
+        contract, error = self._build_contract_for_current_state(
+            require_discovery=True,
         )
+        if error is not None:
+            self.output(renderer.render_error(error))
+            return
+        if contract is None:
+            contract = self._empty_contract()
         if contract.task is None:
             self.output(renderer.render_error("missing_task"))
             return
@@ -221,12 +253,14 @@ class SfeTuiApp:
 
     def _handle_patch(self) -> None:
         self.output("building contract")
-        contract = build_contract(
-            workspace_root=self.workspace_root,
-            task=self.task,
-            file_paths=[],
-            context_files=self.context_files,
+        contract, error = self._build_contract_for_current_state(
+            require_discovery=True,
         )
+        if error is not None:
+            self.output(renderer.render_error(error))
+            return
+        if contract is None:
+            contract = self._empty_contract()
         if contract.task is None:
             self.output(renderer.render_error("missing_task"))
             return
@@ -243,6 +277,61 @@ class SfeTuiApp:
         result = self.backend.patch(contract)
         self.latest_result = result
         self.output(renderer.render_patch_result(result))
+
+    def _build_contract_for_current_state(
+        self,
+        *,
+        require_discovery: bool,
+    ) -> tuple[SFEContract | None, str | None]:
+        if self.context_files:
+            context_files = self.context_files
+        elif not self.task.strip():
+            context_files = []
+        elif self.discovery_result is None:
+            if require_discovery:
+                return None, "discovery_not_run"
+            context_files = []
+        else:
+            context_files = list(
+                load_discovered_context(
+                    workspace_root=self.workspace_root,
+                    discovery_result=self.discovery_result,
+                )
+            )
+        return (
+            build_contract(
+                workspace_root=self.workspace_root,
+                task=self.task,
+                file_paths=[],
+                context_files=context_files,
+            ),
+            None,
+        )
+
+    def _active_context_files(self, *, require_discovery: bool) -> list[ContextLoadResult]:
+        if self.context_files:
+            return self.context_files
+        if self.discovery_result is None:
+            return []
+        if require_discovery or self.task.strip():
+            return list(
+                load_discovered_context(
+                    workspace_root=self.workspace_root,
+                    discovery_result=self.discovery_result,
+                )
+            )
+        return []
+
+    def _using_discovered_context(self) -> bool:
+        return not self.context_files and self.discovery_result is not None
+
+    def _empty_contract(self) -> SFEContract:
+        return build_contract(
+            workspace_root=self.workspace_root,
+            task=self.task,
+            file_paths=[],
+            context_files=[],
+        )
 
 
 def main() -> int:
