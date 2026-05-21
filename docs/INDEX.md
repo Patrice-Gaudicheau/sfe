@@ -4,24 +4,23 @@ This repository is a technical prototype for Spatial Field Engine for Cognition
 (`SFE`), an experimental architecture that separates context selection from
 task execution in long-context LLM workflows. The documentation records
 controlled benchmark methodology, provider-specific observations, and the
-experimental SFE Proxy path. It does not claim production readiness,
+standby historical SFE Proxy path. It does not claim production readiness,
 statistical reliability, or general model-safety guarantees.
 
 ## Start Here
 
-1. [README.md](../README.md): project purpose, architecture, setup, current
-   provider support, Proxy usage, benchmark snapshot, and limitations.
-2. [current_architecture_status.md](current_architecture_status.md): compact
-   current-status note freezing the TUI + DirectBackend path as canonical and
-   the Proxy/CodexCLI path as experimental compatibility infrastructure.
-3. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): concise guide for the
+1. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): concise guide for the
    current canonical SFE-aware TUI workflow, commands, safety boundaries, and
    limitations.
+2. [current_architecture_status.md](current_architecture_status.md): compact
+   current-status note freezing the TUI + DirectBackend path as canonical and
+   the Proxy/CodexCLI path as standby experimental compatibility
+   infrastructure.
+3. [README.md](../README.md): project purpose, architecture, setup, current
+   provider support, benchmark snapshot, and limitations.
 4. [public_release_technical_report.md](public_release_technical_report.md):
    public-facing technical report for the current release-readiness snapshot.
-5. [sfe_proxy_mode.md](sfe_proxy_mode.md): detailed SFE Proxy configuration,
-   supported providers, modes, Docker usage, and operational caveats.
-6. [router_contract.md](router_contract.md): router JSON contract and strict
+5. [router_contract.md](router_contract.md): router JSON contract and strict
    output expectations.
 
 ## Current Primary Docs
@@ -31,12 +30,12 @@ statistical reliability, or general model-safety guarantees.
   campaigns.
 - [current_architecture_status.md](current_architecture_status.md): short
   current-status boundary for the canonical TUI + DirectBackend path, the
-  experimental proxy path, and what remains unproven.
+  standby experimental proxy path, and what remains unproven.
 - [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current user-facing TUI
   workflow and command reference for the canonical DirectBackend path.
 - [tui_direct_backend_strategy.md](tui_direct_backend_strategy.md): current
   first-party TUI direction, with DirectBackend as the canonical exposed path
-  and the Proxy/CodexCLI path frozen as compatibility infrastructure.
+  and the Proxy/CodexCLI path frozen as standby compatibility infrastructure.
 - [tui_readonly_ask_milestone.md](tui_readonly_ask_milestone.md): first
   read-only `/ask` milestone for the first-party SFE-aware TUI.
 - [token_cost_metrics.md](token_cost_metrics.md): OpenAI token accounting and
@@ -49,15 +48,8 @@ statistical reliability, or general model-safety guarantees.
   effectiveness result.
 - [decisions.md](decisions.md): project decision notes where applicable.
 
-## Proxy And Provider Docs
+## Provider Docs
 
-- [sfe_proxy_mode.md](sfe_proxy_mode.md): canonical Proxy mode reference. It
-  covers `pass_through`, `shadow`, `dry_run_enabled`, and `enabled` modes, plus
-  OpenAI-compatible, OpenAI, Lemonade, Alibaba/Qwen, and Anthropic proxy
-  providers.
-- [proxy_milestone_history.md](proxy_milestone_history.md): preferred starting
-  point for historical Proxy milestone notes before reading the individual
-  smoke and controlled-run records.
 - [openai_api_benchmark.md](openai_api_benchmark.md): optional direct OpenAI
   API benchmark path.
 - [openai_validation_report.md](openai_validation_report.md): direct OpenAI API
@@ -129,8 +121,7 @@ include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
 | Selected-context OpenAI executor smokes | `runtime/run_high_overlap_*_openai_executor_smoke.py` | Yes for live run | Executor receives deterministic authoritative context only. |
 | Selected-vs-full OpenAI comparisons | `runtime/run_high_overlap_*_contamination_comparison.py` | Yes for live run | Compare selected authoritative context with full fixture context. |
 | Alibaba/Qwen smoke | `runtime/run_alibaba_smoke.py` | Yes for live run | Tiny provider smoke path; not a benchmark campaign. |
-| Proxy direct run | `python -m sfe_proxy` | Depends on configured upstream provider | Experimental local OpenAI-compatible proxy path. |
-| Proxy Docker run | `make build`, `make start`, `make logs`, `make status`, `make stop` | `make build` no; `make start` depends on provider config | Uses `docker-compose.proxy.yml` and the root `.env` for runtime configuration. |
+| Standby proxy history | See `docs/history/proxy/` | Depends on historical scenario | Not the current user-facing path. Retained for compatibility research and audit trail. |
 
 Generated local reports should stay outside tracked files, preferably under
 `/tmp`, unless a summarized documentation note is intentionally added.
@@ -141,9 +132,11 @@ These notes preserve narrower experiments, smoke tests, and phase closeouts.
 They are useful for audit trail and context, but they should not be read as the
 current top-level project status.
 
-- [proxy_milestone_history.md](proxy_milestone_history.md): rollup for the
-  historical Proxy shadow, dry-run-enabled, enabled-mode, and live-provider
-  milestone notes below.
+- [proxy_milestone_history.md](history/proxy/proxy_milestone_history.md):
+  rollup for the historical Proxy shadow, dry-run-enabled, enabled-mode, and
+  live-provider milestone notes below.
+- [sfe_proxy_mode.md](history/proxy/sfe_proxy_mode.md): standby historical
+  proxy mode reference. It is not current user-facing setup guidance.
 - [high_overlap_history.md](high_overlap_history.md): rollup for the
   historical High-Overlap experiment notes below.
 - [high_overlap_poison_pill_progression_summary.md](history/high_overlap/high_overlap_poison_pill_progression_summary.md)
@@ -168,6 +161,10 @@ current top-level project status.
 - [proxy_enabled_mode_controlled_summary.md](history/proxy/proxy_enabled_mode_controlled_summary.md)
 - [proxy_enabled_mode_milestone_summary.md](history/proxy/proxy_enabled_mode_milestone_summary.md)
 - [proxy_structured_responses_builder_diagnostics_note.md](history/proxy/proxy_structured_responses_builder_diagnostics_note.md)
+- [codex_shadow_routing_milestone.md](history/proxy/codex_shadow_routing_milestone.md)
+- [enabled_mode_smoke_milestone.md](history/proxy/enabled_mode_smoke_milestone.md)
+- [codex_enabled_streaming_guard_milestone.md](history/proxy/codex_enabled_streaming_guard_milestone.md)
+- [codex_enabled_streaming_replacement_smoke.md](history/proxy/codex_enabled_streaming_replacement_smoke.md)
 - [proxy_enabled_live_lemonade_summary.md](history/proxy/proxy_enabled_live_lemonade_summary.md)
 - [proxy_enabled_live_lemonade_multifixture_summary.md](history/proxy/proxy_enabled_live_lemonade_multifixture_summary.md)
 - [proxy_enabled_live_openai_summary.md](history/proxy/proxy_enabled_live_openai_summary.md)

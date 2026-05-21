@@ -4,7 +4,7 @@ Status note: This is a historical phase-close record preserved for
 audit/research continuity. High-overlap remains a useful benchmark family and
 methodology area, but it is not the whole current project status. Future-looking
 Gateway/Proxy wording below reflects the project state at the time; current
-terminology and implementation status use the experimental SFE Proxy. Start
+terminology treats the SFE Proxy as standby experimental infrastructure. Start
 with `README.md` and `docs/INDEX.md` for the latest project overview.
 
 This internal note closes the high-overlap fixture-expansion phase for the

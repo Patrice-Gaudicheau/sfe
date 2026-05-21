@@ -92,7 +92,7 @@ SFE may be commercially relevant when avoided context is large enough to
 amortize routing cost. Current areas of interest include:
 
 - API-heavy long-context workflows.
-- LLM proxy layers.
+- Provider integration and proxy research.
 - Token budget control and context exposure reduction.
 - Auditable routing decisions.
 - Authority conflicts between documents, versions, policies, or governance
@@ -160,6 +160,9 @@ New technical reviewers should start with `docs/INDEX.md`. It gives a compact
 map of the benchmark families, runner categories, current high-overlap status,
 and the recommended reading path.
 
+For the current canonical user-facing workflow, read
+`docs/tui_v0_1_user_guide.md` and `docs/current_architecture_status.md`.
+
 For the current high-overlap methodology, read
 `docs/high_overlap_fixture_expansion_phase_close.md` and
 `docs/high_overlap_diagnostic_bucketing_notes.md`.
@@ -200,8 +203,9 @@ At a high level, the current repository has five layers:
 - `providers/`: minimal benchmark provider adapters, including Lemonade,
   OpenAI API, Alibaba/Qwen, and native Anthropic Messages API paths.
 - `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
-- `sfe_proxy/`: experimental OpenAI-compatible local proxy for pass-through,
-  shadow observation, and enabled SFE routing experiments.
+- `sfe_tui/`: current canonical user-facing TUI path using `DirectBackend`.
+- `sfe_proxy/`: standby experimental OpenAI-compatible local proxy retained for
+  compatibility research, observability, and historical stress tests.
 
 The main execution pattern is:
 
@@ -253,12 +257,15 @@ Copy `.env.example` to `.env` for local provider configuration. `.env` is ignore
 These commands do not require provider API keys:
 
 ```bash
-python -m py_compile runtime/run_large_contextual_benchmark.py sfe_proxy/config.py sfe_proxy/server.py
+python -m py_compile runtime/run_large_contextual_benchmark.py sfe_tui/*.py
 pytest tests/test_env_config.py -q
+pytest tests/test_sfe_tui.py -q
 pytest tests/test_large_contextual_benchmark.py -q
-pytest tests/test_sfe_proxy.py -q
 python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
 ```
+
+Proxy tests remain available for standby/historical compatibility work, but
+they are not the current user-facing smoke path.
 
 The full test suite can also be run from the repository root:
 
@@ -274,18 +281,15 @@ or `TEMP` point to `/mnt/c/...`.
 The current prototype has provider paths for OpenAI, Lemonade, Alibaba/Qwen,
 and Anthropic. They do not all have identical maturity or API shape.
 
-| Provider | Benchmark path | Proxy path | Notes |
+| Provider | Benchmark path | Standby proxy notes | Notes |
 | --- | --- | --- | --- |
-| OpenAI | `--executor openai-api` in large/contextual benchmarks and related OpenAI runners | `SFE_PROXY_PROVIDER=openai` or generic `openai-compatible` | Uses OpenAI-compatible or direct OpenAI API configuration. Set `OPENAI_API_KEY`, `SFE_OPENAI_ROUTER_MODEL`, and `SFE_OPENAI_EXECUTOR_MODEL` for live benchmark runs. |
-| Lemonade | `--executor lemonade` and historical/local benchmark runners | `SFE_PROXY_PROVIDER=lemonade` | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
-| Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | `SFE_PROXY_PROVIDER=alibaba` | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
-| Anthropic | `--executor anthropic` in large/contextual benchmarks | `SFE_PROXY_PROVIDER=anthropic` | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
+| OpenAI | `--executor openai-api` in large/contextual benchmarks and related OpenAI runners | Historical proxy support exists, but the proxy is not the current user path. | Uses OpenAI-compatible or direct OpenAI API configuration. Set `OPENAI_API_KEY`, `SFE_OPENAI_ROUTER_MODEL`, and `SFE_OPENAI_EXECUTOR_MODEL` for live benchmark runs. |
+| Lemonade | `--executor lemonade` and historical/local benchmark runners | Historical proxy support exists, but the proxy is not the current user path. | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
+| Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Historical proxy support exists, but the proxy is not the current user path. | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
+| Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
 
-Proxy-specific variables are documented in `.env.example` and
-`docs/sfe_proxy_mode.md`. For proxy mode, `SFE_PROXY_UPSTREAM_API_KEY` is the
-generic upstream-key override. Alibaba proxy mode also accepts
-`ALIBABA_API_KEY` and `DASHSCOPE_API_KEY`; Anthropic proxy mode accepts
-`SFE_ANTHROPIC_API_KEY` and `ANTHROPIC_API_KEY`.
+Proxy-specific variables remain in `.env.example` for historical and standby
+work, but the proxy is not the recommended active path for TUI V0.1.
 
 Lemonade is used here as a local OpenAI-compatible inference server. Configure it with:
 
@@ -333,163 +337,17 @@ include `openai` even though they call OpenAI when the API key is present. Check
 Anthropic structural runs may require `--provider-call-delay-seconds` because
 provider input-token-per-minute limits can affect execution timing.
 
-## Proxy Mode
+## Proxy Standby Status
 
-The repository now includes an experimental SFE Proxy prototype in
-`sfe_proxy/`. It is an OpenAI-compatible local HTTP proxy layer for
-pass-through, shadow observation, and enabled SFE routing experiments. It is
-not presented as production-ready infrastructure.
+The proxy and Dockerized proxy path are currently in standby. The canonical
+user-facing path is the SFE-aware TUI with `DirectBackend`; start with
+`docs/tui_v0_1_user_guide.md`.
 
-Run it directly with:
-
-```bash
-python -m sfe_proxy
-```
-
-By default it binds to `127.0.0.1:17891`. The supported proxy providers are:
-
-- `openai-compatible`: generic OpenAI-compatible upstream path.
-- `openai`: explicit OpenAI alias using the OpenAI-compatible path.
-- `lemonade`: local Lemonade OpenAI-compatible path.
-- `alibaba`: Alibaba/DashScope/Qwen alias using the OpenAI-compatible path.
-- `anthropic`: Anthropic Messages API adapter for text-only proxy requests.
-
-The supported modes are:
-
-- `pass_through`: forward supported requests to the upstream.
-- `shadow`: forward requests and write safe local observation events.
-- `dry_run_enabled`: build reduced candidate requests for diagnostics while
-  still forwarding the original request.
-- `enabled`: send a reduced candidate request upstream when one can be built.
-
-The proxy supports `GET /v1/models`, `POST /v1/chat/completions`, and
-`POST /v1/responses`. A minimal local request shape is:
-
-```bash
-curl http://127.0.0.1:17891/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -d '{"model":"configured-model","messages":[{"role":"user","content":"Reply with OK"}]}'
-```
-
-Provider keys and upstream URLs are configured through `.env.example`.
-Anthropic proxy mode has text-only mapping and provider-specific pacing,
-input-guard, and optional one-retry-on-429 settings. Alibaba proxy mode forwards
-OpenAI-compatible request bodies unchanged and has live validation for
-`/v1/chat/completions`; `/v1/responses` may require an explicit DashScope
-compatible base URL depending on the endpoint used.
-
-### Running The Proxy With Docker
-
-The repository includes a `Dockerfile`, `docker-compose.proxy.yml`, and Makefile
-targets for the experimental Proxy. Docker Compose reads the repository root
-`.env` file for runtime configuration; keep provider keys local and do not
-commit `.env`.
-
-For a first local Docker run, use:
-
-```bash
-make install
-```
-
-`make install` runs `make build` and then `make start`. Use `make build` when
-you only want to build the image, `make start` to start an already built
-container, `make logs` to follow proxy logs, `make status` to inspect the
-compose service, `make stop` to stop it, and `make remove` to stop it and remove
-orphans.
-
-Direct Compose commands are:
-
-```bash
-docker compose -f docker-compose.proxy.yml build sfe-proxy
-docker compose -f docker-compose.proxy.yml up -d sfe-proxy
-docker compose -f docker-compose.proxy.yml logs -f sfe-proxy
-docker compose -f docker-compose.proxy.yml down
-```
-
-The container listens on port `17891` internally. The compose file publishes it
-on the host loopback address by default:
-
-```text
-127.0.0.1:17891
-```
-
-After the container is running, the same local request shape can be used:
-
-```bash
-curl http://127.0.0.1:17891/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -d '{"model":"configured-model","messages":[{"role":"user","content":"Reply with OK"}]}'
-```
-
-`make build` does not require provider secrets. `make start` validates that the
-selected proxy provider has the required local key configuration before starting
-the container.
-
-If the Dockerized proxy calls a local Lemonade or OpenAI-compatible server,
-remember that `127.0.0.1` from inside the container is the container itself.
-Depending on Docker Desktop, WSL, or Linux networking, use
-`host.docker.internal`, a host LAN IP, or another endpoint reachable from the
-container.
-
-### Using The Dockerized Proxy From CodexCLI
-
-Start the Dockerized SFE Proxy first, using the Docker commands above. Once it
-is running, verify that the OpenAI-compatible model endpoint is reachable:
-
-```bash
-curl -s http://127.0.0.1:17891/v1/models | jq
-```
-
-Optionally verify the Responses API path. The model below is only an example
-that was valid in one local environment; use a model returned by your own
-`/v1/models` response.
-
-```bash
-curl -s http://127.0.0.1:17891/v1/responses \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5.3-codex",
-    "input": "Say hello from SFE."
-  }' | jq
-```
-
-Add a CodexCLI profile to `~/.codex/config.toml`:
-
-```toml
-[model_providers.sfe]
-name = "SFE Proxy"
-base_url = "http://127.0.0.1:17891/v1"
-wire_api = "responses"
-
-[profiles.sfe]
-model_provider = "sfe"
-model = "gpt-5.3-codex"
-```
-
-Replace `gpt-5.3-codex` with a model ID returned by:
-
-```bash
-curl -s http://127.0.0.1:17891/v1/models | jq
-```
-
-A virtual model name such as `sfe` will fail unless the proxy explicitly
-exposes a model alias named `sfe`.
-
-Launch CodexCLI with:
-
-```bash
-codex --profile sfe
-```
-
-Troubleshooting:
-
-- If Codex tries to call port `8000`, check for stale `base_url` values in
-  `~/.codex/config.toml` or project-level `.codex/config.toml`.
-- If Codex reports that `wire_api = "chat"` is no longer supported, use
-  `wire_api = "responses"`.
-- If Codex reports `model_not_found`, use a model ID returned by `/v1/models`.
-- Docker Desktop or WSL networking can differ by setup; adjust the host and
-  port if `127.0.0.1:17891` is not reachable from your environment.
+The proxy source code remains in `sfe_proxy/`, and historical proxy notes are
+kept under `docs/history/proxy/`. That material is retained for compatibility
+research, observability work, OpenAI-compatible request-shape experiments, and
+possible future development. It should not be read as the recommended active
+user workflow, production deployment guidance, or the canonical SFE interface.
 
 ## Benchmarks
 
@@ -614,6 +472,9 @@ model intelligence.
 ## Documentation
 
 - `docs/INDEX.md`: recommended starting point and runner-category map for technical reviewers.
+- `docs/tui_v0_1_user_guide.md`: current canonical SFE-aware TUI workflow.
+- `docs/current_architecture_status.md`: current boundary between the TUI
+  canonical path and standby/experimental proxy infrastructure.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
 - `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
 - `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.
@@ -631,13 +492,13 @@ model intelligence.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.
 - `sfe_white_paper.md`: original architecture proposal; more speculative than the current public README.
 
-## Proxy Development Direction
+## Proxy Standby Direction
 
-The next Proxy work should stay narrow: better observability, clearer activation
-criteria, and safer provider-operation boundaries. Context size,
-authority-conflict density, token budget, and audit requirements should
-determine when SFE routing is used. The current proxy remains an experimental
-prototype for local integration and controlled routing experiments.
+Future proxy work may resume later, but it is not part of the current V0.1
+user-facing path. Any future activation should stay narrow: better
+observability, clearer activation criteria, and safer provider-operation
+boundaries. The current proxy remains standby/experimental infrastructure for
+local integration research and controlled routing experiments.
 
 ## Limitations
 

@@ -1,5 +1,9 @@
 # SFE Enabled-Mode Smoke Milestone
 
+Status: standby/historical. The proxy is not the canonical user-facing path as
+of TUI V0.1. This note is retained for compatibility research and audit
+history.
+
 This note records the first successful controlled SFE proxy enabled-mode smoke
 test.
 

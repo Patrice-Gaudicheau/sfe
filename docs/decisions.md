@@ -7,10 +7,11 @@ historical context and may describe work that was deferred or planned at the
 time of writing. Current project navigation starts in `docs/INDEX.md`.
 
 As of the current documentation set, provider paths include OpenAI, Lemonade,
-Alibaba/Qwen, and Anthropic across benchmark and proxy configuration surfaces.
-The SFE Proxy is now an implemented experimental prototype in `sfe_proxy/`,
-documented in `docs/sfe_proxy_mode.md`; it should not be read as production
-infrastructure. Current benchmark summaries include structural 50k+
+Alibaba/Qwen, and Anthropic across benchmark surfaces. The SFE Proxy is an
+implemented standby experimental prototype in `sfe_proxy/`, with historical
+notes under `docs/history/proxy/`; it should not be read as production
+infrastructure or the canonical user-facing path. Current benchmark summaries
+include structural 50k+
 observations, OpenAI and Anthropic protocol-aligned observations across all
 four large/contextual tiers, and Alibaba/Qwen repeat-3 observations for
 `standard`, `practical`, and `high_context` plus a single live structural

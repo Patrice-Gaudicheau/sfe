@@ -1,5 +1,9 @@
 # SFE Proxy Mode
 
+Status: standby/historical. The proxy is not the canonical user-facing path as
+of TUI V0.1. It is retained for compatibility research and possible future
+development.
+
 SFE remains Spatial Field Engine for Cognition. Proxy mode is an integration
 mode, not a project rename.
 

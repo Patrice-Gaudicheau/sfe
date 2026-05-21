@@ -43,9 +43,10 @@ file changes, modify the workspace, run shell commands, or imply that files were
 changed. Any future write/apply workflow needs a separate design and explicit
 confirmation boundary.
 
-## Experimental And Compatibility Path
+## Standby Experimental And Compatibility Path
 
-The SFE proxy remains useful infrastructure for:
+The SFE proxy and Dockerized proxy path are in standby for the current TUI V0.1
+user-facing work. They remain useful infrastructure for:
 
 - OpenAI-compatible traffic compatibility;
 - safe observability in `shadow` mode;
@@ -60,13 +61,17 @@ embed large or protected context inside client-specific request envelopes. SFE
 should not depend on reverse-engineering that traffic shape as its primary
 interface.
 
+Dockerized proxy operation is also standby infrastructure, not the recommended
+current user path.
+
 `ProxyBackend` may remain in the TUI codebase as an internal experimental stub,
 but it must not be exposed as a user-facing backend yet. The TUI should not
 offer backend switching until a concrete need is proven.
 
-Historical proxy milestone notes remain useful audit records, but they should
-be read as experimental smoke and controlled-run history. They do not establish
-production reliability, general token savings, or broad provider behavior.
+Historical proxy milestone and mode notes remain useful audit records under
+`docs/history/proxy/`, but they should be read as standby experimental smoke
+and controlled-run history. They do not establish production reliability,
+general token savings, or broad provider behavior.
 
 ## What Remains Unproven
 
@@ -90,6 +95,6 @@ The minimum proof still missing includes:
   proxy exposure.
 
 The current status is therefore: TUI plus `DirectBackend` is the primary
-architecture direction; proxy work is experimental compatibility and research
-infrastructure; practical value remains to be demonstrated with controlled,
-repeatable workflows.
+architecture direction; proxy work is standby experimental compatibility and
+research infrastructure; practical value remains to be demonstrated with
+controlled, repeatable workflows.

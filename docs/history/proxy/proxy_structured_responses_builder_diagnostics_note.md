@@ -2,7 +2,11 @@
 
 Date: 2026-05-18
 
-This note records the current SFE Proxy milestone for CodexCLI-style
+Status: standby/historical. The proxy is not the canonical user-facing path as
+of TUI V0.1. This note is retained for compatibility research and audit
+history.
+
+This note records a historical SFE Proxy milestone for CodexCLI-style
 `/v1/responses` requests.
 
 The controlled structured builder path is validated for a narrow fixture: it

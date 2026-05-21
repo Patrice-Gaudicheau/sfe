@@ -1,5 +1,9 @@
 # Codex Enabled Streaming Replacement Smoke
 
+Status: standby/historical. The proxy is not the canonical user-facing path as
+of TUI V0.1. This note is retained for compatibility research and audit
+history.
+
 This note records the first successful CodexCLI smoke test for opt-in enabled
 streaming replacement on branch `feature/enabled-streaming-replacement`, commit
 `9da72dc2aa9fcde3c3e9c664ec9b43842520a512`.

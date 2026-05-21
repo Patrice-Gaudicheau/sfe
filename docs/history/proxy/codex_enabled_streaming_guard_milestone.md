@@ -1,5 +1,9 @@
 # Codex Enabled Streaming Guard Milestone
 
+Status: standby/historical. The proxy is not the canonical user-facing path as
+of TUI V0.1. This note is retained for compatibility research and audit
+history.
+
 This note records the first successful CodexCLI enabled-mode test after adding
 the streaming guard.
 

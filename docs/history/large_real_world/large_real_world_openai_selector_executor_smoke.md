@@ -3,9 +3,9 @@
 Status note: This is a historical live-smoke record preserved for
 audit/research continuity. It predates later Proxy and provider work, so
 statements saying gateway/proxy behavior was not yet tested should be read as
-historical. Current terminology and implementation status use the experimental
-SFE Proxy. Start with `README.md` and `docs/INDEX.md` for the latest project
-overview.
+historical. Current terminology treats the SFE Proxy as standby experimental
+infrastructure. Start with `README.md` and `docs/INDEX.md` for the latest
+project overview.
 
 ## Scope
 

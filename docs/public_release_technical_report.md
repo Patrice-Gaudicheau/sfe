@@ -21,9 +21,10 @@ The prototype separates five concerns:
 - Provider execution: Lemonade, OpenAI, Alibaba/Qwen, and Anthropic benchmark
   paths execute prompts through configurable model ids.
 - Reporting: benchmark runners record success checks, token estimates, latency, router validity, fallbacks, and generated reports.
-- Proxy integration: `sfe_proxy/` provides an experimental OpenAI-compatible
-  local Proxy for pass-through, shadow observation, and enabled SFE routing
-  experiments.
+- Standby proxy integration: `sfe_proxy/` provides historical/experimental
+  OpenAI-compatible local proxy infrastructure for pass-through, shadow
+  observation, and enabled SFE routing experiments. It is not the current
+  canonical user-facing path.
 
 Lemonade is treated as a local OpenAI-compatible inference server. The repository does not require Lemonade for deterministic dry runs, but live Lemonade benchmarks require a running local server and installed local models.
 
@@ -99,8 +100,9 @@ Any public claim should distinguish executor-only reduction from router-inclusiv
   token-accounting comparability.
 - Results do not isolate all causal factors; routing, role framing, prompt compaction, and context filtering can interact.
 - The repository does not yet evaluate adversarial retrieval, real user workloads, long multi-step tool use, or provider/model-family generalization.
-- The SFE Proxy is implemented as an experimental prototype, but production
-  deployment behavior is not validated.
+- The SFE Proxy is implemented as standby experimental infrastructure, but it
+  is not the current canonical user-facing path and production deployment
+  behavior is not validated.
 
 ## Publication Guidance
 

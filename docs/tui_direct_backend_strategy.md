@@ -8,10 +8,10 @@ The SFE-aware TUI is the canonical user-facing path for new SFE workflow
 development. The DirectBackend is the default and only exposed backend for the
 TUI for now.
 
-The existing SFE Proxy and CodexCLI path remain compatibility and stress-test
-infrastructure. They should stay safe, observable, and fallback-oriented, but
-they are no longer the primary interface being optimized for SFE-aware context
-routing.
+The existing SFE Proxy and CodexCLI path are standby compatibility and
+stress-test infrastructure. They should stay safe, observable, and
+fallback-oriented, but they are no longer the primary interface being optimized
+for SFE-aware context routing.
 
 ## Rationale
 
