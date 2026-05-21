@@ -23,6 +23,18 @@ not run shell commands, execute tools, switch backends, or apply patches.
 From the repository root:
 
 ```bash
+make sfe-tui
+```
+
+This loads local `.env` settings into the TUI subprocess if `.env` exists, then
+runs `python -m sfe_tui`. The `.env` file is local/private, ignored by git, and
+must not be committed. The TUI executor provider is selected with
+`SFE_PROVIDER`, for example `SFE_PROVIDER=lemonade`.
+
+You can also launch the module directly when the environment is already
+configured:
+
+```bash
 python -m sfe_tui
 ```
 

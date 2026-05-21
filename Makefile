@@ -8,12 +8,15 @@ SFE_PROXY_PORT ?= 17891
 SFE_PROXY_PROVIDER ?= openai-compatible
 SFE_PROXY_UPSTREAM_BASE_URL ?=
 
-.PHONY: build install start stop restart logs status update remove check-port check-runtime-config
+.PHONY: build install sfe-tui start stop restart logs status update remove check-port check-runtime-config
 
 build:
 	docker compose -f $(COMPOSE_FILE) build $(SERVICE)
 
 install: build start
+
+sfe-tui:
+	@set -a; [ ! -f .env ] || . ./.env; set +a; python -m sfe_tui
 
 check-port:
 	@python -c "import socket; s=socket.socket(); s.settimeout(0.5); code=s.connect_ex(('$(SFE_PROXY_HOST)', int('$(SFE_PROXY_PORT)'))); s.close(); raise SystemExit('Port $(SFE_PROXY_HOST):$(SFE_PROXY_PORT) is already in use' if code == 0 else 0)"
