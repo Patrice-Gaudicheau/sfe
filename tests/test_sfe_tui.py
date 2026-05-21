@@ -2315,7 +2315,9 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
 
     assert "DirectBackend is the default and only exposed backend" in note
     assert "No `/backend` command" in note
-    assert "CodexCLI path remain compatibility and stress-test" in note
+    assert "CodexCLI path are standby compatibility" in note
+    assert "stress-test infrastructure" in note
+    assert "The project should not keep reverse-engineering those payloads" in note
     assert "Router integration comes before executor integration" in note
     assert "`local_lexical_preview`" in note
     assert "`/ask` is the first read-only executor phase" in note

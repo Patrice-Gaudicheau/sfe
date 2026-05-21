@@ -161,7 +161,7 @@ The current TUI behavior intentionally keeps these boundaries:
 - `/patch` does not apply patches.
 - There is no CLI/API pipeline integration for the canonical TUI workflow yet.
 - There is no provider-backed TUI router yet.
-- The proxy remains experimental compatibility and observability
+- The proxy remains standby experimental compatibility and observability
   infrastructure; it is not the canonical user path.
 - The current test suite validates expected behavior and safety boundaries, but
   it does not establish production reliability or general practical value.
