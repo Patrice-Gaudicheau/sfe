@@ -3,6 +3,9 @@
 This note freezes the current architecture status after the latest first-party
 TUI work. It is a status boundary, not a production-readiness claim.
 
+For the current user-facing TUI workflow and command reference, see
+[tui_v0_1_user_guide.md](tui_v0_1_user_guide.md).
+
 ## Canonical User Path
 
 The SFE-aware TUI is the canonical user-facing path for current SFE workflow

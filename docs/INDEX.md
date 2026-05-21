@@ -14,11 +14,14 @@ statistical reliability, or general model-safety guarantees.
 2. [current_architecture_status.md](current_architecture_status.md): compact
    current-status note freezing the TUI + DirectBackend path as canonical and
    the Proxy/CodexCLI path as experimental compatibility infrastructure.
-3. [public_release_technical_report.md](public_release_technical_report.md):
+3. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): concise guide for the
+   current canonical SFE-aware TUI workflow, commands, safety boundaries, and
+   limitations.
+4. [public_release_technical_report.md](public_release_technical_report.md):
    public-facing technical report for the current release-readiness snapshot.
-4. [sfe_proxy_mode.md](sfe_proxy_mode.md): detailed SFE Proxy configuration,
+5. [sfe_proxy_mode.md](sfe_proxy_mode.md): detailed SFE Proxy configuration,
    supported providers, modes, Docker usage, and operational caveats.
-5. [router_contract.md](router_contract.md): router JSON contract and strict
+6. [router_contract.md](router_contract.md): router JSON contract and strict
    output expectations.
 
 ## Current Primary Docs
@@ -29,6 +32,8 @@ statistical reliability, or general model-safety guarantees.
 - [current_architecture_status.md](current_architecture_status.md): short
   current-status boundary for the canonical TUI + DirectBackend path, the
   experimental proxy path, and what remains unproven.
+- [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current user-facing TUI
+  workflow and command reference for the canonical DirectBackend path.
 - [tui_direct_backend_strategy.md](tui_direct_backend_strategy.md): current
   first-party TUI direction, with DirectBackend as the canonical exposed path
   and the Proxy/CodexCLI path frozen as compatibility infrastructure.
