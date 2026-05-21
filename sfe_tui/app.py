@@ -105,7 +105,11 @@ class SfeTuiApp:
             self._handle_files(rest)
             return False
         if name == "/task":
-            self.task = rest.strip()
+            task = rest.strip()
+            if not task:
+                self.output(renderer.render_error("missing_task"))
+                return False
+            self.task = task
             self.latest_result = None
             self.output(renderer.render_task_set())
             return False

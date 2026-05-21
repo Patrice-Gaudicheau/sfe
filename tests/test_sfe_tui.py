@@ -257,6 +257,24 @@ def test_files_rejects_directories(tmp_path) -> None:
     assert loaded.reason == "not_a_file"
 
 
+def test_files_directory_input_reports_clear_safe_rejection(tmp_path) -> None:
+    directory = tmp_path / "docs"
+    directory.mkdir()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files docs", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Context files replaced: loaded 0; skipped 1" in rendered
+    assert "not_a_file" in rendered
+    assert "unsupported file input; provide a file path, not a directory" in rendered
+    assert str(directory.resolve()) not in rendered
+
+
 def test_files_rejects_file_above_max_size_limit(tmp_path) -> None:
     source = tmp_path / "large.txt"
     source.write_bytes(b"a" * (MAX_CONTEXT_FILE_BYTES + 1))
@@ -509,7 +527,7 @@ def test_app_loop_handles_mocked_commands_and_quit(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "Context sources loaded: 1; skipped: 0" in rendered
+    assert "Context files replaced: loaded 1; skipped 0" in rendered
     assert "Task stored." in rendered
     assert "SFE dry-run summary" in rendered
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
@@ -532,8 +550,9 @@ def test_app_loop_reports_skipped_reason_counts_without_raw_paths(tmp_path) -> N
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "Context sources loaded: 0; skipped: 1" in rendered
+    assert "Context files replaced: loaded 0; skipped 1" in rendered
     assert "outside_workspace" in rendered
+    assert "path is outside the selected workspace" in rendered
     assert str(outside) not in rendered
     assert "outside-app.txt" not in rendered
 
@@ -584,8 +603,46 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/ask" in rendered
     assert "/patch" in rendered
     assert "/reset" in rendered
+    assert "/files <paths...>  Replace loaded context with text files" in rendered
+    assert "files or directories" not in rendered
+    assert "Add context" not in rendered
+    assert "ProxyBackend" not in rendered
     assert "Clear task, context, and routing; preserve workspace" in rendered
     assert "/backend" not in rendered
+
+
+def test_task_without_text_is_actionable_error_and_preserves_existing_task(
+    tmp_path,
+) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Keep this task", "/task", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Task stored." in rendered
+    assert "Error: missing_task - missing task; set one with /task <text>" in rendered
+    assert rendered.count("Task stored.") == 1
+    assert "task present: True" in rendered
+
+
+def test_unknown_command_suggests_help(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/wat", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: unknown_command" in rendered
+    assert "use /help to list commands" in rendered
 
 
 def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
@@ -599,6 +656,7 @@ def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert "Error: unknown_command" in rendered
+    assert "use /help to list commands" in rendered
     assert "proxy_not_connected" not in rendered
 
 
@@ -914,6 +972,7 @@ def test_ask_requires_task(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "building contract" in rendered
     assert "Error: missing_task" in rendered
+    assert "set one with /task <text>" in rendered
     assert not executor.calls
 
 
@@ -930,6 +989,7 @@ def test_ask_requires_loaded_context(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert "Error: no_context_loaded" in rendered
+    assert "replace context with /files <path>" in rendered
     assert not executor.calls
 
 
@@ -1088,6 +1148,7 @@ def test_patch_requires_task(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "building contract" in rendered
     assert "Error: missing_task" in rendered
+    assert "set one with /task <text>" in rendered
     assert not executor.patch_calls
 
 
@@ -1104,6 +1165,7 @@ def test_patch_requires_loaded_context(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert "Error: no_context_loaded" in rendered
+    assert "replace context with /files <path>" in rendered
     assert not executor.patch_calls
 
 

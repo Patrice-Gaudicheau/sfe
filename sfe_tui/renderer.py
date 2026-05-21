@@ -16,7 +16,7 @@ def render_help() -> str:
             "  /pwd               Show selected workspace",
             "  /status            Show safe TUI state and disabled capabilities",
             "  /context           Show safe loaded/selected context metadata",
-            "  /files <paths...>  Add context source files or directories",
+            "  /files <paths...>  Replace loaded context with text files",
             "  /task <text>       Set the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /ask               Ask a read-only question using selected context",
@@ -50,7 +50,19 @@ def render_workspace_selected(
 def render_file_selection(results: list[ContextLoadResult]) -> str:
     loaded = sum(1 for result in results if result.loaded)
     skipped = len(results) - loaded
-    return f"Context sources loaded: {loaded}; skipped: {skipped}"
+    lines = [
+        f"Context files replaced: loaded {loaded}; skipped {skipped}",
+    ]
+    skipped_reasons = _skipped_reason_counts(results)
+    if skipped_reasons:
+        lines.append(
+            "  skipped reasons: "
+            + ", ".join(
+                f"{reason} ({_skip_reason_guidance(reason)}): {count}"
+                for reason, count in skipped_reasons.items()
+            )
+        )
+    return "\n".join(lines)
 
 
 def render_task_set() -> str:
@@ -62,7 +74,19 @@ def render_reset() -> str:
 
 
 def render_error(message: str) -> str:
-    return f"Error: {message}"
+    guidance = {
+        "unknown_command": "unknown command; use /help to list commands",
+        "missing_task": "missing task; set one with /task <text>",
+        "no_context_loaded": "no context loaded; replace context with /files <path>",
+        "no_files_provided": "no files provided; use /files <path>",
+        "invalid_file_command": "invalid file command; quote paths that contain spaces",
+        "workspace_not_selected": "workspace not selected",
+        "workspace_not_found": "workspace not found",
+        "workspace_not_directory": "workspace path is not a directory",
+    }.get(message)
+    if guidance is None:
+        return f"Error: {message}"
+    return f"Error: {message} - {guidance}"
 
 
 def render_status(
@@ -282,6 +306,27 @@ def _context_size_bucket(text_chars: int) -> str:
     if text_chars <= 8_192:
         return "2049-8192"
     return "8193+"
+
+
+def _skipped_reason_counts(results: list[ContextLoadResult]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for result in results:
+        if result.loaded:
+            continue
+        reason = result.reason or "read_error"
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _skip_reason_guidance(reason: str) -> str:
+    return {
+        "not_a_file": "unsupported file input; provide a file path, not a directory",
+        "outside_workspace": "path is outside the selected workspace",
+        "file_too_large": "file is above the local size limit",
+        "binary_or_non_text": "file is not UTF-8 text",
+        "secret_like_file": "file looks secret-like and was not loaded",
+        "read_error": "file could not be read",
+    }.get(reason, "input was not loaded")
 
 
 def _yes_no(value: bool) -> str:
