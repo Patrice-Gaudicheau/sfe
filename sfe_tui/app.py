@@ -84,17 +84,26 @@ class SfeTuiApp:
                 )
             return False
         if name == "/status":
+            loaded_context_files = sum(
+                1 for result in self.context_files if result.loaded
+            )
+            skipped_context_files = sum(
+                1 for result in self.context_files if not result.loaded
+            )
             self.output(
                 renderer.render_status(
                     workspace_selected=self.workspace_root is not None,
-                    loaded_context_files=sum(
-                        1 for result in self.context_files if result.loaded
+                    workspace_label=(
+                        renderer.safe_workspace_label(self.workspace_root, self.cwd)
+                        if self.workspace_root is not None
+                        else None
                     ),
-                    skipped_context_files=sum(
-                        1 for result in self.context_files if not result.loaded
-                    ),
+                    loaded_context_files=loaded_context_files,
+                    skipped_context_files=skipped_context_files,
+                    loaded_context_segments=loaded_context_files,
                     task_present=bool(self.task.strip()),
                     backend_name=self.backend.name,
+                    latest_result=self.latest_result,
                 )
             )
             return False

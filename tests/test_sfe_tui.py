@@ -571,28 +571,170 @@ def test_status_renders_state_without_file_contents(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "SFE TUI status" in rendered
+    status_block = rendered.split("SFE TUI status", 1)[1]
     assert "loaded context files: 1" in rendered
     assert "skipped context files: 0" in rendered
+    assert "loaded context segments: 1" in rendered
     assert "task present: True" in rendered
+    assert "workspace: ." in status_block
+    assert "latest result present: no" in status_block
+    assert "latest result kind: none" in status_block
+    assert "latest provider calls made: 0" in status_block
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
     assert str(tmp_path.resolve()) not in rendered
 
 
+def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/status", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "workspace selected: True" in status_block
+    assert "workspace: ." in status_block
+    assert "loaded context files: 0" in status_block
+    assert "skipped context files: 0" in status_block
+    assert "loaded context segments: 0" in status_block
+    assert "task present: False" in status_block
+    assert "latest result present: no" in status_block
+    assert "latest result kind: none" in status_block
+    assert "latest provider calls made: 0" in status_block
+    assert "writes enabled: no" in status_block
+    assert "shell enabled: no" in status_block
+    assert "patch application enabled: no" in status_block
+    assert "/backend" not in status_block
+    assert "ProxyBackend" not in status_block
+    assert str(tmp_path.resolve()) not in status_block
+
+
+def test_status_after_task_reports_task_without_content(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task SECRET_TASK_TEXT", "/status", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "task present: True" in status_block
+    assert "loaded context segments: 0" in status_block
+    assert "latest result present: no" in status_block
+    assert "SECRET_TASK_TEXT" not in status_block
+
+
+def test_status_after_files_reports_context_counts_without_content(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files context.txt", "/status", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "loaded context files: 1" in status_block
+    assert "skipped context files: 0" in status_block
+    assert "loaded context segments: 1" in status_block
+    assert "task present: False" in status_block
+    assert "latest result present: no" in status_block
+    assert "SECRET_FILE_CONTENT" not in status_block
+    assert str(tmp_path.resolve()) not in status_block
+
+
+def test_status_after_dry_run_reports_latest_result_and_no_provider_calls(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/dry-run",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "latest result present: yes" in status_block
+    assert "latest result kind: dry_run_only" in status_block
+    assert "latest provider calls made: 0" in status_block
+    assert "writes enabled: no" in status_block
+    assert "shell enabled: no" in status_block
+    assert "patch application enabled: no" in status_block
+
+
+def test_status_after_ask_reports_latest_provider_calls(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/ask",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=FakeExecutor()),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "latest result present: yes" in status_block
+    assert "latest result kind: ask_completed" in status_block
+    assert "latest provider calls made: 1" in status_block
+    assert "writes enabled: no" in status_block
+    assert "shell enabled: no" in status_block
+    assert "patch application enabled: no" in status_block
+
+
 def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
     rendered = render_status(
         workspace_selected=True,
+        workspace_label=".",
         loaded_context_files=2,
         skipped_context_files=1,
+        loaded_context_segments=2,
         task_present=True,
         backend_name="direct",
+        latest_result=None,
     )
 
     assert "backend: direct" in rendered
-    assert "provider calls made: 0" in rendered
+    assert "workspace: ." in rendered
+    assert "latest provider calls made: 0" in rendered
     assert "writes enabled: no" in rendered
     assert "shell enabled: no" in rendered
+    assert "patch application enabled: no" in rendered
+    assert "ProxyBackend" not in rendered
+    assert "/backend" not in rendered
 
 
 def test_help_does_not_advertise_backend_switching() -> None:
@@ -672,6 +814,9 @@ def test_context_empty_state_is_safe(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "SFE context" in rendered
     assert "loaded context segments: 0" in rendered
+    assert "skipped context files: 0" in rendered
+    assert "skipped reasons: none" in rendered
+    assert "latest selected segment ids: []" in rendered
     assert "empty: no context loaded" in rendered
     assert str(tmp_path) not in rendered.split("SFE context", 1)[1]
 
@@ -689,12 +834,46 @@ def test_context_after_files_shows_ids_and_relative_refs_only(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     context_block = rendered.split("SFE context", 1)[1]
+    assert "loaded context segments: 1" in context_block
+    assert "skipped context files: 0" in context_block
+    assert "skipped reasons: none" in context_block
+    assert "latest selected segment ids: []" in context_block
     assert "id=ctx_" in context_block
     assert "ref=context.txt" in context_block
+    assert "chars=19" in context_block
+    assert "tokens=" in context_block
     assert "selected=no" in context_block
     assert "score=unrouted" in context_block
     assert "SECRET_FILE_CONTENT" not in context_block
     assert str(tmp_path) not in context_block
+
+
+def test_context_after_files_reports_skipped_reasons_safely(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("SAFE_CONTEXT", encoding="utf-8")
+    outside = tmp_path.parent / "outside-context.txt"
+    outside.write_text("OUTSIDE_SECRET", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", f"/files context.txt {outside}", "/context", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    context_block = rendered.split("SFE context", 1)[1]
+    assert "loaded context segments: 1" in context_block
+    assert "skipped context files: 1" in context_block
+    assert "skipped reasons: outside_workspace: 1" in context_block
+    assert "ref=context.txt" in context_block
+    assert "SAFE_CONTEXT" not in context_block
+    assert "OUTSIDE_SECRET" not in context_block
+    assert "outside-context.txt" not in context_block
+    assert str(outside) not in context_block
+    assert str(tmp_path.resolve()) not in context_block
 
 
 def test_context_after_dry_run_marks_selected_segments(tmp_path) -> None:
@@ -721,6 +900,7 @@ def test_context_after_dry_run_marks_selected_segments(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     context_block = rendered.split("SFE context", 1)[1]
+    assert "latest selected segment ids: ['ctx_" in context_block
     assert "ref=alpha.txt" in context_block
     assert "ref=beta.txt" in context_block
     assert "selected=yes" in context_block
@@ -743,7 +923,6 @@ def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
                 "/task Explain selected context",
                 "/dry-run",
                 "/reset",
-                "/dry-run",
                 "/status",
                 "/context",
                 "/pwd",
@@ -756,10 +935,6 @@ def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    dry_run_block = rendered.rsplit("SFE dry-run summary", 1)[1].split(
-        "SFE TUI status",
-        1,
-    )[0]
     status_block = rendered.split("SFE TUI status", 1)[1].split("SFE context", 1)[0]
     context_block = rendered.split("SFE context", 1)[1]
     assert "Session reset. Workspace is preserved." in rendered
@@ -768,12 +943,18 @@ def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
     assert app.task == ""
     assert "loaded context files: 0" in status_block
     assert "skipped context files: 0" in status_block
+    assert "loaded context segments: 0" in status_block
     assert "task present: False" in status_block
-    assert "task present: False" in dry_run_block
-    assert "context segments: 0" in dry_run_block
+    assert "latest result present: no" in status_block
+    assert "latest result kind: none" in status_block
+    assert "latest provider calls made: 0" in status_block
     assert "loaded context segments: 0" in context_block
+    assert "skipped context files: 0" in context_block
+    assert "skipped reasons: none" in context_block
+    assert "latest selected segment ids: []" in context_block
     assert "empty: no context loaded" in context_block
     assert "selected=yes" not in context_block
+    assert "latest selected segment ids: ['ctx_" not in context_block
     assert "Workspace: ." in rendered
     assert str(tmp_path.resolve()) not in rendered
     assert str(outside) not in rendered

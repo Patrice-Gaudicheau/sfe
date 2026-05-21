@@ -92,22 +92,35 @@ def render_error(message: str) -> str:
 def render_status(
     *,
     workspace_selected: bool,
+    workspace_label: str | None = None,
     loaded_context_files: int,
     skipped_context_files: int,
+    loaded_context_segments: int,
     task_present: bool,
     backend_name: str,
+    latest_result: BackendResult | None = None,
 ) -> str:
+    latest_result_present = latest_result is not None
+    latest_result_kind = latest_result.status if latest_result is not None else "none"
+    latest_provider_calls = (
+        latest_result.provider_calls_made if latest_result is not None else 0
+    )
     return "\n".join(
         [
             "SFE TUI status",
             f"  workspace selected: {workspace_selected}",
+            f"  workspace: {workspace_label or 'not selected'}",
             f"  loaded context files: {loaded_context_files}",
             f"  skipped context files: {skipped_context_files}",
+            f"  loaded context segments: {loaded_context_segments}",
             f"  task present: {task_present}",
             f"  backend: {backend_name}",
-            "  provider calls made: 0",
+            f"  latest result present: {_yes_no(latest_result_present)}",
+            f"  latest result kind: {latest_result_kind}",
+            f"  latest provider calls made: {latest_provider_calls}",
             "  writes enabled: no",
             "  shell enabled: no",
+            "  patch application enabled: no",
         ]
     )
 
@@ -118,11 +131,21 @@ def render_context_summary(
     context_files: list[ContextLoadResult],
     latest_result: BackendResult | None,
 ) -> str:
+    skipped_count = sum(1 for result in context_files if not result.loaded)
+    skipped_reasons = _skipped_reason_counts(context_files)
+    latest_selected_ids: list[str] = []
+    if latest_result is not None:
+        latest_selected_ids = list(
+            latest_result.contract.audit.get("selected_segment_ids") or []
+        )
     if not contract.context_segments:
         return "\n".join(
             [
                 "SFE context",
                 "  loaded context segments: 0",
+                f"  skipped context files: {skipped_count}",
+                f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
+                f"  latest selected segment ids: {latest_selected_ids}",
                 "  empty: no context loaded",
             ]
         )
@@ -134,7 +157,7 @@ def render_context_summary(
     selected_ids = set()
     score_by_id: dict[str, str] = {}
     if latest_result is not None:
-        selected_ids = set(latest_result.contract.audit.get("selected_segment_ids") or [])
+        selected_ids = set(latest_selected_ids)
         score_by_id = dict(
             latest_result.contract.audit.get("router_score_categories_by_segment_id")
             or {}
@@ -142,6 +165,9 @@ def render_context_summary(
     lines = [
         "SFE context",
         f"  loaded context segments: {len(contract.context_segments)}",
+        f"  skipped context files: {skipped_count}",
+        f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
+        f"  latest selected segment ids: {latest_selected_ids}",
     ]
     for segment in contract.context_segments:
         warning = warning_by_ref.get(segment.source_ref) or "none"
@@ -316,6 +342,12 @@ def _skipped_reason_counts(results: list[ContextLoadResult]) -> dict[str, int]:
         reason = result.reason or "read_error"
         counts[reason] = counts.get(reason, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _format_reason_counts(counts: dict[str, int]) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(f"{reason}: {count}" for reason, count in counts.items())
 
 
 def _skip_reason_guidance(reason: str) -> str:
