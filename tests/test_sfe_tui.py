@@ -1278,6 +1278,7 @@ def test_ask_refuses_when_router_selects_no_context(tmp_path) -> None:
     assert "routing context" in rendered
     assert "SFE ask failed" in rendered
     assert "reason: no_selected_context" in rendered
+    assert "routing found no relevant context segments" in rendered
     assert "calling provider" not in rendered
     assert not executor.calls
 
@@ -1352,19 +1353,26 @@ def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    summary = rendered.split("SFE ask summary", 1)[1]
+    diagnostics = rendered.split("SFE answer", 1)[0]
     assert "calling provider" in rendered
     assert "answer received" in rendered
     assert "SFE answer\nmock answer" in rendered
-    assert "router mode: local_lexical_preview" in summary
-    assert "selected segment ids: ['ctx_" in summary
-    assert "provider calls made: 1" in summary
-    assert "writes enabled: no" in summary
-    assert "shell enabled: no" in summary
-    assert "SECRET_FILE_CONTENT" not in summary
-    assert "Explain context" not in summary
-    assert str(tmp_path) not in summary
+    assert "Preflight state" in diagnostics
+    assert "Local routing" in diagnostics
+    assert "Provider call" in diagnostics
+    assert "selected segment ids: ctx_" in diagnostics
+    assert "selected source refs: context.txt" in diagnostics
+    assert "provider calls made: 1" in diagnostics
+    assert "Safety state" in rendered
+    assert "writes disabled" in rendered
+    assert "shell disabled" in rendered
+    assert "patch application disabled" in rendered
+    assert "SECRET_FILE_CONTENT" not in diagnostics
+    assert "Explain context" not in diagnostics
+    assert str(tmp_path) not in diagnostics
     assert str(tmp_path.resolve()) not in rendered
+    assert "ProxyBackend" not in rendered
+    assert "backend switching" not in rendered
 
 
 def test_ask_provider_failure_is_category_only(tmp_path) -> None:
@@ -1392,10 +1400,39 @@ def test_ask_provider_failure_is_category_only(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "SFE ask failed" in rendered
     assert "reason: provider_error" in rendered
+    assert "provider call failed; check provider configuration and retry" in rendered
     assert api_key not in rendered
     assert "Authorization" not in rendered
     assert "request body" not in rendered.lower()
     assert "provider payload" not in rendered.lower()
+
+
+def test_ask_provider_not_configured_is_actionable(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("context", encoding="utf-8")
+    executor = FakeExecutor(
+        ExecutorResponse(
+            answer=None,
+            error_category="provider_not_configured",
+            provider_calls_made=0,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain context", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE ask failed" in rendered
+    assert "reason: provider_not_configured" in rendered
+    assert "needs a configured executor/provider" in rendered
+    assert "provider calls made: 0" in rendered
 
 
 def test_patch_requires_task(tmp_path) -> None:
@@ -1454,6 +1491,7 @@ def test_patch_refuses_when_router_selects_no_context(tmp_path) -> None:
     assert "routing context" in rendered
     assert "SFE patch failed" in rendered
     assert "reason: no_selected_context" in rendered
+    assert "routing found no relevant context segments" in rendered
     assert "calling provider" not in rendered
     assert not executor.patch_calls
 
@@ -1531,24 +1569,32 @@ def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    summary = rendered.split("SFE patch summary", 1)[1]
+    diagnostics = rendered.split("Patch proposal only, not applied", 1)[0]
     assert "calling provider" in rendered
     assert "Patch proposal only, not applied" in rendered
+    assert "not applied" in rendered
+    assert "no files were modified" in rendered
     assert "diff --git a/context.txt b/context.txt" in rendered
-    assert "router mode: local_lexical_preview" in summary
-    assert "selected segment ids: ['ctx_" in summary
-    assert "provider calls made: 1" in summary
-    assert "writes enabled: no" in summary
-    assert "shell enabled: no" in summary
-    assert "patch applied: no" in summary
-    assert "SECRET_FILE_CONTENT" not in summary
-    assert "Patch context" not in summary
-    assert str(tmp_path) not in summary
+    assert "Preflight state" in diagnostics
+    assert "Local routing" in diagnostics
+    assert "Provider call" in diagnostics
+    assert "selected segment ids: ctx_" in diagnostics
+    assert "selected source refs: context.txt" in diagnostics
+    assert "provider calls made: 1" in diagnostics
+    assert "writes disabled" in rendered
+    assert "shell disabled" in rendered
+    assert "patch application disabled" in rendered
+    assert "patch applied: no" in rendered
+    assert "SECRET_FILE_CONTENT" not in diagnostics
+    assert "Patch context" not in diagnostics
+    assert str(tmp_path) not in diagnostics
     assert str(tmp_path.resolve()) not in rendered
-    assert "request body" not in summary.lower()
-    assert "provider payload" not in summary.lower()
-    assert "Authorization" not in summary
-    assert "API_KEY" not in summary
+    assert "request body" not in diagnostics.lower()
+    assert "provider payload" not in diagnostics.lower()
+    assert "Authorization" not in diagnostics
+    assert "API_KEY" not in diagnostics
+    assert "ProxyBackend" not in rendered
+    assert "backend switching" not in rendered
 
 
 def test_patch_provider_failure_is_category_only(tmp_path) -> None:
@@ -1576,11 +1622,64 @@ def test_patch_provider_failure_is_category_only(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "SFE patch failed" in rendered
     assert "reason: provider_error" in rendered
+    assert "provider call failed; check provider configuration and retry" in rendered
+    assert "no files were modified" in rendered
+    assert "patch application disabled" in rendered
     assert "patch applied: no" in rendered
     assert api_key not in rendered
     assert "Authorization" not in rendered
     assert "request body" not in rendered.lower()
     assert "provider payload" not in rendered.lower()
+
+
+def test_patch_provider_not_configured_is_actionable(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("context", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=None,
+            error_category="provider_not_configured",
+            provider_calls_made=0,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE patch failed" in rendered
+    assert "reason: provider_not_configured" in rendered
+    assert "needs a configured executor/provider" in rendered
+    assert "provider calls made: 0" in rendered
+    assert "no files were modified" in rendered
+
+
+def test_patch_does_not_modify_files(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    original = "context before patch proposal"
+    source.write_text(original, encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=FakeExecutor()),
+    )
+
+    assert app.run() == 0
+    assert source.read_text(encoding="utf-8") == original
+    rendered = "\n".join(output)
+    assert "Patch proposal only, not applied" in rendered
+    assert "no files were modified" in rendered
 
 
 def test_openai_executor_reports_provider_not_configured_without_key_leak() -> None:

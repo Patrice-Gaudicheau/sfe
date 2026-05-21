@@ -256,50 +256,99 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
 
 
 def render_ask_result(result: BackendResult) -> str:
-    lines: list[str] = []
+    audit = result.contract.audit
+    selected_ids = list(audit.get("selected_segment_ids") or [])
+    selected_refs = _selected_source_refs(result.contract, selected_ids)
+    task_present = result.contract.task is not None
+    context_loaded = bool(result.contract.context_segments)
+    selected_count = int(audit.get("selected_segment_count") or 0)
+    lines: list[str] = [
+        "SFE ask",
+        "Preflight state",
+        f"  task present: {_yes_no(task_present)}",
+        f"  context loaded: {_yes_no(context_loaded)}",
+        f"  loaded context segments: {len(result.contract.context_segments)}",
+        "Local routing",
+        f"  mode: {_display_value(audit.get('router_mode'))}",
+        f"  selected segments: {selected_count}",
+        f"  selected segment ids: {_format_string_list(selected_ids)}",
+        f"  selected source refs: {_format_string_list(selected_refs)}",
+        f"  estimated input tokens: {_display_value(audit.get('estimated_input_tokens'))}",
+        f"  estimated selected tokens: {_display_value(audit.get('estimated_selected_tokens'))}",
+        f"  estimated reduction pct: {_display_value(audit.get('estimated_reduction_pct'))}",
+        f"  fallback reason: {_display_value(audit.get('fallback_reason'))}",
+        "Provider call",
+        f"  status: {_ask_provider_status(result)}",
+        f"  provider calls made: {result.provider_calls_made}",
+    ]
     if result.answer:
         lines.extend(["SFE answer", result.answer])
     else:
-        lines.extend(["SFE ask failed", f"  reason: {result.error_category}"])
-    audit = result.contract.audit
+        lines.extend(
+            [
+                "SFE ask failed",
+                f"  reason: {_display_value(result.error_category)}",
+                f"  action: {_failure_guidance(result.error_category)}",
+            ]
+        )
     lines.extend(
         [
-            "SFE ask summary",
-            f"  router mode: {audit.get('router_mode')}",
-            f"  selected segment count: {audit.get('selected_segment_count')}",
-            f"  selected segment ids: {audit.get('selected_segment_ids')}",
-            f"  estimated input tokens: {audit.get('estimated_input_tokens')}",
-            f"  estimated selected tokens: {audit.get('estimated_selected_tokens')}",
-            f"  estimated reduction pct: {audit.get('estimated_reduction_pct')}",
-            f"  fallback reason: {audit.get('fallback_reason')}",
-            f"  provider calls made: {result.provider_calls_made}",
-            "  writes enabled: no",
-            "  shell enabled: no",
+            "Safety state",
+            "  writes disabled",
+            "  shell disabled",
+            "  patch application disabled",
         ]
     )
     return "\n".join(lines)
 
 
 def render_patch_result(result: BackendResult) -> str:
-    lines: list[str] = []
+    audit = result.contract.audit
+    selected_ids = list(audit.get("selected_segment_ids") or [])
+    selected_refs = _selected_source_refs(result.contract, selected_ids)
+    task_present = result.contract.task is not None
+    context_loaded = bool(result.contract.context_segments)
+    selected_count = int(audit.get("selected_segment_count") or 0)
+    lines: list[str] = [
+        "SFE patch",
+        "Preflight state",
+        f"  task present: {_yes_no(task_present)}",
+        f"  context loaded: {_yes_no(context_loaded)}",
+        f"  loaded context segments: {len(result.contract.context_segments)}",
+        "Local routing",
+        f"  mode: {_display_value(audit.get('router_mode'))}",
+        f"  selected segments: {selected_count}",
+        f"  selected segment ids: {_format_string_list(selected_ids)}",
+        f"  selected source refs: {_format_string_list(selected_refs)}",
+        f"  estimated input tokens: {_display_value(audit.get('estimated_input_tokens'))}",
+        f"  estimated selected tokens: {_display_value(audit.get('estimated_selected_tokens'))}",
+        f"  estimated reduction pct: {_display_value(audit.get('estimated_reduction_pct'))}",
+        f"  fallback reason: {_display_value(audit.get('fallback_reason'))}",
+        "Provider call",
+        f"  status: {_patch_provider_status(result)}",
+        f"  provider calls made: {result.provider_calls_made}",
+        "Patch application",
+        "  patch proposal only",
+        "  not applied",
+        "  no files were modified",
+        "  patch application disabled",
+    ]
     if result.answer:
         lines.extend(["Patch proposal only, not applied", result.answer])
     else:
-        lines.extend(["SFE patch failed", f"  reason: {result.error_category}"])
-    audit = result.contract.audit
+        lines.extend(
+            [
+                "SFE patch failed",
+                f"  reason: {_display_value(result.error_category)}",
+                f"  action: {_failure_guidance(result.error_category)}",
+            ]
+        )
     lines.extend(
         [
-            "SFE patch summary",
-            f"  router mode: {audit.get('router_mode')}",
-            f"  selected segment count: {audit.get('selected_segment_count')}",
-            f"  selected segment ids: {audit.get('selected_segment_ids')}",
-            f"  estimated input tokens: {audit.get('estimated_input_tokens')}",
-            f"  estimated selected tokens: {audit.get('estimated_selected_tokens')}",
-            f"  estimated reduction pct: {audit.get('estimated_reduction_pct')}",
-            f"  fallback reason: {audit.get('fallback_reason')}",
-            f"  provider calls made: {result.provider_calls_made}",
-            "  writes enabled: no",
-            "  shell enabled: no",
+            "Safety state",
+            "  writes disabled",
+            "  shell disabled",
+            "  patch application disabled",
             "  patch applied: no",
         ]
     )
@@ -355,6 +404,38 @@ def _selected_source_refs(contract: SFEContract, selected_ids: list[str]) -> lis
         for segment in contract.context_segments
         if segment.id in selected
     ]
+
+
+def _ask_provider_status(result: BackendResult) -> str:
+    if result.answer:
+        return "answer received"
+    if result.error_category:
+        return f"failed ({result.error_category})"
+    return "no answer returned"
+
+
+def _patch_provider_status(result: BackendResult) -> str:
+    if result.answer:
+        return "proposal received"
+    if result.error_category:
+        return f"failed ({result.error_category})"
+    return "no proposal returned"
+
+
+def _failure_guidance(error_category: str | None) -> str:
+    return {
+        "missing_task": "set a task with /task <text>",
+        "no_context_loaded": "replace context with /files <path>",
+        "no_selected_context": (
+            "routing found no relevant context segments; revise the task or loaded files"
+        ),
+        "provider_not_configured": (
+            "this command needs a configured executor/provider"
+        ),
+        "timeout": "provider call timed out; retry later or check provider settings",
+        "provider_error": "provider call failed; check provider configuration and retry",
+        "invalid_response": "provider returned an invalid response",
+    }.get(error_category, "check the command state and retry")
 
 
 def _skip_reason_guidance(reason: str) -> str:
