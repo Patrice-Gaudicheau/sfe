@@ -12,13 +12,32 @@ DEFAULT_BASE_URL = "http://127.0.0.1:13305"
 DEFAULT_TIMEOUT = 30
 
 
+class LemonadeProviderError(RuntimeError):
+    """Sanitized Lemonade failure with a safe category for callers."""
+
+    def __init__(
+        self,
+        error_category: str,
+        *,
+        parameter_rejection: bool = False,
+    ) -> None:
+        self.error_category = error_category
+        self.parameter_rejection = parameter_rejection
+        super().__init__(error_category)
+
+
 class LemonadeProvider:
     """Small standard-library client for a Lemonade OpenAI-compatible server."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout: float | None = None,
+    ):
         self.base_url = (base_url or os.getenv("SFE_LEMONADE_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key if api_key is not None else os.getenv("SFE_LEMONADE_API_KEY")
-        self.timeout = DEFAULT_TIMEOUT
+        self.timeout = _resolve_timeout(timeout)
 
     def health(self) -> dict:
         """Check whether the Lemonade server responds to the models endpoint."""
@@ -72,8 +91,8 @@ class LemonadeProvider:
 
         try:
             response = self._request("POST", "/v1/chat/completions", payload)
-        except RuntimeError as exc:
-            if uses_template_kwargs and _is_parameter_rejection_text(str(exc)):
+        except LemonadeProviderError as exc:
+            if uses_template_kwargs and exc.parameter_rejection:
                 payload.pop("chat_template_kwargs", None)
                 return self._request("POST", "/v1/chat/completions", payload)
             raise
@@ -102,16 +121,24 @@ class LemonadeProvider:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code} from {url}: {details}") from exc
+            raise LemonadeProviderError(
+                "http_error",
+                parameter_rejection=_is_parameter_rejection_text(details),
+            ) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Could not reach {url}: {exc.reason}") from exc
+            if _is_timeout_reason(exc.reason):
+                raise LemonadeProviderError("timeout") from exc
+            raise LemonadeProviderError("network_error") from exc
         except TimeoutError as exc:
-            raise RuntimeError(f"Timed out after {self.timeout} seconds calling {url}") from exc
+            raise LemonadeProviderError("timeout") from exc
 
         if not body:
             return {}
 
-        return json.loads(body)
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise LemonadeProviderError("invalid_json") from exc
 
 
 def _join_openai_compatible_url(base_url: str, path: str) -> str:
@@ -124,6 +151,22 @@ def _join_openai_compatible_url(base_url: str, path: str) -> str:
 
 def _is_qwen_model(model: str) -> bool:
     return "qwen" in model.lower()
+
+
+def _resolve_timeout(timeout: float | None) -> float:
+    timeout_value = (
+        timeout
+        if timeout is not None
+        else os.getenv("SFE_LEMONADE_TIMEOUT_SECONDS") or DEFAULT_TIMEOUT
+    )
+    parsed_timeout = float(timeout_value)
+    if parsed_timeout <= 0:
+        raise ValueError("Lemonade timeout must be greater than 0.")
+    return parsed_timeout
+
+
+def _is_timeout_reason(reason: object) -> bool:
+    return isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
 
 
 def _is_parameter_rejection(response: dict) -> bool:

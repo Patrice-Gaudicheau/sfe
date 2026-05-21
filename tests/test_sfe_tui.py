@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import sys
+import urllib.error
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from providers.lemonade import LemonadeProvider, LemonadeProviderError
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
     DirectBackend,
@@ -119,6 +122,20 @@ class FakeProvider:
         if self.error is not None:
             raise self.error
         return self.response
+
+
+class FakeHTTPResponse:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def __enter__(self) -> FakeHTTPResponse:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
 
 
 def test_startup_accepts_empty_workspace_input_and_uses_cwd(tmp_path) -> None:
@@ -1804,6 +1821,133 @@ def test_tui_executor_factory_selects_lemonade_from_sfe_provider() -> None:
     assert "system_instruction" not in provider.calls[0]
 
 
+def test_tui_lemonade_executor_uses_lemonade_model_fallback() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "lemonade",
+            "SFE_LEMONADE_MODEL": "lemonade-fallback-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["model"] == "lemonade-fallback-model"
+
+
+def test_tui_lemonade_executor_prefers_specific_executor_model() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "lemonade",
+            "SFE_LEMONADE_EXECUTOR_MODEL": "lemonade-executor-model",
+            "SFE_LEMONADE_MODEL": "lemonade-shared-model",
+            "SFE_EXECUTOR_MODEL": "generic-executor-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["model"] == "lemonade-executor-model"
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "expected_category"),
+    (
+        (LemonadeProviderError("timeout"), "timeout"),
+        (LemonadeProviderError("http_error"), "http_error"),
+        (LemonadeProviderError("invalid_json"), "invalid_json"),
+        (LemonadeProviderError("network_error"), "network_error"),
+    ),
+)
+def test_tui_lemonade_executor_maps_safe_error_categories(
+    provider_error: LemonadeProviderError,
+    expected_category: str,
+) -> None:
+    provider = FakeProvider(error=provider_error)
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "lemonade"},
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.error_category == expected_category
+    assert result.provider_calls_made == 1
+    assert result.provider_name == "lemonade"
+
+
+@pytest.mark.parametrize(
+    ("raised_error", "expected_category"),
+    (
+        (TimeoutError("timed out with raw detail"), "timeout"),
+        (urllib.error.URLError(TimeoutError("timed out with raw detail")), "timeout"),
+        (urllib.error.URLError("connection refused with raw detail"), "network_error"),
+        (
+            urllib.error.HTTPError(
+                "redacted",
+                500,
+                "server error",
+                {},
+                io.BytesIO(b"raw body should not be rendered"),
+            ),
+            "http_error",
+        ),
+    ),
+)
+def test_lemonade_provider_raises_safe_error_categories(
+    monkeypatch,
+    raised_error: Exception,
+    expected_category: str,
+) -> None:
+    def fake_urlopen(*_: object, **__: object) -> object:
+        raise raised_error
+
+    monkeypatch.setattr("providers.lemonade.urllib.request.urlopen", fake_urlopen)
+    provider = LemonadeProvider(base_url="http://local.invalid", timeout=1)
+
+    with pytest.raises(LemonadeProviderError) as exc_info:
+        provider.list_models()
+
+    assert exc_info.value.error_category == expected_category
+    assert str(exc_info.value) == expected_category
+    assert "raw detail" not in str(exc_info.value)
+    assert "raw body" not in str(exc_info.value)
+
+
+def test_lemonade_provider_invalid_json_raises_safe_category(monkeypatch) -> None:
+    def fake_urlopen(*_: object, **__: object) -> FakeHTTPResponse:
+        return FakeHTTPResponse(b"not json")
+
+    monkeypatch.setattr("providers.lemonade.urllib.request.urlopen", fake_urlopen)
+    provider = LemonadeProvider(base_url="http://local.invalid", timeout=1)
+
+    with pytest.raises(LemonadeProviderError) as exc_info:
+        provider.list_models()
+
+    assert exc_info.value.error_category == "invalid_json"
+    assert str(exc_info.value) == "invalid_json"
+    assert "not json" not in str(exc_info.value)
+
+
+def test_lemonade_provider_uses_timeout_env(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_LEMONADE_TIMEOUT_SECONDS", "45")
+
+    provider = LemonadeProvider(base_url="redacted")
+
+    assert provider.timeout == 45
+
+
 def test_tui_executor_factory_selects_openai_compatible_from_sfe_provider() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
@@ -1940,6 +2084,46 @@ def test_tui_ask_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert "/backend" not in rendered
 
 
+def test_tui_ask_renders_safe_lemonade_failure_category(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text(
+        "selected context PROMPT_CONTENT_SHOULD_NOT_RENDER",
+        encoding="utf-8",
+    )
+    provider = FakeProvider(error=LemonadeProviderError("timeout"))
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context SECRET_TASK_SHOULD_NOT_RENDER",
+                "/ask",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "lemonade"},
+                provider_factories={"lemonade": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: lemonade" in rendered
+    assert "status: failed (timeout)" in rendered
+    assert "reason: timeout" in rendered
+    assert "PROMPT_CONTENT_SHOULD_NOT_RENDER" not in rendered
+    assert "SECRET_TASK_SHOULD_NOT_RENDER" not in rendered
+    assert "sk-SECRET" not in rendered
+    assert "Authorization" not in rendered
+    assert "http://" not in rendered
+
+
 def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("selected context", encoding="utf-8")
@@ -1968,6 +2152,46 @@ def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert "system_instruction" not in provider.calls[0]
     assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
+
+
+def test_tui_patch_renders_safe_lemonade_failure_category(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text(
+        "selected context PATCH_PROMPT_CONTENT_SHOULD_NOT_RENDER",
+        encoding="utf-8",
+    )
+    provider = FakeProvider(error=LemonadeProviderError("http_error"))
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch selected context PATCH_SECRET_TASK_SHOULD_NOT_RENDER",
+                "/patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "lemonade"},
+                provider_factories={"lemonade": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: lemonade" in rendered
+    assert "status: failed (http_error)" in rendered
+    assert "reason: http_error" in rendered
+    assert "PATCH_PROMPT_CONTENT_SHOULD_NOT_RENDER" not in rendered
+    assert "PATCH_SECRET_TASK_SHOULD_NOT_RENDER" not in rendered
+    assert "sk-SECRET" not in rendered
+    assert "Authorization" not in rendered
+    assert "http://" not in rendered
 
 
 def test_tui_status_displays_executor_provider_safely(tmp_path) -> None:

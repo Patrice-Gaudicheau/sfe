@@ -441,6 +441,9 @@ def _failure_guidance(error_category: str | None) -> str:
             "this command needs a configured executor/provider"
         ),
         "timeout": "provider call timed out; retry later or check provider settings",
+        "http_error": "provider returned an HTTP error; check provider settings",
+        "network_error": "provider could not be reached; check local provider status",
+        "invalid_json": "provider returned non-JSON data",
         "provider_error": "provider call failed; check provider configuration and retry",
         "provider_configuration_error": (
             "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, or anthropic"

@@ -18,7 +18,7 @@ from providers.anthropic import (
     AnthropicProvider,
     MissingAnthropicAPIKeyError,
 )
-from providers.lemonade import LemonadeProvider
+from providers.lemonade import LemonadeProvider, LemonadeProviderError
 from providers.openai_api import (
     DEFAULT_EXECUTOR_MODEL,
     MissingOpenAIAPIKeyError,
@@ -75,6 +75,7 @@ class DirectProviderReadOnlyExecutor:
         call_style: str,
         missing_key_errors: tuple[type[Exception], ...] = (),
         provider_error_types: tuple[type[Exception], ...] = (),
+        provider_error_classifier: Callable[[Exception], str | None] | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         max_patch_output_tokens: int = DEFAULT_PATCH_OUTPUT_TOKENS,
     ) -> None:
@@ -84,6 +85,7 @@ class DirectProviderReadOnlyExecutor:
         self.call_style = call_style
         self.missing_key_errors = missing_key_errors
         self.provider_error_types = provider_error_types
+        self.provider_error_classifier = provider_error_classifier
         self.max_output_tokens = max_output_tokens
         self.max_patch_output_tokens = max_patch_output_tokens
 
@@ -146,10 +148,14 @@ class DirectProviderReadOnlyExecutor:
                 provider_calls_made=1,
                 provider_name=self.provider_name,
             )
-        except Exception:
+        except Exception as exc:
+            error_category = _classify_provider_error(
+                exc,
+                self.provider_error_classifier,
+            )
             return ExecutorResponse(
                 answer=None,
-                error_category="provider_error",
+                error_category=error_category,
                 provider_calls_made=1,
                 provider_name=self.provider_name,
             )
@@ -255,11 +261,16 @@ def create_tui_executor(
             model=(
                 _first_env_value(
                     environ,
-                    ("SFE_LEMONADE_EXECUTOR_MODEL", "SFE_EXECUTOR_MODEL"),
+                    (
+                        "SFE_LEMONADE_EXECUTOR_MODEL",
+                        "SFE_LEMONADE_MODEL",
+                        "SFE_EXECUTOR_MODEL",
+                    ),
                 )
                 or DEFAULT_LEMONADE_EXECUTOR_MODEL
             ),
             call_style="system_message",
+            provider_error_classifier=_classify_lemonade_error,
         )
     if provider_name == "alibaba":
         return DirectProviderReadOnlyExecutor(
@@ -350,6 +361,21 @@ def _unsupported_provider_response(provider_name: str) -> ExecutorResponse:
         provider_calls_made=0,
         provider_name=provider_name,
     )
+
+
+def _classify_provider_error(
+    exc: Exception,
+    classifier: Callable[[Exception], str | None] | None,
+) -> str:
+    if classifier is None:
+        return "provider_error"
+    return classifier(exc) or "provider_error"
+
+
+def _classify_lemonade_error(exc: Exception) -> str | None:
+    if isinstance(exc, LemonadeProviderError):
+        return exc.error_category
+    return None
 
 
 def _first_env_value(
