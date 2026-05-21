@@ -37,6 +37,7 @@ from sfe_tui.executors import (
     OpenAIReadOnlyExecutor,
     PATCH_SYSTEM_INSTRUCTION,
     READ_ONLY_SYSTEM_INSTRUCTION,
+    create_tui_executor,
 )
 from sfe_tui.renderer import (
     render_context_summary,
@@ -1751,6 +1752,267 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["system_instruction"] != READ_ONLY_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == 4000
+
+
+def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={},
+        provider_factories={"openai": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "openai"
+    assert result.provider_name == "openai"
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
+
+
+def test_tui_executor_factory_selects_openai_from_sfe_provider() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "openai"},
+        provider_factories={"openai": lambda: provider},
+    )
+
+    assert executor.provider_name == "openai"
+
+
+def test_tui_executor_factory_selects_lemonade_from_sfe_provider() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "lemonade",
+            "SFE_EXECUTOR_MODEL": "local-executor",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "lemonade"
+    assert result.provider_name == "lemonade"
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["model"] == "local-executor"
+    assert provider.calls[0]["messages"][0]["role"] == "system"
+    assert provider.calls[0]["messages"][0]["content"] == READ_ONLY_SYSTEM_INSTRUCTION
+    assert "system_instruction" not in provider.calls[0]
+
+
+def test_tui_executor_factory_selects_openai_compatible_from_sfe_provider() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "openai-compatible"},
+        provider_factories={"openai-compatible": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "openai-compatible"
+    assert result.provider_name == "openai-compatible"
+    assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "model_env", "model_value"),
+    (
+        ("alibaba", "SFE_ALIBABA_EXECUTOR_MODEL", "qwen-test"),
+        ("anthropic", "SFE_ANTHROPIC_EXECUTOR_MODEL", "claude-test"),
+    ),
+)
+def test_tui_executor_factory_selects_other_direct_providers(
+    provider_name: str,
+    model_env: str,
+    model_value: str,
+) -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": provider_name, model_env: model_value},
+        provider_factories={provider_name: lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == provider_name
+    assert result.provider_name == provider_name
+    assert provider.calls[0]["model"] == model_value
+
+
+def test_tui_executor_factory_reports_invalid_sfe_provider_safely() -> None:
+    executor = create_tui_executor(environ={"SFE_PROVIDER": "bad-provider"})
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "invalid"
+    assert result.error_category == "provider_configuration_error"
+    assert result.provider_calls_made == 0
+
+
+def test_tui_executor_factory_ignores_proxy_provider_legacy_variable() -> None:
+    openai_provider = FakeProvider()
+    lemonade_provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROXY_PROVIDER": "lemonade"},
+        provider_factories={
+            "openai": lambda: openai_provider,
+            "lemonade": lambda: lemonade_provider,
+        },
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "openai"
+    assert result.provider_name == "openai"
+    assert openai_provider.calls
+    assert not lemonade_provider.calls
+
+
+def test_tui_dry_run_makes_no_provider_call_with_sfe_provider(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/dry-run",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "lemonade"},
+                provider_factories={"lemonade": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "executor/provider called: no" in rendered
+    assert "provider calls made: 0" in rendered
+    assert not provider.calls
+
+
+def test_tui_ask_uses_resolved_provider_without_proxy(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain selected context", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "lemonade"},
+                provider_factories={"lemonade": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: lemonade" in rendered
+    assert "SFE answer\nprovider answer" in rendered
+    assert provider.calls
+    assert "ProxyBackend" not in rendered
+    assert "/backend" not in rendered
+
+
+def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch selected context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "lemonade"},
+                provider_factories={"lemonade": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: lemonade" in rendered
+    assert "Patch proposal only, not applied" in rendered
+    assert provider.calls[0]["messages"][0]["role"] == "system"
+    assert provider.calls[0]["messages"][0]["content"] == PATCH_SYSTEM_INSTRUCTION
+    assert "system_instruction" not in provider.calls[0]
+    assert "ProxyBackend" not in rendered
+    assert "/backend" not in rendered
+
+
+def test_tui_status_displays_executor_provider_safely(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/status", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "lemonade"},
+                provider_factories={"lemonade": lambda: FakeProvider()},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "executor provider: lemonade" in status_block
+    assert "API_KEY" not in status_block
+    assert "Authorization" not in status_block
+    assert "http://" not in status_block
+
+
+def test_tui_invalid_provider_renders_configuration_guidance(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain selected context", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(environ={"SFE_PROVIDER": "bad-provider"})
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "reason: provider_configuration_error" in rendered
+    assert "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, or anthropic" in rendered
+    assert "bad-provider" not in rendered
 
 
 def test_local_segment_router_selects_matching_segment() -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .contracts import ContextSegment, SFEContract
-from .executors import ExecutorResponse, OpenAIReadOnlyExecutor, ReadOnlyExecutor
+from .executors import ExecutorResponse, ReadOnlyExecutor, create_tui_executor
 from .routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
     LocalSegmentRouter,
@@ -85,7 +85,11 @@ class DirectBackend:
     name = "direct"
 
     def __init__(self, executor: ReadOnlyExecutor | None = None) -> None:
-        self.executor = executor or OpenAIReadOnlyExecutor()
+        self.executor = executor or create_tui_executor()
+
+    @property
+    def executor_provider_name(self) -> str | None:
+        return getattr(self.executor, "provider_name", None)
 
     def dry_run(self, contract: SFEContract) -> BackendResult:
         return _local_router_preview_result(self.name, contract)
@@ -186,6 +190,7 @@ def _ask_result_from_executor_response(
             **routed.summary,
             "provider_calls_made": executor_response.provider_calls_made,
             "ask_error_category": executor_response.error_category,
+            "executor_provider": executor_response.provider_name,
         },
         contract=routed.contract,
         execution_preview=routed.execution_preview,
@@ -209,6 +214,7 @@ def _patch_result_from_executor_response(
             "provider_calls_made": executor_response.provider_calls_made,
             "patch_error_category": executor_response.error_category,
             "patch_applied": False,
+            "executor_provider": executor_response.provider_name,
         },
         contract=routed.contract,
         execution_preview=routed.execution_preview,

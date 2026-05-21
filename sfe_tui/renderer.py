@@ -98,6 +98,7 @@ def render_status(
     loaded_context_segments: int,
     task_present: bool,
     backend_name: str,
+    executor_provider_name: str | None = None,
     latest_result: BackendResult | None = None,
 ) -> str:
     latest_result_present = latest_result is not None
@@ -105,16 +106,20 @@ def render_status(
     latest_provider_calls = (
         latest_result.provider_calls_made if latest_result is not None else 0
     )
-    return "\n".join(
+    lines = [
+        "SFE TUI status",
+        f"  workspace selected: {workspace_selected}",
+        f"  workspace: {workspace_label or 'not selected'}",
+        f"  loaded context files: {loaded_context_files}",
+        f"  skipped context files: {skipped_context_files}",
+        f"  loaded context segments: {loaded_context_segments}",
+        f"  task present: {task_present}",
+        f"  backend: {backend_name}",
+    ]
+    if executor_provider_name:
+        lines.append(f"  executor provider: {executor_provider_name}")
+    lines.extend(
         [
-            "SFE TUI status",
-            f"  workspace selected: {workspace_selected}",
-            f"  workspace: {workspace_label or 'not selected'}",
-            f"  loaded context files: {loaded_context_files}",
-            f"  skipped context files: {skipped_context_files}",
-            f"  loaded context segments: {loaded_context_segments}",
-            f"  task present: {task_present}",
-            f"  backend: {backend_name}",
             f"  latest result present: {_yes_no(latest_result_present)}",
             f"  latest result kind: {latest_result_kind}",
             f"  latest provider calls made: {latest_provider_calls}",
@@ -123,6 +128,7 @@ def render_status(
             "  patch application enabled: no",
         ]
     )
+    return "\n".join(lines)
 
 
 def render_context_summary(
@@ -278,6 +284,7 @@ def render_ask_result(result: BackendResult) -> str:
         f"  estimated reduction pct: {_display_value(audit.get('estimated_reduction_pct'))}",
         f"  fallback reason: {_display_value(audit.get('fallback_reason'))}",
         "Provider call",
+        f"  provider: {_display_value(result.summary.get('executor_provider'))}",
         f"  status: {_ask_provider_status(result)}",
         f"  provider calls made: {result.provider_calls_made}",
     ]
@@ -325,6 +332,7 @@ def render_patch_result(result: BackendResult) -> str:
         f"  estimated reduction pct: {_display_value(audit.get('estimated_reduction_pct'))}",
         f"  fallback reason: {_display_value(audit.get('fallback_reason'))}",
         "Provider call",
+        f"  provider: {_display_value(result.summary.get('executor_provider'))}",
         f"  status: {_patch_provider_status(result)}",
         f"  provider calls made: {result.provider_calls_made}",
         "Patch application",
@@ -434,6 +442,10 @@ def _failure_guidance(error_category: str | None) -> str:
         ),
         "timeout": "provider call timed out; retry later or check provider settings",
         "provider_error": "provider call failed; check provider configuration and retry",
+        "provider_configuration_error": (
+            "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, or anthropic"
+        ),
+        "provider_not_supported": "selected provider is not supported by the TUI executor yet",
         "invalid_response": "provider returned an invalid response",
     }.get(error_category, "check the command state and retry")
 

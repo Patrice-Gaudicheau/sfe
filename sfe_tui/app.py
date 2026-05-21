@@ -103,6 +103,11 @@ class SfeTuiApp:
                     loaded_context_segments=loaded_context_files,
                     task_present=bool(self.task.strip()),
                     backend_name=self.backend.name,
+                    executor_provider_name=getattr(
+                        self.backend,
+                        "executor_provider_name",
+                        None,
+                    ),
                     latest_result=self.latest_result,
                 )
             )
