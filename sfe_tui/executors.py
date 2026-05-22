@@ -37,11 +37,19 @@ READ_ONLY_SYSTEM_INSTRUCTION = (
     "or use tools."
 )
 PATCH_SYSTEM_INSTRUCTION = (
-    "You are the SFE TUI patch proposal executor. Propose a unified diff when "
-    "a safe concrete edit can be made from the selected context. Do not use "
-    "markdown fences when a clean diff is possible. If no safe diff can be "
-    "proposed, explain why briefly. Do not claim files were modified. Do not "
-    "invent file contents outside the selected context."
+    "You are the SFE TUI patch proposal executor. Return only a strict unified "
+    "diff when a safe concrete edit can be made from the selected context. "
+    "The first output line must be exactly a diff header in this shape: "
+    "diff --git a/path b/path. Then include --- a/path, +++ b/path, and "
+    "@@ -old_start,old_count +new_start,new_count @@ hunks with context, "
+    "removed, and added lines. Use a/ and b/ path prefixes. Do not use "
+    "markdown fences. Do not write prose before or after the diff. Do not use "
+    "bullet points, file summaries, or explanations. Only modify existing "
+    "files from the selected context. Do not invent files or file contents "
+    "outside the selected context. Do not use /dev/null. Do not propose new "
+    "files, deletes, renames, copy changes, mode changes, chmod changes, "
+    "binary patches, or symlink changes. If no safe patch can be proposed, "
+    "return one short non-diff refusal sentence."
 )
 
 

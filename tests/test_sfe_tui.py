@@ -156,6 +156,26 @@ def valid_text_diff(
     )
 
 
+def markdown_fenced_diff(
+    path: str = "context.txt",
+    *,
+    old: str = "old context",
+    new: str = "new context",
+) -> str:
+    return "\n".join(
+        [
+            "```diff",
+            f"diff --git a/{path} b/{path}",
+            f"--- a/{path}",
+            f"+++ b/{path}",
+            "@@ -1,1 +1,1 @@",
+            f"-{old}",
+            f"+{new}",
+            "```",
+        ]
+    )
+
+
 def test_startup_accepts_empty_workspace_input_and_uses_cwd(tmp_path) -> None:
     assert resolve_workspace("", tmp_path) == tmp_path.resolve()
 
@@ -2175,6 +2195,43 @@ def test_patch_non_diff_output_does_not_store_pending_patch(tmp_path) -> None:
     assert "pending patch: no" in rendered
 
 
+def test_patch_markdown_fenced_diff_does_not_store_pending_patch(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=markdown_fenced_diff(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert "pending patch stored: no" in rendered
+    assert "pending patch reason: invalid_patch_proposal" in rendered
+    assert "Error: no_pending_patch" in rendered
+    assert "run /patch first" in rendered
+
+
 def test_patch_dangerous_diff_does_not_store_pending_patch(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
@@ -2556,6 +2613,29 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["system_instruction"] != READ_ONLY_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == 4000
+
+
+def test_patch_system_instruction_requires_strict_supported_diff() -> None:
+    instruction = PATCH_SYSTEM_INSTRUCTION
+
+    assert "Return only a strict unified diff" in instruction
+    assert "diff --git a/path b/path" in instruction
+    assert "--- a/path" in instruction
+    assert "+++ b/path" in instruction
+    assert "@@ -old_start,old_count +new_start,new_count @@" in instruction
+    assert "Do not use markdown fences" in instruction
+    assert "Do not write prose before or after the diff" in instruction
+    assert "Only modify existing files" in instruction
+    assert "Do not invent files" in instruction
+    assert "Do not use /dev/null" in instruction
+    assert "new files" in instruction
+    assert "deletes" in instruction
+    assert "renames" in instruction
+    assert "mode changes" in instruction
+    assert "chmod changes" in instruction
+    assert "binary patches" in instruction
+    assert "symlink changes" in instruction
+    assert "one short non-diff refusal sentence" in instruction
 
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
