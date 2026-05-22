@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shlex
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -10,6 +12,15 @@ from sfe.discovery import (
     DiscoveryResult,
     discover_workspace_context,
     load_discovered_context,
+)
+from sfe.patching import (
+    INVALID_PATCH_PROPOSAL,
+    PATCH_PREIMAGE_MISMATCH,
+    ParsedPatch,
+    PatchSummary,
+    apply_patch_to_workspace,
+    parse_unified_diff,
+    validate_patch_targets,
 )
 
 from .backends import (
@@ -33,6 +44,18 @@ from . import renderer
 OutputFunc = Callable[[str], None]
 
 
+@dataclass(frozen=True)
+class PendingPatchProposal:
+    text: str
+    parsed_patch: ParsedPatch
+    source: str
+    created_from_task_hash: str
+    selected_source_refs: tuple[str, ...]
+    provider_name: str | None
+    summary: PatchSummary
+    parse_status: str = "accepted"
+
+
 class SfeTuiApp:
     def __init__(
         self,
@@ -51,6 +74,7 @@ class SfeTuiApp:
         self.discovery_result: DiscoveryResult | None = None
         self.task = ""
         self.latest_result: BackendResult | None = None
+        self.pending_patch: PendingPatchProposal | None = None
 
     def run(self) -> int:
         if not self._select_workspace():
@@ -118,6 +142,11 @@ class SfeTuiApp:
                         None,
                     ),
                     latest_result=self.latest_result,
+                    pending_patch_summary=(
+                        self.pending_patch.summary
+                        if self.pending_patch is not None
+                        else None
+                    ),
                 )
             )
             return False
@@ -135,6 +164,7 @@ class SfeTuiApp:
             self.task = task
             self.discovery_result = None
             self.latest_result = None
+            self._clear_pending_patch()
             self.output(renderer.render_task_set())
             return False
         if name == "/discover":
@@ -148,6 +178,9 @@ class SfeTuiApp:
             return False
         if name == "/patch":
             self._handle_patch()
+            return False
+        if name == "/apply-patch":
+            self._handle_apply_patch()
             return False
         if name == "/reset":
             self._handle_reset()
@@ -171,6 +204,7 @@ class SfeTuiApp:
             load_context_file(self.workspace_root, value) for value in values
         ]
         self.latest_result = None
+        self._clear_pending_patch()
         self.output(renderer.render_file_selection(self.context_files))
 
     def _handle_discover(self) -> None:
@@ -185,6 +219,7 @@ class SfeTuiApp:
             task=self.task,
         )
         self.latest_result = None
+        self._clear_pending_patch()
         self.output(renderer.render_discovery_summary(self.discovery_result))
 
     def _handle_reset(self) -> None:
@@ -192,6 +227,7 @@ class SfeTuiApp:
         self.discovery_result = None
         self.task = ""
         self.latest_result = None
+        self._clear_pending_patch()
         self.output(renderer.render_reset())
 
     def _handle_context(self) -> None:
@@ -204,6 +240,11 @@ class SfeTuiApp:
                 context_files=self._active_context_files(require_discovery=False),
                 latest_result=self.latest_result,
                 discovery_result=self.discovery_result,
+                pending_patch_summary=(
+                    self.pending_patch.summary
+                    if self.pending_patch is not None
+                    else None
+                ),
             )
         )
 
@@ -223,6 +264,7 @@ class SfeTuiApp:
         self.output(renderer.render_dry_run_summary(contract, result))
 
     def _handle_ask(self) -> None:
+        self._clear_pending_patch()
         self.output("building contract")
         contract, error = self._build_contract_for_current_state(
             require_discovery=True,
@@ -271,12 +313,73 @@ class SfeTuiApp:
         routed = self.backend.dry_run(contract)
         if not routed.contract.audit.get("selected_segment_ids"):
             self.latest_result = patch_error_result(routed, "no_selected_context")
+            self._clear_pending_patch()
             self.output(renderer.render_patch_result(self.latest_result))
             return
         self.output("calling provider")
         result = self.backend.patch(contract)
         self.latest_result = result
-        self.output(renderer.render_patch_result(result))
+        pending_patch, pending_issue = self._pending_patch_from_result(result)
+        self.pending_patch = pending_patch
+        self.output(
+            renderer.render_patch_result(
+                result,
+                pending_patch_summary=(
+                    pending_patch.summary if pending_patch is not None else None
+                ),
+                pending_patch_issue=pending_issue,
+            )
+        )
+
+    def _handle_apply_patch(self) -> None:
+        if self.workspace_root is None:
+            self.output(renderer.render_error("workspace_not_selected"))
+            return
+        if self.pending_patch is None:
+            self.output(renderer.render_error("no_pending_patch"))
+            return
+        parsed = parse_unified_diff(self.pending_patch.text)
+        if parsed.patch is None:
+            self._clear_pending_patch()
+            self.output(
+                renderer.render_apply_patch_failure(
+                    INVALID_PATCH_PROPOSAL,
+                    parsed.issue,
+                    pending_patch_cleared=True,
+                )
+            )
+            return
+        validation = validate_patch_targets(self.workspace_root, parsed.patch)
+        if not validation.ok:
+            self._clear_pending_patch()
+            self.output(
+                renderer.render_apply_patch_failure(
+                    validation.issue.category if validation.issue else "unsafe_patch",
+                    validation.issue,
+                    pending_patch_cleared=True,
+                )
+            )
+            return
+        result = apply_patch_to_workspace(self.workspace_root, parsed.patch)
+        if result.applied:
+            self._clear_pending_patch()
+            self.output(renderer.render_apply_patch_success(result))
+            return
+        if result.issue is not None and result.issue.category == PATCH_PREIMAGE_MISMATCH:
+            self.output(renderer.render_apply_patch_failure(
+                result.issue.category,
+                result.issue,
+                pending_patch_cleared=False,
+            ))
+            return
+        self._clear_pending_patch()
+        self.output(
+            renderer.render_apply_patch_failure(
+                result.issue.category if result.issue else "unsafe_patch",
+                result.issue,
+                pending_patch_cleared=True,
+            )
+        )
 
     def _build_contract_for_current_state(
         self,
@@ -324,6 +427,47 @@ class SfeTuiApp:
 
     def _using_discovered_context(self) -> bool:
         return not self.context_files and self.discovery_result is not None
+
+    def _pending_patch_from_result(
+        self,
+        result: BackendResult,
+    ) -> tuple[PendingPatchProposal | None, object | None]:
+        if self.workspace_root is None or not result.answer:
+            return None, result.error_category
+        parsed = parse_unified_diff(result.answer)
+        if parsed.patch is None:
+            return None, parsed.issue
+        validation = validate_patch_targets(self.workspace_root, parsed.patch)
+        if not validation.ok or validation.summary is None:
+            return None, validation.issue
+        selected_ids = list(result.contract.audit.get("selected_segment_ids") or [])
+        selected_refs = tuple(
+            segment.source_ref
+            for segment in result.contract.context_segments
+            if segment.id in selected_ids
+        )
+        return (
+            PendingPatchProposal(
+                text=result.answer,
+                parsed_patch=parsed.patch,
+                source="patch",
+                created_from_task_hash=self._task_hash(),
+                selected_source_refs=selected_refs,
+                provider_name=(
+                    str(result.summary.get("executor_provider"))
+                    if result.summary.get("executor_provider") is not None
+                    else None
+                ),
+                summary=validation.summary,
+            ),
+            None,
+        )
+
+    def _clear_pending_patch(self) -> None:
+        self.pending_patch = None
+
+    def _task_hash(self) -> str:
+        return hashlib.sha256(self.task.encode("utf-8")).hexdigest()[:16]
 
     def _empty_contract(self) -> SFEContract:
         return build_contract(

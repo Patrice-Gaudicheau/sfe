@@ -138,6 +138,24 @@ class FakeHTTPResponse:
         return self.body
 
 
+def valid_text_diff(
+    path: str = "context.txt",
+    *,
+    old: str = "old context",
+    new: str = "new context",
+) -> str:
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            f"--- a/{path}",
+            f"+++ b/{path}",
+            "@@ -1,1 +1,1 @@",
+            f"-{old}",
+            f"+{new}",
+        ]
+    )
+
+
 def test_startup_accepts_empty_workspace_input_and_uses_cwd(tmp_path) -> None:
     assert resolve_workspace("", tmp_path) == tmp_path.resolve()
 
@@ -2077,6 +2095,396 @@ def test_patch_does_not_modify_files(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "Patch proposal only, not applied" in rendered
     assert "no files were modified" in rendered
+
+
+def test_help_includes_apply_patch_command() -> None:
+    rendered = render_help()
+
+    assert "/apply-patch" in rendered
+    assert "Apply latest pending patch proposal" in rendered
+
+
+def test_apply_patch_without_pending_patch_reports_actionable_error(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/apply-patch", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Error: no_pending_patch" in rendered
+    assert "run /patch first" in rendered
+
+
+def test_patch_stores_pending_patch_only_for_valid_diff(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is not None
+    assert "pending patch stored: yes" in rendered
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "pending patch: yes" in status_block
+    assert "pending patch files: 1" in status_block
+    assert "pending patch hunks: 1" in status_block
+
+
+def test_patch_non_diff_output_does_not_store_pending_patch(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer="No safe patch can be proposed.",
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert "pending patch stored: no" in rendered
+    assert "pending patch: no" in rendered
+
+
+def test_patch_dangerous_diff_does_not_store_pending_patch(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(".env", old="SECRET=old", new="SECRET=new"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert "pending patch stored: no" in rendered
+    assert "pending patch reason: unsafe_patch" in rendered
+
+
+def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "new context\n"
+    assert app.pending_patch is None
+    assert "SFE apply-patch" in rendered
+    assert "status: applied" in rendered
+    assert "modified relative paths: context.txt" in rendered
+    assert "file count: 1" in rendered
+    assert "hunk count: 1" in rendered
+    assert "lines added: 1" in rendered
+    assert "lines removed: 1" in rendered
+    assert "pending patch cleared: yes" in rendered
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "pending patch: no" in status_block
+
+
+def test_apply_patch_preimage_mismatch_writes_nothing_and_keeps_pending_patch(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+    assert app._select_workspace() is True
+    app._handle_files("context.txt")
+    app._handle_command("/task Patch old context")
+    app._handle_patch()
+    source.write_text("changed context\n", encoding="utf-8")
+
+    app._handle_apply_patch()
+
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "changed context\n"
+    assert app.pending_patch is not None
+    assert "error category: patch_preimage_mismatch" in rendered
+    assert "pending patch cleared: no" in rendered
+
+
+def test_apply_patch_makes_zero_provider_calls(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    assert len(executor.patch_calls) == 1
+    assert len(executor.calls) == 0
+
+
+def test_pending_patch_clear_lifecycle_commands(tmp_path) -> None:
+    clearing_commands = [
+        "/task New old context task",
+        "/discover",
+        "/ask",
+        "/files other.txt",
+        "/reset",
+    ]
+    for command in clearing_commands:
+        source = tmp_path / command.strip("/").split()[0] / "context.txt"
+        source.parent.mkdir()
+        source.write_text("old context\n", encoding="utf-8")
+        other = source.parent / "other.txt"
+        other.write_text("other context\n", encoding="utf-8")
+        executor = FakeExecutor(
+            response=ExecutorResponse("mock answer", None, 1),
+            patch_response=ExecutorResponse(valid_text_diff(), None, 1),
+        )
+        output: list[str] = []
+        app = SfeTuiApp(
+            input_provider=FakeInput([""]),
+            output=output.append,
+            cwd=source.parent,
+            backend=DirectBackend(executor=executor),
+        )
+        assert app._select_workspace() is True
+        app._handle_files("context.txt")
+        app._handle_command("/task Patch old context")
+        app._handle_patch()
+        assert app.pending_patch is not None
+
+        app._handle_command(command)
+
+        assert app.pending_patch is None
+
+
+def test_pending_patch_preserved_by_observation_commands(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(valid_text_diff(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+    assert app._select_workspace() is True
+    app._handle_files("context.txt")
+    app._handle_command("/task Patch old context")
+    app._handle_patch()
+
+    for command in ["/dry-run", "/context", "/status", "/directory", "/pwd", "/help"]:
+        app._handle_command(command)
+        assert app.pending_patch is not None
+
+
+def test_apply_patch_invalid_pending_state_clears_without_writing(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(valid_text_diff(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+    assert app._select_workspace() is True
+    app._handle_files("context.txt")
+    app._handle_command("/task Patch old context")
+    app._handle_patch()
+    assert app.pending_patch is not None
+    app.pending_patch = replace(app.pending_patch, text="not a diff")
+
+    app._handle_apply_patch()
+
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert app.pending_patch is None
+    assert "error category: invalid_patch_proposal" in rendered
+    assert "pending patch cleared: yes" in rendered
+
+
+def test_status_and_context_show_safe_pending_patch_metadata(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context SECRET_FILE_CONTENT\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(old="old context SECRET_FILE_CONTENT", new="new context"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context SECRET_TASK_TEXT",
+                "/patch",
+                "/status",
+                "/context",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1].split("SFE context", 1)[0]
+    context_block = rendered.split("SFE context", 1)[1]
+    for block in (status_block, context_block):
+        assert "pending patch: yes" in block
+        assert "pending patch files: 1" in block
+        assert "pending patch hunks: 1" in block
+        assert "SECRET_FILE_CONTENT" not in block
+        assert "SECRET_TASK_TEXT" not in block
+        assert str(tmp_path.resolve()) not in block
+
+
+def test_apply_diagnostics_omit_raw_sensitive_material(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context SECRET_FILE_CONTENT\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(
+                old="old context SECRET_FILE_CONTENT",
+                new="new context SECRET_FILE_CONTENT",
+            ),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch SECRET_TASK_TEXT old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    apply_block = "\n".join(output).split("SFE apply-patch", 1)[1]
+    assert "status: applied" in apply_block
+    assert "context.txt" in apply_block
+    assert "SECRET_FILE_CONTENT" not in apply_block
+    assert "SECRET_TASK_TEXT" not in apply_block
+    assert str(tmp_path.resolve()) not in apply_block
+    assert "Authorization" not in apply_block
+    assert "API_KEY" not in apply_block
+    assert "request body" not in apply_block.lower()
+    assert "provider payload" not in apply_block.lower()
+    assert "diff --git" not in apply_block
 
 
 def test_openai_executor_reports_provider_not_configured_without_key_leak() -> None:

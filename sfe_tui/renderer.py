@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sfe.discovery import DiscoveryResult
+from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
 
 from .backends import BackendResult
 from .contracts import ContextLoadResult, SFEContract
@@ -23,6 +24,7 @@ def render_help() -> str:
             "  /context           Show safe loaded/selected context metadata",
             "  /ask               Ask a read-only question using selected context",
             "  /patch             Propose a patch without applying it",
+            "  /apply-patch       Apply latest pending patch proposal",
             "  /files <paths...>  Replace context manually for debug/design",
             "  /reset             Clear task, context, discovery, and routing; preserve workspace",
             "  /quit, /exit       Exit",
@@ -87,6 +89,7 @@ def render_error(message: str) -> str:
         "workspace_not_selected": "workspace not selected",
         "workspace_not_found": "workspace not found",
         "workspace_not_directory": "workspace path is not a directory",
+        "no_pending_patch": "run /patch first",
     }.get(message)
     if guidance is None:
         return f"Error: {message}"
@@ -105,6 +108,7 @@ def render_status(
     executor_provider_name: str | None = None,
     latest_result: BackendResult | None = None,
     discovery_result: DiscoveryResult | None = None,
+    pending_patch_summary: PatchSummary | None = None,
 ) -> str:
     latest_result_present = latest_result is not None
     latest_result_kind = latest_result.status if latest_result is not None else "none"
@@ -132,9 +136,12 @@ def render_status(
             f"  latest result present: {_yes_no(latest_result_present)}",
             f"  latest result kind: {latest_result_kind}",
             f"  latest provider calls made: {latest_provider_calls}",
-            "  writes enabled: no",
+            f"  pending patch: {_yes_no(pending_patch_summary is not None)}",
+            f"  pending patch files: {_patch_summary_count(pending_patch_summary, 'file_count')}",
+            f"  pending patch hunks: {_patch_summary_count(pending_patch_summary, 'hunk_count')}",
+            "  writes enabled: no automatic writes; apply-patch only",
             "  shell enabled: no",
-            "  patch application enabled: no",
+            "  patch application enabled: no automatic apply; explicit /apply-patch only",
         ]
     )
     return "\n".join(lines)
@@ -146,6 +153,7 @@ def render_context_summary(
     context_files: list[ContextLoadResult],
     latest_result: BackendResult | None,
     discovery_result: DiscoveryResult | None = None,
+    pending_patch_summary: PatchSummary | None = None,
 ) -> str:
     skipped_count = sum(1 for result in context_files if not result.loaded)
     skipped_reasons = _skipped_reason_counts(context_files)
@@ -162,6 +170,7 @@ def render_context_summary(
             f"  skipped context files: {skipped_count}",
             f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
             f"  latest selected segment ids: {latest_selected_ids}",
+            *_pending_patch_context_lines(pending_patch_summary),
             "  empty: no context loaded",
         ]
         return "\n".join(lines)
@@ -185,6 +194,7 @@ def render_context_summary(
         f"  skipped context files: {skipped_count}",
         f"  skipped reasons: {_format_reason_counts(skipped_reasons)}",
         f"  latest selected segment ids: {latest_selected_ids}",
+        *_pending_patch_context_lines(pending_patch_summary),
     ]
     for segment in contract.context_segments:
         warning = warning_by_ref.get(segment.source_ref) or "none"
@@ -347,7 +357,12 @@ def render_ask_result(result: BackendResult) -> str:
     return "\n".join(lines)
 
 
-def render_patch_result(result: BackendResult) -> str:
+def render_patch_result(
+    result: BackendResult,
+    *,
+    pending_patch_summary: PatchSummary | None = None,
+    pending_patch_issue: object | None = None,
+) -> str:
     audit = result.contract.audit
     selected_ids = list(audit.get("selected_segment_ids") or [])
     selected_refs = _selected_source_refs(result.contract, selected_ids)
@@ -377,8 +392,20 @@ def render_patch_result(result: BackendResult) -> str:
         "  patch proposal only",
         "  not applied",
         "  no files were modified",
-        "  patch application disabled",
+        f"  pending patch stored: {_yes_no(pending_patch_summary is not None)}",
     ]
+    if pending_patch_summary is not None:
+        lines.extend(
+            [
+                f"  pending patch files: {pending_patch_summary.file_count}",
+                f"  pending patch hunks: {pending_patch_summary.hunk_count}",
+                "  apply command: /apply-patch",
+            ]
+        )
+    elif pending_patch_issue is not None:
+        lines.append(
+            f"  pending patch reason: {_safe_patch_issue_category(pending_patch_issue)}"
+        )
     if result.answer:
         lines.extend(["Patch proposal only, not applied", result.answer])
     else:
@@ -392,13 +419,80 @@ def render_patch_result(result: BackendResult) -> str:
     lines.extend(
         [
             "Safety state",
-            "  writes disabled",
+            "  writes disabled for /patch",
             "  shell disabled",
-            "  patch application disabled",
+            "  patch application disabled for /patch; requires explicit /apply-patch",
             "  patch applied: no",
         ]
     )
     return "\n".join(lines)
+
+
+def render_apply_patch_success(result: PatchApplyResult) -> str:
+    summary = result.summary
+    return "\n".join(
+        [
+            "SFE apply-patch",
+            "  status: applied",
+            f"  modified relative paths: {_format_string_list(list(summary.paths) if summary else [])}",
+            f"  file count: {summary.file_count if summary else 0}",
+            f"  hunk count: {summary.hunk_count if summary else 0}",
+            f"  lines added: {summary.lines_added if summary else 0}",
+            f"  lines removed: {summary.lines_removed if summary else 0}",
+            f"  pending patch cleared: {_yes_no(result.pending_patch_cleared)}",
+        ]
+    )
+
+
+def render_apply_patch_failure(
+    error_category: str,
+    issue: PatchIssue | None,
+    *,
+    pending_patch_cleared: bool,
+) -> str:
+    lines = [
+        "SFE apply-patch",
+        f"  status: failed",
+        f"  error category: {error_category}",
+    ]
+    if issue is not None and issue.path is not None:
+        lines.append(f"  relative path: {issue.path}")
+    if issue is not None:
+        lines.append(f"  reason category: {issue.reason}")
+    lines.extend(
+        [
+            f"  pending patch cleared: {_yes_no(pending_patch_cleared)}",
+            "  no files were modified",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _pending_patch_context_lines(summary: PatchSummary | None) -> list[str]:
+    if summary is None:
+        return [
+            "  pending patch: no",
+            "  pending patch files: 0",
+            "  pending patch hunks: 0",
+        ]
+    return [
+        "  pending patch: yes",
+        f"  pending patch files: {summary.file_count}",
+        f"  pending patch hunks: {summary.hunk_count}",
+    ]
+
+
+def _patch_summary_count(summary: PatchSummary | None, attr_name: str) -> int:
+    if summary is None:
+        return 0
+    return int(getattr(summary, attr_name))
+
+
+def _safe_patch_issue_category(issue: object) -> str:
+    category = getattr(issue, "category", None)
+    if category is None:
+        return "none"
+    return str(category)
 
 
 def _context_size_bucket(text_chars: int) -> str:

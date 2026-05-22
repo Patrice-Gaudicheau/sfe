@@ -1,16 +1,17 @@
 # TUI Apply Patch Design
 
-This note designs a possible future `/apply-patch` command for the first-party
-SFE TUI. It is a design boundary only. It does not imply that patch application
-is implemented or production-ready.
+This note defines the safety boundary for the first-party SFE TUI
+`/apply-patch` command. V0 implements the narrow local-only behavior described
+here; this document remains the boundary for what that implementation is and is
+not expected to support.
 
 ## Purpose
 
-Today `/patch` asks the configured read-only executor for a patch proposal and
+`/patch` asks the configured read-only executor for a patch proposal and
 renders it as proposal-only output. It does not write files, run shell
 commands, execute tools, call git, or apply anything.
 
-A future `/apply-patch` command should provide a separate, explicit, local-only
+`/apply-patch` provides a separate, explicit, local-only
 write boundary for applying a narrow subset of safe patch proposals inside the
 selected workspace.
 
@@ -71,7 +72,7 @@ The command should use the same general safety vocabulary already present in
 `sfe_tui.contracts` and `sfe.discovery`: workspace-relative refs, UTF-8 text
 checks, binary rejection, secret-like path rejection, and size limits.
 
-## Proposed Command Semantics
+## Command Semantics
 
 `/apply-patch` should apply only the latest pending patch proposal stored by a
 successful `/patch` command.
