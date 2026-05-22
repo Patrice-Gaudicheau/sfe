@@ -179,7 +179,23 @@ def test_startup_rejects_file_path_as_workspace(tmp_path) -> None:
         resolve_workspace(str(file_path), tmp_path)
 
 
-def test_pwd_reports_selected_workspace_safely(tmp_path) -> None:
+def test_directory_reports_selected_workspace_safely(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/directory", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    directory_outputs = [line for line in output if line.startswith("Workspace:")]
+    assert directory_outputs
+    assert directory_outputs[-1] == "Workspace: ."
+    assert str(tmp_path.resolve()) not in "\n".join(output)
+    assert "Authorization" not in "\n".join(output)
+
+
+def test_pwd_remains_undocumented_workspace_alias(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(["", "/pwd", "/quit"]),
@@ -188,11 +204,10 @@ def test_pwd_reports_selected_workspace_safely(tmp_path) -> None:
     )
 
     assert app.run() == 0
-    pwd_outputs = [line for line in output if line.startswith("Workspace:")]
-    assert pwd_outputs
-    assert pwd_outputs[-1] == "Workspace: ."
-    assert str(tmp_path.resolve()) not in "\n".join(output)
-    assert "Authorization" not in "\n".join(output)
+    rendered = "\n".join(output)
+    assert "Workspace: ." in rendered
+    assert "/pwd" not in render_help()
+    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_workspace_root_remains_absolute_resolved_internally(tmp_path) -> None:
@@ -865,6 +880,8 @@ def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
 def test_help_does_not_advertise_backend_switching() -> None:
     rendered = render_help()
 
+    assert "/directory" in rendered
+    assert "/pwd" not in rendered
     assert "/status" in rendered
     assert "/context" in rendered
     assert "/discover" in rendered
@@ -875,8 +892,14 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "files or directories" not in rendered
     assert "Add context" not in rendered
     assert "ProxyBackend" not in rendered
-    assert "Clear task, context, and routing; preserve workspace" in rendered
+    assert "Clear task, context, discovery, and routing; preserve workspace" in rendered
     assert "/backend" not in rendered
+    assert rendered.index("/directory") < rendered.index("/status")
+    assert rendered.index("/task <text>") < rendered.index("/discover")
+    assert rendered.index("/discover") < rendered.index("/dry-run")
+    assert rendered.index("/dry-run") < rendered.index("/context")
+    assert rendered.index("/context") < rendered.index("/ask")
+    assert rendered.index("/patch") < rendered.index("/files <paths...>")
 
 
 def test_task_without_text_is_actionable_error_and_preserves_existing_task(
@@ -1384,7 +1407,7 @@ def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
                 "/reset",
                 "/status",
                 "/context",
-                "/pwd",
+                "/directory",
                 "/quit",
             ]
         ),

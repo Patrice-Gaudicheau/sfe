@@ -15,16 +15,16 @@ def render_help() -> str:
         [
             "SFE TUI commands:",
             "  /help              Show this help",
-            "  /pwd               Show selected workspace",
+            "  /directory         Show selected workspace directory",
             "  /status            Show safe TUI state and disabled capabilities",
-            "  /context           Show safe loaded/selected context metadata",
             "  /task <text>       Set the current task",
             "  /discover          Discover workspace context for the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
+            "  /context           Show safe loaded/selected context metadata",
             "  /ask               Ask a read-only question using selected context",
             "  /patch             Propose a patch without applying it",
             "  /files <paths...>  Replace context manually for debug/design",
-            "  /reset             Clear task, context, and routing; preserve workspace",
+            "  /reset             Clear task, context, discovery, and routing; preserve workspace",
             "  /quit, /exit       Exit",
         ]
     )

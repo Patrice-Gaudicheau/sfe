@@ -9,10 +9,10 @@ this guide.
 
 ## What The TUI Is
 
-The SFE-aware TUI is a command-line interactive workflow for loading explicit
-local text files as context, setting a task, previewing local context routing,
-and optionally asking a configured read-only executor/provider for an answer or
-patch proposal.
+The SFE-aware TUI is a command-line interactive workflow for setting a task,
+discovering a controlled pool of workspace context, previewing local context
+routing, and optionally asking a configured read-only executor/provider for an
+answer or patch proposal.
 
 The TUI keeps the current task, selected workspace, loaded context metadata,
 local routing diagnostics, and latest ask/patch result in the session. It does
@@ -46,20 +46,19 @@ workspace paths using safe relative labels where possible.
 1. Check the selected workspace:
 
    ```text
-   /pwd
+   /directory
    ```
 
-2. Load one or more local text files as context. This replaces the currently
-   loaded context:
+2. Set the task:
 
    ```text
-   /files <path>
+   /task <question>
    ```
 
-3. Set the task:
+3. Discover workspace context:
 
    ```text
-   /task <text>
+   /discover
    ```
 
 4. Preview local routing without provider calls or writes:
@@ -80,7 +79,7 @@ workspace paths using safe relative labels where possible.
    /ask
    ```
 
-7. Request a patch proposal without applying it:
+7. Optionally request a patch proposal without applying it:
 
    ```text
    /patch
@@ -95,27 +94,70 @@ workspace paths using safe relative labels where possible.
 ## Command Reference
 
 - `/help`: show concise command help.
-- `/pwd`: show the selected workspace using safe display conventions.
+- `/directory`: show the selected workspace using safe display conventions.
 - `/status`: show safe TUI state, latest result metadata, and disabled
   capabilities.
+- `/task <text>`: store the current task. Empty tasks are rejected.
+- `/discover`: scan the selected workspace and build a controlled candidate
+  pool for the current task. Empty tasks are rejected.
+- `/dry-run`: build the SFE contract and run a local routing preview. After a
+  task is set, this requires `/discover` unless manual `/files` context exists.
 - `/context`: show loaded context segment count, opaque ids, safe source refs,
   approximate sizes/tokens, latest selected ids, and skipped/rejected metadata.
-- `/files <paths...>`: replace the loaded context with the provided text files.
-  Directory inputs and unsupported files are rejected or skipped with a reason.
-- `/task <text>`: store the current task. Empty tasks are rejected.
-- `/dry-run`: build the SFE contract and run a local routing preview.
 - `/ask`: send selected context plus protected task/instructions to the
-  configured read-only executor/provider.
-- `/patch`: ask for a patch proposal only. The proposal is not applied.
+  configured read-only executor/provider. After a task is set, this requires
+  `/discover` unless manual `/files` context exists.
+- `/patch`: ask for a patch proposal only. The proposal is not applied. After a
+  task is set, this requires `/discover` unless manual `/files` context exists.
+- `/files <paths...>`: replace context manually with the provided text files
+  for debug/design work. Directory inputs and unsupported files are rejected or
+  skipped with a reason. This remains available but is not the normal
+  human-facing workflow.
 - `/reset`: clear task, context, latest routing/result, and skipped/rejected
-  context state; preserve the selected workspace.
+  context and discovery state; preserve the selected workspace.
 - `/quit` and `/exit`: exit the TUI.
+
+Setting a new `/task` invalidates any previous discovery result. Run
+`/discover` again before `/dry-run`, `/ask`, or `/patch` unless you are using
+manual `/files` context.
+
+## Discovery
+
+`/discover` uses the reusable core discovery layer in `sfe/discovery.py`. It
+scans only inside the selected workspace and builds a bounded, deterministic
+candidate pool for the current task.
+
+Discovery is the first controlled TUI discovery workflow. It is not a claim of
+robust general retrieval or production readiness. The architecture boundary is:
+
+```text
+Discoverer -> Router -> Executor
+```
+
+In the current TUI:
+
+- the Discoverer is core workspace discovery in `sfe/discovery.py`;
+- the Router is still the provider-free local lexical preview;
+- the Executor is the configured read-only executor used by `DirectBackend`.
+
+Discovery does not call providers, write files, run shell commands, execute
+tools, or expose raw file contents in diagnostics. It excludes obvious
+unsafe/local/generated inputs such as `.env`, cache directories, local logs,
+local databases, JSONL streams, binary/non-UTF-8 files, and common build
+artifacts.
+
+`DiscoveryResult` is render-safe: its load results are scrubbed and should be
+used only for diagnostics. When the TUI later builds the real SFE contract for
+`/dry-run`, `/ask`, or `/patch`, it reloads selected discovered source refs
+through the explicit discovery loading boundary. That internal reload provides
+full text for routing/execution without exposing raw contents in status,
+discovery, context, or dry-run diagnostics.
 
 ## Dry Run
 
 `/dry-run` is a local preview. It uses the provider-free
-`local_lexical_preview` router to estimate which loaded context segments would
-be selected for the current task.
+`local_lexical_preview` router to estimate which loaded or discovered context
+segments would be selected for the current task.
 
 It reports preflight state, selected opaque segment ids, safe source refs,
 approximate token counts, fallback reasons where available, and safety flags.
@@ -124,9 +166,11 @@ apply patches.
 
 ## Ask
 
-`/ask` routes the loaded context locally, then sends only the selected context
+`/ask` routes active context locally, then sends only the selected context
 segments, protected instructions, and protected task to the configured
-read-only executor/provider.
+read-only executor/provider. In the canonical path, active context comes from
+`/discover`; manual `/files` context remains available for debug/design work
+and takes precedence when present.
 
 The answer returned by the provider is displayed to the user. Diagnostics remain
 limited to safe metadata such as counts, opaque segment ids, safe source refs,
@@ -158,8 +202,13 @@ The current TUI behavior intentionally keeps these boundaries:
 - no shell execution;
 - no tool execution;
 - no backend switching;
+- no proxy in the canonical TUI path;
+- discovery does not call providers, write files, or expose raw contents in
+  diagnostics;
 - patch application disabled;
 - `/dry-run` makes no executor/provider call;
+- `/ask` calls the configured executor only after local routing selects
+  context;
 - `/patch` is proposal-only and does not write files;
 - workspace and source paths are displayed using safe relative labels where
   possible;
@@ -169,6 +218,7 @@ The current TUI behavior intentionally keeps these boundaries:
 ## Current Limitations
 
 - The router is a local lexical preview, not an LLM router result.
+- Discovery is a first controlled TUI workflow, not robust general retrieval.
 - Routing quality is not yet proven across repeated realistic workflows.
 - `/patch` does not apply patches.
 - There is no CLI/API pipeline integration for the canonical TUI workflow yet.
@@ -178,35 +228,39 @@ The current TUI behavior intentionally keeps these boundaries:
 - The current test suite validates expected behavior and safety boundaries, but
   it does not establish production reliability or general practical value.
 
-## First Smoke Test
+## Repository-Root Smoke Test
 
-Use a small local text file inside the selected workspace:
+From the repository root:
 
 ```bash
-cd /tmp
-printf "SFE routing note: alpha context is relevant for the smoke test.\n" \
-  > sfe-smoke-note.txt
-python -m sfe_tui
+make sfe-tui
 ```
 
-In the TUI, accept `/tmp` as the current workspace, then run:
+In the TUI, accept the current workspace, then run:
 
 ```text
-/pwd
-/files sfe-smoke-note.txt
-/task Explain the alpha context in one sentence.
+/status
+/task Explique en quelques phrases comment SFE_PROVIDER est résolu.
+/discover
 /dry-run
 /context
 /ask
-/patch
-/reset
+/status
 /quit
 ```
 
 Expected observations:
 
+- `/status` reports `backend: direct`;
+- `/discover` reports safe candidate metadata and does not show task text,
+  raw file contents, absolute workspace paths, request bodies, authorization
+  headers, or API keys;
 - `/dry-run` reports local preview diagnostics and `provider calls made: 0`;
-- `/context` shows opaque segment ids and safe source refs, not file contents;
-- `/ask` requires a configured executor/provider before it can return an
-  answer;
-- `/patch` is clearly labeled as proposal-only and does not modify the file.
+- `/dry-run` uses discovered context;
+- `/context` shows opaque segment ids, safe source refs, approximate
+  sizes/tokens, and selection metadata, not raw file contents;
+- `/ask` requires a configured executor/provider and may report safe provider
+  errors if the configured provider is unavailable;
+- with `SFE_PROVIDER=lemonade` and Lemonade reachable, `/ask` can complete
+  through `DirectBackend`;
+- no proxy is used.

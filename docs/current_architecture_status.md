@@ -16,32 +16,74 @@ contract: selected workspace, protected task, protected instructions, explicit
 context segments, reducibility metadata, local routing diagnostics, and a
 read-only executor boundary.
 
+The current canonical TUI workflow is:
+
+```text
+/task <question>
+/discover
+/dry-run
+/context
+/ask
+```
+
+This is the first controlled TUI discovery workflow. It follows the intended
+architecture boundary:
+
+```text
+Discoverer -> Router -> Executor
+```
+
+The Discoverer is the reusable core discovery layer in `sfe/discovery.py`. It
+scans the selected workspace, builds a bounded candidate pool, keeps
+`DiscoveryResult` render-safe, and does not call providers, write files, run
+shell commands, or expose raw file contents in diagnostics. Full text is
+reloaded later through the explicit discovery loading boundary when the TUI
+builds an SFE contract.
+
+The Router remains the provider-free local lexical preview for now. It is not
+an LLM router result and should not be described as robust general retrieval.
+The Executor remains the configured read-only executor behind `DirectBackend`.
+
 The currently validated TUI commands are:
 
 - `/help`
-- `/pwd`
+- `/directory`
 - `/status`
-- `/context`
-- `/files`
 - `/task`
+- `/discover`
 - `/dry-run`
+- `/context`
 - `/ask`
 - `/patch`
+- `/files`
 - `/reset`
 
 `/dry-run` uses the local provider-free `local_lexical_preview` router. It is
 deterministic and useful for previewing selected segment ids, token estimates,
 score categories, and fallback reasons. It is not an LLM router result.
+After a task is set, `/dry-run` requires `/discover` unless manual `/files`
+context exists. It makes zero provider calls.
 
 `/ask` uses `DirectBackend`, selected context, protected instructions, and the
 protected task to produce a read-only answer. It does not use the proxy, switch
-backends, write files, execute shell commands, or run an agent loop.
+backends, write files, execute shell commands, or run an agent loop. After a
+task is set, `/ask` requires `/discover` unless manual `/files` context exists.
+It calls the configured executor only after local routing selected context.
 
 `/patch` is proposal-only. It may ask the read-only executor for a unified diff
 or a brief explanation of why no safe diff can be proposed. It must not apply
 file changes, modify the workspace, run shell commands, or imply that files were
-changed. Any future write/apply workflow needs a separate design and explicit
-confirmation boundary.
+changed. After a task is set, `/patch` requires `/discover` unless manual
+`/files` context exists. Any future write/apply workflow needs a separate design
+and explicit confirmation boundary.
+
+`/files` remains available as manual/debug context loading. It is no longer the
+normal human-facing workflow and should not be presented as the recommended TUI
+path.
+
+Setting `/task` invalidates previous discovery. `/reset` clears task, manual
+context, discovery state, latest routing/result, and skipped/rejected context
+state while preserving the selected workspace.
 
 ## Standby Experimental And Compatibility Path
 

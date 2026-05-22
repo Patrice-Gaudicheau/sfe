@@ -196,8 +196,10 @@ The tradeoff is that routing and orchestration have fixed costs. SFE only looks 
 
 ## Architecture
 
-At a high level, the current repository has five layers:
+At a high level, the current repository has these layers:
 
+- `sfe/`: core SFE helpers, including provider selection and reusable
+  provider-free workspace discovery.
 - `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
 - `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
 - `providers/`: minimal benchmark provider adapters, including Lemonade,
@@ -207,7 +209,35 @@ At a high level, the current repository has five layers:
 - `sfe_proxy/`: standby experimental OpenAI-compatible local proxy retained for
   compatibility research, observability, and historical stress tests.
 
-The main execution pattern is:
+The current canonical TUI path uses `DirectBackend` and follows:
+
+```text
+/task <question>
+/discover
+/dry-run
+/context
+/ask
+```
+
+The architecture boundary is:
+
+```text
+Discoverer -> Router -> Executor
+```
+
+For the TUI today, the Discoverer is core workspace discovery in
+`sfe/discovery.py`, the Router is still a provider-free local lexical preview,
+and the Executor is the configured read-only executor behind `DirectBackend`.
+`/discover` scans the selected workspace and builds a controlled candidate pool.
+It does not call providers, write files, run shell commands, or expose raw file
+contents in diagnostics. `/dry-run` still makes zero provider calls. `/ask`
+calls the configured executor only after routing selected context. No proxy is
+used in the canonical TUI path.
+
+Manual `/files` context loading remains available for debug/design work, but it
+is not the normal human-facing TUI workflow.
+
+The benchmark execution pattern remains:
 
 1. Load a task and available context.
 2. Route or select the relevant role/context block.
@@ -259,8 +289,9 @@ including the TUI and standby proxy compatibility path.
 These commands do not require provider API keys:
 
 ```bash
-python -m py_compile runtime/run_large_contextual_benchmark.py sfe_tui/*.py
+python -m py_compile runtime/run_large_contextual_benchmark.py sfe/discovery.py sfe_tui/*.py
 pytest tests/test_env_config.py -q
+pytest tests/test_sfe_discovery.py -q
 pytest tests/test_sfe_tui.py -q
 pytest tests/test_large_contextual_benchmark.py -q
 python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
@@ -268,6 +299,31 @@ python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
 
 Proxy tests remain available for standby/historical compatibility work, but
 they are not the current user-facing smoke path.
+
+For the current repository-root TUI smoke path:
+
+```bash
+make sfe-tui
+```
+
+Then accept the current workspace and run:
+
+```text
+/status
+/task Explique en quelques phrases comment SFE_PROVIDER est résolu.
+/discover
+/dry-run
+/context
+/ask
+/status
+/quit
+```
+
+Expected observations are modest: `/discover` reports safe candidate metadata,
+`/dry-run` reports `provider calls made: 0`, and `/ask` requires a configured
+provider. With `SFE_PROVIDER=lemonade` and Lemonade reachable, `/ask` can
+complete through `DirectBackend`. Provider errors should be reported safely if
+the configured provider is unavailable. No proxy is used.
 
 The full test suite can also be run from the repository root:
 

@@ -83,7 +83,7 @@ class SfeTuiApp:
             return False
         if name in {"/quit", "/exit"}:
             return True
-        if name == "/pwd":
+        if name in {"/directory", "/pwd"}:
             if self.workspace_root is None:
                 self.output("Workspace: not selected")
             else:
