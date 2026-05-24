@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 import urllib.error
 from dataclasses import replace
@@ -49,6 +50,7 @@ from sfe_tui.patch_review import (
     PatchReviewDecision,
     _build_review_prompt,
 )
+from sfe.workspace_review import WorkspaceReviewDecision
 from sfe_tui.renderer import (
     render_context_summary,
     render_dry_run_summary,
@@ -149,6 +151,28 @@ class FakePatchReviewer:
         self.calls: list[dict[str, object]] = []
 
     def review(self, payload: dict[str, object]) -> PatchReviewDecision:
+        self.calls.append(payload)
+        return self.decision
+
+
+class FakeWorkspaceReviewer:
+    def __init__(
+        self,
+        decision: WorkspaceReviewDecision | None = None,
+    ) -> None:
+        self.provider_name = "fake-workspace-router"
+        self.model = "fake-workspace-router-model"
+        self.decision = decision or WorkspaceReviewDecision(
+            decision="OK_PROMOTE",
+            reason="worktree changes match the requested task",
+            files_reviewed=("context.txt",),
+            risk_level="low",
+            provider_name=self.provider_name,
+            model=self.model,
+        )
+        self.calls: list[dict[str, object]] = []
+
+    def review(self, payload: dict[str, object]) -> WorkspaceReviewDecision:
         self.calls.append(payload)
         return self.decision
 
@@ -269,6 +293,30 @@ def replacement_proposal(
             "diff_preview": diff_preview or valid_text_diff(path, old=old, new=preview_new),
         }
     )
+
+
+def init_git_repo(path: Path) -> Path:
+    path.mkdir()
+    run_git(path, "init")
+    run_git(path, "config", "user.email", "sfe@example.invalid")
+    run_git(path, "config", "user.name", "SFE Test")
+    (path / "context.txt").write_text("old context\n", encoding="utf-8")
+    run_git(path, "add", "context.txt")
+    run_git(path, "commit", "-m", "initial")
+    run_git(path, "branch", "-M", "main")
+    return path
+
+
+def run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed
 
 
 def test_startup_accepts_empty_workspace_input_and_uses_cwd(tmp_path) -> None:
@@ -2419,6 +2467,336 @@ def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
     assert "pending patch: no" in status_block
 
 
+def test_patch_preview_is_computed_from_replacement_not_provider_preview(
+    tmp_path,
+) -> None:
+    source = tmp_path / "README.rst"
+    original = "| |sponsor| |bluesky-nedbat| |mastodon-nedbat|\n\nOld docs\n"
+    replacement = "|sponsor| |bluesky-nedbat| |mastodon-nedbat|\n\nOld docs\n\n>>> greet(\"Ada\")\n'Hello, Ada!'\n"
+    source.write_text(original, encoding="utf-8")
+    provider_preview = "\n".join(
+        [
+            "diff --git a/README.rst b/README.rst",
+            "--- a/README.rst",
+            "+++ b/README.rst",
+            "@@ -3,1 +3,4 @@",
+            " Old docs",
+            "+",
+            "+>>> greet(\"Ada\")",
+            "+'Hello, Ada!'",
+        ]
+    )
+    proposal = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "README.rst",
+                    "action": "replace_existing_file",
+                    "content": replacement,
+                }
+            ],
+            "diff_preview": provider_preview,
+        }
+    )
+
+    class DiffAwareReviewer:
+        provider_name = "diff-aware-router"
+        model = "diff-aware-model"
+
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def review(self, payload: dict[str, object]) -> PatchReviewDecision:
+            self.calls.append(payload)
+            diff = str(payload.get("diff_preview") or "")
+            if "-| |sponsor| |bluesky-nedbat| |mastodon-nedbat|" in diff:
+                return PatchReviewDecision(
+                    decision="KO_BLOCK",
+                    reason="computed effective diff includes unrelated README badge edit",
+                    files_reviewed=("README.rst",),
+                    risk_level="medium",
+                    provider_name=self.provider_name,
+                    model=self.model,
+                )
+            return PatchReviewDecision(
+                decision="OK_APPLY",
+                reason="no unrelated computed diff found",
+                files_reviewed=("README.rst",),
+                risk_level="low",
+                provider_name=self.provider_name,
+                model=self.model,
+            )
+
+    reviewer = DiffAwareReviewer()
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=proposal,
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files README.rst",
+                "/task Update README greeting docs",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "-| |sponsor| |bluesky-nedbat| |mastodon-nedbat|" in rendered
+    assert "+|sponsor| |bluesky-nedbat| |mastodon-nedbat|" in rendered
+    assert reviewer.calls
+    reviewed_diff = str(reviewer.calls[0]["diff_preview"])
+    assert "-| |sponsor| |bluesky-nedbat| |mastodon-nedbat|" in reviewed_diff
+    assert "+|sponsor| |bluesky-nedbat| |mastodon-nedbat|" in reviewed_diff
+    assert reviewed_diff != provider_preview
+    assert "router decision: KO_BLOCK" in rendered
+    assert "computed effective diff includes unrelated README badge edit" in rendered
+    assert source.read_text(encoding="utf-8") == original
+
+
+def test_isolate_on_non_git_workspace_reports_unsupported(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/isolate", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE isolate" in rendered
+    assert "status: failed" in rendered
+    assert "error category: unsupported_workspace" in rendered
+    assert "reason: not_inside_git_repository" in rendered
+    assert app.workspace_session is None
+
+
+def test_isolate_on_clean_git_repo_creates_worktree_and_switches_active_workspace(
+    tmp_path,
+) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/isolate", "/workspace-status", "/quit"]),
+        output=output.append,
+        cwd=repo,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    assert app.workspace_root == session.worktree_path
+    assert session.worktree_path.exists()
+    assert session.worktree_branch.startswith("sfe/worktree/")
+    assert "SFE isolate" in rendered
+    assert "status: created" in rendered
+    assert "SFE workspace-status" in rendered
+    assert "mode: isolated" in rendered
+    assert "status available: yes" in rendered
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_patch_apply_after_isolate_writes_only_to_worktree(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=replacement_proposal(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    reviewer = FakePatchReviewer()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/isolate",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert (session.worktree_path / "context.txt").read_text(encoding="utf-8") == "new context\n"
+    assert run_git(repo, "status", "--porcelain").stdout.strip() == ""
+    rendered = "\n".join(output)
+    assert "router decision: OK_APPLY" in rendered
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_worktree_diff_shows_changed_files(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=lambda text: None,
+        cwd=repo,
+    )
+    assert app._select_workspace() is True
+    app._handle_command("/isolate")
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    (session.worktree_path / "context.txt").write_text("changed in worktree\n", encoding="utf-8")
+    output: list[str] = []
+    app.output = output.append
+
+    app._handle_command("/worktree-diff")
+
+    rendered = "\n".join(output)
+    assert "SFE worktree-diff" in rendered
+    assert "changed files: context.txt" in rendered
+    assert "changed in worktree" in rendered
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_review_worktree_renders_ok_promote(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    reviewer = FakeWorkspaceReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=lambda text: None,
+        cwd=repo,
+        workspace_reviewer=reviewer,
+    )
+    assert app._select_workspace() is True
+    app._handle_command("/task Patch old context")
+    app._handle_command("/isolate")
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    (session.worktree_path / "context.txt").write_text("changed in worktree\n", encoding="utf-8")
+    output: list[str] = []
+    app.output = output.append
+
+    app._handle_command("/review-worktree")
+
+    rendered = "\n".join(output)
+    assert "SFE review-worktree" in rendered
+    assert "router decision: OK_PROMOTE" in rendered
+    assert "router provider: fake-workspace-router" in rendered
+    assert "router reason: worktree changes match the requested task" in rendered
+    assert "merge: not performed" in rendered
+    assert reviewer.calls[0]["original_user_task"] == "Patch old context"
+    assert reviewer.calls[0]["changed_files"] == ["context.txt"]
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_review_worktree_renders_ko_block(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    reviewer = FakeWorkspaceReviewer(
+        WorkspaceReviewDecision(
+            decision="KO_BLOCK",
+            reason="worktree changes are unrelated",
+            files_reviewed=("context.txt",),
+            risk_level="high",
+            provider_name="fake-workspace-router",
+            model="fake-workspace-router-model",
+        )
+    )
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=lambda text: None,
+        cwd=repo,
+        workspace_reviewer=reviewer,
+    )
+    assert app._select_workspace() is True
+    app._handle_command("/task Patch old context")
+    app._handle_command("/isolate")
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    (session.worktree_path / "context.txt").write_text("unrelated\n", encoding="utf-8")
+    output: list[str] = []
+    app.output = output.append
+
+    app._handle_command("/review-worktree")
+
+    rendered = "\n".join(output)
+    assert "router decision: KO_BLOCK" in rendered
+    assert "router risk level: high" in rendered
+    assert "router reason: worktree changes are unrelated" in rendered
+    assert "promotion: not performed" in rendered
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_cleanup_worktree_removes_sfe_worktree_and_restores_source_workspace(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=repo,
+    )
+    assert app._select_workspace() is True
+    app._handle_command("/isolate")
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    assert session.worktree_path.exists()
+
+    app._handle_command("/cleanup-worktree")
+
+    rendered = "\n".join(output)
+    assert "SFE cleanup-worktree" in rendered
+    assert "status: cleaned" in rendered
+    assert app.workspace_session is None
+    assert app.workspace_root == repo.resolve()
+    assert not session.worktree_path.exists()
+    assert session.metadata_path is not None
+    assert not session.metadata_path.exists()
+
+
+def test_reset_does_not_delete_active_worktree(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/isolate", "/task Patch old context", "/reset", "/quit"]),
+        output=output.append,
+        cwd=repo,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    assert session.worktree_path.exists()
+    assert app.workspace_root == session.worktree_path
+    assert app.task == ""
+    rendered = "\n".join(output)
+    assert "Session reset. Workspace is preserved." in rendered
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
 def test_patch_review_prompt_describes_full_replacement_as_expected_transport() -> None:
     payload = {
         "proposal_format": "file_replacements",
@@ -2445,6 +2823,7 @@ def test_patch_review_prompt_describes_full_replacement_as_expected_transport() 
     assert "expected internal application format" in prompt
     assert "not evidence that the user-visible edit is large or non-minimal" in prompt
     assert "Compare current_files with proposed_full_replacements" in prompt
+    assert "diff_preview field was computed locally by SFE" in prompt
     assert "Allow OK_APPLY when the effective diff is small" in prompt
     assert "Patch review payload JSON:" in prompt
 
@@ -3131,8 +3510,9 @@ def test_patch_system_instruction_requires_structured_file_replacements() -> Non
     assert '"path":"relative/path"' in instruction
     assert '"action":"replace_existing_file"' in instruction
     assert '"content":"full replacement file content"' in instruction
-    assert '"diff_preview":"optional unified diff for display"' in instruction
+    assert '"diff_preview":"optional untrusted diagnostic diff"' in instruction
     assert "full replacement content as the source of truth" in instruction
+    assert "SFE computes the trusted preview diff locally" in instruction
     assert "Do not return markdown fences or prose" in instruction
     assert "Only use the action replace_existing_file" in instruction
     assert "Only modify existing files" in instruction

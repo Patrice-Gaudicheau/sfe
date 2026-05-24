@@ -19,6 +19,18 @@ from sfe.patching import (
     validate_patch_paths,
 )
 from sfe.env import load_repo_env
+from sfe.git_worktree_backend import GitWorktreeBackend
+from sfe.workspace_isolation import (
+    WorkspaceIsolationPolicy,
+    WorkspaceManager,
+    WorkspaceSession,
+)
+from sfe.workspace_review import (
+    WorkspaceReviewError,
+    WorkspaceReviewer,
+    build_workspace_review_payload,
+    create_workspace_reviewer,
+)
 
 from .backends import (
     BackendAdapter,
@@ -75,13 +87,18 @@ class SfeTuiApp:
         cwd: Path | None = None,
         backend: BackendAdapter | None = None,
         patch_reviewer: PatchReviewer | None = None,
+        workspace_manager: WorkspaceManager | None = None,
+        workspace_reviewer: WorkspaceReviewer | None = None,
     ) -> None:
         self.input_provider = input_provider or TerminalInput()
         self.output = output
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
+        self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
+        self.workspace_reviewer = workspace_reviewer or create_workspace_reviewer()
         self.workspace_root: Path | None = None
+        self.workspace_session: WorkspaceSession | None = None
         self.context_files: list[ContextLoadResult] = []
         self.discovery_result: DiscoveryResult | None = None
         self.task = ""
@@ -194,6 +211,21 @@ class SfeTuiApp:
         if name == "/apply-patch":
             self._handle_apply_patch()
             return False
+        if name == "/isolate":
+            self._handle_isolate()
+            return False
+        if name == "/workspace-status":
+            self._handle_workspace_status()
+            return False
+        if name == "/worktree-diff":
+            self._handle_worktree_diff()
+            return False
+        if name == "/review-worktree":
+            self._handle_review_worktree()
+            return False
+        if name == "/cleanup-worktree":
+            self._handle_cleanup_worktree()
+            return False
         if name == "/reset":
             self._handle_reset()
             return False
@@ -241,6 +273,107 @@ class SfeTuiApp:
         self.latest_result = None
         self._clear_pending_patch()
         self.output(renderer.render_reset())
+
+    def _handle_isolate(self) -> None:
+        if self.workspace_root is None:
+            self.output(renderer.render_error("workspace_not_selected"))
+            return
+        if self.workspace_session is not None:
+            self.output(renderer.render_error("workspace_already_isolated"))
+            return
+        result = self.workspace_manager.create(
+            self.workspace_root,
+            WorkspaceIsolationPolicy(),
+        )
+        if not result.created or result.session is None:
+            self.output(renderer.render_isolate_failure(result.issue))
+            return
+        session = result.session
+        self.workspace_session = session
+        self.workspace_root = self._active_path_for_session(session)
+        self.context_files = []
+        self.discovery_result = None
+        self.latest_result = None
+        self._clear_pending_patch()
+        self.output(
+            renderer.render_isolate_success(
+                session,
+                active_workspace=self.workspace_root,
+                launch_cwd=self.cwd,
+            )
+        )
+
+    def _handle_workspace_status(self) -> None:
+        status_result = (
+            self.workspace_manager.status(self.workspace_session)
+            if self.workspace_session is not None
+            else None
+        )
+        self.output(
+            renderer.render_workspace_mode_status(
+                workspace_root=self.workspace_root,
+                workspace_session=self.workspace_session,
+                status_result=status_result,
+                launch_cwd=self.cwd,
+            )
+        )
+
+    def _handle_worktree_diff(self) -> None:
+        if self.workspace_session is None:
+            self.output(renderer.render_error("no_isolated_workspace"))
+            return
+        status_result = self.workspace_manager.status(self.workspace_session)
+        self.output(renderer.render_worktree_diff(status_result))
+
+    def _handle_review_worktree(self) -> None:
+        if self.workspace_session is None:
+            self.output(renderer.render_error("no_isolated_workspace"))
+            return
+        status_result = self.workspace_manager.status(self.workspace_session)
+        if not status_result.ok or status_result.status is None:
+            self.output(renderer.render_worktree_review_failure(status_result.issue))
+            return
+        payload = build_workspace_review_payload(
+            original_user_task=self.task,
+            workspace_status=status_result.status,
+            test_results={"ran": False},
+            discovered_constraints=self._infer_task_constraints(),
+        )
+        try:
+            decision = self.workspace_reviewer.review(payload)
+        except WorkspaceReviewError as exc:
+            self.output(
+                renderer.render_worktree_review_failure(
+                    None,
+                    failure_category=exc.category,
+                    router_reason=exc.reason,
+                    router_provider=getattr(self.workspace_reviewer, "provider_name", None),
+                    router_model=getattr(self.workspace_reviewer, "model", None),
+                )
+            )
+            return
+        self.output(renderer.render_worktree_review_success(decision))
+
+    def _handle_cleanup_worktree(self) -> None:
+        if self.workspace_session is None:
+            self.output(renderer.render_error("no_isolated_workspace"))
+            return
+        session = self.workspace_session
+        result = self.workspace_manager.cleanup(session)
+        if result.cleaned:
+            self.workspace_session = None
+            self.workspace_root = session.source_path
+            self.context_files = []
+            self.discovery_result = None
+            self.latest_result = None
+            self._clear_pending_patch()
+        self.output(
+            renderer.render_cleanup_worktree_result(
+                result,
+                restored_workspace=session.source_path if result.cleaned else None,
+                launch_cwd=self.cwd,
+            )
+        )
 
     def _handle_context(self) -> None:
         contract = self._build_contract_for_current_state(require_discovery=False)[0]
@@ -466,15 +599,11 @@ class SfeTuiApp:
         parsed = parse_file_replacement_proposal(result.answer)
         if parsed.proposal is None or parsed.summary is None:
             return None, parsed.issue
-        preview = parsed.proposal.diff_preview or generate_replacement_diff_preview(
+        preview = generate_replacement_diff_preview(
             self.workspace_root,
             parsed.proposal,
         )
-        proposal = (
-            parsed.proposal
-            if parsed.proposal.diff_preview
-            else FileReplacementProposal(parsed.proposal.edits, preview or None)
-        )
+        proposal = FileReplacementProposal(parsed.proposal.edits, preview or None)
         summary = summarize_file_replacements(proposal)
         selected_ids = list(result.contract.audit.get("selected_segment_ids") or [])
         selected_refs = tuple(
@@ -559,7 +688,8 @@ class SfeTuiApp:
                 "full_file_replacement_is_transport_format_only": True,
                 "do_not_reject_solely_because_full_file_replacement": True,
                 "judge_effective_delta_between_current_and_proposed_content": True,
-                "use_diff_preview_to_understand_intended_minimal_delta": True,
+                "effective_diff_is_computed_by_sfe_from_current_and_proposed_content": True,
+                "reject_unrelated_or_surprising_effective_diff_changes": True,
                 "ok_apply_when_effective_delta_is_small_task_aligned_and_preserves_unrelated_content": True,
                 "ko_block_when_delta_is_unrelated_dangerous_missing_required_changes_or_preview_mismatch": True,
             },
@@ -614,6 +744,13 @@ class SfeTuiApp:
 
     def _task_hash(self) -> str:
         return hashlib.sha256(self.task.encode("utf-8")).hexdigest()[:16]
+
+    def _active_path_for_session(self, session: WorkspaceSession) -> Path:
+        try:
+            relative_source = session.source_path.relative_to(session.source_git_root)
+        except ValueError:
+            relative_source = Path()
+        return (session.worktree_path / relative_source).resolve()
 
     def _empty_contract(self) -> SFEContract:
         return build_contract(

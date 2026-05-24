@@ -6,6 +6,13 @@ from pathlib import Path
 
 from sfe.discovery import DiscoveryResult
 from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
+from sfe.router_review import JsonReviewDecision
+from sfe.workspace_isolation import (
+    WorkspaceCleanupResult,
+    WorkspaceIssue,
+    WorkspaceSession,
+    WorkspaceStatusResult,
+)
 
 from .backends import BackendResult
 from .contracts import ContextLoadResult, SFEContract
@@ -26,6 +33,11 @@ def render_help() -> str:
             "  /ask               Ask a read-only question using selected context",
             "  /patch             Propose a patch without applying it",
             "  /apply-patch       Apply latest pending patch proposal",
+            "  /isolate           Create and switch to an isolated Git worktree",
+            "  /workspace-status  Show original/isolated workspace state",
+            "  /worktree-diff     Show isolated worktree status and diff",
+            "  /review-worktree   Ask router for OK_PROMOTE or KO_BLOCK",
+            "  /cleanup-worktree  Remove the active SFE-created worktree",
             "  /files <paths...>  Replace context manually for debug/design",
             "  /reset             Clear task, context, discovery, and routing; preserve workspace",
             "  /quit, /exit       Exit",
@@ -91,6 +103,8 @@ def render_error(message: str) -> str:
         "workspace_not_found": "workspace not found",
         "workspace_not_directory": "workspace path is not a directory",
         "no_pending_patch": "run /patch first",
+        "workspace_already_isolated": "cleanup the active worktree before creating another",
+        "no_isolated_workspace": "run /isolate first",
     }.get(message)
     if guidance is None:
         return f"Error: {message}"
@@ -143,6 +157,184 @@ def render_status(
             "  writes enabled: automatic writes disabled; explicit /apply-patch available",
             "  shell enabled: no",
             "  patch application enabled: explicit /apply-patch available",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_isolate_success(
+    session: WorkspaceSession,
+    *,
+    active_workspace: Path,
+    launch_cwd: Path | None = None,
+) -> str:
+    return "\n".join(
+        [
+            "SFE isolate",
+            "  status: created",
+            f"  session id: {session.session_id}",
+            f"  source workspace: {safe_workspace_label(session.source_path, launch_cwd)}",
+            f"  active workspace: {safe_workspace_label(active_workspace, launch_cwd)}",
+            f"  worktree path: {safe_workspace_label(session.worktree_path, launch_cwd)}",
+            f"  source branch: {session.source_branch}",
+            f"  worktree branch: {session.worktree_branch}",
+            "  promotion: disabled; use /review-worktree for router validation",
+        ]
+    )
+
+
+def render_isolate_failure(issue: WorkspaceIssue | None) -> str:
+    return "\n".join(
+        [
+            "SFE isolate",
+            "  status: failed",
+            f"  error category: {_workspace_issue_category(issue)}",
+            f"  reason: {_workspace_issue_reason(issue)}",
+            "  active workspace unchanged",
+        ]
+    )
+
+
+def render_workspace_mode_status(
+    *,
+    workspace_root: Path | None,
+    workspace_session: WorkspaceSession | None,
+    status_result: WorkspaceStatusResult | None,
+    launch_cwd: Path | None = None,
+) -> str:
+    lines = [
+        "SFE workspace-status",
+        f"  mode: {'isolated' if workspace_session is not None else 'original'}",
+        f"  active workspace: {safe_workspace_label(workspace_root, launch_cwd) if workspace_root is not None else 'not selected'}",
+    ]
+    if workspace_session is None:
+        lines.append("  isolated session: none")
+        return "\n".join(lines)
+    lines.extend(
+        [
+            f"  session id: {workspace_session.session_id}",
+            f"  source workspace: {safe_workspace_label(workspace_session.source_path, launch_cwd)}",
+            f"  worktree path: {safe_workspace_label(workspace_session.worktree_path, launch_cwd)}",
+            f"  source branch: {workspace_session.source_branch}",
+            f"  worktree branch: {workspace_session.worktree_branch}",
+        ]
+    )
+    if status_result is None:
+        return "\n".join(lines)
+    if not status_result.ok or status_result.status is None:
+        lines.extend(
+            [
+                f"  status available: no",
+                f"  error category: {_workspace_issue_category(status_result.issue)}",
+                f"  reason: {_workspace_issue_reason(status_result.issue)}",
+            ]
+        )
+        return "\n".join(lines)
+    lines.extend(
+        [
+            "  status available: yes",
+            f"  changed files: {_format_string_list(list(status_result.status.changed_files))}",
+            f"  git status lines: {len(status_result.status.git_status_porcelain.splitlines())}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_worktree_diff(status_result: WorkspaceStatusResult) -> str:
+    lines = [
+        "SFE worktree-diff",
+    ]
+    if not status_result.ok or status_result.status is None:
+        lines.extend(
+            [
+                "  status: failed",
+                f"  error category: {_workspace_issue_category(status_result.issue)}",
+                f"  reason: {_workspace_issue_reason(status_result.issue)}",
+            ]
+        )
+        return "\n".join(lines)
+    status = status_result.status
+    diff = _truncate_text(status.git_diff, max_chars=4000)
+    lines.extend(
+        [
+            "  status: ok",
+            f"  changed files: {_format_string_list(list(status.changed_files))}",
+            f"  git status lines: {len(status.git_status_porcelain.splitlines())}",
+            "Git status",
+            status.git_status_porcelain.rstrip() or "  clean",
+            "Git diff",
+            diff.rstrip() or "  no diff",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_worktree_review_success(decision: JsonReviewDecision) -> str:
+    return "\n".join(
+        [
+            "SFE review-worktree",
+            "  status: reviewed",
+            *_router_decision_lines(decision),
+            "  promotion: not performed",
+            "  merge: not performed",
+            "  push: not performed",
+        ]
+    )
+
+
+def render_worktree_review_failure(
+    issue: WorkspaceIssue | None,
+    *,
+    failure_category: str | None = None,
+    router_reason: str | None = None,
+    router_provider: str | None = None,
+    router_model: str | None = None,
+) -> str:
+    lines = [
+        "SFE review-worktree",
+        "  status: failed",
+        f"  error category: {failure_category or _workspace_issue_category(issue)}",
+    ]
+    if router_reason is not None:
+        lines.extend(
+            [
+                f"  router provider: {_display_value(router_provider)}",
+                f"  router model: {_display_value(router_model)}",
+                f"  router reason: {router_reason}",
+            ]
+        )
+    else:
+        lines.append(f"  reason: {_workspace_issue_reason(issue)}")
+    lines.extend(
+        [
+            "  promotion: not performed",
+            "  merge: not performed",
+            "  push: not performed",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_cleanup_worktree_result(
+    result: WorkspaceCleanupResult,
+    *,
+    restored_workspace: Path | None = None,
+    launch_cwd: Path | None = None,
+) -> str:
+    lines = [
+        "SFE cleanup-worktree",
+        f"  status: {'cleaned' if result.cleaned else 'failed'}",
+    ]
+    if result.cleaned:
+        lines.append(
+            f"  active workspace: {safe_workspace_label(restored_workspace, launch_cwd) if restored_workspace is not None else 'original'}"
+        )
+        return "\n".join(lines)
+    lines.extend(
+        [
+            f"  error category: {_workspace_issue_category(result.issue)}",
+            f"  reason: {_workspace_issue_reason(result.issue)}",
+            "  active workspace unchanged",
         ]
     )
     return "\n".join(lines)
@@ -509,6 +701,24 @@ def _router_decision_lines(decision: PatchReviewDecision) -> list[str]:
         f"  router files reviewed: {_format_string_list(list(decision.files_reviewed))}",
         f"  router reason: {decision.reason}",
     ]
+
+
+def _workspace_issue_category(issue: WorkspaceIssue | None) -> str:
+    if issue is None:
+        return "workspace_error"
+    return issue.category
+
+
+def _workspace_issue_reason(issue: WorkspaceIssue | None) -> str:
+    if issue is None:
+        return "unknown"
+    return issue.reason
+
+
+def _truncate_text(text: str, *, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n... truncated ..."
 
 
 def _pending_patch_context_lines(summary: PatchSummary | None) -> list[str]:
