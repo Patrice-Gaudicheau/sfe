@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 import urllib.error
 from dataclasses import replace
@@ -41,6 +42,12 @@ from sfe_tui.executors import (
     PATCH_SYSTEM_INSTRUCTION,
     READ_ONLY_SYSTEM_INSTRUCTION,
     create_tui_executor,
+)
+from sfe_tui.patch_review import (
+    PATCH_REVIEW_SYSTEM_INSTRUCTION,
+    DirectProviderPatchReviewer,
+    PatchReviewDecision,
+    _build_review_prompt,
 )
 from sfe_tui.renderer import (
     render_context_summary,
@@ -83,7 +90,7 @@ class FakeExecutor:
             provider_calls_made=1,
         )
         self.patch_response = patch_response or ExecutorResponse(
-            answer="diff --git a/context.txt b/context.txt\n--- a/context.txt\n+++ b/context.txt",
+            answer=replacement_proposal(),
             error_category=None,
             provider_calls_made=1,
         )
@@ -122,6 +129,70 @@ class FakeProvider:
         if self.error is not None:
             raise self.error
         return self.response
+
+
+class FakePatchReviewer:
+    def __init__(
+        self,
+        decision: PatchReviewDecision | None = None,
+    ) -> None:
+        self.provider_name = "fake-router"
+        self.model = "fake-router-model"
+        self.decision = decision or PatchReviewDecision(
+            decision="OK_APPLY",
+            reason="patch matches the requested task",
+            files_reviewed=("context.txt",),
+            risk_level="low",
+            provider_name=self.provider_name,
+            model=self.model,
+        )
+        self.calls: list[dict[str, object]] = []
+
+    def review(self, payload: dict[str, object]) -> PatchReviewDecision:
+        self.calls.append(payload)
+        return self.decision
+
+
+class DeltaAwareFakePatchReviewer:
+    provider_name = "fake-router"
+    model = "fake-router-model"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def review(self, payload: dict[str, object]) -> PatchReviewDecision:
+        self.calls.append(payload)
+        current_by_path = {
+            str(item["path"]): str(item.get("content") or "")
+            for item in payload.get("current_files", [])
+            if isinstance(item, dict) and item.get("available")
+        }
+        unrelated_paths: list[str] = []
+        for item in payload.get("proposed_full_replacements", []):
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "")
+            proposed = str(item.get("content") or "")
+            current = current_by_path.get(path, "")
+            if current and not proposed.startswith(current):
+                unrelated_paths.append(path)
+        if unrelated_paths:
+            return PatchReviewDecision(
+                decision="KO_BLOCK",
+                reason="effective delta replaces unrelated content",
+                files_reviewed=tuple(unrelated_paths),
+                risk_level="high",
+                provider_name=self.provider_name,
+                model=self.model,
+            )
+        return PatchReviewDecision(
+            decision="OK_APPLY",
+            reason="effective delta is a small task-aligned addition",
+            files_reviewed=tuple(current_by_path),
+            risk_level="low",
+            provider_name=self.provider_name,
+            model=self.model,
+        )
 
 
 class FakeHTTPResponse:
@@ -173,6 +244,30 @@ def markdown_fenced_diff(
             f"+{new}",
             "```",
         ]
+    )
+
+
+def replacement_proposal(
+    path: str = "context.txt",
+    *,
+    old: str = "old context",
+    new: str = "new context\n",
+    content: str | None = None,
+    diff_preview: str | None = None,
+) -> str:
+    replacement = content if content is not None else new
+    preview_new = replacement.rstrip("\n")
+    return json.dumps(
+        {
+            "edits": [
+                {
+                    "path": path,
+                    "action": "replace_existing_file",
+                    "content": replacement,
+                }
+            ],
+            "diff_preview": diff_preview or valid_text_diff(path, old=old, new=preview_new),
+        }
     )
 
 
@@ -567,9 +662,9 @@ def test_dry_run_with_context_but_missing_task_does_not_fake_reduction(
     assert "estimated reduction pct: 100.0" not in dry_run_block
     assert "provider calls made: 0" in dry_run_block
     assert "executor/provider called: no" in dry_run_block
-    assert "writes disabled" in dry_run_block
+    assert "automatic writes disabled" in dry_run_block
     assert "shell disabled" in dry_run_block
-    assert "patch application disabled" in dry_run_block
+    assert "patch application available through explicit /apply-patch" in dry_run_block
     assert "SECRET_FILE_CONTENT" not in dry_run_block
     assert str(tmp_path.resolve()) not in rendered
 
@@ -760,9 +855,9 @@ def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
     assert "latest result present: no" in status_block
     assert "latest result kind: none" in status_block
     assert "latest provider calls made: 0" in status_block
-    assert "writes enabled: no" in status_block
+    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in status_block
     assert "shell enabled: no" in status_block
-    assert "patch application enabled: no" in status_block
+    assert "patch application enabled: explicit /apply-patch available" in status_block
     assert "/backend" not in status_block
     assert "ProxyBackend" not in status_block
     assert str(tmp_path.resolve()) not in status_block
@@ -834,9 +929,9 @@ def test_status_after_dry_run_reports_latest_result_and_no_provider_calls(
     assert "latest result present: yes" in status_block
     assert "latest result kind: dry_run_only" in status_block
     assert "latest provider calls made: 0" in status_block
-    assert "writes enabled: no" in status_block
+    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in status_block
     assert "shell enabled: no" in status_block
-    assert "patch application enabled: no" in status_block
+    assert "patch application enabled: explicit /apply-patch available" in status_block
 
 
 def test_status_after_ask_reports_latest_provider_calls(tmp_path) -> None:
@@ -865,9 +960,9 @@ def test_status_after_ask_reports_latest_provider_calls(tmp_path) -> None:
     assert "latest result present: yes" in status_block
     assert "latest result kind: ask_completed" in status_block
     assert "latest provider calls made: 1" in status_block
-    assert "writes enabled: no" in status_block
+    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in status_block
     assert "shell enabled: no" in status_block
-    assert "patch application enabled: no" in status_block
+    assert "patch application enabled: explicit /apply-patch available" in status_block
 
 
 def test_status_reports_discovery_state_without_content(tmp_path) -> None:
@@ -908,9 +1003,9 @@ def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
     assert "backend: direct" in rendered
     assert "workspace: ." in rendered
     assert "latest provider calls made: 0" in rendered
-    assert "writes enabled: no" in rendered
+    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in rendered
     assert "shell enabled: no" in rendered
-    assert "patch application enabled: no" in rendered
+    assert "patch application enabled: explicit /apply-patch available" in rendered
     assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
@@ -1799,9 +1894,9 @@ def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
     assert "selected source refs: context.txt" in diagnostics
     assert "provider calls made: 1" in diagnostics
     assert "Safety state" in rendered
-    assert "writes disabled" in rendered
+    assert "automatic writes disabled" in rendered
     assert "shell disabled" in rendered
-    assert "patch application disabled" in rendered
+    assert "patch application available through explicit /apply-patch" in rendered
     assert "SECRET_FILE_CONTENT" not in diagnostics
     assert "Explain context" not in diagnostics
     assert str(tmp_path) not in diagnostics
@@ -2016,9 +2111,9 @@ def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
     assert "selected segment ids: ctx_" in diagnostics
     assert "selected source refs: context.txt" in diagnostics
     assert "provider calls made: 1" in diagnostics
-    assert "writes disabled" in rendered
+    assert "automatic writes disabled" in rendered
     assert "shell disabled" in rendered
-    assert "patch application disabled" in rendered
+    assert "patch application available through explicit /apply-patch" in rendered
     assert "patch applied: no" in rendered
     assert "SECRET_FILE_CONTENT" not in diagnostics
     assert "Patch context" not in diagnostics
@@ -2059,7 +2154,7 @@ def test_patch_provider_failure_is_category_only(tmp_path) -> None:
     assert "reason: provider_error" in rendered
     assert "provider call failed; check provider configuration and retry" in rendered
     assert "no files were modified" in rendered
-    assert "patch application disabled" in rendered
+    assert "patch application available through explicit /apply-patch" in rendered
     assert "patch applied: no" in rendered
     assert api_key not in rendered
     assert "Authorization" not in rendered
@@ -2138,12 +2233,12 @@ def test_apply_patch_without_pending_patch_reports_actionable_error(tmp_path) ->
     assert "run /patch first" in rendered
 
 
-def test_patch_stores_pending_patch_only_for_valid_diff(tmp_path) -> None:
+def test_patch_stores_pending_file_replacement_proposal(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(),
+            answer=replacement_proposal(),
             error_category=None,
             provider_calls_made=1,
         )
@@ -2161,7 +2256,11 @@ def test_patch_stores_pending_patch_only_for_valid_diff(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert app.pending_patch is not None
+    assert app.pending_patch.proposal.edits[0].content == "new context\n"
     assert "pending patch stored: yes" in rendered
+    patch_block = rendered.split("SFE patch", 1)[1].split("SFE TUI status", 1)[0]
+    assert "diff --git a/context.txt b/context.txt" in patch_block
+    assert '"edits"' not in patch_block
     status_block = rendered.split("SFE TUI status", 1)[1]
     assert "pending patch: yes" in status_block
     assert "pending patch files: 1" in status_block
@@ -2195,7 +2294,7 @@ def test_patch_non_diff_output_does_not_store_pending_patch(tmp_path) -> None:
     assert "pending patch: no" in rendered
 
 
-def test_patch_markdown_fenced_diff_does_not_store_pending_patch(tmp_path) -> None:
+def test_patch_legacy_diff_only_output_is_unsupported_pending_format(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
@@ -2213,7 +2312,6 @@ def test_patch_markdown_fenced_diff_does_not_store_pending_patch(tmp_path) -> No
                 "/files context.txt",
                 "/task Patch old context",
                 "/patch",
-                "/apply-patch",
                 "/quit",
             ]
         ),
@@ -2227,17 +2325,15 @@ def test_patch_markdown_fenced_diff_does_not_store_pending_patch(tmp_path) -> No
     assert app.pending_patch is None
     assert source.read_text(encoding="utf-8") == "old context\n"
     assert "pending patch stored: no" in rendered
-    assert "pending patch reason: invalid_patch_proposal" in rendered
-    assert "Error: no_pending_patch" in rendered
-    assert "run /patch first" in rendered
+    assert "pending patch reason: unsupported_pending_patch_format" in rendered
 
 
-def test_patch_dangerous_diff_does_not_store_pending_patch(tmp_path) -> None:
+def test_patch_hidden_or_secret_like_path_stores_pending_patch(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(".env", old="SECRET=old", new="SECRET=new"),
+            answer=replacement_proposal(".env", old="SECRET=old", new="SECRET=new\n"),
             error_category=None,
             provider_calls_made=1,
         )
@@ -2254,9 +2350,9 @@ def test_patch_dangerous_diff_does_not_store_pending_patch(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert app.pending_patch is None
-    assert "pending patch stored: no" in rendered
-    assert "pending patch reason: unsafe_patch" in rendered
+    assert app.pending_patch is not None
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch: yes" in rendered
 
 
 def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
@@ -2266,12 +2362,13 @@ def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(),
+            answer=replacement_proposal(),
             error_category=None,
             provider_calls_made=1,
         )
     )
     output: list[str] = []
+    reviewer = FakePatchReviewer()
     app = SfeTuiApp(
         input_provider=FakeInput(
             [
@@ -2287,6 +2384,7 @@ def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
         output=output.append,
         cwd=tmp_path,
         backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
     )
 
     assert app.run() == 0
@@ -2295,58 +2393,195 @@ def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
     assert app.pending_patch is None
     assert "SFE apply-patch" in rendered
     assert "status: applied" in rendered
+    assert "router decision: OK_APPLY" in rendered
+    assert "router provider: fake-router" in rendered
+    assert "router reason: patch matches the requested task" in rendered
     assert "modified relative paths: context.txt" in rendered
     assert "file count: 1" in rendered
     assert "hunk count: 1" in rendered
     assert "lines added: 1" in rendered
     assert "lines removed: 1" in rendered
     assert "pending patch cleared: yes" in rendered
+    assert reviewer.calls[0]["proposal_format"] == "file_replacements"
+    guidance = reviewer.calls[0]["review_guidance"]
+    assert guidance["full_file_replacements_are_expected"] is True
+    assert guidance["do_not_reject_solely_because_full_file_replacement"] is True
+    assert guidance["judge_effective_delta_between_current_and_proposed_content"] is True
+    assert reviewer.calls[0]["proposed_full_replacements"] == [
+        {
+            "path": "context.txt",
+            "action": "replace_existing_file",
+            "content": "new context\n",
+        }
+    ]
+    assert "pending_patch" not in reviewer.calls[0]
     status_block = rendered.split("SFE TUI status", 1)[1]
     assert "pending patch: no" in status_block
 
 
-def test_apply_patch_preimage_mismatch_writes_nothing_and_keeps_pending_patch(
-    tmp_path,
-) -> None:
+def test_patch_review_prompt_describes_full_replacement_as_expected_transport() -> None:
+    payload = {
+        "proposal_format": "file_replacements",
+        "current_files": [{"path": "context.txt", "content": "old context\n"}],
+        "proposed_full_replacements": [
+            {
+                "path": "context.txt",
+                "action": "replace_existing_file",
+                "content": "old context\nnew line\n",
+            }
+        ],
+        "diff_preview": "@@ -1 +1,2 @@\n old context\n+new line",
+    }
+
+    prompt = _build_review_prompt(payload)
+
+    assert "full-file replacements" in PATCH_REVIEW_SYSTEM_INSTRUCTION
+    assert "Do not reject a proposal merely because it uses full-file replacement format" in (
+        PATCH_REVIEW_SYSTEM_INSTRUCTION
+    )
+    assert "Judge the effective semantic and textual delta" in (
+        PATCH_REVIEW_SYSTEM_INSTRUCTION
+    )
+    assert "expected internal application format" in prompt
+    assert "not evidence that the user-visible edit is large or non-minimal" in prompt
+    assert "Compare current_files with proposed_full_replacements" in prompt
+    assert "Allow OK_APPLY when the effective diff is small" in prompt
+    assert "Patch review payload JSON:" in prompt
+
+
+def test_direct_patch_reviewer_sends_full_replacement_guidance_to_provider() -> None:
+    provider = FakeProvider(
+        response={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "decision": "OK_APPLY",
+                                "reason": "effective delta is small",
+                                "files_reviewed": ["context.txt"],
+                                "risk_level": "low",
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+    )
+    reviewer = DirectProviderPatchReviewer(
+        provider=provider,
+        provider_name="fake-router",
+        model="fake-router-model",
+        call_style="system_instruction",
+    )
+
+    decision = reviewer.review(
+        {
+            "proposal_format": "file_replacements",
+            "current_files": [{"path": "context.txt", "content": "old context\n"}],
+            "proposed_full_replacements": [
+                {"path": "context.txt", "content": "old context\nnew line\n"}
+            ],
+        }
+    )
+
+    assert decision.decision == "OK_APPLY"
+    assert "full-file replacements" in provider.calls[0]["system_instruction"]
+    assert "Do not reject a proposal merely because it uses full-file replacement format" in (
+        provider.calls[0]["system_instruction"]
+    )
+    prompt = provider.calls[0]["messages"][0]["content"]
+    assert "expected internal application format" in prompt
+    assert "not evidence that the user-visible edit is large or non-minimal" in prompt
+
+
+def test_delta_aware_reviewer_allows_small_delta_full_replacement(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(),
-            error_category=None,
-            provider_calls_made=1,
+            replacement_proposal(content="old context\nnew line\n"),
+            None,
+            1,
         )
     )
+    reviewer = DeltaAwareFakePatchReviewer()
     output: list[str] = []
     app = SfeTuiApp(
-        input_provider=FakeInput([""]),
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
         output=output.append,
         cwd=tmp_path,
         backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
     )
-    assert app._select_workspace() is True
-    app._handle_files("context.txt")
-    app._handle_command("/task Patch old context")
-    app._handle_patch()
-    source.write_text("changed context\n", encoding="utf-8")
 
-    app._handle_apply_patch()
-
+    assert app.run() == 0
     rendered = "\n".join(output)
-    assert source.read_text(encoding="utf-8") == "changed context\n"
-    assert app.pending_patch is not None
-    assert "error category: patch_preimage_mismatch" in rendered
-    assert "pending patch cleared: no" in rendered
+    assert source.read_text(encoding="utf-8") == "old context\nnew line\n"
+    assert "router decision: OK_APPLY" in rendered
+    assert "router reason: effective delta is a small task-aligned addition" in rendered
 
 
-def test_apply_patch_makes_zero_provider_calls(tmp_path) -> None:
+def test_delta_aware_reviewer_blocks_unrelated_full_replacement(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(),
-            error_category=None,
-            provider_calls_made=1,
+            replacement_proposal(content="totally unrelated rewrite\n"),
+            None,
+            1,
+        )
+    )
+    reviewer = DeltaAwareFakePatchReviewer()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert app.pending_patch is not None
+    assert "router decision: KO_BLOCK" in rendered
+    assert "router reason: effective delta replaces unrelated content" in rendered
+
+
+def test_apply_patch_router_ko_blocks_and_keeps_pending_patch(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    reviewer = FakePatchReviewer(
+        PatchReviewDecision(
+            decision="KO_BLOCK",
+            reason="patch changes the wrong behavior",
+            files_reviewed=("context.txt",),
+            risk_level="medium",
+            provider_name="fake-router",
+            model="fake-router-model",
         )
     )
     output: list[str] = []
@@ -2364,11 +2599,270 @@ def test_apply_patch_makes_zero_provider_calls(tmp_path) -> None:
         output=output.append,
         cwd=tmp_path,
         backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert app.pending_patch is not None
+    assert len(reviewer.calls) == 1
+    assert "error category: router_rejected_patch" in rendered
+    assert "failure kind: router_rejected" in rendered
+    assert "router decision: KO_BLOCK" in rendered
+    assert "router reason: patch changes the wrong behavior" in rendered
+    assert "pending patch cleared: no" in rendered
+
+
+def test_apply_patch_absolute_path_rejected_before_router_review(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal("/tmp/outside.txt"), None, 1)
+    )
+    reviewer = FakePatchReviewer()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert len(reviewer.calls) == 0
+    assert "failure kind: mechanical_safety_guard" in rendered
+    assert "reason category: absolute_path" in rendered
+
+
+def test_apply_patch_workspace_escape_rejected_before_router_review(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal("../outside.txt"), None, 1)
+    )
+    reviewer = FakePatchReviewer()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert len(reviewer.calls) == 0
+    assert "failure kind: mechanical_safety_guard" in rendered
+    assert "reason category: path_outside_workspace" in rendered
+
+
+def test_apply_patch_physical_write_failure_keeps_pending_patch(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=replacement_proposal("missing.txt"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+    assert app._select_workspace() is True
+    app._handle_files("context.txt")
+    app._handle_command("/task Patch old context")
+    app._handle_patch()
+
+    app._handle_apply_patch()
+
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert app.pending_patch is not None
+    assert "error category: physical_write_failure" in rendered
+    assert "failure kind: physical_write_failure" in rendered
+    assert "reason category: target_not_existing_file" in rendered
+    assert "hunk_preimage_mismatch" not in rendered
+    assert "router decision: OK_APPLY" in rendered
+    assert "pending patch cleared: no" in rendered
+
+
+def test_apply_patch_physical_write_failure_rolls_back_prior_writes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("old first\n", encoding="utf-8")
+    second.write_text("old second\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            json.dumps(
+                {
+                    "edits": [
+                        {
+                            "path": "first.txt",
+                            "action": "replace_existing_file",
+                            "content": "new first\n",
+                        },
+                        {
+                            "path": "second.txt",
+                            "action": "replace_existing_file",
+                            "content": "new second\n",
+                        },
+                    ],
+                    "diff_preview": "\n".join(
+                        [
+                            valid_text_diff("first.txt", old="old first", new="new first"),
+                            valid_text_diff("second.txt", old="old second", new="new second"),
+                        ]
+                    ),
+                }
+            ),
+            None,
+            1,
+        )
+    )
+    import sfe_tui.file_edits as file_edits
+
+    real_replace = file_edits.os.replace
+    replace_calls = 0
+
+    def fail_second_replace(src: object, dst: object) -> None:
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 2:
+            raise OSError("simulated replace failure")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(file_edits.os, "replace", fail_second_replace)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files first.txt second.txt",
+                "/task Patch old first and old second",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert first.read_text(encoding="utf-8") == "old first\n"
+    assert second.read_text(encoding="utf-8") == "old second\n"
+    assert app.pending_patch is not None
+    assert "error category: physical_write_failure" in rendered
+    assert "pending patch cleared: no" in rendered
+
+
+def test_apply_patch_calls_router_reviewer_but_not_ask_executor(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=replacement_proposal(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    reviewer = FakePatchReviewer()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
     )
 
     assert app.run() == 0
     assert len(executor.patch_calls) == 1
     assert len(executor.calls) == 0
+    assert len(reviewer.calls) == 1
+
+
+def test_apply_patch_does_not_use_shell_commands(tmp_path, monkeypatch) -> None:
+    import os
+    import subprocess
+
+    def fail_shell(*_: object, **__: object) -> None:
+        raise AssertionError("shell command should not be used")
+
+    monkeypatch.setattr(os, "system", fail_shell)
+    monkeypatch.setattr(subprocess, "run", fail_shell)
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    assert source.read_text(encoding="utf-8") == "new context\n"
 
 
 def test_pending_patch_clear_lifecycle_commands(tmp_path) -> None:
@@ -2387,7 +2881,7 @@ def test_pending_patch_clear_lifecycle_commands(tmp_path) -> None:
         other.write_text("other context\n", encoding="utf-8")
         executor = FakeExecutor(
             response=ExecutorResponse("mock answer", None, 1),
-            patch_response=ExecutorResponse(valid_text_diff(), None, 1),
+            patch_response=ExecutorResponse(replacement_proposal(), None, 1),
         )
         output: list[str] = []
         app = SfeTuiApp(
@@ -2411,7 +2905,7 @@ def test_pending_patch_preserved_by_observation_commands(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
-        patch_response=ExecutorResponse(valid_text_diff(), None, 1)
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
     )
     output: list[str] = []
     app = SfeTuiApp(
@@ -2430,33 +2924,43 @@ def test_pending_patch_preserved_by_observation_commands(tmp_path) -> None:
         assert app.pending_patch is not None
 
 
-def test_apply_patch_invalid_pending_state_clears_without_writing(tmp_path) -> None:
+def test_patch_unsupported_edit_format_does_not_store_pending_proposal(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
     executor = FakeExecutor(
-        patch_response=ExecutorResponse(valid_text_diff(), None, 1)
+        patch_response=ExecutorResponse(
+            json.dumps(
+                {
+                    "edits": [
+                        {
+                            "path": "context.txt",
+                            "action": "create_file",
+                            "content": "new context\n",
+                        }
+                    ]
+                }
+            ),
+            None,
+            1,
+        )
     )
     output: list[str] = []
     app = SfeTuiApp(
-        input_provider=FakeInput([""]),
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/quit"]
+        ),
         output=output.append,
         cwd=tmp_path,
         backend=DirectBackend(executor=executor),
     )
-    assert app._select_workspace() is True
-    app._handle_files("context.txt")
-    app._handle_command("/task Patch old context")
-    app._handle_patch()
-    assert app.pending_patch is not None
-    app.pending_patch = replace(app.pending_patch, text="not a diff")
 
-    app._handle_apply_patch()
+    assert app.run() == 0
 
     rendered = "\n".join(output)
     assert source.read_text(encoding="utf-8") == "old context\n"
     assert app.pending_patch is None
-    assert "error category: invalid_patch_proposal" in rendered
-    assert "pending patch cleared: yes" in rendered
+    assert "pending patch stored: no" in rendered
+    assert "pending patch reason: unsupported_edit_format" in rendered
 
 
 def test_status_and_context_show_safe_pending_patch_metadata(tmp_path) -> None:
@@ -2464,7 +2968,10 @@ def test_status_and_context_show_safe_pending_patch_metadata(tmp_path) -> None:
     source.write_text("old context SECRET_FILE_CONTENT\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(old="old context SECRET_FILE_CONTENT", new="new context"),
+            answer=replacement_proposal(
+                old="old context SECRET_FILE_CONTENT",
+                new="new context\n",
+            ),
             error_category=None,
             provider_calls_made=1,
         )
@@ -2505,9 +3012,9 @@ def test_apply_diagnostics_omit_raw_sensitive_material(tmp_path) -> None:
     source.write_text("old context SECRET_FILE_CONTENT\n", encoding="utf-8")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
-            answer=valid_text_diff(
+            answer=replacement_proposal(
                 old="old context SECRET_FILE_CONTENT",
-                new="new context SECRET_FILE_CONTENT",
+                new="new context SECRET_FILE_CONTENT\n",
             ),
             error_category=None,
             provider_calls_made=1,
@@ -2528,6 +3035,7 @@ def test_apply_diagnostics_omit_raw_sensitive_material(tmp_path) -> None:
         output=output.append,
         cwd=tmp_path,
         backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
     )
 
     assert app.run() == 0
@@ -2609,33 +3117,33 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     )
 
     assert result.answer == "provider answer"
-    assert DEFAULT_PATCH_OUTPUT_TOKENS == 4000
+    assert DEFAULT_PATCH_OUTPUT_TOKENS == 12000
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["system_instruction"] != READ_ONLY_SYSTEM_INSTRUCTION
-    assert provider.calls[0]["max_tokens"] == 4000
+    assert provider.calls[0]["max_tokens"] == 12000
 
 
-def test_patch_system_instruction_requires_strict_supported_diff() -> None:
+def test_patch_system_instruction_requires_structured_file_replacements() -> None:
     instruction = PATCH_SYSTEM_INSTRUCTION
 
-    assert "Return only a strict unified diff" in instruction
-    assert "diff --git a/path b/path" in instruction
-    assert "--- a/path" in instruction
-    assert "+++ b/path" in instruction
-    assert "@@ -old_start,old_count +new_start,new_count @@" in instruction
-    assert "Do not use markdown fences" in instruction
-    assert "Do not write prose before or after the diff" in instruction
+    assert "Return only one strict JSON object" in instruction
+    assert '"edits"' in instruction
+    assert '"path":"relative/path"' in instruction
+    assert '"action":"replace_existing_file"' in instruction
+    assert '"content":"full replacement file content"' in instruction
+    assert '"diff_preview":"optional unified diff for display"' in instruction
+    assert "full replacement content as the source of truth" in instruction
+    assert "Do not return markdown fences or prose" in instruction
+    assert "Only use the action replace_existing_file" in instruction
     assert "Only modify existing files" in instruction
     assert "Do not invent files" in instruction
-    assert "Do not use /dev/null" in instruction
-    assert "new files" in instruction
+    assert "creates" in instruction
     assert "deletes" in instruction
     assert "renames" in instruction
     assert "mode changes" in instruction
-    assert "chmod changes" in instruction
     assert "binary patches" in instruction
     assert "symlink changes" in instruction
-    assert "one short non-diff refusal sentence" in instruction
+    assert "one short non-JSON refusal sentence" in instruction
 
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
@@ -3616,9 +4124,9 @@ def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
     assert "backend: direct" in rendered
     assert "provider calls made: 0" in rendered
     assert "executor/provider called: no" in rendered
-    assert "writes disabled" in rendered
+    assert "automatic writes disabled" in rendered
     assert "shell disabled" in rendered
-    assert "patch application disabled" in rendered
+    assert "patch application available through explicit /apply-patch" in rendered
     assert "not an LLM router result" in rendered
 
 

@@ -9,6 +9,7 @@ from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
 
 from .backends import BackendResult
 from .contracts import ContextLoadResult, SFEContract
+from .patch_review import PatchReviewDecision
 
 
 def render_help() -> str:
@@ -139,9 +140,9 @@ def render_status(
             f"  pending patch: {_yes_no(pending_patch_summary is not None)}",
             f"  pending patch files: {_patch_summary_count(pending_patch_summary, 'file_count')}",
             f"  pending patch hunks: {_patch_summary_count(pending_patch_summary, 'hunk_count')}",
-            "  writes enabled: no automatic writes; apply-patch only",
+            "  writes enabled: automatic writes disabled; explicit /apply-patch available",
             "  shell enabled: no",
-            "  patch application enabled: no automatic apply; explicit /apply-patch only",
+            "  patch application enabled: explicit /apply-patch available",
         ]
     )
     return "\n".join(lines)
@@ -300,9 +301,9 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
             f"  backend: {result.backend}",
             f"  provider calls made: {result.provider_calls_made}",
             "  executor/provider called: no",
-            "  writes disabled",
+            "  automatic writes disabled; explicit /apply-patch available",
             "  shell disabled",
-            "  patch application disabled",
+            "  patch application available through explicit /apply-patch",
             f"  status: {result.status}",
         ]
     )
@@ -349,9 +350,9 @@ def render_ask_result(result: BackendResult) -> str:
     lines.extend(
         [
             "Safety state",
-            "  writes disabled",
+            "  automatic writes disabled; explicit /apply-patch available",
             "  shell disabled",
-            "  patch application disabled",
+            "  patch application available through explicit /apply-patch",
         ]
     )
     return "\n".join(lines)
@@ -362,6 +363,7 @@ def render_patch_result(
     *,
     pending_patch_summary: PatchSummary | None = None,
     pending_patch_issue: object | None = None,
+    pending_patch_preview: str | None = None,
 ) -> str:
     audit = result.contract.audit
     selected_ids = list(audit.get("selected_segment_ids") or [])
@@ -407,7 +409,11 @@ def render_patch_result(
             f"  pending patch reason: {_safe_patch_issue_category(pending_patch_issue)}"
         )
     if result.answer:
-        lines.extend(["Patch proposal only, not applied", result.answer])
+        if pending_patch_summary is not None:
+            proposal_text = pending_patch_preview or "No text diff preview available."
+        else:
+            proposal_text = result.answer
+        lines.extend(["Patch proposal only, not applied", proposal_text])
     else:
         lines.extend(
             [
@@ -419,21 +425,29 @@ def render_patch_result(
     lines.extend(
         [
             "Safety state",
-            "  writes disabled for /patch",
+            "  automatic writes disabled for /patch",
             "  shell disabled",
-            "  patch application disabled for /patch; requires explicit /apply-patch",
+            "  patch application available through explicit /apply-patch",
             "  patch applied: no",
         ]
     )
     return "\n".join(lines)
 
 
-def render_apply_patch_success(result: PatchApplyResult) -> str:
+def render_apply_patch_success(
+    result: PatchApplyResult,
+    *,
+    router_decision: PatchReviewDecision | None = None,
+) -> str:
     summary = result.summary
-    return "\n".join(
+    lines = [
+        "SFE apply-patch",
+        "  status: applied",
+    ]
+    if router_decision is not None:
+        lines.extend(_router_decision_lines(router_decision))
+    lines.extend(
         [
-            "SFE apply-patch",
-            "  status: applied",
             f"  modified relative paths: {_format_string_list(list(summary.paths) if summary else [])}",
             f"  file count: {summary.file_count if summary else 0}",
             f"  hunk count: {summary.hunk_count if summary else 0}",
@@ -442,6 +456,7 @@ def render_apply_patch_success(result: PatchApplyResult) -> str:
             f"  pending patch cleared: {_yes_no(result.pending_patch_cleared)}",
         ]
     )
+    return "\n".join(lines)
 
 
 def render_apply_patch_failure(
@@ -449,12 +464,29 @@ def render_apply_patch_failure(
     issue: PatchIssue | None,
     *,
     pending_patch_cleared: bool,
+    failure_kind: str | None = None,
+    router_decision: PatchReviewDecision | None = None,
+    router_reason: str | None = None,
+    router_provider: str | None = None,
+    router_model: str | None = None,
 ) -> str:
     lines = [
         "SFE apply-patch",
         f"  status: failed",
         f"  error category: {error_category}",
     ]
+    if failure_kind is not None:
+        lines.append(f"  failure kind: {failure_kind}")
+    if router_decision is not None:
+        lines.extend(_router_decision_lines(router_decision))
+    elif router_reason is not None:
+        lines.extend(
+            [
+                f"  router provider: {_display_value(router_provider)}",
+                f"  router model: {_display_value(router_model)}",
+                f"  router reason: {router_reason}",
+            ]
+        )
     if issue is not None and issue.path is not None:
         lines.append(f"  relative path: {issue.path}")
     if issue is not None:
@@ -466,6 +498,17 @@ def render_apply_patch_failure(
         ]
     )
     return "\n".join(lines)
+
+
+def _router_decision_lines(decision: PatchReviewDecision) -> list[str]:
+    return [
+        f"  router decision: {decision.decision}",
+        f"  router provider: {_display_value(decision.provider_name)}",
+        f"  router model: {_display_value(decision.model)}",
+        f"  router risk level: {decision.risk_level}",
+        f"  router files reviewed: {_format_string_list(list(decision.files_reviewed))}",
+        f"  router reason: {decision.reason}",
+    ]
 
 
 def _pending_patch_context_lines(summary: PatchSummary | None) -> list[str]:

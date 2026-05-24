@@ -29,7 +29,7 @@ from sfe.provider_config import resolve_sfe_provider
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
-DEFAULT_PATCH_OUTPUT_TOKENS = 4000
+DEFAULT_PATCH_OUTPUT_TOKENS = 12000
 DEFAULT_LEMONADE_EXECUTOR_MODEL = "Qwen3.5-35B-A3B-GGUF"
 READ_ONLY_SYSTEM_INSTRUCTION = (
     "You are the read-only SFE TUI executor. Answer only from the selected "
@@ -37,19 +37,17 @@ READ_ONLY_SYSTEM_INSTRUCTION = (
     "or use tools."
 )
 PATCH_SYSTEM_INSTRUCTION = (
-    "You are the SFE TUI patch proposal executor. Return only a strict unified "
-    "diff when a safe concrete edit can be made from the selected context. "
-    "The first output line must be exactly a diff header in this shape: "
-    "diff --git a/path b/path. Then include --- a/path, +++ b/path, and "
-    "@@ -old_start,old_count +new_start,new_count @@ hunks with context, "
-    "removed, and added lines. Use a/ and b/ path prefixes. Do not use "
-    "markdown fences. Do not write prose before or after the diff. Do not use "
-    "bullet points, file summaries, or explanations. Only modify existing "
-    "files from the selected context. Do not invent files or file contents "
-    "outside the selected context. Do not use /dev/null. Do not propose new "
-    "files, deletes, renames, copy changes, mode changes, chmod changes, "
-    "binary patches, or symlink changes. If no safe patch can be proposed, "
-    "return one short non-diff refusal sentence."
+    "You are the SFE TUI patch proposal executor. Return only one strict JSON "
+    "object with this shape: {\"edits\":[{\"path\":\"relative/path\","
+    "\"action\":\"replace_existing_file\",\"content\":\"full replacement file "
+    "content\"}],\"diff_preview\":\"optional unified diff for display\"}. "
+    "Use full replacement content as the source of truth for every touched "
+    "file. Do not return markdown fences or prose. Only use the action "
+    "replace_existing_file. Only modify existing files from the selected "
+    "context. Do not invent files or file contents outside the selected "
+    "context. Do not propose creates, deletes, renames, mode changes, binary "
+    "patches, or symlink changes. If no safe patch can be proposed, return one "
+    "short non-JSON refusal sentence."
 )
 
 

@@ -14,14 +14,11 @@ from sfe.discovery import (
     load_discovered_context,
 )
 from sfe.patching import (
-    INVALID_PATCH_PROPOSAL,
-    PATCH_PREIMAGE_MISMATCH,
-    ParsedPatch,
+    MECHANICAL_GUARD_REJECTED,
     PatchSummary,
-    apply_patch_to_workspace,
-    parse_unified_diff,
-    validate_patch_targets,
+    validate_patch_paths,
 )
+from sfe.env import load_repo_env
 
 from .backends import (
     BackendAdapter,
@@ -38,6 +35,18 @@ from .contracts import (
     resolve_workspace,
 )
 from .input import TerminalInput
+from .file_edits import (
+    FileReplacementProposal,
+    apply_file_replacements,
+    generate_replacement_diff_preview,
+    parse_file_replacement_proposal,
+    summarize_file_replacements,
+)
+from .patch_review import (
+    PatchReviewError,
+    PatchReviewer,
+    create_tui_patch_reviewer,
+)
 from . import renderer
 
 
@@ -47,7 +56,8 @@ OutputFunc = Callable[[str], None]
 @dataclass(frozen=True)
 class PendingPatchProposal:
     text: str
-    parsed_patch: ParsedPatch
+    proposal: FileReplacementProposal
+    preview: str
     source: str
     created_from_task_hash: str
     selected_source_refs: tuple[str, ...]
@@ -64,11 +74,13 @@ class SfeTuiApp:
         output: OutputFunc = print,
         cwd: Path | None = None,
         backend: BackendAdapter | None = None,
+        patch_reviewer: PatchReviewer | None = None,
     ) -> None:
         self.input_provider = input_provider or TerminalInput()
         self.output = output
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
+        self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_root: Path | None = None
         self.context_files: list[ContextLoadResult] = []
         self.discovery_result: DiscoveryResult | None = None
@@ -328,6 +340,9 @@ class SfeTuiApp:
                     pending_patch.summary if pending_patch is not None else None
                 ),
                 pending_patch_issue=pending_issue,
+                pending_patch_preview=(
+                    pending_patch.preview if pending_patch is not None else None
+                ),
             )
         )
 
@@ -338,46 +353,60 @@ class SfeTuiApp:
         if self.pending_patch is None:
             self.output(renderer.render_error("no_pending_patch"))
             return
-        parsed = parse_unified_diff(self.pending_patch.text)
-        if parsed.patch is None:
+        guard_issue = validate_patch_paths(
+            self.workspace_root,
+            self.pending_patch.proposal.paths,
+        )
+        if guard_issue is not None:
             self._clear_pending_patch()
             self.output(
                 renderer.render_apply_patch_failure(
-                    INVALID_PATCH_PROPOSAL,
-                    parsed.issue,
+                    guard_issue.category or MECHANICAL_GUARD_REJECTED,
+                    guard_issue,
                     pending_patch_cleared=True,
+                    failure_kind="mechanical_safety_guard",
                 )
             )
             return
-        validation = validate_patch_targets(self.workspace_root, parsed.patch)
-        if not validation.ok:
-            self._clear_pending_patch()
+        review_payload = self._build_patch_review_payload()
+        try:
+            review = self.patch_reviewer.review(review_payload)
+        except PatchReviewError as exc:
             self.output(
                 renderer.render_apply_patch_failure(
-                    validation.issue.category if validation.issue else "unsafe_patch",
-                    validation.issue,
-                    pending_patch_cleared=True,
+                    exc.category,
+                    None,
+                    pending_patch_cleared=False,
+                    failure_kind="router_review_failed",
+                    router_reason=exc.reason,
+                    router_provider=getattr(self.patch_reviewer, "provider_name", None),
+                    router_model=getattr(self.patch_reviewer, "model", None),
                 )
             )
             return
-        result = apply_patch_to_workspace(self.workspace_root, parsed.patch)
+        if review.decision == "KO_BLOCK":
+            self.output(
+                renderer.render_apply_patch_failure(
+                    "router_rejected_patch",
+                    None,
+                    pending_patch_cleared=False,
+                    failure_kind="router_rejected",
+                    router_decision=review,
+                )
+            )
+            return
+        result = apply_file_replacements(self.workspace_root, self.pending_patch.proposal)
         if result.applied:
             self._clear_pending_patch()
-            self.output(renderer.render_apply_patch_success(result))
+            self.output(renderer.render_apply_patch_success(result, router_decision=review))
             return
-        if result.issue is not None and result.issue.category == PATCH_PREIMAGE_MISMATCH:
-            self.output(renderer.render_apply_patch_failure(
-                result.issue.category,
-                result.issue,
-                pending_patch_cleared=False,
-            ))
-            return
-        self._clear_pending_patch()
         self.output(
             renderer.render_apply_patch_failure(
-                result.issue.category if result.issue else "unsafe_patch",
+                result.issue.category if result.issue else "physical_write_failure",
                 result.issue,
-                pending_patch_cleared=True,
+                pending_patch_cleared=False,
+                failure_kind="physical_write_failure",
+                router_decision=review,
             )
         )
 
@@ -434,12 +463,19 @@ class SfeTuiApp:
     ) -> tuple[PendingPatchProposal | None, object | None]:
         if self.workspace_root is None or not result.answer:
             return None, result.error_category
-        parsed = parse_unified_diff(result.answer)
-        if parsed.patch is None:
+        parsed = parse_file_replacement_proposal(result.answer)
+        if parsed.proposal is None or parsed.summary is None:
             return None, parsed.issue
-        validation = validate_patch_targets(self.workspace_root, parsed.patch)
-        if not validation.ok or validation.summary is None:
-            return None, validation.issue
+        preview = parsed.proposal.diff_preview or generate_replacement_diff_preview(
+            self.workspace_root,
+            parsed.proposal,
+        )
+        proposal = (
+            parsed.proposal
+            if parsed.proposal.diff_preview
+            else FileReplacementProposal(parsed.proposal.edits, preview or None)
+        )
+        summary = summarize_file_replacements(proposal)
         selected_ids = list(result.contract.audit.get("selected_segment_ids") or [])
         selected_refs = tuple(
             segment.source_ref
@@ -449,7 +485,8 @@ class SfeTuiApp:
         return (
             PendingPatchProposal(
                 text=result.answer,
-                parsed_patch=parsed.patch,
+                proposal=proposal,
+                preview=preview,
                 source="patch",
                 created_from_task_hash=self._task_hash(),
                 selected_source_refs=selected_refs,
@@ -458,10 +495,119 @@ class SfeTuiApp:
                     if result.summary.get("executor_provider") is not None
                     else None
                 ),
-                summary=validation.summary,
+                summary=summary,
+                parse_status="structured_replacements",
             ),
             None,
         )
+
+    def _build_patch_review_payload(self) -> dict[str, object]:
+        current_files: list[dict[str, object]] = []
+        proposed_files: list[dict[str, object]] = []
+        summary = self.pending_patch.summary
+        if self.workspace_root is not None:
+            root = self.workspace_root.resolve()
+            for edit in self.pending_patch.proposal.edits:
+                source_ref = edit.path
+                path = root / source_ref
+                proposed_files.append(
+                    {
+                        "path": source_ref,
+                        "action": edit.action,
+                        "content": edit.content,
+                    }
+                )
+                try:
+                    raw = path.read_bytes()
+                except OSError:
+                    current_files.append(
+                        {
+                            "path": source_ref,
+                            "available": False,
+                            "reason": "read_error",
+                        }
+                    )
+                    continue
+                current_files.append(
+                    {
+                        "path": source_ref,
+                        "available": True,
+                        "content": raw.decode("utf-8", errors="replace"),
+                    }
+                )
+        allowed_paths = sorted(
+            set(self.pending_patch.selected_source_refs if self.pending_patch else ())
+            | {
+                result.source_ref
+                for result in self._active_context_files(require_discovery=False)
+                if result.loaded and result.source_ref is not None
+            }
+            | {
+                candidate.source_ref
+                for candidate in (
+                    self.discovery_result.candidates
+                    if self.discovery_result is not None
+                    else ()
+                )
+            }
+        )
+        return {
+            "original_user_task": self.task,
+            "proposal_format": "file_replacements",
+            "review_guidance": {
+                "full_file_replacements_are_expected": True,
+                "full_file_replacement_is_transport_format_only": True,
+                "do_not_reject_solely_because_full_file_replacement": True,
+                "judge_effective_delta_between_current_and_proposed_content": True,
+                "use_diff_preview_to_understand_intended_minimal_delta": True,
+                "ok_apply_when_effective_delta_is_small_task_aligned_and_preserves_unrelated_content": True,
+                "ko_block_when_delta_is_unrelated_dangerous_missing_required_changes_or_preview_mismatch": True,
+            },
+            "diff_preview": self.pending_patch.preview if self.pending_patch else "",
+            "patch_summary": {
+                "paths": list(summary.paths),
+                "file_count": summary.file_count,
+                "hunk_count": summary.hunk_count,
+                "lines_added": summary.lines_added,
+                "lines_removed": summary.lines_removed,
+            },
+            "selected_context_metadata": {
+                "selected_source_refs": list(
+                    self.pending_patch.selected_source_refs if self.pending_patch else ()
+                ),
+                "provider_name": self.pending_patch.provider_name if self.pending_patch else None,
+                "created_from_task_hash": (
+                    self.pending_patch.created_from_task_hash if self.pending_patch else None
+                ),
+            },
+            "discovery_metadata": self._patch_review_discovery_metadata(),
+            "current_files": current_files,
+            "proposed_full_replacements": proposed_files,
+            "allowed_workspace_relative_paths": allowed_paths,
+            "inferred_task_constraints": self._infer_task_constraints(),
+        }
+
+    def _patch_review_discovery_metadata(self) -> dict[str, object]:
+        if self.discovery_result is None:
+            return {"discovery_ran": False}
+        return {
+            "discovery_ran": True,
+            "candidate_count": self.discovery_result.candidate_count,
+            "loaded_candidate_count": self.discovery_result.loaded_candidate_count,
+            "candidate_source_refs": [
+                candidate.source_ref for candidate in self.discovery_result.candidates
+            ],
+        }
+
+    def _infer_task_constraints(self) -> dict[str, object]:
+        normalized = self.task.lower()
+        existing_only = (
+            "existing files only" in normalized
+            or "existing source files only" in normalized
+            or "modify existing files only" in normalized
+            or "modify the existing source files only" in normalized
+        )
+        return {"existing_files_only": existing_only}
 
     def _clear_pending_patch(self) -> None:
         self.pending_patch = None
@@ -479,5 +625,6 @@ class SfeTuiApp:
 
 
 def main() -> int:
+    load_repo_env()
     app = SfeTuiApp()
     return app.run()

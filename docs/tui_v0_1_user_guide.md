@@ -15,8 +15,10 @@ routing, and optionally asking a configured read-only executor/provider for an
 answer or patch proposal.
 
 The TUI keeps the current task, selected workspace, loaded context metadata,
-local routing diagnostics, and latest ask/patch result in the session. It does
-not run shell commands, execute tools, switch backends, or apply patches.
+local routing diagnostics, latest ask/patch result, and pending patch proposal
+metadata in the session. It does not run shell commands, execute tools, or
+switch backends. Automatic writes are disabled; explicit `/apply-patch` is
+available for applying the latest pending patch proposal after router review.
 
 ## Launch
 
@@ -85,7 +87,13 @@ workspace paths using safe relative labels where possible.
    /patch
    ```
 
-8. Clear the session state while preserving the workspace:
+8. Optionally apply the latest pending patch proposal explicitly:
+
+   ```text
+   /apply-patch
+   ```
+
+9. Clear the session state while preserving the workspace:
 
    ```text
    /reset
@@ -109,6 +117,9 @@ workspace paths using safe relative labels where possible.
   `/discover` unless manual `/files` context exists.
 - `/patch`: ask for a patch proposal only. The proposal is not applied. After a
   task is set, this requires `/discover` unless manual `/files` context exists.
+- `/apply-patch`: ask the configured router reviewer to approve or block the
+  latest pending structured patch proposal. If approved, write the proposed
+  full file replacements inside the selected workspace.
 - `/files <paths...>`: replace context manually with the provided text files
   for debug/design work. Directory inputs and unsupported files are rejected or
   skipped with a reason. This remains available but is not the normal
@@ -190,10 +201,19 @@ The result is proposal-only:
 
 - not applied;
 - no files are modified;
-- patch application is disabled.
+- automatic writes are disabled;
+- explicit `/apply-patch` is available when a structured proposal is pending.
 
-The TUI may display the provider's proposed diff or explanation. It does not
-apply that diff, run shell commands, execute tools, or modify the workspace.
+The provider is asked for structured full-file replacements. The TUI may display
+a readable diff preview, but the stored proposal is the full replacement content
+for each touched file. `/patch` does not apply that proposal, run shell
+commands, execute tools, or modify the workspace.
+
+`/apply-patch` calls the configured router reviewer before writing. Router
+`KO_BLOCK` writes nothing and keeps the pending proposal. Router `OK_APPLY`
+allows the TUI to write the proposed full replacement contents; the pending
+proposal is cleared only after successful writes. Physical write failures are
+reported separately from router rejection and keep the pending proposal.
 
 ## Safety Guarantees
 
@@ -205,11 +225,13 @@ The current TUI behavior intentionally keeps these boundaries:
 - no proxy in the canonical TUI path;
 - discovery does not call providers, write files, or expose raw contents in
   diagnostics;
-- patch application disabled;
+- automatic writes disabled; explicit `/apply-patch` available;
 - `/dry-run` makes no executor/provider call;
 - `/ask` calls the configured executor only after local routing selects
   context;
 - `/patch` is proposal-only and does not write files;
+- `/apply-patch` is explicit, router-reviewed, and applies only pending
+  structured full-file replacements;
 - workspace and source paths are displayed using safe relative labels where
   possible;
 - diagnostics do not display raw file contents, request bodies, provider
@@ -220,7 +242,7 @@ The current TUI behavior intentionally keeps these boundaries:
 - The router is a local lexical preview, not an LLM router result.
 - Discovery is a first controlled TUI workflow, not robust general retrieval.
 - Routing quality is not yet proven across repeated realistic workflows.
-- `/patch` does not apply patches.
+- `/patch` does not apply patches; `/apply-patch` is required for writes.
 - There is no CLI/API pipeline integration for the canonical TUI workflow yet.
 - There is no provider-backed TUI router yet.
 - The proxy remains standby experimental compatibility and observability
