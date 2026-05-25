@@ -1,4 +1,4 @@
-"""Tests for provider-free core workspace discovery."""
+"""Tests for LLM-driven core workspace discovery."""
 
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ from sfe.discovery import (
     discover_workspace_context,
     load_discovered_context,
 )
+from sfe.discovery_router import (
+    DISCOVERY_ROUTER_MODE,
+    DiscoveryRouterError,
+    DiscoveryRouterSelection,
+    parse_discovery_router_output,
+)
 from sfe_tui.contracts import build_contract
 from sfe_tui.routers import LocalSegmentRouter
 
@@ -28,10 +34,45 @@ def _refs(result) -> list[str]:
     return [candidate.source_ref for candidate in result.candidates]
 
 
+class FakeDiscoveryRouter:
+    provider_name = "fake-discovery-router"
+    model = "fake-discovery-model"
+
+    def __init__(self, files_to_inspect: tuple[str, ...] = ()) -> None:
+        self.files_to_inspect = files_to_inspect
+        self.calls: list[dict[str, object]] = []
+
+    def select_files(
+        self,
+        *,
+        task: str,
+        workspace_map: list[dict[str, object]],
+        max_files: int,
+    ) -> DiscoveryRouterSelection:
+        self.calls.append(
+            {
+                "task": task,
+                "workspace_map": workspace_map,
+                "max_files": max_files,
+            }
+        )
+        files = self.files_to_inspect or tuple(
+            str(entry["path"]) for entry in workspace_map[:max_files]
+        )
+        return DiscoveryRouterSelection(
+            files_to_inspect=files,
+            reason="fake semantic file selection",
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
+        )
+
+
 def test_discovery_rejects_missing_workspace_or_missing_task_safely(tmp_path) -> None:
     missing = discover_workspace_context(
         workspace_root=tmp_path / "missing",
         task="find context",
+        router=FakeDiscoveryRouter(),
     )
 
     assert missing.workspace_root_present is False
@@ -40,12 +81,34 @@ def test_discovery_rejects_missing_workspace_or_missing_task_safely(tmp_path) ->
     assert missing.candidates == ()
     assert missing.load_results == ()
 
-    no_task = discover_workspace_context(workspace_root=tmp_path, task="  ")
+    no_task = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="  ",
+        router=FakeDiscoveryRouter(),
+    )
 
     assert no_task.workspace_root_present is True
     assert no_task.task_present is False
     assert no_task.stop_reason == "missing_task"
     assert no_task.scanned_file_count == 0
+
+
+def test_discovery_router_output_parser_requires_strict_json_shape() -> None:
+    parsed = parse_discovery_router_output(
+        '{"files_to_inspect":["templates/home/index.html.twig"],"reason":"homepage"}'
+    )
+
+    assert parsed.files_to_inspect == ("templates/home/index.html.twig",)
+    assert parsed.reason == "homepage"
+
+    try:
+        parse_discovery_router_output(
+            '{"files_to_inspect":["valid.txt", 3],"reason":"bad"}'
+        )
+    except DiscoveryRouterError as exc:
+        assert exc.category == "invalid_discovery_router_response"
+    else:
+        raise AssertionError("expected strict parser failure")
 
 
 def test_discovery_finds_relevant_project_files_from_task_terms(tmp_path) -> None:
@@ -57,19 +120,25 @@ def test_discovery_finds_relevant_project_files_from_task_terms(tmp_path) -> Non
     result = discover_workspace_context(
         workspace_root=tmp_path,
         task="Implement core workspace discovery context loading",
+        router=FakeDiscoveryRouter(("sfe/discovery.py", "sfe_tui/contracts.py")),
     )
 
     refs = _refs(result)
     assert "sfe/discovery.py" in refs
     assert "sfe_tui/contracts.py" in refs
-    assert refs.index("sfe/discovery.py") < refs.index("unrelated.txt")
+    assert "unrelated.txt" not in refs
     assert result.loaded_candidate_count > 0
+    assert result.discovery_mode == DISCOVERY_ROUTER_MODE
 
 
 def test_discovery_returns_only_workspace_relative_refs(tmp_path) -> None:
     _write(tmp_path / "pkg" / "module.py", "module content")
 
-    result = discover_workspace_context(workspace_root=tmp_path, task="module")
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="module",
+        router=FakeDiscoveryRouter(("pkg/module.py",)),
+    )
 
     assert _refs(result) == ["pkg/module.py"]
     assert result.load_results[0].source_ref == "pkg/module.py"
@@ -80,7 +149,11 @@ def test_discovery_never_includes_absolute_workspace_paths_in_result_metadata(
 ) -> None:
     _write(tmp_path / "notes.md", "SECRET_FILE_CONTENT")
 
-    result = discover_workspace_context(workspace_root=tmp_path, task="notes")
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="notes",
+        router=FakeDiscoveryRouter(("notes.md",)),
+    )
 
     rendered = repr(result)
     assert str(tmp_path.resolve()) not in rendered
@@ -96,6 +169,7 @@ def test_discovery_excludes_env_files_but_allows_env_example(tmp_path) -> None:
     result = discover_workspace_context(
         workspace_root=tmp_path,
         task="environment example provider",
+        router=FakeDiscoveryRouter((".env.example",)),
     )
 
     refs = _refs(result)
@@ -119,7 +193,11 @@ def test_discovery_excludes_sensitive_generated_and_cache_paths(tmp_path) -> Non
     _write(tmp_path / "dist" / "package.py", "generated")
     _write(tmp_path / "safe.py", "safe context")
 
-    result = discover_workspace_context(workspace_root=tmp_path, task="safe context")
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="safe context",
+        router=FakeDiscoveryRouter(("safe.py",)),
+    )
 
     assert _refs(result) == ["safe.py"]
     assert "secret_like_file" in result.skipped_reason_counts
@@ -133,9 +211,16 @@ def test_discovery_rejects_binary_and_non_utf8_files(tmp_path) -> None:
     (tmp_path / "latin.txt").write_bytes("caf\xe9".encode("latin-1"))
     _write(tmp_path / "valid.txt", "valid text")
 
-    result = discover_workspace_context(workspace_root=tmp_path, task="valid text")
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="valid text",
+        router=FakeDiscoveryRouter(("image.txt", "latin.txt", "valid.txt")),
+    )
 
-    assert _refs(result) == ["valid.txt"]
+    assert _refs(result) == ["image.txt", "latin.txt", "valid.txt"]
+    assert [item.source_ref for item in result.load_results if item.loaded] == [
+        "valid.txt"
+    ]
     assert result.skipped_reason_counts["binary_or_non_text"] == 2
 
 
@@ -150,6 +235,7 @@ def test_discovery_respects_scan_candidate_load_and_total_byte_limits(
         workspace_root=tmp_path,
         task="alpha beta gamma",
         policy=DiscoveryPolicy(max_files_scanned=1),
+        router=FakeDiscoveryRouter(),
     )
     assert scanned.scanned_file_count == 1
     assert scanned.stop_reason == "max_files_scanned"
@@ -158,6 +244,7 @@ def test_discovery_respects_scan_candidate_load_and_total_byte_limits(
         workspace_root=tmp_path,
         task="alpha beta gamma",
         policy=DiscoveryPolicy(max_candidates=1),
+        router=FakeDiscoveryRouter(("a.py", "b.py", "c.py")),
     )
     assert candidates.candidate_count == 1
     assert candidates.stop_reason == "max_candidates"
@@ -166,6 +253,7 @@ def test_discovery_respects_scan_candidate_load_and_total_byte_limits(
         workspace_root=tmp_path,
         task="alpha beta gamma",
         policy=DiscoveryPolicy(max_loaded_candidates=1),
+        router=FakeDiscoveryRouter(),
     )
     assert loaded.candidate_count == 3
     assert loaded.loaded_candidate_count == 1
@@ -176,12 +264,16 @@ def test_discovery_respects_scan_candidate_load_and_total_byte_limits(
         workspace_root=tmp_path,
         task="alpha beta gamma",
         policy=DiscoveryPolicy(max_total_loaded_bytes=5),
+        router=FakeDiscoveryRouter(),
     )
     assert total_bytes.loaded_candidate_count == 0
     assert total_bytes.stop_reason == "max_total_loaded_bytes"
 
 
-def test_discovery_makes_zero_provider_calls(tmp_path, monkeypatch) -> None:
+def test_discovery_uses_injected_router_without_configured_provider_calls(
+    tmp_path,
+    monkeypatch,
+) -> None:
     import sfe.provider_config as provider_config
 
     calls = {"count": 0}
@@ -193,9 +285,16 @@ def test_discovery_makes_zero_provider_calls(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(provider_config, "resolve_sfe_provider", fake_resolver)
     _write(tmp_path / "context.py", "provider-free discovery")
 
-    discover_workspace_context(workspace_root=tmp_path, task="provider discovery")
+    router = FakeDiscoveryRouter(("context.py",))
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="provider discovery",
+        router=router,
+    )
 
     assert calls["count"] == 0
+    assert router.calls
+    assert result.router_provider_calls_made == 1
 
 
 def test_discovery_and_execution_time_loading_perform_no_writes(tmp_path) -> None:
@@ -206,7 +305,11 @@ def test_discovery_and_execution_time_loading_perform_no_writes(tmp_path) -> Non
         if path.is_file()
     }
 
-    result = discover_workspace_context(workspace_root=tmp_path, task="context")
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="context",
+        router=FakeDiscoveryRouter(("context.md",)),
+    )
     load_discovered_context(workspace_root=tmp_path, discovery_result=result)
 
     after = {
@@ -220,7 +323,11 @@ def test_discovery_and_execution_time_loading_perform_no_writes(tmp_path) -> Non
 def test_discovery_output_does_not_contain_raw_file_contents(tmp_path) -> None:
     _write(tmp_path / "context.md", "SECRET_FILE_CONTENT")
 
-    result = discover_workspace_context(workspace_root=tmp_path, task="context")
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="context",
+        router=FakeDiscoveryRouter(("context.md",)),
+    )
 
     assert result.load_results[0].loaded is True
     assert result.load_results[0].text == ""
@@ -235,6 +342,7 @@ def test_load_discovered_context_returns_full_text_for_contract_building(
     result = discover_workspace_context(
         workspace_root=tmp_path,
         task="alpha routing",
+        router=FakeDiscoveryRouter(("context.md",)),
     )
     loaded = load_discovered_context(
         workspace_root=tmp_path,
@@ -263,6 +371,7 @@ def test_load_discovered_context_only_reloads_discovered_candidates(tmp_path) ->
         workspace_root=tmp_path,
         task="selected alpha",
         policy=DiscoveryPolicy(max_candidates=1),
+        router=FakeDiscoveryRouter(("selected.py",)),
     )
 
     loaded = load_discovered_context(
@@ -283,6 +392,7 @@ def test_load_discovered_context_respects_load_and_total_byte_limits(
     discovery = discover_workspace_context(
         workspace_root=tmp_path,
         task="alpha beta gamma",
+        router=FakeDiscoveryRouter(),
     )
 
     limited_count = load_discovered_context(
@@ -305,13 +415,114 @@ def test_load_discovered_context_respects_load_and_total_byte_limits(
     assert {result.reason for result in limited_bytes} == {"max_total_loaded_bytes"}
 
 
+def test_discovery_router_can_select_symfony_home_template_without_content_or_twig_rule(
+    tmp_path,
+) -> None:
+    _write(tmp_path / "composer.json", '{"require":{"symfony/framework-bundle":"*"}}')
+    _write(tmp_path / "config" / "routes.yaml", "controllers:\n  resource: ../src/Controller/\n")
+    _write(tmp_path / "src" / "Controller" / "HomeController.php", "<?php\nclass HomeController {}\n")
+    _write(tmp_path / "templates" / "base.html.twig", "<html>{% block body %}{% endblock %}</html>")
+    _write(
+        tmp_path / "templates" / "home" / "index.html.twig",
+        "<h1>SECRET_TEMPLATE_CONTENT</h1>",
+    )
+    _write(tmp_path / "README.md", "Symfony test project")
+    _write(tmp_path / "PROJECT_REQUEST.md", "Add a homepage form")
+    router = FakeDiscoveryRouter(("templates/home/index.html.twig",))
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task=(
+            "Modifier la page d'accueil pour y ajouter un formulaire HTML avec "
+            "nom, prénom, bouton Envoyer"
+        ),
+        router=router,
+    )
+
+    workspace_map = router.calls[0]["workspace_map"]
+    assert "templates/home/index.html.twig" in {
+        entry["path"] for entry in workspace_map
+    }
+    assert "SECRET_TEMPLATE_CONTENT" not in repr(workspace_map)
+    template_entry = next(
+        entry
+        for entry in workspace_map
+        if entry["path"] == "templates/home/index.html.twig"
+    )
+    assert template_entry["suffix"] == ".html.twig"
+    assert _refs(result) == ["templates/home/index.html.twig"]
+    assert result.load_results[0].loaded is True
+    assert result.load_results[0].text == ""
+    loaded = load_discovered_context(workspace_root=tmp_path, discovery_result=result)
+    assert loaded[0].source_ref == "templates/home/index.html.twig"
+    assert "SECRET_TEMPLATE_CONTENT" in loaded[0].text
+    assert "unsupported_extension" not in result.skipped_reason_counts
+
+
+def test_discovery_revalidates_router_selected_paths_locally(tmp_path) -> None:
+    _write(tmp_path / "valid.txt", "valid context")
+    _write(tmp_path / "large.txt", "x" * 20)
+    outside = tmp_path.parent / "outside-discovery.txt"
+    outside.write_text("outside", encoding="utf-8")
+    symlink_created = False
+    try:
+        (tmp_path / "outside-link.txt").symlink_to(outside)
+        symlink_created = True
+    except OSError:
+        pass
+    selected = [
+        str(tmp_path / "valid.txt"),
+        "../outside-discovery.txt",
+        "missing.txt",
+        "large.txt",
+        "valid.txt",
+        "extra.txt",
+    ]
+    _write(tmp_path / "extra.txt", "extra context")
+    if symlink_created:
+        selected.append("outside-link.txt")
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="validate router paths",
+        policy=DiscoveryPolicy(max_file_bytes=15, max_candidates=10),
+        router=FakeDiscoveryRouter(tuple(selected)),
+    )
+
+    assert _refs(result) == ["valid.txt", "extra.txt"]
+    assert result.skipped_reason_counts["absolute_path"] == 1
+    assert result.skipped_reason_counts["path_traversal"] == 1
+    assert result.skipped_reason_counts["path_not_found"] == 1
+    assert result.skipped_reason_counts["file_too_large"] >= 1
+    if symlink_created:
+        assert result.skipped_reason_counts["outside_workspace"] >= 1
+
+    limited = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="validate router path count limit",
+        router=FakeDiscoveryRouter(("valid.txt", "extra.txt")),
+        policy=DiscoveryPolicy(max_candidates=1),
+    )
+
+    assert _refs(limited) == ["valid.txt"]
+    assert limited.skipped_reason_counts["max_candidates"] == 1
+
+
 def test_candidate_ordering_is_deterministic(tmp_path) -> None:
     _write(tmp_path / "zeta.py", "shared content")
     _write(tmp_path / "alpha.py", "shared content")
     _write(tmp_path / "docs" / "guide.md", "shared content")
 
-    first = discover_workspace_context(workspace_root=tmp_path, task="shared")
-    second = discover_workspace_context(workspace_root=tmp_path, task="shared")
+    first = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="shared",
+        router=FakeDiscoveryRouter(),
+    )
+    second = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="shared",
+        router=FakeDiscoveryRouter(),
+    )
 
     assert _refs(first) == _refs(second)
     assert _refs(first) == sorted(_refs(first), key=lambda ref: (-_score(first, ref), ref))

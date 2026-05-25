@@ -198,9 +198,9 @@ The tradeoff is that routing and orchestration have fixed costs. SFE only looks 
 
 At a high level, the current repository has these layers:
 
-- `sfe/`: core SFE helpers, including provider selection, reusable
-  provider-free workspace discovery, shared router-review plumbing, and
-  Git Worktree workspace isolation.
+- `sfe/`: core SFE helpers, including provider selection, LLM-driven workspace
+  discovery, shared router-review plumbing, and Git Worktree workspace
+  isolation.
 - `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
 - `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
 - `providers/`: minimal benchmark provider adapters, including Lemonade,
@@ -246,15 +246,17 @@ Discoverer -> Router -> Executor
 ```
 
 For TUI context selection today, the Discoverer is core workspace discovery in
-`sfe/discovery.py`, the Router is still a provider-free local lexical preview,
-and the Executor is the configured executor behind `DirectBackend`. Separate
+`sfe/discovery.py`, backed by the dedicated discovery router in
+`sfe/discovery_router.py`. `/discover` scans the selected workspace, builds a
+metadata-only workspace map, asks the configured discovery router which files to
+inspect, and then locally revalidates selected paths before loading them. The
+`/dry-run` context preview is still a provider-free local lexical preview, and
+the Executor is the configured executor behind `DirectBackend`. Separate
 router-review calls are used for `/apply-patch` and `/review-worktree`; these
-are semantic LLM reviews, not formal security proofs.
-`/discover` scans the selected workspace and builds a controlled candidate pool.
-It does not call providers, write files, run shell commands, or expose raw file
-contents in diagnostics. `/dry-run` still makes zero provider calls. `/ask`
-calls the configured executor only after routing selected context. No proxy is
-used in the canonical TUI path.
+are semantic LLM reviews, not formal security proofs. `/discover` does not write
+files, run shell commands, or expose raw file contents in diagnostics. `/dry-run`
+still makes zero provider calls. `/ask` calls the configured executor only after
+routing selected context. No proxy is used in the canonical TUI path.
 
 Manual `/files` context loading remains available for debug/design work, but it
 is not the normal human-facing TUI workflow.

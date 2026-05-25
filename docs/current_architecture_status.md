@@ -53,14 +53,15 @@ Discoverer -> Router -> Executor
 
 The Discoverer is the reusable core discovery layer in `sfe/discovery.py`. It
 scans the selected workspace, builds a bounded candidate pool, keeps
-`DiscoveryResult` render-safe, and does not call providers, write files, run
-shell commands, or expose raw file contents in diagnostics. Full text is
-reloaded later through the explicit discovery loading boundary when the TUI
-builds an SFE contract.
+`DiscoveryResult` render-safe. `/discover` now calls the configured discovery
+router with a metadata-only workspace map, then locally revalidates selected
+paths before loading them. It does not write files, run shell commands, or
+expose raw file contents in diagnostics. Full text is reloaded later through the
+explicit discovery loading boundary when the TUI builds an SFE contract.
 
-The context-selection Router remains the provider-free local lexical preview
-for now. It is not an LLM router result and should not be described as robust
-general retrieval. The Executor remains the configured executor behind
+The `/dry-run` context-selection preview remains the provider-free local lexical
+preview for now. It is not an LLM router result and should not be described as
+robust general retrieval. The Executor remains the configured executor behind
 `DirectBackend`. Separate configured router-review calls are used for
 `/apply-patch` and `/review-worktree`; those reviews are semantic checks, not
 formal security proofs.

@@ -13,6 +13,7 @@ from sfe.discovery import (
     discover_workspace_context,
     load_discovered_context,
 )
+from sfe.discovery_router import DiscoveryRouter
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
     ParsedPatch,
@@ -92,6 +93,7 @@ class SfeTuiApp:
         output: OutputFunc = print,
         cwd: Path | None = None,
         backend: BackendAdapter | None = None,
+        discovery_router: DiscoveryRouter | None = None,
         patch_reviewer: PatchReviewer | None = None,
         workspace_manager: WorkspaceManager | None = None,
         workspace_reviewer: WorkspaceReviewer | None = None,
@@ -100,6 +102,7 @@ class SfeTuiApp:
         self.output = output
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
+        self.discovery_router = discovery_router
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
         self.workspace_reviewer = workspace_reviewer or create_workspace_reviewer()
@@ -276,6 +279,7 @@ class SfeTuiApp:
         self.discovery_result = discover_workspace_context(
             workspace_root=self.workspace_root,
             task=self.task,
+            router=self.discovery_router,
         )
         self.latest_result = None
         self._clear_pending_patch()

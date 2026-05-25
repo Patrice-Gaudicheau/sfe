@@ -1,12 +1,17 @@
-"""Provider-free workspace discovery for reusable SFE context selection."""
+"""LLM-driven workspace discovery for reusable SFE context selection."""
 
 from __future__ import annotations
 
 import fnmatch
-import re
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from sfe.discovery_router import (
+    DISCOVERY_ROUTER_MODE,
+    DiscoveryRouter,
+    DiscoveryRouterError,
+    create_configured_discovery_router,
+)
 from sfe_tui.contracts import (
     ContextLoadResult,
     PRIVATE_KEY_MARKERS,
@@ -18,21 +23,7 @@ from sfe_tui.contracts import (
 )
 
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _TEXT_PREFIX_BYTES = 4096
-_CANDIDATE_EXTENSIONS = {
-    ".cfg",
-    ".ini",
-    ".json",
-    ".md",
-    ".py",
-    ".rst",
-    ".sh",
-    ".toml",
-    ".txt",
-    ".yaml",
-    ".yml",
-}
 _DIRECTORY_EXCLUSIONS = {
     ".cache",
     ".git",
@@ -69,7 +60,6 @@ _FILE_SUFFIX_EXCLUSIONS = {
     ".sqlite3",
 }
 _PRIVATE_KEY_SUFFIXES = {".key"}
-_SPECIAL_CANDIDATE_NAMES = {"Makefile", ".env.example"}
 
 
 @dataclass(frozen=True)
@@ -104,6 +94,13 @@ class DiscoveryResult:
     load_results: tuple[ContextLoadResult, ...]
     skipped_reason_counts: dict[str, int]
     warning_reason_counts: dict[str, int]
+    discovery_mode: str = DISCOVERY_ROUTER_MODE
+    router_reason: str | None = None
+    router_provider_name: str | None = None
+    router_model: str | None = None
+    router_error_category: str | None = None
+    router_provider_calls_made: int = 0
+    workspace_map_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -111,7 +108,6 @@ class _ScannedFile:
     path: Path
     source_ref: str
     approx_bytes: int
-    text_prefix: str
 
 
 @dataclass(frozen=True)
@@ -126,8 +122,9 @@ def discover_workspace_context(
     workspace_root: Path | None,
     task: str,
     policy: DiscoveryPolicy = DiscoveryPolicy(),
+    router: DiscoveryRouter | None = None,
 ) -> DiscoveryResult:
-    """Discover a deterministic candidate pool from a workspace.
+    """Discover a router-selected candidate pool from a workspace.
 
     The returned object is safe to render: source refs are workspace-relative and
     loaded context results have their text fields scrubbed.
@@ -162,23 +159,43 @@ def discover_workspace_context(
         policy=normalized_policy,
         skipped_reason_counts=skipped_reason_counts,
     )
-    task_terms = _tokenize(task)
-    scored = [
-        _score_scanned_file(item, task_terms)
-        for item in scanned
-    ]
-    scored.sort(key=lambda item: (-item.score, item.source_ref))
-
+    workspace_map = _build_workspace_map(scanned)
     stop_reason = scan_stop_reason
-    if len(scored) > normalized_policy.max_candidates:
-        _increment(
-            skipped_reason_counts,
-            "max_candidates",
-            len(scored) - normalized_policy.max_candidates,
+    discovery_router = router or create_configured_discovery_router()
+    try:
+        router_selection = discovery_router.select_files(
+            task=task,
+            workspace_map=workspace_map,
+            max_files=normalized_policy.max_candidates,
         )
-        if stop_reason is None:
-            stop_reason = "max_candidates"
-    candidates = tuple(scored[: normalized_policy.max_candidates])
+    except DiscoveryRouterError as exc:
+        return DiscoveryResult(
+            workspace_root_present=True,
+            task_present=True,
+            scanned_file_count=scanned_file_count,
+            candidate_count=0,
+            loaded_candidate_count=0,
+            skipped_candidate_count=0,
+            stop_reason=exc.category,
+            candidates=(),
+            load_results=(),
+            skipped_reason_counts=dict(sorted(skipped_reason_counts.items())),
+            warning_reason_counts={},
+            router_provider_name=getattr(discovery_router, "provider_name", None),
+            router_model=getattr(discovery_router, "model", None),
+            router_error_category=exc.category,
+            router_reason=exc.reason,
+            workspace_map_count=len(workspace_map),
+        )
+    candidates = _validate_router_selection(
+        root,
+        scanned,
+        selected_refs=router_selection.files_to_inspect,
+        policy=normalized_policy,
+        skipped_reason_counts=skipped_reason_counts,
+    )
+    if stop_reason is None and "max_candidates" in skipped_reason_counts:
+        stop_reason = "max_candidates"
     load_results, load_stop_reason = _load_candidates(
         root,
         candidates,
@@ -204,6 +221,11 @@ def discover_workspace_context(
         load_results=load_results,
         skipped_reason_counts=dict(sorted(skipped_reason_counts.items())),
         warning_reason_counts=warning_reason_counts,
+        router_reason=router_selection.reason,
+        router_provider_name=router_selection.provider_name,
+        router_model=router_selection.model,
+        router_provider_calls_made=router_selection.provider_calls_made,
+        workspace_map_count=len(workspace_map),
     )
 
 
@@ -352,26 +374,106 @@ def _scan_file(
         return "read_error"
     if size > policy.max_file_bytes:
         return "file_too_large"
-    try:
-        raw_prefix = path.read_bytes()[:_TEXT_PREFIX_BYTES]
-    except OSError:
-        return "read_error"
-    if b"\x00" in raw_prefix:
-        return "binary_or_non_text"
-    try:
-        text_prefix = raw_prefix.decode("utf-8")
-    except UnicodeDecodeError:
-        return "binary_or_non_text"
-    if _contains_private_key_marker(text_prefix) and not _is_source_or_doc_ref(
-        source_ref
-    ):
-        return "secret_like_file"
     return _ScannedFile(
         path=path,
         source_ref=source_ref,
         approx_bytes=size,
-        text_prefix=text_prefix,
     )
+
+
+def _build_workspace_map(scanned: list[_ScannedFile]) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for item in scanned:
+        path = PurePosixPath(item.source_ref)
+        entries.append(
+            {
+                "path": item.source_ref,
+                "type": "file",
+                "approx_bytes": item.approx_bytes,
+                "depth": max(0, len(path.parts) - 1),
+                "extension": path.suffix,
+                "suffix": "".join(path.suffixes),
+            }
+        )
+    return entries
+
+
+def _validate_router_selection(
+    root: Path,
+    scanned: list[_ScannedFile],
+    *,
+    selected_refs: tuple[str, ...],
+    policy: DiscoveryPolicy,
+    skipped_reason_counts: dict[str, int],
+) -> tuple[DiscoveryCandidate, ...]:
+    scanned_by_ref = {item.source_ref: item for item in scanned}
+    accepted: list[DiscoveryCandidate] = []
+    seen: set[str] = set()
+    for selected_ref in selected_refs:
+        source_ref = str(selected_ref)
+        if len(accepted) >= policy.max_candidates:
+            _increment(skipped_reason_counts, "max_candidates")
+            continue
+        reason = _router_selected_ref_rejection_reason(
+            root,
+            source_ref,
+            scanned_by_ref,
+            policy=policy,
+        )
+        if reason is not None:
+            _increment(skipped_reason_counts, reason)
+            continue
+        if source_ref in seen:
+            _increment(skipped_reason_counts, "duplicate_router_path")
+            continue
+        seen.add(source_ref)
+        item = scanned_by_ref[source_ref]
+        accepted.append(
+            DiscoveryCandidate(
+                source_ref=source_ref,
+                approx_bytes=item.approx_bytes,
+                score=max(0, policy.max_candidates - len(accepted)),
+                reasons=("llm_router_selected",),
+            )
+        )
+    return tuple(accepted)
+
+
+def _router_selected_ref_rejection_reason(
+    root: Path,
+    source_ref: str,
+    scanned_by_ref: dict[str, _ScannedFile],
+    *,
+    policy: DiscoveryPolicy,
+) -> str | None:
+    if not source_ref.strip():
+        return "empty_router_path"
+    selected = PurePosixPath(source_ref)
+    if selected.is_absolute():
+        return "absolute_path"
+    if ".." in selected.parts:
+        return "path_traversal"
+    path = root / source_ref
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root)
+    except ValueError:
+        return "outside_workspace"
+    except OSError:
+        return "read_error"
+    if not resolved.exists():
+        return "path_not_found"
+    if not resolved.is_file():
+        return "not_a_file"
+    try:
+        size = resolved.stat().st_size
+    except OSError:
+        return "read_error"
+    if size > policy.max_file_bytes:
+        return "file_too_large"
+    if source_ref not in scanned_by_ref:
+        return "not_in_workspace_map"
+    return None
 
 
 def _directory_skip_reason(
@@ -415,8 +517,6 @@ def _file_skip_reason(
         return "generated_artifact"
     if policy.respect_gitignore and _gitignore_ignored(source_ref, is_dir=False, rules=rules):
         return "gitignored"
-    if name not in _SPECIAL_CANDIDATE_NAMES and suffix not in _CANDIDATE_EXTENSIONS:
-        return "unsupported_extension"
     return None
 
 
@@ -432,72 +532,6 @@ def _is_private_key_like_ref(source_ref: str) -> bool:
         or lower_name.endswith("_ed25519")
         or path.suffix.lower() in _PRIVATE_KEY_SUFFIXES
     )
-
-
-def _is_source_or_doc_ref(source_ref: str) -> bool:
-    path = Path(source_ref)
-    return path.name in _SPECIAL_CANDIDATE_NAMES or path.suffix.lower() in _CANDIDATE_EXTENSIONS
-
-
-def _score_scanned_file(
-    item: _ScannedFile,
-    task_terms: set[str],
-) -> DiscoveryCandidate:
-    source_ref = item.source_ref
-    path = Path(source_ref)
-    path_terms = _tokenize(source_ref)
-    name_terms = _tokenize(path.name)
-    prefix_terms = _tokenize(item.text_prefix)
-    score = 0
-    reasons: list[str] = []
-
-    path_matches = len(task_terms.intersection(path_terms))
-    if path_matches:
-        score += path_matches * 8
-        reasons.append("task_path_match")
-    name_matches = len(task_terms.intersection(name_terms))
-    if name_matches:
-        score += name_matches * 4
-        reasons.append("task_name_match")
-    extension = path.suffix.lower().lstrip(".")
-    if extension and extension in task_terms:
-        score += 3
-        reasons.append("task_extension_match")
-    prefix_matches = len(task_terms.intersection(prefix_terms))
-    if prefix_matches:
-        score += prefix_matches
-        reasons.append("task_prefix_match")
-
-    priority_score, priority_reason = _priority_score(source_ref)
-    if priority_score:
-        score += priority_score
-        reasons.append(priority_reason)
-    if not reasons:
-        reasons.append("eligible")
-    return DiscoveryCandidate(
-        source_ref=source_ref,
-        approx_bytes=item.approx_bytes,
-        score=score,
-        reasons=tuple(reasons),
-    )
-
-
-def _priority_score(source_ref: str) -> tuple[int, str]:
-    if source_ref == "README.md":
-        return 7, "priority_readme"
-    if source_ref == "Makefile":
-        return 5, "priority_makefile"
-    if source_ref == ".env.example":
-        return 3, "priority_env_example"
-    if source_ref.startswith("sfe_tui/"):
-        return 6, "priority_tui"
-    if source_ref.startswith("sfe/"):
-        return 6, "priority_core"
-    if source_ref.startswith("tests/"):
-        return 5, "priority_tests"
-    if source_ref.startswith("docs/"):
-        return 4, "priority_docs"
-    return 0, ""
 
 
 def _load_candidates(
@@ -665,28 +699,6 @@ def _gitignore_rule_matches(
         source_ref,
         pattern,
     )
-
-
-def _tokenize(text: str) -> set[str]:
-    return {
-        normalized
-        for token in (match.group(0).lower() for match in _TOKEN_RE.finditer(text))
-        if len(token) >= 3
-        for normalized in (_normalize_token(token),)
-        if normalized
-    }
-
-
-def _normalize_token(token: str) -> str:
-    if token.endswith("ies") and len(token) > 4:
-        return token[:-3] + "y"
-    if token.endswith("ing") and len(token) > 5:
-        return token[:-3]
-    if token.endswith("ed") and len(token) > 4:
-        return token[:-2]
-    if token.endswith("s") and len(token) > 3:
-        return token[:-1]
-    return token
 
 
 def _contains_private_key_marker(text: str) -> bool:

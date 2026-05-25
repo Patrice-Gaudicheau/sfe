@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
+from sfe.discovery_router import DiscoveryRouterSelection
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
     DirectBackend,
@@ -131,6 +132,51 @@ class FakeProvider:
         if self.error is not None:
             raise self.error
         return self.response
+
+
+class FakeDiscoveryRouter:
+    provider_name = "fake-discovery-router"
+    model = "fake-discovery-model"
+
+    def __init__(self, files_to_inspect: tuple[str, ...] = ()) -> None:
+        self.files_to_inspect = files_to_inspect
+        self.calls: list[dict[str, object]] = []
+
+    def select_files(
+        self,
+        *,
+        task: str,
+        workspace_map: list[dict[str, object]],
+        max_files: int,
+    ) -> DiscoveryRouterSelection:
+        self.calls.append(
+            {
+                "task": task,
+                "workspace_map": workspace_map,
+                "max_files": max_files,
+            }
+        )
+        files = self.files_to_inspect or tuple(
+            str(entry["path"]) for entry in workspace_map[:max_files]
+        )
+        return DiscoveryRouterSelection(
+            files_to_inspect=files,
+            reason="fake semantic file selection",
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
+        )
+
+
+@pytest.fixture(autouse=True)
+def fake_discovery_router(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sfe.discovery as discovery
+
+    monkeypatch.setattr(
+        discovery,
+        "create_configured_discovery_router",
+        lambda: FakeDiscoveryRouter(),
+    )
 
 
 class FakePatchReviewer:
@@ -1475,17 +1521,17 @@ def test_discovery_excludes_sensitive_generated_and_non_text_files_in_tui(
         input_provider=FakeInput(["", "/task safe alpha", "/discover", "/quit"]),
         output=output.append,
         cwd=tmp_path,
+        discovery_router=FakeDiscoveryRouter(("safe.md", "data.txt")),
     )
 
     assert app.run() == 0
     rendered = "\n".join(output)
     discovery_block = rendered.split("SFE discovery", 1)[1]
-    assert "top candidate source refs: safe.md" in discovery_block
+    assert "top candidate source refs: safe.md, data.txt" in discovery_block
     assert ".env" not in discovery_block
     assert "hidden.md" not in discovery_block
     assert "app.log" not in discovery_block
     assert "cache.md" not in discovery_block
-    assert "data.txt" not in discovery_block
     assert "secret_like_file" in discovery_block
     assert "binary_or_non_text" in discovery_block
     assert "safe alpha context" not in discovery_block
@@ -5333,7 +5379,7 @@ def test_dry_run_rendering_omits_content_and_absolute_paths(tmp_path) -> None:
     rendered = render_dry_run_summary(contract, result)
 
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
-    assert "Local routing preview" in rendered
+    assert "Local dry-run context preview" in rendered
     assert "Selected context" in rendered
     assert "Safety guarantees" in rendered
     assert "selected segment ids: ctx_" in rendered
@@ -5362,7 +5408,7 @@ def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
     rendered = render_dry_run_summary(contract, result)
 
     assert "Preflight state" in rendered
-    assert "Local routing preview" in rendered
+    assert "Local dry-run context preview" in rendered
     assert "Selected context" in rendered
     assert "Skipped/rejected context" in rendered
     assert "Safety guarantees" in rendered
@@ -5372,7 +5418,7 @@ def test_dry_run_renders_execution_preview_summary(tmp_path) -> None:
     assert "automatic writes disabled" in rendered
     assert "shell disabled" in rendered
     assert "patch application available through explicit /apply-patch" in rendered
-    assert "not an LLM router result" in rendered
+    assert "/discover reports its own discovery mode" in rendered
 
 
 def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
@@ -5388,9 +5434,9 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
 
     rendered = render_dry_run_summary(contract, result)
 
-    assert "Local routing preview" in rendered
+    assert "Local dry-run context preview" in rendered
     assert f"selector mode: {LOCAL_LEXICAL_PREVIEW_MODE}" in rendered
-    assert "local preview only, not an LLM router result" in rendered
+    assert "this dry-run context preview is local" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "SECRET_TASK_TEXT" not in rendered
     assert str(tmp_path) not in rendered
@@ -5430,7 +5476,7 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "`/ask` is the first read-only executor phase" in note
     assert "does not use" in note
     assert "the proxy, write files, execute shell commands" in normalized_note
-    assert "not an LLM router result" in note
+    assert "dry-run" in normalized_note
     assert "tui_direct_backend_strategy.md" in index
     milestone = (
         PROJECT_ROOT / "docs" / "tui_readonly_ask_milestone.md"

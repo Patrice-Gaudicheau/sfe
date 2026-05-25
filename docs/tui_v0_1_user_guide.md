@@ -180,15 +180,18 @@ Discoverer -> Router -> Executor
 
 In the current TUI:
 
-- the Discoverer is core workspace discovery in `sfe/discovery.py`;
-- the Router is still the provider-free local lexical preview;
+- the Discoverer is core workspace discovery in `sfe/discovery.py`, backed by
+  the configured discovery router in `sfe/discovery_router.py`;
+- the `/dry-run` context preview is still the provider-free local lexical
+  preview;
 - the Executor is the configured executor used by `DirectBackend`.
 
-Discovery does not call providers, write files, run shell commands, execute
-tools, or expose raw file contents in diagnostics. It excludes obvious
-unsafe/local/generated inputs such as `.env`, cache directories, local logs,
-local databases, JSONL streams, binary/non-UTF-8 files, and common build
-artifacts.
+Discovery builds a metadata-only workspace map, asks the configured discovery
+router which files to inspect, and locally revalidates selected paths before
+loading them. It does not write files, run shell commands, execute tools, or
+expose raw file contents in diagnostics. It excludes obvious unsafe/local/generated
+inputs such as `.env`, cache directories, local logs, local databases, JSONL
+streams, binary/non-UTF-8 files, and common build artifacts.
 
 `DiscoveryResult` is render-safe: its load results are scrubbed and should be
 used only for diagnostics. When the TUI later builds the real SFE contract for
@@ -328,8 +331,8 @@ The current TUI behavior intentionally keeps these boundaries:
 
 ## Current Limitations
 
-- Context-selection routing is a local lexical preview, not an LLM router
-  result.
+- `/dry-run` context preview routing is a local lexical preview, not an LLM
+  router result.
 - Router review for `/apply-patch` and `/review-worktree` is a semantic LLM
   review, not a formal security proof.
 - Discovery is a first controlled TUI workflow, not robust general retrieval.
