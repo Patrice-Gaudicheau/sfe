@@ -62,7 +62,7 @@ dry-run selector depends on fixture oracle labels rather than arbitrary
 first-party TUI context. Provider-backed router integration remains future work
 after the local explicit-segment router path is validated.
 
-Real SFE router integration should be introduced before any executor
+Real SFE router integration should be introduced before broadening executor
 integration. Executor calls remain out of scope for the current TUI dry-run
 path.
 
@@ -73,12 +73,19 @@ routes explicit `context_segments` through `local_lexical_preview`, and sends
 only the selected context segments plus protected instructions and the protected
 task to the executor.
 
-This path may call the configured OpenAI executor provider, but it does not use
-the proxy, write files, execute shell commands, expose backend switching, or run
-an agent loop. The assistant answer is displayed to the user; diagnostics remain
+This path may call the configured executor provider, but it does not use the
+proxy, write files, execute shell commands, expose backend switching, or run an
+agent loop. The assistant answer is displayed to the user; diagnostics remain
 sanitized to counts, opaque ids, token estimates, provider call count, and
-disabled capability flags. Write tools and shell/tool execution remain later
-phases.
+disabled capability flags.
+
+The later `/patch` -> `/apply-patch` path keeps writes behind an explicit
+router-reviewed boundary. `/patch` stores structured full-file replacement
+proposals and never writes files. `/apply-patch` writes only after the
+configured router reviewer returns `OK_APPLY`; `KO_BLOCK` writes nothing.
+Worktree isolation can move that explicit write boundary into an SFE-created
+Git Worktree, but it still does not merge, push, create PRs, run shell
+commands, or run tests.
 
 ## Safety Posture
 
@@ -90,6 +97,6 @@ The TUI should continue to avoid:
 - request-body logging,
 - provider payload logging,
 - API key or header logging,
-- writes,
+- automatic writes,
 - shell command execution,
 - provider or proxy calls in dry-run preview mode.

@@ -37,16 +37,12 @@ appeared to end abruptly, so the TUI read-only executor default output budget
 was raised from 800 to 1500 tokens. This change is local to the first-party TUI
 read-only executor and does not alter benchmark or proxy defaults.
 
-`/patch` is the next proposal-only phase. It uses the same DirectBackend,
-explicit `context_segments`, and `local_lexical_preview` selected context as
-`/ask`, but asks the read-only executor for a unified diff when a safe concrete
-edit can be proposed from the selected context. The TUI labels this output as
-"Patch proposal only, not applied" and reports sanitized routing diagnostics.
-It does not write files, apply patches, execute shell commands, call the proxy,
-switch backends, or run an agent loop. This is the step before any future
-write/apply workflow. Patch proposals use a larger local output budget than
-`/ask` because unified diffs are longer-form output; the `/ask` budget remains
-unchanged.
+Historical note: `/patch` later became a proposal-only structured full-file
+replacement flow, with `/apply-patch` as the explicit router-reviewed write
+boundary. See `tui_v0_1_user_guide.md` and `tui_apply_patch_design.md` for
+current behavior. At the time of this milestone, the important boundary was
+that `/patch` did not write files, apply patches, execute shell commands, call
+the proxy, switch backends, or run an agent loop.
 
 `/reset` exists as a session comfort command. It clears the current task, loaded
 and skipped context file records, warning records tied to those files, and the

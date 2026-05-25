@@ -14,7 +14,7 @@ development. It should remain CLI/TUI-first for now.
 The canonical TUI backend is `DirectBackend`. It works from an explicit SFE
 contract: selected workspace, protected task, protected instructions, explicit
 context segments, reducibility metadata, local routing diagnostics, and a
-read-only executor boundary.
+executor boundary plus explicit router-reviewed write boundaries.
 
 The current canonical TUI workflow is:
 
@@ -24,6 +24,24 @@ The current canonical TUI workflow is:
 /dry-run
 /context
 /ask
+```
+
+Write-oriented experiments use explicit commands rather than automatic writes:
+
+```text
+/patch
+/apply-patch
+```
+
+The isolated worktree path is:
+
+```text
+/isolate
+/patch
+/apply-patch
+/worktree-diff
+/review-worktree
+/cleanup-worktree
 ```
 
 This is the first controlled TUI discovery workflow. It follows the intended
@@ -40,9 +58,12 @@ shell commands, or expose raw file contents in diagnostics. Full text is
 reloaded later through the explicit discovery loading boundary when the TUI
 builds an SFE contract.
 
-The Router remains the provider-free local lexical preview for now. It is not
-an LLM router result and should not be described as robust general retrieval.
-The Executor remains the configured read-only executor behind `DirectBackend`.
+The context-selection Router remains the provider-free local lexical preview
+for now. It is not an LLM router result and should not be described as robust
+general retrieval. The Executor remains the configured executor behind
+`DirectBackend`. Separate configured router-review calls are used for
+`/apply-patch` and `/review-worktree`; those reviews are semantic checks, not
+formal security proofs.
 
 The currently validated TUI commands are:
 
@@ -55,6 +76,15 @@ The currently validated TUI commands are:
 - `/context`
 - `/ask`
 - `/patch`
+- `/apply-patch`
+- `/isolate`
+- `/workspace-status`
+- `/worktree-diff`
+- `/review-worktree`
+- `/cleanup-worktree`
+- `/gc-worktrees`
+- `/auto-patch`
+- `/auto-worktree`
 - `/files`
 - `/reset`
 
@@ -70,12 +100,32 @@ backends, write files, execute shell commands, or run an agent loop. After a
 task is set, `/ask` requires `/discover` unless manual `/files` context exists.
 It calls the configured executor only after local routing selected context.
 
-`/patch` is proposal-only. It may ask the read-only executor for a unified diff
-or a brief explanation of why no safe diff can be proposed. It must not apply
-file changes, modify the workspace, run shell commands, or imply that files were
-changed. After a task is set, `/patch` requires `/discover` unless manual
-`/files` context exists. Any future write/apply workflow needs a separate design
-and explicit confirmation boundary.
+`/patch` is proposal-only. It asks the configured executor for structured
+full-file replacement proposals, stores them as pending state, and never writes
+files. The displayed unified diff is computed locally by SFE from current file
+content and proposed replacement content; provider-supplied diff previews are
+untrusted diagnostics only. After a task is set, `/patch` requires `/discover`
+unless manual `/files` context exists.
+
+`/apply-patch` is the explicit write boundary. It asks the configured router
+reviewer for `OK_APPLY` or `KO_BLOCK` and writes the pending full-file
+replacements only after `OK_APPLY`. `KO_BLOCK` writes nothing and keeps the
+pending proposal for inspection.
+
+Git Worktree isolation is available through `/isolate`. It creates an
+SFE-owned worktree outside the source checkout, switches the active TUI
+workspace to that worktree, and lets `/patch` plus `/apply-patch` modify only
+the isolated copy. `/review-worktree` reviews the actual git status and diff
+with the configured router reviewer and returns `OK_PROMOTE` or `KO_BLOCK`.
+`OK_PROMOTE` does not merge, push, commit, create a PR, or mutate the source
+branch. `/cleanup-worktree` removes only the active SFE-created worktree.
+`/gc-worktrees` is dry-run by default; `/gc-worktrees --clean` removes only
+clean SFE-created orphan worktrees and protects the active TUI session.
+
+`/auto-patch` and `/auto-worktree` are macro commands over the existing
+handlers. They stop on failure or router `KO_BLOCK`, preserve the same router
+review boundaries, and do not introduce shell execution, test/lint execution,
+merge, push, PR creation, or automatic cleanup.
 
 `/files` remains available as manual/debug context loading. It is no longer the
 normal human-facing workflow and should not be presented as the recommended TUI
@@ -134,7 +184,8 @@ The minimum proof still missing includes:
   cost;
 - failure reporting for no-match routing, over-selection, under-selection, and
   provider errors;
-- a safe design for any future write/apply workflow after `/patch`;
+- repeated evidence for the router-reviewed write and worktree flows beyond
+  unit tests and manual validation;
 - stronger evidence for real Responses streaming context replacement before it
   is treated as generally usable;
 - clearer operational guidance for secrets, logs, provider limits, and local

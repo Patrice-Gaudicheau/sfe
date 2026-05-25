@@ -28,14 +28,20 @@ based:
       "content": "full replacement file content\n"
     }
   ],
-  "diff_preview": "optional unified diff for display"
+  "diff_preview": "optional provider diagnostic only"
 }
 ```
 
 For now, only `replace_existing_file` is supported. Creates, deletes, renames,
 mode changes, symlink changes, and binary writes are unsupported edit formats.
-Unified diffs may be displayed as previews, but they are not the internal source
-of truth for application.
+Full-file replacement content is the internal source of truth for application.
+Unified diffs are display/review previews only.
+
+The trusted readable diff preview is computed locally by SFE from the current
+file content and the proposed full replacement content. Provider-supplied diff
+text is untrusted diagnostic output only and must not be used as the effective
+preview for display, router review, or application. This keeps the preview
+auditable against the exact replacement content that would be written.
 
 Legacy diff-only pending proposals are not applied. They should be reported as
 `unsupported_pending_patch_format` unless full replacement content is available
@@ -51,6 +57,8 @@ Before any write, `/apply-patch` sends the configured router reviewer:
 - touched workspace-relative paths;
 - current contents of touched files when readable;
 - proposed full replacement contents;
+- the SFE-computed effective diff from current content to proposed
+  replacements;
 - allowed workspace-relative paths;
 - inferred task constraints when obvious, such as `existing_files_only`.
 
@@ -66,6 +74,10 @@ The router returns a structured decision:
 ```
 
 The only valid decisions are `OK_APPLY` and `KO_BLOCK`.
+
+The router review is semantic and task-oriented. It should reject unrelated or
+surprising effective diff changes, but it is not a formal security proof and it
+does not repair or rewrite the proposal.
 
 ## Mechanical Guards
 
@@ -90,7 +102,7 @@ stores text content only.
 
 - calls the configured executor/provider for a structured replacement proposal;
 - stores a pending proposal only when structured replacement content is present;
-- may render a readable diff preview;
+- renders the locally computed effective diff preview;
 - never writes files.
 
 `/apply-patch`:
@@ -156,7 +168,11 @@ Required focused tests:
 
 - `/patch` stores a structured replacement proposal;
 - `/patch` performs no writes;
-- `/patch` renders a readable preview when available;
+- `/patch` renders a readable preview computed from current content and
+  proposed full replacements;
+- provider-supplied preview text cannot hide unrelated replacement content;
+- `/apply-patch` router payload includes the computed effective diff rather
+  than provider preview text;
 - `/apply-patch` with `OK_APPLY` writes full file contents;
 - `/apply-patch` with `KO_BLOCK` writes nothing and keeps pending;
 - successful apply clears pending only after the write succeeds;

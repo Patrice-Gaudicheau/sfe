@@ -198,8 +198,9 @@ The tradeoff is that routing and orchestration have fixed costs. SFE only looks 
 
 At a high level, the current repository has these layers:
 
-- `sfe/`: core SFE helpers, including provider selection and reusable
-  provider-free workspace discovery.
+- `sfe/`: core SFE helpers, including provider selection, reusable
+  provider-free workspace discovery, shared router-review plumbing, and
+  Git Worktree workspace isolation.
 - `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
 - `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
 - `providers/`: minimal benchmark provider adapters, including Lemonade,
@@ -219,15 +220,36 @@ The current canonical TUI path uses `DirectBackend` and follows:
 /ask
 ```
 
+For write-oriented TUI experiments, `/patch` is proposal-only and `/apply-patch`
+is the explicit write boundary. `/patch` stores structured full-file replacement
+proposals and never writes files. The readable unified diff shown by the TUI is
+computed locally by SFE from the current file content and proposed replacement
+content; provider-supplied diff previews are not trusted as the source of
+truth. `/apply-patch` asks the configured router reviewer for `OK_APPLY` or
+`KO_BLOCK` and writes only after `OK_APPLY`.
+
+The TUI also has an experimental Git Worktree isolation flow. `/isolate`
+creates an SFE-owned worktree outside the source workspace and switches the
+active TUI workspace to it, so later `/patch` and `/apply-patch` operations
+target the isolated worktree rather than the original checkout. `/review-worktree`
+asks the configured router reviewer for `OK_PROMOTE` or `KO_BLOCK` over the
+actual worktree status and git diff. `OK_PROMOTE` is only a semantic review
+decision; it does not merge, push, commit, create a PR, or mutate the source
+branch. `/cleanup-worktree` removes only the active SFE-created worktree, and
+`/gc-worktrees` is a dry-run report by default. `/gc-worktrees --clean` removes
+only clean SFE-created orphan worktrees and protects the active TUI session.
+
 The architecture boundary is:
 
 ```text
 Discoverer -> Router -> Executor
 ```
 
-For the TUI today, the Discoverer is core workspace discovery in
+For TUI context selection today, the Discoverer is core workspace discovery in
 `sfe/discovery.py`, the Router is still a provider-free local lexical preview,
-and the Executor is the configured read-only executor behind `DirectBackend`.
+and the Executor is the configured executor behind `DirectBackend`. Separate
+router-review calls are used for `/apply-patch` and `/review-worktree`; these
+are semantic LLM reviews, not formal security proofs.
 `/discover` scans the selected workspace and builds a controlled candidate pool.
 It does not call providers, write files, run shell commands, or expose raw file
 contents in diagnostics. `/dry-run` still makes zero provider calls. `/ask`
@@ -533,6 +555,8 @@ model intelligence.
 
 - `docs/INDEX.md`: recommended starting point and runner-category map for technical reviewers.
 - `docs/tui_v0_1_user_guide.md`: current canonical SFE-aware TUI workflow.
+- `docs/tui_apply_patch_design.md`: explicit `/patch` -> `/apply-patch` write
+  boundary and router-reviewed full-file replacement design.
 - `docs/current_architecture_status.md`: current boundary between the TUI
   canonical path and standby/experimental proxy infrastructure.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.

@@ -11,14 +11,15 @@ this guide.
 
 The SFE-aware TUI is a command-line interactive workflow for setting a task,
 discovering a controlled pool of workspace context, previewing local context
-routing, and optionally asking a configured read-only executor/provider for an
-answer or patch proposal.
+routing, and optionally asking a configured executor/provider for an answer or
+patch proposal.
 
 The TUI keeps the current task, selected workspace, loaded context metadata,
-local routing diagnostics, latest ask/patch result, and pending patch proposal
-metadata in the session. It does not run shell commands, execute tools, or
-switch backends. Automatic writes are disabled; explicit `/apply-patch` is
-available for applying the latest pending patch proposal after router review.
+local routing diagnostics, latest ask/patch result, pending patch proposal
+metadata, and optional isolated worktree session metadata in the session. It
+does not run shell commands, execute tools, or switch backends. Automatic writes
+are disabled; explicit `/apply-patch` is available for applying the latest
+pending patch proposal after router review.
 
 ## Launch
 
@@ -99,6 +100,12 @@ workspace paths using safe relative labels where possible.
    /reset
    ```
 
+For isolated write experiments, use `/isolate` before `/patch` so writes happen
+inside an SFE-created Git Worktree instead of the original checkout. The macro
+commands `/auto-patch` and `/auto-worktree` run the existing safe handlers in
+sequence and stop on failure or router `KO_BLOCK`; they do not add merge, push,
+PR, shell execution, or test-runner behavior.
+
 ## Command Reference
 
 - `/help`: show concise command help.
@@ -120,6 +127,32 @@ workspace paths using safe relative labels where possible.
 - `/apply-patch`: ask the configured router reviewer to approve or block the
   latest pending structured patch proposal. If approved, write the proposed
   full file replacements inside the selected workspace.
+- `/isolate`: create an SFE-owned Git Worktree from the selected Git workspace
+  and switch the active TUI workspace to that worktree. Dirty source
+  workspaces are refused by default.
+- `/workspace-status`: show whether the active workspace is the original
+  workspace or an isolated worktree, plus worktree metadata and git status when
+  available.
+- `/worktree-diff`: show the active isolated worktree's git status and diff
+  summary.
+- `/review-worktree`: ask the configured router reviewer for `OK_PROMOTE` or
+  `KO_BLOCK` over the actual worktree status, changed files, diff, and task.
+  `OK_PROMOTE` does not merge, push, commit, create a PR, or mutate the source
+  branch.
+- `/cleanup-worktree`: remove only the active SFE-created worktree and restore
+  the original source workspace as the active workspace.
+- `/gc-worktrees`: dry-run report of SFE-created worktrees found from the
+  selected source workspace. It does not remove anything.
+- `/gc-worktrees --clean`: remove only clean SFE-created orphan worktrees and
+  protect the active TUI worktree session. Dirty worktrees are reported and
+  skipped.
+- `/auto-patch`: macro command that runs the existing discover, dry-run,
+  patch, and router-reviewed apply flow. It stops on failure or router
+  `KO_BLOCK`.
+- `/auto-worktree`: macro command that creates isolation if needed, then runs
+  the existing patch, apply, worktree-diff, and router-reviewed worktree review
+  flow. It stops on failure or `KO_BLOCK` and leaves the worktree available for
+  inspection.
 - `/files <paths...>`: replace context manually with the provided text files
   for debug/design work. Directory inputs and unsupported files are rejected or
   skipped with a reason. This remains available but is not the normal
@@ -149,7 +182,7 @@ In the current TUI:
 
 - the Discoverer is core workspace discovery in `sfe/discovery.py`;
 - the Router is still the provider-free local lexical preview;
-- the Executor is the configured read-only executor used by `DirectBackend`.
+- the Executor is the configured executor used by `DirectBackend`.
 
 Discovery does not call providers, write files, run shell commands, execute
 tools, or expose raw file contents in diagnostics. It excludes obvious
@@ -204,16 +237,65 @@ The result is proposal-only:
 - automatic writes are disabled;
 - explicit `/apply-patch` is available when a structured proposal is pending.
 
-The provider is asked for structured full-file replacements. The TUI may display
-a readable diff preview, but the stored proposal is the full replacement content
-for each touched file. `/patch` does not apply that proposal, run shell
-commands, execute tools, or modify the workspace.
+The provider is asked for structured full-file replacements. The stored proposal
+is the full replacement content for each touched file, and that full replacement
+content is the apply source of truth. The TUI displays a readable unified diff
+preview, but that diff is computed locally by SFE from the current file content
+and the proposed replacement content. Provider-supplied diff previews are not
+trusted for display, application, or router review. `/patch` does not apply the
+proposal, run shell commands, execute tools, or modify the workspace.
 
 `/apply-patch` calls the configured router reviewer before writing. Router
 `KO_BLOCK` writes nothing and keeps the pending proposal. Router `OK_APPLY`
 allows the TUI to write the proposed full replacement contents; the pending
 proposal is cleared only after successful writes. Physical write failures are
 reported separately from router rejection and keep the pending proposal.
+
+The router review for `/apply-patch` is a semantic LLM review. It receives the
+original task, selected/discovered context metadata, current file contents when
+readable, proposed full replacements, allowed paths, and the SFE-computed
+effective diff. It is intended to catch unrelated or surprising edits, but it is
+not a formal security proof.
+
+## Worktree Isolation
+
+`/isolate` creates an isolated Git Worktree using core SFE workspace isolation
+support. The worktree is created outside the original workspace on a generated
+branch named like `sfe/worktree/<session-id>`. The TUI then switches its active
+workspace to the worktree, so `/patch` and `/apply-patch` operate on the
+isolated copy.
+
+The default policy refuses non-Git workspaces and dirty source repositories.
+The original workspace is not deleted, force-checked-out, merged into, pushed,
+or otherwise mutated by the isolation flow.
+
+`/review-worktree` collects the actual worktree git status, changed files, and
+git diff, then asks the configured router reviewer for `OK_PROMOTE` or
+`KO_BLOCK`. This review is semantic and task-oriented; it does not repair the
+worktree and does not prove security or correctness. In V1, `OK_PROMOTE` is
+only a review result. There is no automatic merge, push, commit, PR creation,
+source-branch mutation, arbitrary shell execution, or test/lint runner.
+
+`/cleanup-worktree` removes only the active SFE-created worktree. `/gc-worktrees`
+is dry-run by default and reports SFE-created worktrees found from the source
+workspace. `/gc-worktrees --clean` removes only clean SFE-created orphan
+worktrees; it protects the active TUI worktree session and skips dirty
+worktrees.
+
+## Macro Commands
+
+`/auto-patch` and `/auto-worktree` are convenience macros over the existing
+handlers. They do not bypass router review and do not introduce new execution
+capabilities.
+
+`/auto-patch` runs discovery if needed, then the dry-run, patch, and
+router-reviewed apply path. It writes only if `/apply-patch` receives
+`OK_APPLY`.
+
+`/auto-worktree` creates isolation if needed, preserves manually selected
+`/files` context across the worktree switch, then runs patch, apply,
+worktree-diff, and router-reviewed worktree review. It never merges, pushes,
+commits, creates a PR, or cleans up automatically.
 
 ## Safety Guarantees
 
@@ -232,6 +314,13 @@ The current TUI behavior intentionally keeps these boundaries:
 - `/patch` is proposal-only and does not write files;
 - `/apply-patch` is explicit, router-reviewed, and applies only pending
   structured full-file replacements;
+- displayed patch diffs are computed locally from actual proposed full-file
+  replacements; provider diff previews are untrusted diagnostics only;
+- `/review-worktree` reviews the actual worktree git diff and status;
+- `OK_PROMOTE` does not merge, push, commit, create a PR, or mutate the source
+  branch;
+- `/gc-worktrees` is dry-run by default and clean mode targets only
+  SFE-created clean orphan worktrees;
 - workspace and source paths are displayed using safe relative labels where
   possible;
 - diagnostics do not display raw file contents, request bodies, provider
@@ -239,12 +328,16 @@ The current TUI behavior intentionally keeps these boundaries:
 
 ## Current Limitations
 
-- The router is a local lexical preview, not an LLM router result.
+- Context-selection routing is a local lexical preview, not an LLM router
+  result.
+- Router review for `/apply-patch` and `/review-worktree` is a semantic LLM
+  review, not a formal security proof.
 - Discovery is a first controlled TUI workflow, not robust general retrieval.
 - Routing quality is not yet proven across repeated realistic workflows.
 - `/patch` does not apply patches; `/apply-patch` is required for writes.
 - There is no CLI/API pipeline integration for the canonical TUI workflow yet.
-- There is no provider-backed TUI router yet.
+- There is no automatic merge, push, PR creation, arbitrary shell execution, or
+  test/lint runner.
 - The proxy remains standby experimental compatibility and observability
   infrastructure; it is not the canonical user path.
 - The current test suite validates expected behavior and safety boundaries, but
