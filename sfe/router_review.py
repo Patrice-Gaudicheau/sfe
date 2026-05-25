@@ -302,7 +302,10 @@ def parse_json_review_decision(
     if not reason:
         raise RouterReviewError("invalid_router_response", "router reason was empty")
     if not isinstance(files, list):
-        raise RouterReviewError("invalid_router_response", "router files_reviewed was invalid")
+        raise RouterReviewError(
+            "invalid_router_response",
+            f"router files_reviewed was invalid (expected list, got {type(files).__name__})",
+        )
     return JsonReviewDecision(
         decision=decision,
         reason=reason,

@@ -748,7 +748,7 @@ class SfeTuiApp:
             validation = validate_patch_targets(self.workspace_root, diff_parsed.patch)
             if not validation.ok:
                 return None, validation.issue
-            proposal = diff_parsed.patch
+            proposal = validation.patch or diff_parsed.patch
             preview = result.answer
             summary = validation.summary or diff_parsed.summary
             parse_status = "unified_diff"
@@ -790,6 +790,16 @@ class SfeTuiApp:
                 source_ref = proposed["path"]
                 path = root / str(source_ref)
                 proposed_files.append(proposed)
+                if proposed.get("action") == "create_file":
+                    current_files.append(
+                        {
+                            "path": source_ref,
+                            "available": True,
+                            "content": "",
+                            "state": "new_file",
+                        }
+                    )
+                    continue
                 try:
                     raw = path.read_bytes()
                 except OSError:

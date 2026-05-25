@@ -8,12 +8,24 @@ belongs to the configured router reviewer.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import difflib
+import json
+import os
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 MECHANICAL_GUARD_REJECTED = "mechanical_safety_guard"
 INVALID_PATCH_PROPOSAL = "invalid_patch_proposal"
 PHYSICAL_APPLICATION_FAILURE = "physical_application_failure"
+PHYSICAL_WRITE_FAILURE = "physical_write_failure"
+UNSUPPORTED_PENDING_PATCH_FORMAT = "unsupported_pending_patch_format"
+UNSUPPORTED_EDIT_FORMAT = "unsupported_edit_format"
+SUPPORTED_REPLACE_ACTION = "replace_existing_file"
+SUPPORTED_CREATE_ACTION = "create_file"
+SUPPORTED_STRUCTURED_ACTIONS = frozenset(
+    {SUPPORTED_REPLACE_ACTION, SUPPORTED_CREATE_ACTION}
+)
 
 _DIFF_HEADER_RE = re.compile(r"^diff --git (a/[^ ]+) (b/[^ ]+)$")
 _HUNK_HEADER_RE = re.compile(
@@ -116,6 +128,7 @@ class PatchValidationResult:
     ok: bool
     issue: PatchIssue | None
     summary: PatchSummary | None
+    patch: ParsedPatch | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +137,30 @@ class PatchApplyResult:
     issue: PatchIssue | None
     summary: PatchSummary | None
     pending_patch_cleared: bool
+
+
+@dataclass(frozen=True)
+class StructuredFileEdit:
+    path: str
+    action: str
+    content: str
+
+
+@dataclass(frozen=True)
+class StructuredFilePatch:
+    edits: tuple[StructuredFileEdit, ...]
+    diff_preview: str | None = None
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return tuple(edit.path for edit in self.edits)
+
+
+@dataclass(frozen=True)
+class StructuredFilePatchParseResult:
+    proposal: StructuredFilePatch | None
+    issue: PatchIssue | None
+    summary: PatchSummary | None
 
 
 def parse_unified_diff(text: str) -> PatchParseResult:
@@ -293,6 +330,231 @@ def extract_touched_paths(text: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def parse_structured_file_patch_json(text: str) -> StructuredFilePatchParseResult:
+    try:
+        payload = json.loads(strip_json_fence(text))
+    except json.JSONDecodeError:
+        return _structured_parse_error("invalid_json")
+    if not isinstance(payload, dict):
+        return _structured_parse_error("json_not_object")
+    edits_value = payload.get("edits")
+    if not isinstance(edits_value, list) or not edits_value:
+        return _structured_parse_error("missing_edits")
+
+    edits: list[StructuredFileEdit] = []
+    for item in edits_value:
+        if not isinstance(item, dict):
+            return _structured_parse_error("edit_not_object")
+        path = item.get("path")
+        action = item.get("action")
+        content = item.get("content")
+        if not isinstance(path, str) or not path.strip():
+            return _structured_parse_error("invalid_path")
+        if action not in SUPPORTED_STRUCTURED_ACTIONS:
+            return StructuredFilePatchParseResult(
+                None,
+                PatchIssue(UNSUPPORTED_EDIT_FORMAT, "unsupported_action", path),
+                None,
+            )
+        if not isinstance(content, str):
+            return StructuredFilePatchParseResult(
+                None,
+                PatchIssue(UNSUPPORTED_EDIT_FORMAT, "content_not_text", path),
+                None,
+            )
+        edits.append(StructuredFileEdit(path=path, action=str(action), content=content))
+
+    diff_preview = payload.get("diff_preview")
+    if diff_preview is not None and not isinstance(diff_preview, str):
+        return _structured_parse_error("invalid_diff_preview")
+    proposal = StructuredFilePatch(edits=tuple(edits), diff_preview=diff_preview)
+    return StructuredFilePatchParseResult(
+        proposal=proposal,
+        issue=None,
+        summary=summarize_structured_file_patch(proposal),
+    )
+
+
+def validate_structured_file_patch_targets(
+    workspace_root: Path,
+    proposal: StructuredFilePatch,
+) -> PatchValidationResult:
+    guard_issue = validate_patch_paths(workspace_root, proposal.paths)
+    if guard_issue is not None:
+        return PatchValidationResult(False, guard_issue, _structured_summary_with_issue(proposal, guard_issue))
+    root = workspace_root.resolve()
+    for edit in proposal.edits:
+        target = (root / edit.path).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            issue = PatchIssue(MECHANICAL_GUARD_REJECTED, "path_outside_workspace", edit.path)
+            return PatchValidationResult(False, issue, _structured_summary_with_issue(proposal, issue))
+        if edit.action == SUPPORTED_REPLACE_ACTION:
+            if not target.is_file():
+                issue = PatchIssue(PHYSICAL_WRITE_FAILURE, "target_not_existing_file", edit.path)
+                return PatchValidationResult(False, issue, _structured_summary_with_issue(proposal, issue))
+        elif edit.action == SUPPORTED_CREATE_ACTION:
+            if target.exists() or target.is_symlink():
+                issue = PatchIssue(PHYSICAL_WRITE_FAILURE, "target_already_exists", edit.path)
+                return PatchValidationResult(False, issue, _structured_summary_with_issue(proposal, issue))
+        else:
+            issue = PatchIssue(UNSUPPORTED_EDIT_FORMAT, "unsupported_action", edit.path)
+            return PatchValidationResult(False, issue, _structured_summary_with_issue(proposal, issue))
+    return PatchValidationResult(True, None, summarize_structured_file_patch(proposal))
+
+
+def summarize_structured_file_patch(proposal: StructuredFilePatch) -> PatchSummary:
+    preview = proposal.diff_preview or ""
+    hunk_count = sum(1 for line in preview.splitlines() if line.startswith("@@ "))
+    lines_added = sum(
+        1
+        for line in preview.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    lines_removed = sum(
+        1
+        for line in preview.splitlines()
+        if line.startswith("-") and not line.startswith("---")
+    )
+    modified_paths = tuple(
+        edit.path for edit in proposal.edits if edit.action == SUPPORTED_REPLACE_ACTION
+    )
+    created_paths = tuple(
+        edit.path for edit in proposal.edits if edit.action == SUPPORTED_CREATE_ACTION
+    )
+    return PatchSummary(
+        paths=proposal.paths,
+        file_count=len(proposal.edits),
+        hunk_count=hunk_count or len(proposal.edits),
+        lines_added=lines_added,
+        lines_removed=lines_removed,
+        modified_paths=modified_paths,
+        created_paths=created_paths,
+    )
+
+
+def generate_structured_file_patch_diff_preview(
+    workspace_root: Path,
+    proposal: StructuredFilePatch,
+) -> str:
+    root = workspace_root.resolve()
+    parts: list[str] = []
+    for edit in proposal.edits:
+        target = root / edit.path
+        if edit.action == SUPPORTED_CREATE_ACTION:
+            old_lines: list[str] = []
+            fromfile = "/dev/null"
+        else:
+            try:
+                old_text = target.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            old_lines = old_text.splitlines(keepends=True)
+            fromfile = f"a/{edit.path}"
+        new_lines = edit.content.splitlines(keepends=True)
+        if edit.content and not edit.content.endswith("\n"):
+            new_lines = edit.content.splitlines()
+        diff = difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=fromfile,
+            tofile=f"b/{edit.path}",
+            lineterm="",
+        )
+        body = "\n".join(diff).rstrip()
+        if body:
+            parts.append(f"diff --git a/{edit.path} b/{edit.path}\n{body}")
+    return "\n".join(parts)
+
+
+def apply_structured_file_patch(
+    workspace_root: Path,
+    proposal: StructuredFilePatch,
+) -> PatchApplyResult:
+    validation = validate_structured_file_patch_targets(workspace_root, proposal)
+    if not validation.ok:
+        return PatchApplyResult(False, validation.issue, validation.summary, True)
+
+    root = workspace_root.resolve()
+    computed: list[tuple[Path, bytes | None, bytes, str]] = []
+    for edit in proposal.edits:
+        target = (root / edit.path).resolve()
+        if edit.action == SUPPORTED_CREATE_ACTION:
+            computed.append((target, None, edit.content.encode("utf-8"), edit.path))
+            continue
+        try:
+            original_bytes = target.read_bytes()
+        except OSError:
+            return PatchApplyResult(
+                False,
+                PatchIssue(PHYSICAL_WRITE_FAILURE, "read_error", edit.path),
+                None,
+                False,
+            )
+        computed.append((target, original_bytes, edit.content.encode("utf-8"), edit.path))
+
+    temp_paths: list[Path] = []
+    created_dirs: list[Path] = []
+    try:
+        for target, original_bytes, replacement_bytes, source_ref in computed:
+            if original_bytes is None:
+                created_dirs.extend(_ensure_parent_dirs(target.parent))
+                with target.open("xb") as handle:
+                    handle.write(replacement_bytes)
+                temp_paths.append(target)
+                continue
+            temp_file = tempfile.NamedTemporaryFile(
+                mode="wb",
+                delete=False,
+                dir=target.parent,
+                prefix=f".{target.name}.",
+                suffix=".sfe-tmp",
+            )
+            with temp_file:
+                temp_file.write(replacement_bytes)
+            temp_paths.append(Path(temp_file.name))
+    except OSError:
+        _cleanup_structured_created_files(computed)
+        _cleanup_temp_files(temp_paths)
+        _cleanup_created_dirs(created_dirs)
+        return PatchApplyResult(
+            False,
+            PatchIssue(PHYSICAL_WRITE_FAILURE, "write_error", source_ref if "source_ref" in locals() else None),
+            None,
+            False,
+        )
+
+    written: list[tuple[Path, bytes | None]] = [
+        (target, None) for target, original_bytes, _new_bytes, _source_ref in computed if original_bytes is None
+    ]
+    replace_temp_paths = [
+        path
+        for path, (_target, original_bytes, _new_bytes, _source_ref) in zip(temp_paths, computed)
+        if original_bytes is not None
+    ]
+    replace_targets = [
+        (target, original_bytes)
+        for target, original_bytes, _new_bytes, _source_ref in computed
+        if original_bytes is not None
+    ]
+    for temp_path, (target, original_bytes) in zip(replace_temp_paths, replace_targets):
+        try:
+            os.replace(temp_path, target)
+            written.append((target, original_bytes))
+        except OSError:
+            _cleanup_temp_files([temp_path, *replace_temp_paths])
+            _rollback_patch_writes(written)
+            _cleanup_created_dirs(created_dirs)
+            return PatchApplyResult(
+                False,
+                PatchIssue(PHYSICAL_WRITE_FAILURE, "write_error", None),
+                None,
+                False,
+            )
+    return PatchApplyResult(True, None, summarize_structured_file_patch(proposal), True)
+
+
 def validate_patch_targets(
     workspace_root: Path,
     patch: ParsedPatch,
@@ -306,6 +568,7 @@ def validate_patch_targets(
     )
     if path_result is not None:
         return PatchValidationResult(False, path_result, _summary_with_issue(patch, path_result))
+    normalized_files: list[ParsedFilePatch] = []
     for file_patch in patch.files:
         if file_patch.operation not in {PATCH_OPERATION_MODIFY, PATCH_OPERATION_CREATE}:
             issue = PatchIssue(
@@ -314,10 +577,10 @@ def validate_patch_targets(
                 file_patch.new_path,
             )
             return PatchValidationResult(False, issue, _summary_with_issue(patch, issue))
+        target = _resolve_safe_target(workspace_root, file_patch.new_path)
+        if isinstance(target, PatchIssue):
+            return PatchValidationResult(False, target, _summary_with_issue(patch, target))
         if file_patch.operation == PATCH_OPERATION_CREATE:
-            target = _resolve_safe_target(workspace_root, file_patch.new_path)
-            if isinstance(target, PatchIssue):
-                return PatchValidationResult(False, target, _summary_with_issue(patch, target))
             if target.exists() or target.is_symlink():
                 issue = PatchIssue(
                     PHYSICAL_APPLICATION_FAILURE,
@@ -325,7 +588,21 @@ def validate_patch_targets(
                     file_patch.new_path,
                 )
                 return PatchValidationResult(False, issue, _summary_with_issue(patch, issue))
-    return PatchValidationResult(True, None, summarize_patch(patch))
+            normalized_files.append(file_patch)
+            continue
+        if target.exists() or target.is_symlink():
+            normalized_files.append(file_patch)
+            continue
+        if not _is_safe_implicit_create_patch(file_patch):
+            issue = PatchIssue(
+                INVALID_PATCH_PROPOSAL,
+                "missing_target_not_safe_create",
+                file_patch.new_path,
+            )
+            return PatchValidationResult(False, issue, _summary_with_issue(patch, issue))
+        normalized_files.append(replace(file_patch, operation=PATCH_OPERATION_CREATE))
+    normalized_patch = ParsedPatch(files=tuple(normalized_files))
+    return PatchValidationResult(True, None, summarize_patch(normalized_patch), normalized_patch)
 
 
 def validate_patch_paths(
@@ -361,8 +638,10 @@ def apply_patch_to_workspace(
             pending_patch_cleared=True,
         )
 
+    effective_patch = validation.patch or patch
+
     computed: list[tuple[Path, bytes | None, bytes]] = []
-    for file_patch in patch.files:
+    for file_patch in effective_patch.files:
         target = _resolve_safe_target(workspace_root, file_patch.new_path)
         if isinstance(target, PatchIssue):
             return PatchApplyResult(False, target, None, True)
@@ -417,7 +696,7 @@ def apply_patch_to_workspace(
     return PatchApplyResult(
         applied=True,
         issue=None,
-        summary=summarize_patch(patch),
+        summary=summarize_patch(effective_patch),
         pending_patch_cleared=True,
     )
 
@@ -497,6 +776,14 @@ def _parse_error(reason: str, path: str | None = None) -> PatchParseResult:
     )
 
 
+def _structured_parse_error(reason: str) -> StructuredFilePatchParseResult:
+    return StructuredFilePatchParseResult(
+        None,
+        PatchIssue(UNSUPPORTED_PENDING_PATCH_FORMAT, reason, None),
+        None,
+    )
+
+
 def _range_count(value: str | None) -> int:
     if value is None:
         return 1
@@ -550,6 +837,17 @@ def _classify_file_operation(
     return PATCH_OPERATION_MODIFY
 
 
+def _is_safe_implicit_create_patch(file_patch: ParsedFilePatch) -> bool:
+    if not file_patch.hunks:
+        return False
+    for hunk in file_patch.hunks:
+        if hunk.old_start != 0 or hunk.old_count != 0:
+            return False
+        if any(line.kind != "+" for line in hunk.lines):
+            return False
+    return True
+
+
 def _strip_diff_prefix(path: str) -> str:
     if path.startswith("a/") or path.startswith("b/"):
         return path[2:]
@@ -587,8 +885,41 @@ def _resolve_safe_target(workspace_root: Path, source_ref: str) -> Path | PatchI
     return resolved
 
 
+def strip_json_fence(output: str) -> str:
+    text = output.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 def _summary_with_issue(patch: ParsedPatch, issue: PatchIssue) -> PatchSummary:
     summary = summarize_patch(patch)
+    refused_path = issue.path or ""
+    refused_paths = (refused_path,) if refused_path else ()
+    refused_reasons = ((refused_path, issue.reason),) if refused_path else ()
+    return PatchSummary(
+        paths=summary.paths,
+        file_count=summary.file_count,
+        hunk_count=summary.hunk_count,
+        lines_added=summary.lines_added,
+        lines_removed=summary.lines_removed,
+        modified_paths=summary.modified_paths,
+        created_paths=summary.created_paths,
+        refused_paths=refused_paths,
+        refused_reasons=refused_reasons,
+    )
+
+
+def _structured_summary_with_issue(
+    proposal: StructuredFilePatch,
+    issue: PatchIssue,
+) -> PatchSummary:
+    summary = summarize_structured_file_patch(proposal)
     refused_path = issue.path or ""
     refused_paths = (refused_path,) if refused_path else ()
     refused_reasons = ((refused_path, issue.reason),) if refused_path else ()
@@ -640,6 +971,25 @@ def _rollback_patch_writes(written: list[tuple[Path, bytes | None]]) -> None:
                 target.write_bytes(previous_bytes)
         except OSError:
             pass
+
+
+def _cleanup_temp_files(paths: list[Path]) -> None:
+    for path in paths:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _cleanup_structured_created_files(
+    computed: list[tuple[Path, bytes | None, bytes, str]],
+) -> None:
+    for target, original_bytes, _new_bytes, _source_ref in computed:
+        if original_bytes is None:
+            try:
+                target.unlink()
+            except OSError:
+                pass
 
 
 def _cleanup_created_dirs(created_dirs: list[Path]) -> None:

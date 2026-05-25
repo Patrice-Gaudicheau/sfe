@@ -25,9 +25,12 @@ WORKSPACE_REVIEW_SYSTEM_INSTRUCTION = (
     "acceptable for the original user task. The worktree is isolated from the "
     "source workspace. Return exactly one JSON object with keys decision, "
     "reason, files_reviewed, and risk_level. decision must be OK_PROMOTE or "
-    "KO_BLOCK. risk_level must be low, medium, or high. OK_PROMOTE means the "
-    "changes may be considered by an explicit later promotion step; it does "
-    "not merge, push, or mutate the source branch."
+    "KO_BLOCK. risk_level must be low, medium, or high. files_reviewed must "
+    "be a JSON array of strings containing the reviewed file paths. Do not "
+    "return a string, object, count, or comma-separated text for "
+    "files_reviewed. OK_PROMOTE means the changes may be considered by an "
+    "explicit later promotion step; it does not merge, push, or mutate the "
+    "source branch."
 )
 WORKSPACE_REVIEW_DECISIONS = {"OK_PROMOTE", "KO_BLOCK"}
 

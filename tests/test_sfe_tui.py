@@ -265,8 +265,26 @@ def valid_create_diff(path: str = "composer.json", content: str = "{}") -> str:
     )
 
 
+def valid_implicit_create_diff(path: str = "README.md", content: str = "# Demo") -> str:
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            f"--- a/{path}",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,1 @@",
+            f"+{content}",
+        ]
+    )
+
+
 def valid_multi_create_diff(files: dict[str, str]) -> str:
     return "\n".join(valid_create_diff(path, content) for path, content in files.items())
+
+
+def valid_multi_implicit_create_diff(files: dict[str, str]) -> str:
+    return "\n".join(
+        valid_implicit_create_diff(path, content) for path, content in files.items()
+    )
 
 
 def markdown_fenced_diff(
@@ -309,6 +327,27 @@ def replacement_proposal(
                 }
             ],
             "diff_preview": diff_preview or valid_text_diff(path, old=old, new=preview_new),
+        }
+    )
+
+
+def create_file_proposal(
+    path: str = "README.md",
+    *,
+    content: str = "# Demo\n",
+    diff_preview: str | None = None,
+) -> str:
+    preview_content = content.rstrip("\n")
+    return json.dumps(
+        {
+            "edits": [
+                {
+                    "path": path,
+                    "action": "create_file",
+                    "content": content,
+                }
+            ],
+            "diff_preview": diff_preview or valid_create_diff(path, preview_content),
         }
     )
 
@@ -2521,6 +2560,117 @@ def test_tui_pipeline_applies_provider_mocked_multiple_file_creation_diff(
     assert "created relative paths: composer.json, public/index.php, src/Controller/HomeController.php" in rendered
 
 
+def test_tui_pipeline_reclassifies_provider_mocked_implicit_creation_diff(
+    tmp_path,
+) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text(
+        "Create Symfony composer public index controller",
+        encoding="utf-8",
+    )
+    files = {
+        "composer.json": '{"type":"project"}',
+        "public/index.php": "<?php echo 'home';",
+        "src/Controller/HomeController.php": "<?php final class HomeController {}",
+    }
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_multi_implicit_create_diff(files),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    reviewer = FakePatchReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Create Symfony composer public index controller",
+                "/discover",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    for path, content in files.items():
+        assert (tmp_path / path).read_text(encoding="utf-8") == f"{content}\n"
+    assert app.pending_patch is None
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch created files: 3" in rendered
+    assert "modified relative paths: none" in rendered
+    assert "created relative paths: composer.json, public/index.php, src/Controller/HomeController.php" in rendered
+    assert reviewer.calls[0]["patch_summary"]["created_paths"] == list(files)
+    assert reviewer.calls[0]["patch_summary"]["modified_paths"] == []
+    assert reviewer.calls[0]["current_files"] == [
+        {
+            "path": path,
+            "available": True,
+            "content": "",
+            "state": "new_file",
+        }
+        for path in files
+    ]
+    assert reviewer.calls[0]["proposed_full_replacements"] == [
+        {
+            "path": path,
+            "action": "create_file",
+            "content": f"{content}\n",
+        }
+        for path, content in files.items()
+    ]
+
+
+def test_tui_pipeline_still_applies_provider_mocked_existing_file_diff(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_text_diff(),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    reviewer = FakePatchReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "new context\n"
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch created files: 0" in rendered
+    assert "modified relative paths: context.txt" in rendered
+    assert "created relative paths: none" in rendered
+    assert reviewer.calls[0]["patch_summary"]["modified_paths"] == ["context.txt"]
+    assert reviewer.calls[0]["patch_summary"]["created_paths"] == []
+
+
 def test_apply_patch_creates_file_from_core_validated_unified_diff(tmp_path) -> None:
     source = tmp_path / "PROJECT_REQUEST.md"
     source.write_text("Symfony skeleton composer json", encoding="utf-8")
@@ -2627,6 +2777,170 @@ def test_patch_hidden_or_secret_like_path_stores_pending_patch(tmp_path) -> None
     assert app.pending_patch is not None
     assert "pending patch stored: yes" in rendered
     assert "pending patch: yes" in rendered
+
+
+def test_patch_json_create_file_stores_pending_with_created_metadata(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Create README", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=create_file_proposal("README.md", content="# Demo\n"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Create README", "/discover", "/patch", "/status", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is not None
+    assert app.pending_patch.summary.created_paths == ("README.md",)
+    assert app.pending_patch.summary.modified_paths == ()
+    assert not (tmp_path / "README.md").exists()
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch created files: 1" in rendered
+
+
+def test_apply_patch_json_create_file_creates_file_after_router_review(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Create README", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=create_file_proposal("README.md", content="# Demo\n"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    reviewer = FakePatchReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Create README", "/discover", "/patch", "/apply-patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "# Demo\n"
+    assert "created relative paths: README.md" in rendered
+    assert reviewer.calls[0]["current_files"] == [
+        {
+            "path": "README.md",
+            "available": True,
+            "content": "",
+            "state": "new_file",
+        }
+    ]
+    assert reviewer.calls[0]["proposed_full_replacements"] == [
+        {
+            "path": "README.md",
+            "action": "create_file",
+            "content": "# Demo\n",
+        }
+    ]
+
+
+def test_apply_patch_json_create_file_existing_target_is_refused(tmp_path) -> None:
+    source = tmp_path / "README.md"
+    source.write_text("existing\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=create_file_proposal("README.md", content="# Demo\n"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files README.md", "/task Create README", "/patch", "/apply-patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "existing\n"
+    assert "error category: physical_write_failure" in rendered
+    assert "reason category: target_already_exists" in rendered
+
+
+def test_apply_patch_json_create_file_dangerous_path_is_refused(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Create outside", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=create_file_proposal("../outside.md", content="# Demo\n"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Create outside", "/discover", "/patch", "/apply-patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "pending patch stored: yes" in rendered
+    assert "failure kind: mechanical_safety_guard" in rendered
+    assert "reason category: path_outside_workspace" in rendered
+
+
+def test_apply_patch_json_create_file_generated_directories_are_refused(tmp_path) -> None:
+    for path in (
+        ".git/hooks/post-checkout",
+        "vendor/autoload.php",
+        "var/cache.php",
+        "cache/item.txt",
+        "node_modules/pkg/index.js",
+    ):
+        source = tmp_path / path.replace("/", "-") / "PROJECT_REQUEST.md"
+        source.parent.mkdir()
+        source.write_text("Create generated path", encoding="utf-8")
+        executor = FakeExecutor(
+            patch_response=ExecutorResponse(
+                answer=create_file_proposal(path, content="nope\n"),
+                error_category=None,
+                provider_calls_made=1,
+            )
+        )
+        output: list[str] = []
+        app = SfeTuiApp(
+            input_provider=FakeInput(
+                ["", "/task Create generated path", "/discover", "/patch", "/apply-patch", "/quit"]
+            ),
+            output=output.append,
+            cwd=source.parent,
+            backend=DirectBackend(executor=executor),
+            patch_reviewer=FakePatchReviewer(),
+        )
+
+        assert app.run() == 0
+        rendered = "\n".join(output)
+        assert "failure kind: mechanical_safety_guard" in rendered
+        assert "reason category: excluded_directory" in rendered
 
 
 def test_apply_patch_success_modifies_existing_file_and_clears_pending_patch(
@@ -3331,6 +3645,14 @@ def test_patch_review_prompt_describes_full_replacement_as_expected_transport() 
     assert "Judge the effective semantic and textual delta" in (
         PATCH_REVIEW_SYSTEM_INSTRUCTION
     )
+    assert "decision must be OK_APPLY or KO_BLOCK" in PATCH_REVIEW_SYSTEM_INSTRUCTION
+    assert "risk_level must be low, medium, or high" in PATCH_REVIEW_SYSTEM_INSTRUCTION
+    assert "files_reviewed must be a JSON array of strings" in (
+        PATCH_REVIEW_SYSTEM_INSTRUCTION
+    )
+    assert "Do not return a string, object, count, or comma-separated text" in (
+        PATCH_REVIEW_SYSTEM_INSTRUCTION
+    )
     assert "expected internal application format" in prompt
     assert "not evidence that the user-visible edit is large or non-minimal" in prompt
     assert "Compare current_files with proposed_full_replacements" in prompt
@@ -3644,9 +3966,9 @@ def test_apply_patch_physical_write_failure_rolls_back_prior_writes(
             1,
         )
     )
-    import sfe_tui.file_edits as file_edits
+    import sfe.patching as patching
 
-    real_replace = file_edits.os.replace
+    real_replace = patching.os.replace
     replace_calls = 0
 
     def fail_second_replace(src: object, dst: object) -> None:
@@ -3656,7 +3978,7 @@ def test_apply_patch_physical_write_failure_rolls_back_prior_writes(
             raise OSError("simulated replace failure")
         real_replace(src, dst)
 
-    monkeypatch.setattr(file_edits.os, "replace", fail_second_replace)
+    monkeypatch.setattr(patching.os, "replace", fail_second_replace)
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(
@@ -3824,7 +4146,7 @@ def test_patch_unsupported_edit_format_does_not_store_pending_proposal(tmp_path)
                     "edits": [
                         {
                             "path": "context.txt",
-                            "action": "create_file",
+                            "action": "delete_file",
                             "content": "new context\n",
                         }
                     ]
@@ -3851,6 +4173,35 @@ def test_patch_unsupported_edit_format_does_not_store_pending_proposal(tmp_path)
     assert app.pending_patch is None
     assert "pending patch stored: no" in rendered
     assert "pending patch reason: unsupported_edit_format" in rendered
+
+
+def test_apply_patch_json_replace_existing_file_absent_target_is_refused(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Update missing file", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=replacement_proposal("missing.txt", content="new context\n"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Update missing file", "/discover", "/patch", "/apply-patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is not None
+    assert not (tmp_path / "missing.txt").exists()
+    assert "error category: physical_write_failure" in rendered
+    assert "reason category: target_not_existing_file" in rendered
 
 
 def test_status_and_context_show_safe_pending_patch_metadata(tmp_path) -> None:
@@ -4019,13 +4370,15 @@ def test_patch_system_instruction_allows_safe_core_validated_creations() -> None
     assert "Return only one strict JSON object" in instruction
     assert '"edits"' in instruction
     assert '"path":"relative/path"' in instruction
-    assert '"action":"replace_existing_file"' in instruction
-    assert '"content":"full replacement file content"' in instruction
+    assert '"action":"replace_existing_file|create_file"' in instruction
+    assert '"content":"full file content"' in instruction
     assert '"diff_preview":"optional untrusted diagnostic diff"' in instruction
     assert "full replacement content as the source of truth" in instruction
     assert "SFE computes the trusted preview diff locally" in instruction
     assert "Do not return markdown fences or prose" in instruction
-    assert "replace_existing_file for existing files" in instruction
+    assert "replace_existing_file only for files that already exist" in instruction
+    assert "Use create_file for new files" in instruction
+    assert "Never use replace_existing_file for an absent file" in instruction
     assert "plain unified diff/git diff" in instruction
     assert "--- /dev/null" in instruction
     assert "+++ b/relative/path" in instruction

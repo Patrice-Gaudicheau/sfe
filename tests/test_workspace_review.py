@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from sfe.router_review import RouterReviewError
 from sfe.workspace_isolation import WorkspaceStatus
 from sfe.workspace_review import (
+    WORKSPACE_REVIEW_SYSTEM_INSTRUCTION,
     build_workspace_review_payload,
     build_workspace_review_prompt,
     parse_workspace_review_decision,
@@ -102,3 +103,11 @@ def test_workspace_review_payload_contains_task_diff_status_and_metadata(tmp_pat
     assert payload["workspace_metadata"]["worktree_branch"] == "sfe/worktree/session123"
     assert "Workspace review payload JSON:" in prompt
     assert "OK_PROMOTE" in prompt
+    assert "decision must be OK_PROMOTE or KO_BLOCK" in WORKSPACE_REVIEW_SYSTEM_INSTRUCTION
+    assert "risk_level must be low, medium, or high" in WORKSPACE_REVIEW_SYSTEM_INSTRUCTION
+    assert "files_reviewed must be a JSON array of strings" in (
+        WORKSPACE_REVIEW_SYSTEM_INSTRUCTION
+    )
+    assert "Do not return a string, object, count, or comma-separated text" in (
+        WORKSPACE_REVIEW_SYSTEM_INSTRUCTION
+    )

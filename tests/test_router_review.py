@@ -17,6 +17,7 @@ from sfe.router_review import (
     DirectProviderJsonReviewer,
     RouterReviewError,
     create_configured_router_json_reviewer,
+    parse_json_review_decision,
 )
 
 
@@ -68,6 +69,43 @@ def test_generic_reviewer_parses_valid_json_decision() -> None:
     assert decision.risk_level == "low"
     assert decision.provider_name == "fake-router"
     assert decision.model == "fake-model"
+
+
+def test_parse_json_review_decision_accepts_files_reviewed_string_array() -> None:
+    decision = parse_json_review_decision(
+        json.dumps(
+            {
+                "decision": "OK_TEST",
+                "reason": "review passed",
+                "files_reviewed": ["composer.json", "public/index.php"],
+                "risk_level": "low",
+            }
+        ),
+        valid_decisions={"OK_TEST", "KO_BLOCK"},
+    )
+
+    assert decision.files_reviewed == ("composer.json", "public/index.php")
+
+
+def test_parse_json_review_decision_reports_files_reviewed_type_without_content() -> None:
+    with pytest.raises(RouterReviewError) as exc_info:
+        parse_json_review_decision(
+            json.dumps(
+                {
+                    "decision": "OK_TEST",
+                    "reason": "review passed",
+                    "files_reviewed": "all",
+                    "risk_level": "low",
+                }
+            ),
+            valid_decisions={"OK_TEST", "KO_BLOCK"},
+        )
+
+    assert exc_info.value.category == "invalid_router_response"
+    assert exc_info.value.reason == (
+        "router files_reviewed was invalid (expected list, got str)"
+    )
+    assert "all" not in exc_info.value.reason
 
 
 def test_generic_reviewer_invalid_json_produces_clear_failure() -> None:

@@ -37,9 +37,12 @@ PATCH_REVIEW_SYSTEM_INSTRUCTION = (
     "content. The effective diff preview is computed by SFE from the current "
     "file contents and the proposed full replacements; provider-supplied diff "
     "text is not trusted. Reject if the computed effective diff includes "
-    "unrelated or surprising edits. Return exactly one JSON object with keys decision, reason, "
-    "files_reviewed, and risk_level. decision must be OK_APPLY or KO_BLOCK. "
-    "risk_level must be low, medium, or high."
+    "unrelated or surprising edits. Return exactly one JSON object with keys "
+    "decision, reason, files_reviewed, and risk_level. decision must be "
+    "OK_APPLY or KO_BLOCK. risk_level must be low, medium, or high. "
+    "files_reviewed must be a JSON array of strings containing the reviewed "
+    "file paths. Do not return a string, object, count, or comma-separated "
+    "text for files_reviewed."
 )
 DECISIONS = {"OK_APPLY", "KO_BLOCK"}
 RISK_LEVELS = {"low", "medium", "high"}

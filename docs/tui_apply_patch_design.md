@@ -16,8 +16,8 @@ mechanism.
 
 ## Pending Proposal Format
 
-The internal pending proposal is file-replacement based, not unified-diff
-based:
+The internal pending proposal is file-content based. Existing files use
+`replace_existing_file`; new files use `create_file`:
 
 ```json
 {
@@ -26,16 +26,21 @@ based:
       "path": "src/package/module.py",
       "action": "replace_existing_file",
       "content": "full replacement file content\n"
+    },
+    {
+      "path": "README.md",
+      "action": "create_file",
+      "content": "new file content\n"
     }
   ],
   "diff_preview": "optional provider diagnostic only"
 }
 ```
 
-For now, only `replace_existing_file` is supported. Creates, deletes, renames,
-mode changes, symlink changes, and binary writes are unsupported edit formats.
-Full-file replacement content is the internal source of truth for application.
-Unified diffs are display/review previews only.
+`replace_existing_file` requires an existing file. `create_file` requires an
+absent target. Deletes, renames, mode changes, symlink changes, and binary
+writes are unsupported edit formats. Full-file content is the internal source
+of truth for application. Unified diffs are display/review previews only.
 
 The trusted readable diff preview is computed locally by SFE from the current
 file content and the proposed full replacement content. Provider-supplied diff

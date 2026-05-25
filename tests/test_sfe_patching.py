@@ -14,11 +14,17 @@ from sfe.patching import (
     INVALID_PATCH_PROPOSAL,
     MECHANICAL_GUARD_REJECTED,
     PHYSICAL_APPLICATION_FAILURE,
+    PATCH_OPERATION_CREATE,
+    PATCH_OPERATION_MODIFY,
+    PHYSICAL_WRITE_FAILURE,
     apply_patch_to_workspace,
+    apply_structured_file_patch,
     parse_unified_diff,
+    parse_structured_file_patch_json,
     summarize_patch_text,
     validate_patch_paths,
     validate_patch_targets,
+    validate_structured_file_patch_targets,
 )
 
 
@@ -50,11 +56,43 @@ def _create_diff(path: str, *lines: str) -> str:
     )
 
 
+def _implicit_create_diff(path: str, *lines: str) -> str:
+    added = list(lines) or ["created"]
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            f"--- a/{path}",
+            f"+++ b/{path}",
+            f"@@ -0,0 +1,{len(added)} @@",
+            *(f"+{line}" for line in added),
+        ]
+    )
+
+
 def _parse_ok(text: str):
     parsed = parse_unified_diff(text)
     assert parsed.issue is None
     assert parsed.patch is not None
     return parsed.patch
+
+
+def _structured_json(path: str, action: str, content: str = "new\n") -> str:
+    return (
+        '{"edits":[{"path":'
+        + repr(path).replace("'", '"')
+        + ',"action":'
+        + repr(action).replace("'", '"')
+        + ',"content":'
+        + repr(content).replace("'", '"')
+        + '}],"diff_preview":""}'
+    )
+
+
+def _parse_structured_ok(text: str):
+    parsed = parse_structured_file_patch_json(text)
+    assert parsed.issue is None
+    assert parsed.proposal is not None
+    return parsed.proposal
 
 
 def test_parse_valid_single_file_modification_diff() -> None:
@@ -222,14 +260,98 @@ def test_no_policy_rejection_for_hidden_secret_suffix_or_binary_like_paths(tmp_p
     assert validate_patch_paths(tmp_path, paths) is None
 
 
-def test_validate_patch_targets_is_mechanical_only_for_missing_or_binary_targets(tmp_path) -> None:
+def test_validate_patch_targets_rejects_missing_modify_that_is_not_safe_create(tmp_path) -> None:
     patch = _parse_ok(_diff("missing.bin"))
 
     result = validate_patch_targets(tmp_path, patch)
 
-    assert result.ok is True
+    assert result.ok is False
+    assert result.issue is not None
+    assert result.issue.category == INVALID_PATCH_PROPOSAL
+    assert result.issue.reason == "missing_target_not_safe_create"
     assert result.summary is not None
     assert result.summary.paths == ("missing.bin",)
+
+
+def test_canonical_create_remains_classified_create(tmp_path) -> None:
+    patch = _parse_ok(_create_diff("new.txt", "hello"))
+
+    result = validate_patch_targets(tmp_path, patch)
+
+    assert result.ok is True
+    assert result.patch is not None
+    assert result.patch.files[0].operation == PATCH_OPERATION_CREATE
+    assert result.summary is not None
+    assert result.summary.created_paths == ("new.txt",)
+    assert result.summary.modified_paths == ()
+
+
+def test_implicit_create_on_missing_target_is_classified_create(tmp_path) -> None:
+    patch = _parse_ok(_implicit_create_diff("new.txt", "hello", "world"))
+
+    result = validate_patch_targets(tmp_path, patch)
+
+    assert result.ok is True
+    assert result.patch is not None
+    assert result.patch.files[0].operation == PATCH_OPERATION_CREATE
+    assert result.summary is not None
+    assert result.summary.created_paths == ("new.txt",)
+    assert result.summary.modified_paths == ()
+
+    apply_result = apply_patch_to_workspace(tmp_path, patch)
+    assert apply_result.applied is True
+    assert apply_result.summary is not None
+    assert apply_result.summary.created_paths == ("new.txt",)
+    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello\nworld\n"
+
+
+def test_implicit_create_like_diff_on_existing_target_remains_modify(tmp_path) -> None:
+    (tmp_path / "new.txt").write_text("", encoding="utf-8")
+    patch = _parse_ok(_implicit_create_diff("new.txt", "hello"))
+
+    result = validate_patch_targets(tmp_path, patch)
+
+    assert result.ok is True
+    assert result.patch is not None
+    assert result.patch.files[0].operation == PATCH_OPERATION_MODIFY
+    assert result.summary is not None
+    assert result.summary.modified_paths == ("new.txt",)
+    assert result.summary.created_paths == ()
+
+
+def test_implicit_create_on_missing_target_with_removed_lines_is_refused(tmp_path) -> None:
+    patch = _parse_ok(_diff("new.txt", old="old", new="new"))
+
+    result = validate_patch_targets(tmp_path, patch)
+
+    assert result.ok is False
+    assert result.issue is not None
+    assert result.issue.category == INVALID_PATCH_PROPOSAL
+    assert result.issue.reason == "missing_target_not_safe_create"
+    assert result.summary is not None
+    assert result.summary.refused_paths == ("new.txt",)
+
+
+def test_implicit_create_dangerous_path_is_refused_by_parser() -> None:
+    parsed = parse_unified_diff(_implicit_create_diff("../outside.txt", "nope"))
+
+    assert parsed.issue is not None
+    assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+    assert parsed.issue.reason == "path_outside_workspace"
+
+
+def test_implicit_create_in_generated_directories_is_refused_by_parser() -> None:
+    for path in (
+        ".git/hooks/post-checkout",
+        "vendor/autoload.php",
+        "var/cache.php",
+        "cache/item.txt",
+        "node_modules/pkg/index.js",
+    ):
+        parsed = parse_unified_diff(_implicit_create_diff(path, "nope"))
+        assert parsed.issue is not None
+        assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+        assert parsed.issue.reason == "excluded_directory"
 
 
 def test_successful_apply_to_one_existing_text_file(tmp_path) -> None:
@@ -287,6 +409,94 @@ def test_successful_apply_creates_file_in_new_subdirectory(tmp_path) -> None:
 
     assert result.applied is True
     assert (tmp_path / "src" / "App.php").read_text(encoding="utf-8") == "<?php\n"
+
+
+def test_structured_create_file_on_absent_target_is_accepted_and_applied(tmp_path) -> None:
+    proposal = _parse_structured_ok(_structured_json("README.md", "create_file", "# Demo\n"))
+
+    validation = validate_structured_file_patch_targets(tmp_path, proposal)
+    result = apply_structured_file_patch(tmp_path, proposal)
+
+    assert validation.ok is True
+    assert validation.summary is not None
+    assert validation.summary.created_paths == ("README.md",)
+    assert validation.summary.modified_paths == ()
+    assert result.applied is True
+    assert result.summary is not None
+    assert result.summary.created_paths == ("README.md",)
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "# Demo\n"
+
+
+def test_structured_create_file_on_existing_target_is_refused(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("existing\n", encoding="utf-8")
+    proposal = _parse_structured_ok(_structured_json("README.md", "create_file", "# Demo\n"))
+
+    validation = validate_structured_file_patch_targets(tmp_path, proposal)
+
+    assert validation.ok is False
+    assert validation.issue is not None
+    assert validation.issue.category == PHYSICAL_WRITE_FAILURE
+    assert validation.issue.reason == "target_already_exists"
+    assert validation.summary is not None
+    assert validation.summary.refused_paths == ("README.md",)
+
+
+def test_structured_replace_existing_file_on_existing_target_is_accepted(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("old\n", encoding="utf-8")
+    proposal = _parse_structured_ok(
+        _structured_json("README.md", "replace_existing_file", "new\n")
+    )
+
+    validation = validate_structured_file_patch_targets(tmp_path, proposal)
+    result = apply_structured_file_patch(tmp_path, proposal)
+
+    assert validation.ok is True
+    assert validation.summary is not None
+    assert validation.summary.modified_paths == ("README.md",)
+    assert validation.summary.created_paths == ()
+    assert result.applied is True
+    assert target.read_text(encoding="utf-8") == "new\n"
+
+
+def test_structured_replace_existing_file_on_absent_target_is_refused(tmp_path) -> None:
+    proposal = _parse_structured_ok(
+        _structured_json("README.md", "replace_existing_file", "new\n")
+    )
+
+    validation = validate_structured_file_patch_targets(tmp_path, proposal)
+
+    assert validation.ok is False
+    assert validation.issue is not None
+    assert validation.issue.category == PHYSICAL_WRITE_FAILURE
+    assert validation.issue.reason == "target_not_existing_file"
+
+
+def test_structured_create_file_dangerous_path_is_refused(tmp_path) -> None:
+    proposal = _parse_structured_ok(_structured_json("../outside.md", "create_file", "# Demo\n"))
+
+    validation = validate_structured_file_patch_targets(tmp_path, proposal)
+
+    assert validation.ok is False
+    assert validation.issue is not None
+    assert validation.issue.category == MECHANICAL_GUARD_REJECTED
+    assert validation.issue.reason == "path_outside_workspace"
+
+
+def test_structured_create_file_generated_directories_are_refused(tmp_path) -> None:
+    for path in (
+        ".git/hooks/post-checkout",
+        "vendor/autoload.php",
+        "var/cache.php",
+        "cache/item.txt",
+        "node_modules/pkg/index.js",
+    ):
+        proposal = _parse_structured_ok(_structured_json(path, "create_file", "nope\n"))
+        validation = validate_structured_file_patch_targets(tmp_path, proposal)
+        assert validation.ok is False
+        assert validation.issue is not None
+        assert validation.issue.category == MECHANICAL_GUARD_REJECTED
+        assert validation.issue.reason == "excluded_directory"
 
 
 def test_creation_outside_workspace_via_symlink_parent_is_refused(tmp_path) -> None:
@@ -372,7 +582,7 @@ def test_physical_decode_failure_writes_nothing_and_keeps_pending_patch(tmp_path
     assert source.read_bytes() == b"\xff\xfe\x00"
 
 
-def test_physical_second_file_failure_causes_no_partial_write_to_first_file(tmp_path) -> None:
+def test_missing_unsafe_second_file_causes_no_partial_write_to_first_file(tmp_path) -> None:
     first = tmp_path / "first.txt"
     first.write_text("old\n", encoding="utf-8")
     patch = _parse_ok(_diff("first.txt") + "\n" + _diff("second.txt", "one", "two"))
@@ -381,9 +591,9 @@ def test_physical_second_file_failure_causes_no_partial_write_to_first_file(tmp_
 
     assert result.applied is False
     assert result.issue is not None
-    assert result.issue.category == PHYSICAL_APPLICATION_FAILURE
-    assert result.issue.reason == "read_error"
-    assert result.pending_patch_cleared is False
+    assert result.issue.category == INVALID_PATCH_PROPOSAL
+    assert result.issue.reason == "missing_target_not_safe_create"
+    assert result.pending_patch_cleared is True
     assert first.read_text(encoding="utf-8") == "old\n"
 
 
