@@ -226,6 +226,15 @@ class SfeTuiApp:
         if name == "/cleanup-worktree":
             self._handle_cleanup_worktree()
             return False
+        if name == "/gc-worktrees":
+            self._handle_gc_worktrees(rest)
+            return False
+        if name == "/auto-patch":
+            self._handle_auto_patch()
+            return False
+        if name == "/auto-worktree":
+            self._handle_auto_worktree()
+            return False
         if name == "/reset":
             self._handle_reset()
             return False
@@ -251,13 +260,13 @@ class SfeTuiApp:
         self._clear_pending_patch()
         self.output(renderer.render_file_selection(self.context_files))
 
-    def _handle_discover(self) -> None:
+    def _handle_discover(self) -> bool:
         if self.workspace_root is None:
             self.output(renderer.render_error("workspace_not_selected"))
-            return
+            return False
         if not self.task.strip():
             self.output(renderer.render_error("missing_task"))
-            return
+            return False
         self.discovery_result = discover_workspace_context(
             workspace_root=self.workspace_root,
             task=self.task,
@@ -265,6 +274,7 @@ class SfeTuiApp:
         self.latest_result = None
         self._clear_pending_patch()
         self.output(renderer.render_discovery_summary(self.discovery_result))
+        return True
 
     def _handle_reset(self) -> None:
         self.context_files = []
@@ -274,20 +284,20 @@ class SfeTuiApp:
         self._clear_pending_patch()
         self.output(renderer.render_reset())
 
-    def _handle_isolate(self) -> None:
+    def _handle_isolate(self) -> bool:
         if self.workspace_root is None:
             self.output(renderer.render_error("workspace_not_selected"))
-            return
+            return False
         if self.workspace_session is not None:
             self.output(renderer.render_error("workspace_already_isolated"))
-            return
+            return False
         result = self.workspace_manager.create(
             self.workspace_root,
             WorkspaceIsolationPolicy(),
         )
         if not result.created or result.session is None:
             self.output(renderer.render_isolate_failure(result.issue))
-            return
+            return False
         session = result.session
         self.workspace_session = session
         self.workspace_root = self._active_path_for_session(session)
@@ -302,6 +312,7 @@ class SfeTuiApp:
                 launch_cwd=self.cwd,
             )
         )
+        return True
 
     def _handle_workspace_status(self) -> None:
         status_result = (
@@ -318,21 +329,22 @@ class SfeTuiApp:
             )
         )
 
-    def _handle_worktree_diff(self) -> None:
+    def _handle_worktree_diff(self) -> bool:
         if self.workspace_session is None:
             self.output(renderer.render_error("no_isolated_workspace"))
-            return
+            return False
         status_result = self.workspace_manager.status(self.workspace_session)
         self.output(renderer.render_worktree_diff(status_result))
+        return status_result.ok
 
-    def _handle_review_worktree(self) -> None:
+    def _handle_review_worktree(self) -> bool:
         if self.workspace_session is None:
             self.output(renderer.render_error("no_isolated_workspace"))
-            return
+            return False
         status_result = self.workspace_manager.status(self.workspace_session)
         if not status_result.ok or status_result.status is None:
             self.output(renderer.render_worktree_review_failure(status_result.issue))
-            return
+            return False
         payload = build_workspace_review_payload(
             original_user_task=self.task,
             workspace_status=status_result.status,
@@ -351,13 +363,14 @@ class SfeTuiApp:
                     router_model=getattr(self.workspace_reviewer, "model", None),
                 )
             )
-            return
+            return False
         self.output(renderer.render_worktree_review_success(decision))
+        return decision.decision == "OK_PROMOTE"
 
-    def _handle_cleanup_worktree(self) -> None:
+    def _handle_cleanup_worktree(self) -> bool:
         if self.workspace_session is None:
             self.output(renderer.render_error("no_isolated_workspace"))
-            return
+            return False
         session = self.workspace_session
         result = self.workspace_manager.cleanup(session)
         if result.cleaned:
@@ -374,6 +387,115 @@ class SfeTuiApp:
                 launch_cwd=self.cwd,
             )
         )
+        return result.cleaned
+
+    def _handle_gc_worktrees(self, rest: str) -> bool:
+        if self.workspace_root is None:
+            self.output(renderer.render_error("workspace_not_selected"))
+            return False
+        try:
+            values = shlex.split(rest)
+        except ValueError:
+            self.output(renderer.render_error("invalid_gc_command"))
+            return False
+        clean = False
+        for value in values:
+            if value == "--clean":
+                clean = True
+                continue
+            self.output(renderer.render_error("invalid_gc_command"))
+            return False
+        gc_root = (
+            self.workspace_session.source_path
+            if self.workspace_session is not None
+            else self.workspace_root
+        )
+        result = self.workspace_manager.gc(
+            gc_root,
+            clean=clean,
+            protected_session_ids=(
+                (self.workspace_session.session_id,)
+                if self.workspace_session is not None
+                else ()
+            ),
+        )
+        self.output(renderer.render_gc_worktrees_result(result, launch_cwd=self.cwd))
+        return result.issue is None
+
+    def _handle_auto_patch(self) -> bool:
+        self.output(renderer.render_macro_start("auto-patch"))
+        if not self.task.strip():
+            self.output(renderer.render_macro_stop("auto-patch", "missing_task"))
+            self.output(renderer.render_error("missing_task"))
+            return False
+        if not self.context_files and self.discovery_result is None:
+            self.output(renderer.render_macro_step("auto-patch", "discover"))
+            if not self._handle_discover():
+                self.output(renderer.render_macro_stop("auto-patch", "discover_failed"))
+                return False
+        self.output(renderer.render_macro_step("auto-patch", "dry-run"))
+        if not self._handle_dry_run():
+            self.output(renderer.render_macro_stop("auto-patch", "dry_run_failed"))
+            return False
+        self.output(renderer.render_macro_step("auto-patch", "patch"))
+        if not self._handle_patch():
+            self.output(renderer.render_macro_stop("auto-patch", "patch_failed"))
+            return False
+        self.output(renderer.render_macro_step("auto-patch", "apply-patch"))
+        if not self._handle_apply_patch():
+            self.output(renderer.render_macro_stop("auto-patch", "apply_patch_failed"))
+            return False
+        self.output(renderer.render_macro_done("auto-patch"))
+        return True
+
+    def _handle_auto_worktree(self) -> bool:
+        self.output(renderer.render_macro_start("auto-worktree"))
+        if not self.task.strip():
+            self.output(renderer.render_macro_stop("auto-worktree", "missing_task"))
+            self.output(renderer.render_error("missing_task"))
+            return False
+        manual_context_refs = tuple(
+            result.source_ref
+            for result in self.context_files
+            if result.loaded and result.source_ref is not None
+        )
+        if self.workspace_session is None:
+            self.output(renderer.render_macro_step("auto-worktree", "isolate"))
+            if not self._handle_isolate():
+                self.output(renderer.render_macro_stop("auto-worktree", "isolate_failed"))
+                return False
+            if manual_context_refs:
+                self.context_files = [
+                    load_context_file(self.workspace_root, source_ref)
+                    for source_ref in manual_context_refs
+                ]
+                self.output(renderer.render_file_selection(self.context_files))
+                if not any(result.loaded for result in self.context_files):
+                    self.output(renderer.render_macro_stop("auto-worktree", "manual_context_failed"))
+                    return False
+        if not self.context_files and self.discovery_result is None:
+            self.output(renderer.render_macro_step("auto-worktree", "discover"))
+            if not self._handle_discover():
+                self.output(renderer.render_macro_stop("auto-worktree", "discover_failed"))
+                return False
+        self.output(renderer.render_macro_step("auto-worktree", "patch"))
+        if not self._handle_patch():
+            self.output(renderer.render_macro_stop("auto-worktree", "patch_failed"))
+            return False
+        self.output(renderer.render_macro_step("auto-worktree", "apply-patch"))
+        if not self._handle_apply_patch():
+            self.output(renderer.render_macro_stop("auto-worktree", "apply_patch_failed"))
+            return False
+        self.output(renderer.render_macro_step("auto-worktree", "worktree-diff"))
+        if not self._handle_worktree_diff():
+            self.output(renderer.render_macro_stop("auto-worktree", "worktree_diff_failed"))
+            return False
+        self.output(renderer.render_macro_step("auto-worktree", "review-worktree"))
+        if not self._handle_review_worktree():
+            self.output(renderer.render_macro_stop("auto-worktree", "review_worktree_blocked"))
+            return False
+        self.output(renderer.render_macro_done("auto-worktree"))
+        return True
 
     def _handle_context(self) -> None:
         contract = self._build_contract_for_current_state(require_discovery=False)[0]
@@ -393,13 +515,13 @@ class SfeTuiApp:
             )
         )
 
-    def _handle_dry_run(self) -> None:
+    def _handle_dry_run(self) -> bool:
         contract, error = self._build_contract_for_current_state(
             require_discovery=True,
         )
         if error is not None:
             self.output(renderer.render_error(error))
-            return
+            return False
         if contract is None:
             contract = self._empty_contract()
         result = self.backend.dry_run(contract)
@@ -407,6 +529,7 @@ class SfeTuiApp:
         if self._using_discovered_context():
             self.output(renderer.render_discovery_summary(self.discovery_result))
         self.output(renderer.render_dry_run_summary(contract, result))
+        return True
 
     def _handle_ask(self) -> None:
         self._clear_pending_patch()
@@ -438,29 +561,29 @@ class SfeTuiApp:
             self.output("answer received")
         self.output(renderer.render_ask_result(result))
 
-    def _handle_patch(self) -> None:
+    def _handle_patch(self) -> bool:
         self.output("building contract")
         contract, error = self._build_contract_for_current_state(
             require_discovery=True,
         )
         if error is not None:
             self.output(renderer.render_error(error))
-            return
+            return False
         if contract is None:
             contract = self._empty_contract()
         if contract.task is None:
             self.output(renderer.render_error("missing_task"))
-            return
+            return False
         if not contract.context_segments:
             self.output(renderer.render_error("no_context_loaded"))
-            return
+            return False
         self.output("routing context")
         routed = self.backend.dry_run(contract)
         if not routed.contract.audit.get("selected_segment_ids"):
             self.latest_result = patch_error_result(routed, "no_selected_context")
             self._clear_pending_patch()
             self.output(renderer.render_patch_result(self.latest_result))
-            return
+            return False
         self.output("calling provider")
         result = self.backend.patch(contract)
         self.latest_result = result
@@ -478,14 +601,15 @@ class SfeTuiApp:
                 ),
             )
         )
+        return pending_patch is not None
 
-    def _handle_apply_patch(self) -> None:
+    def _handle_apply_patch(self) -> bool:
         if self.workspace_root is None:
             self.output(renderer.render_error("workspace_not_selected"))
-            return
+            return False
         if self.pending_patch is None:
             self.output(renderer.render_error("no_pending_patch"))
-            return
+            return False
         guard_issue = validate_patch_paths(
             self.workspace_root,
             self.pending_patch.proposal.paths,
@@ -500,7 +624,7 @@ class SfeTuiApp:
                     failure_kind="mechanical_safety_guard",
                 )
             )
-            return
+            return False
         review_payload = self._build_patch_review_payload()
         try:
             review = self.patch_reviewer.review(review_payload)
@@ -516,7 +640,7 @@ class SfeTuiApp:
                     router_model=getattr(self.patch_reviewer, "model", None),
                 )
             )
-            return
+            return False
         if review.decision == "KO_BLOCK":
             self.output(
                 renderer.render_apply_patch_failure(
@@ -527,12 +651,12 @@ class SfeTuiApp:
                     router_decision=review,
                 )
             )
-            return
+            return False
         result = apply_file_replacements(self.workspace_root, self.pending_patch.proposal)
         if result.applied:
             self._clear_pending_patch()
             self.output(renderer.render_apply_patch_success(result, router_decision=review))
-            return
+            return True
         self.output(
             renderer.render_apply_patch_failure(
                 result.issue.category if result.issue else "physical_write_failure",
@@ -542,6 +666,7 @@ class SfeTuiApp:
                 router_decision=review,
             )
         )
+        return False
 
     def _build_contract_for_current_state(
         self,

@@ -9,6 +9,7 @@ from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
 from sfe.router_review import JsonReviewDecision
 from sfe.workspace_isolation import (
     WorkspaceCleanupResult,
+    WorkspaceGCResult,
     WorkspaceIssue,
     WorkspaceSession,
     WorkspaceStatusResult,
@@ -38,6 +39,9 @@ def render_help() -> str:
             "  /worktree-diff     Show isolated worktree status and diff",
             "  /review-worktree   Ask router for OK_PROMOTE or KO_BLOCK",
             "  /cleanup-worktree  Remove the active SFE-created worktree",
+            "  /gc-worktrees      Report SFE-created worktrees; add --clean to remove clean ones",
+            "  /auto-patch        Run discover, patch, and router-reviewed apply",
+            "  /auto-worktree     Isolate, patch, apply, diff, and router-review",
             "  /files <paths...>  Replace context manually for debug/design",
             "  /reset             Clear task, context, discovery, and routing; preserve workspace",
             "  /quit, /exit       Exit",
@@ -105,6 +109,7 @@ def render_error(message: str) -> str:
         "no_pending_patch": "run /patch first",
         "workspace_already_isolated": "cleanup the active worktree before creating another",
         "no_isolated_workspace": "run /isolate first",
+        "invalid_gc_command": "use /gc-worktrees or /gc-worktrees --clean",
     }.get(message)
     if guidance is None:
         return f"Error: {message}"
@@ -338,6 +343,87 @@ def render_cleanup_worktree_result(
         ]
     )
     return "\n".join(lines)
+
+
+def render_gc_worktrees_result(
+    result: WorkspaceGCResult,
+    *,
+    launch_cwd: Path | None = None,
+) -> str:
+    lines = [
+        "SFE gc-worktrees",
+        f"  mode: {'clean' if result.clean else 'dry-run'}",
+    ]
+    if result.issue is not None:
+        lines.extend(
+            [
+                "  status: failed",
+                f"  error category: {_workspace_issue_category(result.issue)}",
+                f"  reason: {_workspace_issue_reason(result.issue)}",
+            ]
+        )
+        return "\n".join(lines)
+    lines.extend(
+        [
+            "  status: ok",
+            f"  SFE worktrees found: {result.sfe_worktree_count}",
+            f"  clean eligible worktrees: {result.eligible_count}",
+            f"  dirty worktrees skipped: {result.dirty_skipped_count}",
+            f"  non-SFE worktrees ignored: {result.non_sfe_ignored_count}",
+            f"  worktrees removed: {result.removed_count}",
+        ]
+    )
+    for entry in result.entries:
+        branch = entry.worktree_branch or "unknown"
+        changed = _format_string_list(list(entry.changed_files))
+        lines.append(
+            "  "
+            + " | ".join(
+                [
+                    f"status={entry.status}",
+                    f"branch={branch}",
+                    f"path={safe_workspace_label(entry.worktree_path, launch_cwd)}",
+                    f"reason={entry.reason}",
+                    f"changed={changed}",
+                ]
+            )
+        )
+    return "\n".join(lines)
+
+
+def render_macro_start(name: str) -> str:
+    return "\n".join(
+        [
+            f"SFE {name}",
+            "  status: started",
+        ]
+    )
+
+
+def render_macro_step(name: str, step: str) -> str:
+    return f"SFE {name} step: {step}"
+
+
+def render_macro_stop(name: str, reason: str) -> str:
+    return "\n".join(
+        [
+            f"SFE {name}",
+            "  status: stopped",
+            f"  reason: {reason}",
+        ]
+    )
+
+
+def render_macro_done(name: str) -> str:
+    return "\n".join(
+        [
+            f"SFE {name}",
+            "  status: completed",
+            "  merge: not performed",
+            "  push: not performed",
+            "  cleanup: not performed",
+        ]
+    )
 
 
 def render_context_summary(

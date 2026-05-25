@@ -2797,6 +2797,291 @@ def test_reset_does_not_delete_active_worktree(tmp_path) -> None:
     assert cleanup.cleaned is True
 
 
+def test_gc_worktrees_dry_run_reports_sfe_worktree_without_removing(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/isolate", "/gc-worktrees", "/quit"]),
+        output=output.append,
+        cwd=repo,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    rendered = "\n".join(output)
+    assert "SFE gc-worktrees" in rendered
+    assert "mode: dry-run" in rendered
+    assert "SFE worktrees found: 1" in rendered
+    assert "status=protected_skipped" in rendered
+    assert session.worktree_path.exists()
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_gc_worktrees_clean_keeps_active_worktree_protected(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/isolate", "/gc-worktrees --clean", "/quit"]),
+        output=output.append,
+        cwd=repo,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    rendered = "\n".join(output)
+    assert "mode: clean" in rendered
+    assert "worktrees removed: 0" in rendered
+    assert "status=protected_skipped" in rendered
+    assert session.worktree_path.exists()
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_auto_patch_stops_if_no_task_is_present(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/files context.txt", "/auto-patch", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE auto-patch" in rendered
+    assert "status: stopped" in rendered
+    assert "reason: missing_task" in rendered
+    assert source.read_text(encoding="utf-8") == "old context\n"
+
+
+def test_auto_patch_runs_patch_apply_with_router_ok(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/auto-patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "new context\n"
+    assert "SFE auto-patch step: patch" in rendered
+    assert "router decision: OK_APPLY" in rendered
+    assert "status: completed" in rendered
+
+
+def test_auto_patch_stops_and_reports_router_ko_block(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    reviewer = FakePatchReviewer(
+        PatchReviewDecision(
+            decision="KO_BLOCK",
+            reason="auto patch blocked by router",
+            files_reviewed=("context.txt",),
+            risk_level="medium",
+            provider_name="fake-router",
+            model="fake-router-model",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/auto-patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert "router decision: KO_BLOCK" in rendered
+    assert "router reason: auto patch blocked by router" in rendered
+    assert "reason: apply_patch_failed" in rendered
+
+
+def test_auto_worktree_creates_isolation_and_leaves_source_unchanged(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/auto-worktree", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+        workspace_reviewer=FakeWorkspaceReviewer(),
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    rendered = "\n".join(output)
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert (session.worktree_path / "context.txt").read_text(encoding="utf-8") == "new context\n"
+    assert run_git(repo, "status", "--porcelain").stdout.strip() == ""
+    assert "router decision: OK_PROMOTE" in rendered
+    assert "cleanup: not performed" in rendered
+    assert session.worktree_path.exists()
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_auto_worktree_preserves_manual_files_after_isolate(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/auto-worktree",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+        workspace_reviewer=FakeWorkspaceReviewer(),
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    selected_segments = executor.patch_calls[0]["selected_context_segments"]
+    selected_refs = [segment.source_ref for segment in selected_segments]
+    rendered = "\n".join(output)
+    assert selected_refs == ["context.txt"]
+    assert "Context files replaced: loaded 1; skipped 0" in rendered
+    assert "SFE auto-worktree step: discover" not in rendered
+    assert (session.worktree_path / "context.txt").read_text(encoding="utf-8") == "new context\n"
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_auto_worktree_stops_on_patch_failure(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(None, "provider_error", 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/auto-worktree", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    rendered = "\n".join(output)
+    assert "reason: patch_failed" in rendered
+    assert "SFE review-worktree" not in rendered
+    assert session.worktree_path.exists()
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_auto_worktree_stops_on_apply_ko_block(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    reviewer = FakePatchReviewer(
+        PatchReviewDecision(
+            decision="KO_BLOCK",
+            reason="auto worktree apply blocked",
+            files_reviewed=("context.txt",),
+            risk_level="medium",
+            provider_name="fake-router",
+            model="fake-router-model",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/auto-worktree", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    rendered = "\n".join(output)
+    assert "router decision: KO_BLOCK" in rendered
+    assert "router reason: auto worktree apply blocked" in rendered
+    assert "reason: apply_patch_failed" in rendered
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert (session.worktree_path / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_auto_worktree_reaches_review_and_does_not_cleanup(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(replacement_proposal(), None, 1)
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/auto-worktree", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=FakePatchReviewer(),
+        workspace_reviewer=FakeWorkspaceReviewer(),
+    )
+
+    assert app.run() == 0
+    assert app.workspace_session is not None
+    session = app.workspace_session
+    rendered = "\n".join(output)
+    assert "SFE review-worktree" in rendered
+    assert "router decision: OK_PROMOTE" in rendered
+    assert "merge: not performed" in rendered
+    assert "push: not performed" in rendered
+    assert "cleanup: not performed" in rendered
+    assert session.worktree_path.exists()
+    assert run_git(repo, "status", "--porcelain").stdout.strip() == ""
+
+    cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
 def test_patch_review_prompt_describes_full_replacement_as_expected_transport() -> None:
     payload = {
         "proposal_format": "file_replacements",

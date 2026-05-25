@@ -12,6 +12,8 @@ from pathlib import Path
 from sfe.workspace_isolation import (
     WorkspaceCleanupResult,
     WorkspaceCreateResult,
+    WorkspaceGCEntry,
+    WorkspaceGCResult,
     WorkspaceIsolationPolicy,
     WorkspaceIssue,
     WorkspaceSession,
@@ -215,6 +217,155 @@ class GitWorktreeBackend:
             )
         return WorkspaceCleanupResult(True)
 
+    def gc(
+        self,
+        workspace_path: Path,
+        *,
+        clean: bool = False,
+        policy: WorkspaceIsolationPolicy | None = None,
+        protected_session_ids: tuple[str, ...] = (),
+    ) -> WorkspaceGCResult:
+        policy = policy or WorkspaceIsolationPolicy()
+        source_path = workspace_path.expanduser().resolve()
+        git_root_result = _git(source_path, "rev-parse", "--show-toplevel")
+        if not git_root_result.ok:
+            return WorkspaceGCResult(
+                clean=clean,
+                source_path=source_path,
+                sfe_worktree_count=0,
+                eligible_count=0,
+                dirty_skipped_count=0,
+                non_sfe_ignored_count=0,
+                removed_count=0,
+                entries=(),
+                issue=WorkspaceIssue("unsupported_workspace", "not_inside_git_repository"),
+            )
+        source_git_root = Path(git_root_result.stdout.strip()).resolve()
+        worktree_parent = _resolve_worktree_parent(source_git_root, policy)
+        sessions = _load_sfe_sessions(worktree_parent)
+        worktree_entries = _git_worktree_entries(source_git_root)
+        sfe_paths = {session.worktree_path.resolve() for session in sessions}
+
+        entries: list[WorkspaceGCEntry] = []
+        eligible_count = 0
+        dirty_skipped_count = 0
+        removed_count = 0
+
+        for session in sessions:
+            if session.session_id in protected_session_ids:
+                entries.append(
+                    WorkspaceGCEntry(
+                        session=session,
+                        worktree_path=session.worktree_path,
+                        worktree_branch=session.worktree_branch,
+                        metadata_path=session.metadata_path,
+                        status="protected_skipped",
+                        reason="active_session_protected",
+                    )
+                )
+                continue
+            status_result = self.status(session)
+            if not status_result.ok or status_result.status is None:
+                entries.append(
+                    WorkspaceGCEntry(
+                        session=session,
+                        worktree_path=session.worktree_path,
+                        worktree_branch=session.worktree_branch,
+                        metadata_path=session.metadata_path,
+                        status="skipped",
+                        reason=(
+                            status_result.issue.reason
+                            if status_result.issue is not None
+                            else "status_unavailable"
+                        ),
+                    )
+                )
+                continue
+            if status_result.status.git_status_porcelain.strip():
+                dirty_skipped_count += 1
+                entries.append(
+                    WorkspaceGCEntry(
+                        session=session,
+                        worktree_path=session.worktree_path,
+                        worktree_branch=session.worktree_branch,
+                        metadata_path=session.metadata_path,
+                        status="dirty_skipped",
+                        reason="dirty_worktree_refused_by_policy",
+                        changed_files=status_result.status.changed_files,
+                    )
+                )
+                continue
+
+            eligible_count += 1
+            if clean:
+                cleanup_result = self.cleanup(session)
+                if cleanup_result.cleaned:
+                    removed_count += 1
+                    entries.append(
+                        WorkspaceGCEntry(
+                            session=session,
+                            worktree_path=session.worktree_path,
+                            worktree_branch=session.worktree_branch,
+                            metadata_path=session.metadata_path,
+                            status="removed",
+                            reason="clean_sfe_worktree_removed",
+                        )
+                    )
+                else:
+                    entries.append(
+                        WorkspaceGCEntry(
+                            session=session,
+                            worktree_path=session.worktree_path,
+                            worktree_branch=session.worktree_branch,
+                            metadata_path=session.metadata_path,
+                            status="cleanup_failed",
+                            reason=(
+                                cleanup_result.issue.reason
+                                if cleanup_result.issue is not None
+                                else "cleanup_failed"
+                            ),
+                        )
+                    )
+            else:
+                entries.append(
+                    WorkspaceGCEntry(
+                        session=session,
+                        worktree_path=session.worktree_path,
+                        worktree_branch=session.worktree_branch,
+                        metadata_path=session.metadata_path,
+                        status="eligible",
+                        reason="clean_sfe_worktree_eligible_for_cleanup",
+                    )
+                )
+
+        non_sfe_ignored_count = 0
+        for item in worktree_entries:
+            path = item.path.resolve()
+            if path == source_git_root or path in sfe_paths:
+                continue
+            non_sfe_ignored_count += 1
+            entries.append(
+                WorkspaceGCEntry(
+                    session=None,
+                    worktree_path=path,
+                    worktree_branch=item.branch,
+                    metadata_path=None,
+                    status="ignored",
+                    reason="non_sfe_worktree",
+                )
+            )
+
+        return WorkspaceGCResult(
+            clean=clean,
+            source_path=source_path,
+            sfe_worktree_count=len(sessions),
+            eligible_count=eligible_count,
+            dirty_skipped_count=dirty_skipped_count,
+            non_sfe_ignored_count=non_sfe_ignored_count,
+            removed_count=removed_count,
+            entries=tuple(entries),
+        )
+
 
 class _GitResult:
     def __init__(self, completed: subprocess.CompletedProcess[str]) -> None:
@@ -229,6 +380,12 @@ class _GitResult:
         return self.completed.stdout
 
 
+class _GitWorktreeEntry:
+    def __init__(self, path: Path, branch: str | None) -> None:
+        self.path = path
+        self.branch = branch
+
+
 def _git(cwd: Path, *args: str) -> _GitResult:
     completed = subprocess.run(
         ["git", "-C", str(cwd), *args],
@@ -238,6 +395,28 @@ def _git(cwd: Path, *args: str) -> _GitResult:
         text=True,
     )
     return _GitResult(completed)
+
+
+def _git_worktree_entries(git_root: Path) -> tuple[_GitWorktreeEntry, ...]:
+    result = _git(git_root, "worktree", "list", "--porcelain")
+    if not result.ok:
+        return ()
+    entries: list[_GitWorktreeEntry] = []
+    current_path: Path | None = None
+    current_branch: str | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            if current_path is not None:
+                entries.append(_GitWorktreeEntry(current_path, current_branch))
+            current_path = Path(line.removeprefix("worktree ")).resolve()
+            current_branch = None
+        elif line.startswith("branch "):
+            current_branch = line.removeprefix("branch ")
+            if current_branch.startswith("refs/heads/"):
+                current_branch = current_branch.removeprefix("refs/heads/")
+    if current_path is not None:
+        entries.append(_GitWorktreeEntry(current_path, current_branch))
+    return tuple(entries)
 
 
 def _current_branch(git_root: Path) -> str:
@@ -315,6 +494,50 @@ def _metadata_matches_session(session: WorkspaceSession) -> bool:
         and Path(str(stored.get("worktree_path") or "")).resolve()
         == session.worktree_path.resolve()
     )
+
+
+def _load_sfe_sessions(worktree_parent: Path) -> tuple[WorkspaceSession, ...]:
+    if not worktree_parent.exists() or not worktree_parent.is_dir():
+        return ()
+    sessions: list[WorkspaceSession] = []
+    for metadata_path in sorted(worktree_parent.glob("*.sfe-session.json")):
+        session = _session_from_metadata(metadata_path)
+        if session is None:
+            continue
+        if not _is_sfe_session(session):
+            continue
+        if not _metadata_matches_session(session):
+            continue
+        sessions.append(session)
+    return tuple(sessions)
+
+
+def _session_from_metadata(metadata_path: Path) -> WorkspaceSession | None:
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    stored = payload.get("session")
+    if not isinstance(stored, dict):
+        return None
+    try:
+        return WorkspaceSession(
+            session_id=str(stored["session_id"]),
+            source_path=Path(str(stored["source_path"])).resolve(),
+            source_git_root=Path(str(stored["source_git_root"])).resolve(),
+            worktree_path=Path(str(stored["worktree_path"])).resolve(),
+            source_branch=str(stored["source_branch"]),
+            worktree_branch=str(stored["worktree_branch"]),
+            backend_name=str(stored["backend_name"]),
+            created_by=str(stored.get("created_by") or ""),
+            metadata_path=metadata_path.resolve(),
+            metadata={
+                str(key): str(value)
+                for key, value in dict(stored.get("metadata") or {}).items()
+            },
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _is_sfe_session(session: WorkspaceSession) -> bool:

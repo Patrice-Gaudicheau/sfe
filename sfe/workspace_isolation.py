@@ -64,6 +64,30 @@ class WorkspaceCleanupResult:
     issue: WorkspaceIssue | None = None
 
 
+@dataclass(frozen=True)
+class WorkspaceGCEntry:
+    session: WorkspaceSession | None
+    worktree_path: Path
+    worktree_branch: str | None
+    metadata_path: Path | None
+    status: str
+    reason: str
+    changed_files: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class WorkspaceGCResult:
+    clean: bool
+    source_path: Path
+    sfe_worktree_count: int
+    eligible_count: int
+    dirty_skipped_count: int
+    non_sfe_ignored_count: int
+    removed_count: int
+    entries: tuple[WorkspaceGCEntry, ...]
+    issue: WorkspaceIssue | None = None
+
+
 class WorkspaceBackend(Protocol):
     name: str
 
@@ -78,6 +102,16 @@ class WorkspaceBackend(Protocol):
         ...
 
     def cleanup(self, session: WorkspaceSession) -> WorkspaceCleanupResult:
+        ...
+
+    def gc(
+        self,
+        workspace_path: Path,
+        *,
+        clean: bool = False,
+        policy: WorkspaceIsolationPolicy | None = None,
+        protected_session_ids: tuple[str, ...] = (),
+    ) -> WorkspaceGCResult:
         ...
 
 
@@ -97,6 +131,21 @@ class WorkspaceManager:
 
     def cleanup(self, session: WorkspaceSession) -> WorkspaceCleanupResult:
         return self.backend.cleanup(session)
+
+    def gc(
+        self,
+        workspace_path: Path,
+        *,
+        clean: bool = False,
+        policy: WorkspaceIsolationPolicy | None = None,
+        protected_session_ids: tuple[str, ...] = (),
+    ) -> WorkspaceGCResult:
+        return self.backend.gc(
+            workspace_path,
+            clean=clean,
+            policy=policy,
+            protected_session_ids=protected_session_ids,
+        )
 
 
 @dataclass(frozen=True)

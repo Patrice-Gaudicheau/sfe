@@ -165,6 +165,101 @@ def test_no_automatic_merge_to_main_happens(tmp_path) -> None:
     assert cleanup.cleaned is True
 
 
+def test_gc_dry_run_reports_sfe_created_orphan_worktree_without_removing(
+    tmp_path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    backend = GitWorktreeBackend()
+    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
+    result = backend.create(repo, policy)
+    assert result.session is not None
+
+    gc_result = backend.gc(repo, clean=False, policy=policy)
+
+    assert gc_result.clean is False
+    assert gc_result.sfe_worktree_count == 1
+    assert gc_result.eligible_count == 1
+    assert gc_result.removed_count == 0
+    assert gc_result.dirty_skipped_count == 0
+    assert gc_result.entries[0].status == "eligible"
+    assert result.session.worktree_path.exists()
+    assert _branch_exists(repo, result.session.worktree_branch)
+
+    cleanup = backend.cleanup(result.session)
+    assert cleanup.cleaned is True
+
+
+def test_gc_clean_removes_only_clean_sfe_created_worktrees(tmp_path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    backend = GitWorktreeBackend()
+    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
+    sfe_result = backend.create(repo, policy)
+    assert sfe_result.session is not None
+    user_worktree = tmp_path / "user-worktree"
+    _git(repo, "worktree", "add", "-b", "user/worktree", str(user_worktree), "HEAD")
+
+    gc_result = backend.gc(repo, clean=True, policy=policy)
+
+    assert gc_result.clean is True
+    assert gc_result.sfe_worktree_count == 1
+    assert gc_result.eligible_count == 1
+    assert gc_result.removed_count == 1
+    assert gc_result.non_sfe_ignored_count == 1
+    assert not sfe_result.session.worktree_path.exists()
+    assert not _branch_exists(repo, sfe_result.session.worktree_branch)
+    assert user_worktree.exists()
+    assert repo.exists()
+
+    _git(repo, "worktree", "remove", "--force", str(user_worktree))
+    _git(repo, "branch", "-D", "user/worktree")
+
+
+def test_gc_skips_dirty_sfe_created_worktree(tmp_path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    backend = GitWorktreeBackend()
+    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
+    result = backend.create(repo, policy)
+    assert result.session is not None
+    (result.session.worktree_path / "example.txt").write_text("dirty\n", encoding="utf-8")
+
+    gc_result = backend.gc(repo, clean=True, policy=policy)
+
+    assert gc_result.sfe_worktree_count == 1
+    assert gc_result.eligible_count == 0
+    assert gc_result.removed_count == 0
+    assert gc_result.dirty_skipped_count == 1
+    assert gc_result.entries[0].status == "dirty_skipped"
+    assert result.session.worktree_path.exists()
+    assert repo.exists()
+
+    cleanup = backend.cleanup(result.session)
+    assert cleanup.cleaned is True
+
+
+def test_gc_clean_does_not_remove_protected_active_session(tmp_path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    backend = GitWorktreeBackend()
+    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
+    result = backend.create(repo, policy)
+    assert result.session is not None
+
+    gc_result = backend.gc(
+        repo,
+        clean=True,
+        policy=policy,
+        protected_session_ids=(result.session.session_id,),
+    )
+
+    assert gc_result.sfe_worktree_count == 1
+    assert gc_result.eligible_count == 0
+    assert gc_result.removed_count == 0
+    assert gc_result.entries[0].status == "protected_skipped"
+    assert result.session.worktree_path.exists()
+
+    cleanup = backend.cleanup(result.session)
+    assert cleanup.cleaned is True
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _git(path, "init")
@@ -187,6 +282,17 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
     assert completed.returncode == 0, completed.stderr
     return completed
+
+
+def _branch_exists(cwd: Path, branch: str) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(cwd), "rev-parse", "--verify", branch],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return completed.returncode == 0
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
