@@ -15,8 +15,14 @@ from sfe.discovery import (
 )
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
+    ParsedPatch,
+    PatchIssue,
     PatchSummary,
+    apply_patch_to_workspace,
+    parse_unified_diff,
+    preview_file_patch_text,
     validate_patch_paths,
+    validate_patch_targets,
 )
 from sfe.env import load_repo_env
 from sfe.git_worktree_backend import GitWorktreeBackend
@@ -68,7 +74,7 @@ OutputFunc = Callable[[str], None]
 @dataclass(frozen=True)
 class PendingPatchProposal:
     text: str
-    proposal: FileReplacementProposal
+    proposal: FileReplacementProposal | ParsedPatch
     preview: str
     source: str
     created_from_task_hash: str
@@ -612,7 +618,7 @@ class SfeTuiApp:
             return False
         guard_issue = validate_patch_paths(
             self.workspace_root,
-            self.pending_patch.proposal.paths,
+            _pending_patch_paths(self.pending_patch.proposal),
         )
         if guard_issue is not None:
             self._clear_pending_patch()
@@ -652,7 +658,10 @@ class SfeTuiApp:
                 )
             )
             return False
-        result = apply_file_replacements(self.workspace_root, self.pending_patch.proposal)
+        if isinstance(self.pending_patch.proposal, ParsedPatch):
+            result = apply_patch_to_workspace(self.workspace_root, self.pending_patch.proposal)
+        else:
+            result = apply_file_replacements(self.workspace_root, self.pending_patch.proposal)
         if result.applied:
             self._clear_pending_patch()
             self.output(renderer.render_apply_patch_success(result, router_decision=review))
@@ -722,14 +731,27 @@ class SfeTuiApp:
         if self.workspace_root is None or not result.answer:
             return None, result.error_category
         parsed = parse_file_replacement_proposal(result.answer)
-        if parsed.proposal is None or parsed.summary is None:
-            return None, parsed.issue
-        preview = generate_replacement_diff_preview(
-            self.workspace_root,
-            parsed.proposal,
-        )
-        proposal = FileReplacementProposal(parsed.proposal.edits, preview or None)
-        summary = summarize_file_replacements(proposal)
+        if parsed.proposal is not None and parsed.summary is not None:
+            preview = generate_replacement_diff_preview(
+                self.workspace_root,
+                parsed.proposal,
+            )
+            proposal = FileReplacementProposal(parsed.proposal.edits, preview or None)
+            summary = summarize_file_replacements(proposal)
+            parse_status = "structured_replacements"
+        else:
+            diff_parsed = parse_unified_diff(result.answer)
+            if diff_parsed.patch is None or diff_parsed.summary is None:
+                if result.answer.lstrip().startswith("diff --git "):
+                    return None, diff_parsed.issue or parsed.issue
+                return None, parsed.issue
+            validation = validate_patch_targets(self.workspace_root, diff_parsed.patch)
+            if not validation.ok:
+                return None, validation.issue
+            proposal = diff_parsed.patch
+            preview = result.answer
+            summary = validation.summary or diff_parsed.summary
+            parse_status = "unified_diff"
         selected_ids = list(result.contract.audit.get("selected_segment_ids") or [])
         selected_refs = tuple(
             segment.source_ref
@@ -750,7 +772,7 @@ class SfeTuiApp:
                     else None
                 ),
                 summary=summary,
-                parse_status="structured_replacements",
+                parse_status=parse_status,
             ),
             None,
         )
@@ -761,16 +783,13 @@ class SfeTuiApp:
         summary = self.pending_patch.summary
         if self.workspace_root is not None:
             root = self.workspace_root.resolve()
-            for edit in self.pending_patch.proposal.edits:
-                source_ref = edit.path
-                path = root / source_ref
-                proposed_files.append(
-                    {
-                        "path": source_ref,
-                        "action": edit.action,
-                        "content": edit.content,
-                    }
-                )
+            for proposed in _pending_patch_proposed_files(
+                self.pending_patch.proposal,
+                root,
+            ):
+                source_ref = proposed["path"]
+                path = root / str(source_ref)
+                proposed_files.append(proposed)
                 try:
                     raw = path.read_bytes()
                 except OSError:
@@ -825,6 +844,10 @@ class SfeTuiApp:
                 "hunk_count": summary.hunk_count,
                 "lines_added": summary.lines_added,
                 "lines_removed": summary.lines_removed,
+                "modified_paths": list(summary.modified_paths),
+                "created_paths": list(summary.created_paths),
+                "refused_paths": list(summary.refused_paths),
+                "refused_reasons": list(summary.refused_reasons),
             },
             "selected_context_metadata": {
                 "selected_source_refs": list(
@@ -884,6 +907,50 @@ class SfeTuiApp:
             file_paths=[],
             context_files=[],
         )
+
+
+def _pending_patch_paths(proposal: FileReplacementProposal | ParsedPatch) -> tuple[str, ...]:
+    if isinstance(proposal, ParsedPatch):
+        return tuple(file_patch.new_path for file_patch in proposal.files)
+    return proposal.paths
+
+
+def _pending_patch_proposed_files(
+    proposal: FileReplacementProposal | ParsedPatch,
+    root: Path,
+) -> list[dict[str, object]]:
+    if not isinstance(proposal, ParsedPatch):
+        return [
+            {
+                "path": edit.path,
+                "action": edit.action,
+                "content": edit.content,
+            }
+            for edit in proposal.edits
+        ]
+    proposed: list[dict[str, object]] = []
+    for file_patch in proposal.files:
+        source_ref = file_patch.new_path
+        current_text = ""
+        if file_patch.operation != "create":
+            try:
+                current_text = (root / source_ref).read_bytes().decode(
+                    "utf-8",
+                    errors="replace",
+                )
+            except OSError:
+                current_text = ""
+        proposed_text = preview_file_patch_text(current_text, file_patch)
+        if isinstance(proposed_text, PatchIssue):
+            proposed_text = current_text
+        proposed.append(
+            {
+                "path": source_ref,
+                "action": "create_file" if file_patch.operation == "create" else "patch_file",
+                "content": proposed_text,
+            }
+        )
+    return proposed
 
 
 def main() -> int:

@@ -36,13 +36,17 @@ the answer was more grounded in the router implementation. The answer still
 appeared to end abruptly, so the TUI read-only executor default output budget
 was raised from 800 to 1500 tokens. This change is local to the first-party TUI
 read-only executor and does not alter benchmark or proxy defaults.
+The TUI intentionally uses a larger local output budget than the benchmark
+defaults for this interactive read-only path.
 
-Historical note: `/patch` later became a proposal-only structured full-file
-replacement flow, with `/apply-patch` as the explicit router-reviewed write
-boundary. See `tui_v0_1_user_guide.md` and `tui_apply_patch_design.md` for
-current behavior. At the time of this milestone, the important boundary was
-that `/patch` did not write files, apply patches, execute shell commands, call
-the proxy, switch backends, or run an agent loop.
+Historical note: `/patch` is the next proposal-only phase and later became a
+core-validated patch flow for structured full-file replacements and safe
+new-file unified diffs, with `/apply-patch` as the explicit router-reviewed
+write boundary. See `tui_v0_1_user_guide.md` and `tui_apply_patch_design.md`
+for current behavior. The TUI renders this as "Patch proposal only, not
+applied". At the time of this milestone, the important boundary was that
+`/patch` does not write files, apply patches, execute shell commands, call the
+proxy, switch backends, or run an agent loop.
 
 `/reset` exists as a session comfort command. It clears the current task, loaded
 and skipped context file records, warning records tied to those files, and the

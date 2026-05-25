@@ -35,6 +35,21 @@ def _diff(path: str, old: str = "old", new: str = "new") -> str:
     )
 
 
+def _create_diff(path: str, *lines: str) -> str:
+    added = list(lines) or ["created"]
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "new file mode 100644",
+            "index 0000000..1111111",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            f"@@ -0,0 +1,{len(added)} @@",
+            *(f"+{line}" for line in added),
+        ]
+    )
+
+
 def _parse_ok(text: str):
     parsed = parse_unified_diff(text)
     assert parsed.issue is None
@@ -64,6 +79,21 @@ def test_parse_valid_multi_file_modification_diff() -> None:
     assert parsed.summary.paths == ("a.txt", "b.txt")
     assert parsed.summary.file_count == 2
     assert parsed.summary.hunk_count == 2
+    assert parsed.summary.modified_paths == ("a.txt", "b.txt")
+    assert parsed.summary.created_paths == ()
+
+
+def test_parse_valid_single_file_creation_diff() -> None:
+    parsed = parse_unified_diff(_create_diff("new.txt", "hello"))
+
+    assert parsed.issue is None
+    assert parsed.patch is not None
+    assert parsed.summary is not None
+    assert parsed.summary.paths == ("new.txt",)
+    assert parsed.summary.modified_paths == ()
+    assert parsed.summary.created_paths == ("new.txt",)
+    assert parsed.summary.lines_added == 1
+    assert parsed.summary.lines_removed == 0
 
 
 def test_parser_accepts_metadata_without_policy_rejection() -> None:
@@ -156,12 +186,34 @@ def test_mechanical_guard_rejects_workspace_escape(tmp_path) -> None:
     assert issue.reason == "path_outside_workspace"
 
 
+def test_mechanical_guard_rejects_traversal_component(tmp_path) -> None:
+    issue = validate_patch_paths(tmp_path, ("safe/../outside.txt",))
+
+    assert issue is not None
+    assert issue.category == MECHANICAL_GUARD_REJECTED
+    assert issue.reason == "path_outside_workspace"
+
+
+def test_mechanical_guard_rejects_excluded_write_directories(tmp_path) -> None:
+    for path in (
+        ".git/config",
+        "vendor/package/file.php",
+        "var/cache.txt",
+        "cache/item.txt",
+        "node_modules/package/index.js",
+    ):
+        issue = validate_patch_paths(tmp_path, (path,))
+        assert issue is not None
+        assert issue.category == MECHANICAL_GUARD_REJECTED
+        assert issue.reason == "excluded_directory"
+        assert issue.path == path
+
+
 def test_no_policy_rejection_for_hidden_secret_suffix_or_binary_like_paths(tmp_path) -> None:
     paths = (
         ".env",
         ".hidden/file.txt",
         ".ssh/config",
-        "logs/app.log",
         "data/app.db",
         "image.bin",
         "archive.zip",
@@ -204,6 +256,90 @@ def test_successful_all_or_nothing_multi_file_apply(tmp_path) -> None:
     assert result.applied is True
     assert first.read_text(encoding="utf-8") == "new\n"
     assert second.read_text(encoding="utf-8") == "two\n"
+
+
+def test_successful_apply_creates_one_text_file(tmp_path) -> None:
+    patch = _parse_ok(_create_diff("new.txt", "hello"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is True
+    assert result.summary is not None
+    assert result.summary.created_paths == ("new.txt",)
+    assert result.summary.modified_paths == ()
+    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello\n"
+
+
+def test_successful_apply_creates_multiple_text_files(tmp_path) -> None:
+    patch = _parse_ok(_create_diff("first.txt", "one") + "\n" + _create_diff("second.txt", "two"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is True
+    assert (tmp_path / "first.txt").read_text(encoding="utf-8") == "one\n"
+    assert (tmp_path / "second.txt").read_text(encoding="utf-8") == "two\n"
+
+
+def test_successful_apply_creates_file_in_new_subdirectory(tmp_path) -> None:
+    patch = _parse_ok(_create_diff("src/App.php", "<?php"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is True
+    assert (tmp_path / "src" / "App.php").read_text(encoding="utf-8") == "<?php\n"
+
+
+def test_creation_outside_workspace_via_symlink_parent_is_refused(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-sfe-patch"
+    outside.mkdir(exist_ok=True)
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    patch = _parse_ok(_create_diff("linked/escape.txt", "nope"))
+
+    result = validate_patch_targets(tmp_path, patch)
+
+    assert result.ok is False
+    assert result.issue is not None
+    assert result.issue.category == MECHANICAL_GUARD_REJECTED
+    assert result.issue.reason == "path_outside_workspace"
+    assert result.summary is not None
+    assert result.summary.refused_paths == ("linked/escape.txt",)
+
+
+def test_creation_absolute_path_is_refused_by_parser() -> None:
+    parsed = parse_unified_diff(_create_diff("/tmp/outside.txt", "nope"))
+
+    assert parsed.issue is not None
+    assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+    assert parsed.issue.reason == "absolute_path"
+
+
+def test_creation_with_parent_traversal_is_refused_by_parser() -> None:
+    parsed = parse_unified_diff(_create_diff("../outside.txt", "nope"))
+
+    assert parsed.issue is not None
+    assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+    assert parsed.issue.reason == "path_outside_workspace"
+
+
+def test_creation_in_git_directory_is_refused() -> None:
+    parsed = parse_unified_diff(_create_diff(".git/hooks/post-checkout", "echo nope"))
+
+    assert parsed.issue is not None
+    assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+    assert parsed.issue.reason == "excluded_directory"
+
+
+def test_creation_in_generated_directories_is_refused() -> None:
+    for path in (
+        "vendor/autoload.php",
+        "var/cache.php",
+        "cache/item.txt",
+        "node_modules/pkg/index.js",
+    ):
+        parsed = parse_unified_diff(_create_diff(path, "nope"))
+        assert parsed.issue is not None
+        assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+        assert parsed.issue.reason == "excluded_directory"
 
 
 def test_physical_preimage_failure_writes_nothing_and_keeps_pending_patch(tmp_path) -> None:
@@ -249,3 +385,43 @@ def test_physical_second_file_failure_causes_no_partial_write_to_first_file(tmp_
     assert result.issue.reason == "read_error"
     assert result.pending_patch_cleared is False
     assert first.read_text(encoding="utf-8") == "old\n"
+
+
+def test_deletion_diff_is_refused_as_unsupported() -> None:
+    parsed = parse_unified_diff(
+        "\n".join(
+            [
+                "diff --git a/old.txt b/old.txt",
+                "deleted file mode 100644",
+                "--- a/old.txt",
+                "+++ /dev/null",
+                "@@ -1,1 +0,0 @@",
+                "-old",
+            ]
+        )
+    )
+
+    assert parsed.issue is not None
+    assert parsed.issue.category == INVALID_PATCH_PROPOSAL
+    assert parsed.issue.reason == "delete_not_supported"
+    assert parsed.summary is not None
+    assert parsed.summary.refused_paths == ("old.txt",)
+
+
+def test_rename_diff_is_refused_as_unsupported() -> None:
+    parsed = parse_unified_diff(
+        "\n".join(
+            [
+                "diff --git a/old.txt b/new.txt",
+                "similarity index 100%",
+                "rename from old.txt",
+                "rename to new.txt",
+                "--- a/old.txt",
+                "+++ b/new.txt",
+            ]
+        )
+    )
+
+    assert parsed.issue is not None
+    assert parsed.issue.category == INVALID_PATCH_PROPOSAL
+    assert parsed.issue.reason == "rename_or_copy_not_supported"

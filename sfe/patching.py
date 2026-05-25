@@ -35,6 +35,25 @@ _METADATA_PREFIXES = (
     "Binary files ",
     "GIT binary patch",
 )
+PATCH_OPERATION_MODIFY = "modify"
+PATCH_OPERATION_CREATE = "create"
+_EXCLUDED_WRITE_DIRS = {
+    ".cache",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "logs",
+    "node_modules",
+    "var",
+    "vendor",
+}
 
 
 @dataclass(frozen=True)
@@ -57,6 +76,7 @@ class ParsedFilePatch:
     old_path: str
     new_path: str
     hunks: tuple[ParsedHunk, ...]
+    operation: str = PATCH_OPERATION_MODIFY
 
 
 @dataclass(frozen=True)
@@ -78,6 +98,10 @@ class PatchSummary:
     hunk_count: int
     lines_added: int
     lines_removed: int
+    modified_paths: tuple[str, ...] = ()
+    created_paths: tuple[str, ...] = ()
+    refused_paths: tuple[str, ...] = ()
+    refused_reasons: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -153,7 +177,10 @@ def parse_unified_diff(text: str) -> PatchParseResult:
             new_file_path,
         )
         if path_issue is not None:
-            return PatchParseResult(None, path_issue, None)
+            return PatchParseResult(None, path_issue, _refused_summary(path_issue))
+        operation = _classify_file_operation(old_file_path, new_file_path)
+        if isinstance(operation, PatchIssue):
+            return PatchParseResult(None, operation, _refused_summary(operation))
 
         hunks: list[ParsedHunk] = []
         while index < len(lines) and not lines[index].startswith("diff --git "):
@@ -167,7 +194,9 @@ def parse_unified_diff(text: str) -> PatchParseResult:
             old_count = _range_count(hunk_header.group("old_count"))
             new_start = int(hunk_header.group("new_start"))
             new_count = _range_count(hunk_header.group("new_count"))
-            if old_start < 1 or new_start < 1:
+            old_range_ok = old_start >= 1 or (old_start == 0 and old_count == 0)
+            new_range_ok = new_start >= 1 or (new_start == 0 and new_count == 0)
+            if not old_range_ok or not new_range_ok:
                 return _parse_error("malformed_hunk_range", _strip_diff_prefix(new_path))
             index += 1
             hunk_lines: list[PatchLine] = []
@@ -213,6 +242,7 @@ def parse_unified_diff(text: str) -> PatchParseResult:
                 old_path=_strip_diff_prefix(old_path),
                 new_path=_strip_diff_prefix(new_path),
                 hunks=tuple(hunks),
+                operation=operation,
             )
         )
 
@@ -275,7 +305,26 @@ def validate_patch_targets(
         tuple(file_patch.new_path for file_patch in patch.files),
     )
     if path_result is not None:
-        return PatchValidationResult(False, path_result, None)
+        return PatchValidationResult(False, path_result, _summary_with_issue(patch, path_result))
+    for file_patch in patch.files:
+        if file_patch.operation not in {PATCH_OPERATION_MODIFY, PATCH_OPERATION_CREATE}:
+            issue = PatchIssue(
+                INVALID_PATCH_PROPOSAL,
+                "unsupported_file_operation",
+                file_patch.new_path,
+            )
+            return PatchValidationResult(False, issue, _summary_with_issue(patch, issue))
+        if file_patch.operation == PATCH_OPERATION_CREATE:
+            target = _resolve_safe_target(workspace_root, file_patch.new_path)
+            if isinstance(target, PatchIssue):
+                return PatchValidationResult(False, target, _summary_with_issue(patch, target))
+            if target.exists() or target.is_symlink():
+                issue = PatchIssue(
+                    PHYSICAL_APPLICATION_FAILURE,
+                    "target_already_exists",
+                    file_patch.new_path,
+                )
+                return PatchValidationResult(False, issue, _summary_with_issue(patch, issue))
     return PatchValidationResult(True, None, summarize_patch(patch))
 
 
@@ -312,28 +361,32 @@ def apply_patch_to_workspace(
             pending_patch_cleared=True,
         )
 
-    computed: list[tuple[Path, bytes, bytes]] = []
+    computed: list[tuple[Path, bytes | None, bytes]] = []
     for file_patch in patch.files:
         target = _resolve_safe_target(workspace_root, file_patch.new_path)
         if isinstance(target, PatchIssue):
             return PatchApplyResult(False, target, None, True)
-        try:
-            current_bytes = target.read_bytes()
-            current_text = current_bytes.decode("utf-8")
-        except OSError:
-            return PatchApplyResult(
-                False,
-                PatchIssue(PHYSICAL_APPLICATION_FAILURE, "read_error", file_patch.new_path),
-                None,
-                False,
-            )
-        except UnicodeDecodeError:
-            return PatchApplyResult(
-                False,
-                PatchIssue(PHYSICAL_APPLICATION_FAILURE, "decode_error", file_patch.new_path),
-                None,
-                False,
-            )
+        if file_patch.operation == PATCH_OPERATION_CREATE:
+            current_bytes = None
+            current_text = ""
+        else:
+            try:
+                current_bytes = target.read_bytes()
+                current_text = current_bytes.decode("utf-8")
+            except OSError:
+                return PatchApplyResult(
+                    False,
+                    PatchIssue(PHYSICAL_APPLICATION_FAILURE, "read_error", file_patch.new_path),
+                    None,
+                    False,
+                )
+            except UnicodeDecodeError:
+                return PatchApplyResult(
+                    False,
+                    PatchIssue(PHYSICAL_APPLICATION_FAILURE, "decode_error", file_patch.new_path),
+                    None,
+                    False,
+                )
         applied = _apply_file_patch(current_text, file_patch)
         if isinstance(applied, PatchIssue):
             return PatchApplyResult(
@@ -344,17 +397,17 @@ def apply_patch_to_workspace(
             )
         computed.append((target, current_bytes, applied.encode("utf-8")))
 
-    written: list[tuple[Path, bytes]] = []
+    written: list[tuple[Path, bytes | None]] = []
+    created_dirs: list[Path] = []
     for target, original_bytes, new_bytes in computed:
         try:
+            if original_bytes is None:
+                created_dirs.extend(_ensure_parent_dirs(target.parent))
             target.write_bytes(new_bytes)
             written.append((target, original_bytes))
         except OSError:
-            for written_target, previous_bytes in reversed(written):
-                try:
-                    written_target.write_bytes(previous_bytes)
-                except OSError:
-                    pass
+            _rollback_patch_writes(written)
+            _cleanup_created_dirs(created_dirs)
             return PatchApplyResult(
                 False,
                 PatchIssue(PHYSICAL_APPLICATION_FAILURE, "write_error", None),
@@ -371,6 +424,16 @@ def apply_patch_to_workspace(
 
 def summarize_patch(patch: ParsedPatch) -> PatchSummary:
     paths = tuple(file_patch.new_path for file_patch in patch.files)
+    modified_paths = tuple(
+        file_patch.new_path
+        for file_patch in patch.files
+        if file_patch.operation == PATCH_OPERATION_MODIFY
+    )
+    created_paths = tuple(
+        file_patch.new_path
+        for file_patch in patch.files
+        if file_patch.operation == PATCH_OPERATION_CREATE
+    )
     hunk_count = sum(len(file_patch.hunks) for file_patch in patch.files)
     lines_added = 0
     lines_removed = 0
@@ -387,18 +450,28 @@ def summarize_patch(patch: ParsedPatch) -> PatchSummary:
         hunk_count=hunk_count,
         lines_added=lines_added,
         lines_removed=lines_removed,
+        modified_paths=modified_paths,
+        created_paths=created_paths,
     )
 
 
+def preview_file_patch_text(text: str, file_patch: ParsedFilePatch) -> str | PatchIssue:
+    return _apply_file_patch(text, file_patch)
+
+
 def _apply_file_patch(text: str, file_patch: ParsedFilePatch) -> str | PatchIssue:
-    original_lines = text.split("\n")
-    had_final_newline = bool(original_lines and original_lines[-1] == "")
-    if had_final_newline:
-        original_lines = original_lines[:-1]
+    if file_patch.operation == PATCH_OPERATION_CREATE:
+        original_lines: list[str] = []
+        had_final_newline = True
+    else:
+        original_lines = text.split("\n")
+        had_final_newline = bool(original_lines and original_lines[-1] == "")
+        if had_final_newline:
+            original_lines = original_lines[:-1]
     result_lines: list[str] = []
     cursor = 0
     for hunk in file_patch.hunks:
-        start = hunk.old_start - 1
+        start = 0 if hunk.old_start == 0 and hunk.old_count == 0 else hunk.old_start - 1
         if start < cursor or start > len(original_lines):
             return PatchIssue(PHYSICAL_APPLICATION_FAILURE, "hunk_location_mismatch", file_patch.new_path)
         result_lines.extend(original_lines[cursor:start])
@@ -456,7 +529,25 @@ def _validate_file_headers(
     if new_file_path != "/dev/null" and new_file_path != diff_new_path:
         path = _strip_diff_prefix(diff_new_path)
         return PatchIssue(INVALID_PATCH_PROPOSAL, "path_header_mismatch", path)
+    if old_file_path == "/dev/null" and new_file_path == "/dev/null":
+        path = _strip_diff_prefix(diff_new_path)
+        return PatchIssue(INVALID_PATCH_PROPOSAL, "empty_file_operation", path)
     return None
+
+
+def _classify_file_operation(
+    old_file_path: str,
+    new_file_path: str,
+) -> str | PatchIssue:
+    if old_file_path == "/dev/null":
+        return PATCH_OPERATION_CREATE
+    if new_file_path == "/dev/null":
+        return PatchIssue(
+            INVALID_PATCH_PROPOSAL,
+            "delete_not_supported",
+            _strip_diff_prefix(old_file_path),
+        )
+    return PATCH_OPERATION_MODIFY
 
 
 def _strip_diff_prefix(path: str) -> str:
@@ -476,6 +567,10 @@ def _validate_relative_path(source_ref: str) -> PatchIssue | None:
         return PatchIssue(MECHANICAL_GUARD_REJECTED, "absolute_path", source_ref)
     if ".." in parts:
         return PatchIssue(MECHANICAL_GUARD_REJECTED, "path_outside_workspace", source_ref)
+    lowered_parts = {part.lower() for part in parts}
+    blocked = lowered_parts & _EXCLUDED_WRITE_DIRS
+    if blocked:
+        return PatchIssue(MECHANICAL_GUARD_REJECTED, "excluded_directory", source_ref)
     return None
 
 
@@ -490,3 +585,66 @@ def _resolve_safe_target(workspace_root: Path, source_ref: str) -> Path | PatchI
     except OSError:
         return PatchIssue(PHYSICAL_APPLICATION_FAILURE, "read_error", source_ref)
     return resolved
+
+
+def _summary_with_issue(patch: ParsedPatch, issue: PatchIssue) -> PatchSummary:
+    summary = summarize_patch(patch)
+    refused_path = issue.path or ""
+    refused_paths = (refused_path,) if refused_path else ()
+    refused_reasons = ((refused_path, issue.reason),) if refused_path else ()
+    return PatchSummary(
+        paths=summary.paths,
+        file_count=summary.file_count,
+        hunk_count=summary.hunk_count,
+        lines_added=summary.lines_added,
+        lines_removed=summary.lines_removed,
+        modified_paths=summary.modified_paths,
+        created_paths=summary.created_paths,
+        refused_paths=refused_paths,
+        refused_reasons=refused_reasons,
+    )
+
+
+def _refused_summary(issue: PatchIssue) -> PatchSummary:
+    refused_path = issue.path or ""
+    refused_paths = (refused_path,) if refused_path else ()
+    refused_reasons = ((refused_path, issue.reason),) if refused_path else ()
+    return PatchSummary(
+        paths=(),
+        file_count=0,
+        hunk_count=0,
+        lines_added=0,
+        lines_removed=0,
+        refused_paths=refused_paths,
+        refused_reasons=refused_reasons,
+    )
+
+
+def _ensure_parent_dirs(parent: Path) -> list[Path]:
+    missing: list[Path] = []
+    current = parent
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+    return missing
+
+
+def _rollback_patch_writes(written: list[tuple[Path, bytes | None]]) -> None:
+    for target, previous_bytes in reversed(written):
+        try:
+            if previous_bytes is None:
+                target.unlink()
+            else:
+                target.write_bytes(previous_bytes)
+        except OSError:
+            pass
+
+
+def _cleanup_created_dirs(created_dirs: list[Path]) -> None:
+    for directory in created_dirs:
+        try:
+            directory.rmdir()
+        except OSError:
+            pass

@@ -678,6 +678,7 @@ def render_patch_result(
         lines.extend(
             [
                 f"  pending patch files: {pending_patch_summary.file_count}",
+                f"  pending patch created files: {len(pending_patch_summary.created_paths)}",
                 f"  pending patch hunks: {pending_patch_summary.hunk_count}",
                 "  apply command: /apply-patch",
             ]
@@ -726,7 +727,8 @@ def render_apply_patch_success(
         lines.extend(_router_decision_lines(router_decision))
     lines.extend(
         [
-            f"  modified relative paths: {_format_string_list(list(summary.paths) if summary else [])}",
+            f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
+            f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
             f"  file count: {summary.file_count if summary else 0}",
             f"  hunk count: {summary.hunk_count if summary else 0}",
             f"  lines added: {summary.lines_added if summary else 0}",
@@ -817,6 +819,7 @@ def _pending_patch_context_lines(summary: PatchSummary | None) -> list[str]:
     return [
         "  pending patch: yes",
         f"  pending patch files: {summary.file_count}",
+        f"  pending patch created files: {len(summary.created_paths)}",
         f"  pending patch hunks: {summary.hunk_count}",
     ]
 

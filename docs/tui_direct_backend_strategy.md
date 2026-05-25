@@ -80,12 +80,12 @@ sanitized to counts, opaque ids, token estimates, provider call count, and
 disabled capability flags.
 
 The later `/patch` -> `/apply-patch` path keeps writes behind an explicit
-router-reviewed boundary. `/patch` stores structured full-file replacement
-proposals and never writes files. `/apply-patch` writes only after the
-configured router reviewer returns `OK_APPLY`; `KO_BLOCK` writes nothing.
-Worktree isolation can move that explicit write boundary into an SFE-created
-Git Worktree, but it still does not merge, push, create PRs, run shell
-commands, or run tests.
+router-reviewed boundary. `/patch` stores core-validated proposals, including
+structured full-file replacements and safe unified diffs for new text files,
+and never writes files. `/apply-patch` writes only after the configured router
+reviewer returns `OK_APPLY`; `KO_BLOCK` writes nothing. Worktree isolation can
+move that explicit write boundary into an SFE-created Git Worktree, but it
+still does not merge, push, create PRs, run shell commands, or run tests.
 
 ## Safety Posture
 

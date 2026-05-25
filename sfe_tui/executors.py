@@ -44,10 +44,13 @@ PATCH_SYSTEM_INSTRUCTION = (
     "Use full replacement content as the source of truth for every touched "
     "file; SFE computes the trusted preview diff locally from the replacement "
     "content. Do not return markdown fences or prose. Only use the action "
-    "replace_existing_file. Only modify existing files from the selected "
-    "context. Do not invent files or file contents outside the selected "
-    "context. Do not propose creates, deletes, renames, mode changes, binary "
-    "patches, or symlink changes. If no safe patch can be proposed, return one "
+    "replace_existing_file for existing files. You may alternatively return a "
+    "plain unified diff/git diff when the task requires creating new safe text "
+    "files inside the workspace. New-file diffs must use --- /dev/null and "
+    "+++ b/relative/path. Do not create files under .git, vendor, var, cache, "
+    "node_modules, or generated/sensitive directories. Do not propose deletes, "
+    "renames, mode-only changes, binary patches, or symlink changes. If no safe "
+    "patch can be proposed, return one "
     "short non-JSON refusal sentence."
 )
 

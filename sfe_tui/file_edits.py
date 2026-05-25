@@ -118,6 +118,7 @@ def summarize_file_replacements(proposal: FileReplacementProposal) -> PatchSumma
         hunk_count=hunk_count or len(proposal.edits),
         lines_added=lines_added,
         lines_removed=lines_removed,
+        modified_paths=proposal.paths,
     )
 
 

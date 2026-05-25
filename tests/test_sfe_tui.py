@@ -251,6 +251,24 @@ def valid_text_diff(
     )
 
 
+def valid_create_diff(path: str = "composer.json", content: str = "{}") -> str:
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "new file mode 100644",
+            "index 0000000..1111111",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,1 @@",
+            f"+{content}",
+        ]
+    )
+
+
+def valid_multi_create_diff(files: dict[str, str]) -> str:
+    return "\n".join(valid_create_diff(path, content) for path, content in files.items())
+
+
 def markdown_fenced_diff(
     path: str = "context.txt",
     *,
@@ -2376,6 +2394,214 @@ def test_patch_legacy_diff_only_output_is_unsupported_pending_format(tmp_path) -
     assert "pending patch reason: unsupported_pending_patch_format" in rendered
 
 
+def test_patch_stores_pending_unified_diff_file_creation(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Symfony skeleton composer json", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_create_diff("composer.json", '{"type":"project"}'),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Create Symfony skeleton composer json",
+                "/discover",
+                "/patch",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is not None
+    assert not (tmp_path / "composer.json").exists()
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch created files: 1" in rendered
+    assert "diff --git a/composer.json b/composer.json" in rendered
+
+
+def test_tui_pipeline_applies_provider_mocked_readme_creation_diff(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Create README documentation", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_create_diff("README.md", "# Demo"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    reviewer = FakePatchReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Create README documentation",
+                "/discover",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "# Demo\n"
+    assert app.pending_patch is None
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch reason: unsupported_pending_patch_format" not in rendered
+    assert reviewer.calls[0]["patch_summary"]["created_paths"] == ["README.md"]
+    assert "created relative paths: README.md" in rendered
+
+
+def test_tui_pipeline_applies_provider_mocked_multiple_file_creation_diff(
+    tmp_path,
+) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text(
+        "Create Symfony composer public index controller",
+        encoding="utf-8",
+    )
+    files = {
+        "composer.json": '{"type":"project"}',
+        "public/index.php": "<?php echo 'home';",
+        "src/Controller/HomeController.php": "<?php final class HomeController {}",
+    }
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_multi_create_diff(files),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    reviewer = FakePatchReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Create Symfony composer public index controller",
+                "/discover",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    for path, content in files.items():
+        assert (tmp_path / path).read_text(encoding="utf-8") == f"{content}\n"
+    assert (tmp_path / "public").is_dir()
+    assert (tmp_path / "src" / "Controller").is_dir()
+    assert app.pending_patch is None
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch created files: 3" in rendered
+    assert reviewer.calls[0]["patch_summary"]["created_paths"] == list(files)
+    assert "created relative paths: composer.json, public/index.php, src/Controller/HomeController.php" in rendered
+
+
+def test_apply_patch_creates_file_from_core_validated_unified_diff(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Symfony skeleton composer json", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_create_diff("composer.json", '{"type":"project"}'),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    reviewer = FakePatchReviewer()
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Create Symfony skeleton composer json",
+                "/discover",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert (tmp_path / "composer.json").read_text(encoding="utf-8") == '{"type":"project"}\n'
+    assert app.pending_patch is None
+    assert "status: applied" in rendered
+    assert "created relative paths: composer.json" in rendered
+    assert reviewer.calls[0]["patch_summary"]["created_paths"] == ["composer.json"]
+    assert reviewer.calls[0]["proposed_full_replacements"] == [
+        {
+            "path": "composer.json",
+            "action": "create_file",
+            "content": '{"type":"project"}\n',
+        }
+    ]
+
+
+def test_patch_rejects_dangerous_unified_diff_creation_from_core(tmp_path) -> None:
+    source = tmp_path / "PROJECT_REQUEST.md"
+    source.write_text("Symfony skeleton vendor file", encoding="utf-8")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=valid_create_diff("vendor/autoload.php", "<?php"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Create Symfony skeleton vendor file",
+                "/discover",
+                "/patch",
+                "/status",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert not (tmp_path / "vendor" / "autoload.php").exists()
+    assert "pending patch stored: no" in rendered
+    assert "pending patch reason: mechanical_safety_guard" in rendered
+    assert "pending patch: no" in rendered
+
+
 def test_patch_hidden_or_secret_like_path_stores_pending_patch(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
@@ -3787,7 +4013,7 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     assert provider.calls[0]["max_tokens"] == 12000
 
 
-def test_patch_system_instruction_requires_structured_file_replacements() -> None:
+def test_patch_system_instruction_allows_safe_core_validated_creations() -> None:
     instruction = PATCH_SYSTEM_INSTRUCTION
 
     assert "Return only one strict JSON object" in instruction
@@ -3799,13 +4025,14 @@ def test_patch_system_instruction_requires_structured_file_replacements() -> Non
     assert "full replacement content as the source of truth" in instruction
     assert "SFE computes the trusted preview diff locally" in instruction
     assert "Do not return markdown fences or prose" in instruction
-    assert "Only use the action replace_existing_file" in instruction
-    assert "Only modify existing files" in instruction
-    assert "Do not invent files" in instruction
-    assert "creates" in instruction
+    assert "replace_existing_file for existing files" in instruction
+    assert "plain unified diff/git diff" in instruction
+    assert "--- /dev/null" in instruction
+    assert "+++ b/relative/path" in instruction
+    assert ".git, vendor, var, cache" in instruction
     assert "deletes" in instruction
     assert "renames" in instruction
-    assert "mode changes" in instruction
+    assert "mode-only changes" in instruction
     assert "binary patches" in instruction
     assert "symlink changes" in instruction
     assert "one short non-JSON refusal sentence" in instruction
@@ -4837,6 +5064,7 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     note = (PROJECT_ROOT / "docs" / "tui_direct_backend_strategy.md").read_text(
         encoding="utf-8"
     )
+    normalized_note = " ".join(note.split())
     index = (PROJECT_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
 
     assert "DirectBackend is the default and only exposed backend" in note
@@ -4848,12 +5076,13 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "`local_lexical_preview`" in note
     assert "`/ask` is the first read-only executor phase" in note
     assert "does not use" in note
-    assert "the proxy, write files, execute shell commands" in note
+    assert "the proxy, write files, execute shell commands" in normalized_note
     assert "not an LLM router result" in note
     assert "tui_direct_backend_strategy.md" in index
     milestone = (
         PROJECT_ROOT / "docs" / "tui_readonly_ask_milestone.md"
     ).read_text(encoding="utf-8")
+    normalized_milestone = " ".join(milestone.split())
     assert "selected 3 of 7 context segments" in milestone
     assert "38.92%" in milestone
     assert "36.58%" in milestone
@@ -4861,9 +5090,9 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "raised from 800 to 1500 tokens" in milestone
     assert "source/path-aware lexical ranking" in milestone
     assert "`/patch` is the next proposal-only phase" in milestone
-    assert "Patch proposal only, not applied" in milestone
-    assert "does not write files, apply patches, execute shell commands" in milestone
-    assert "larger local output budget than" in milestone
+    assert "Patch proposal only, not applied" in normalized_milestone
+    assert "does not write files, apply patches, execute shell commands" in normalized_milestone
+    assert "larger local output budget than" in normalized_milestone
     assert "`/reset` exists as a session comfort command" in milestone
     assert "preserves the selected workspace" in milestone
     assert "not a benchmark" in milestone
