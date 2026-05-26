@@ -58,70 +58,67 @@ workspace paths using safe relative labels where possible.
    /task <question>
    ```
 
-3. Discover workspace context:
+3. Run the task in an isolated worktree:
 
    ```text
-   /discover
+   /run
    ```
 
-4. Preview local routing without provider calls or writes:
-
-   ```text
-   /dry-run
-   ```
-
-5. Inspect safe context metadata and selected segment ids:
+4. Inspect selected context metadata if needed:
 
    ```text
    /context
    ```
 
-6. Ask a read-only question using selected context:
+5. Ask a read-only question using selected context if needed:
 
    ```text
    /ask
    ```
 
-7. Optionally request a patch proposal without applying it:
-
-   ```text
-   /patch
-   ```
-
-8. Optionally apply the latest pending patch proposal explicitly:
-
-   ```text
-   /apply-patch
-   ```
-
-9. Clear the session state while preserving the workspace:
+6. Clear the session state while preserving the workspace:
 
    ```text
    /reset
    ```
 
-For isolated write experiments, use `/isolate` before `/patch` so writes happen
-inside an SFE-created Git Worktree instead of the original checkout. The macro
-commands `/auto-patch` and `/auto-worktree` run the existing safe handlers in
-sequence and stop on failure or router `KO_BLOCK`; they do not add merge, push,
-PR, shell execution, or test-runner behavior.
+For debug and compatibility commands, use:
+
+```text
+/help-advanced
+```
 
 ## Command Reference
 
 - `/help`: show concise command help.
+- `/help-advanced`: show advanced/debug commands retained for compatibility.
 - `/directory`: show the selected workspace using safe display conventions.
-- `/status`: show safe TUI state, latest result metadata, and disabled
+- `/status`: show current TUI state, latest result metadata, and disabled
   capabilities.
 - `/task <text>`: store the current task. Empty tasks are rejected.
-- `/discover`: scan the selected workspace and build a controlled candidate
-  pool for the current task. Empty tasks are rejected.
-- `/dry-run`: build the SFE contract and run a local routing preview. After a
-  task is set, this requires `/discover` unless manual `/files` context exists.
+- `/run`: discover context, route selected context to the executor, request a
+  patch, and apply it inside an SFE-created isolated worktree. If the workspace
+  is not yet a Git repository, `/run` can initialize a local repository snapshot
+  first; it does not create a remote, push, run tests/lint, require diff
+  inspection, or require router review.
 - `/context`: show loaded context segment count, opaque ids, safe source refs,
   approximate sizes/tokens, latest selected ids, and skipped/rejected metadata.
 - `/ask`: send selected context plus protected task/instructions to the
-  configured read-only executor/provider. After a task is set, this requires
-  `/discover` unless manual `/files` context exists.
+  configured read-only executor/provider.
+- `/workspace-status`: show whether the active workspace is the original
+  workspace or an isolated worktree, plus worktree metadata and git status when
+  available.
+- `/reset`: clear task, context, latest routing/result, and skipped/rejected
+  context and discovery state; preserve the selected workspace.
+- `/quit` and `/exit`: exit the TUI.
+
+Advanced/debug commands remain available through `/help-advanced`:
+
+- `/discover`: scan the selected workspace and build a controlled candidate
+  pool for the current task. Empty tasks are rejected. This command remains
+  read-only and does not initialize Git.
+- `/dry-run`: build the SFE contract and run a local routing preview. After a
+  task is set, this requires `/discover` unless manual `/files` context exists.
 - `/patch`: ask for a patch proposal only. The proposal is not applied. After a
   task is set, this requires `/discover` unless manual `/files` context exists.
 - `/apply-patch`: ask the configured router reviewer to approve or block the
@@ -130,9 +127,6 @@ PR, shell execution, or test-runner behavior.
 - `/isolate`: create an SFE-owned Git Worktree from the selected Git workspace
   and switch the active TUI workspace to that worktree. Dirty source
   workspaces are refused by default.
-- `/workspace-status`: show whether the active workspace is the original
-  workspace or an isolated worktree, plus worktree metadata and git status when
-  available.
 - `/worktree-diff`: show the active isolated worktree's git status and diff
   summary.
 - `/review-worktree`: ask the configured router reviewer for `OK_PROMOTE` or
@@ -146,21 +140,17 @@ PR, shell execution, or test-runner behavior.
 - `/gc-worktrees --clean`: remove only clean SFE-created orphan worktrees and
   protect the active TUI worktree session. Dirty worktrees are reported and
   skipped.
-- `/auto-patch`: macro command that runs the existing discover, dry-run,
+- `/auto-patch`: legacy macro command that runs the existing discover, dry-run,
   patch, and router-reviewed apply flow. It stops on failure or router
   `KO_BLOCK`.
-- `/auto-worktree`: macro command that creates isolation if needed, then runs
-  the existing patch, apply, worktree-diff, and router-reviewed worktree review
-  flow. It stops on failure or `KO_BLOCK` and leaves the worktree available for
-  inspection.
+- `/auto-worktree`: legacy macro command that creates isolation if needed, then
+  runs the existing patch, apply, worktree-diff, and router-reviewed worktree
+  review flow. It stops on failure or `KO_BLOCK` and leaves the worktree
+  available for inspection.
 - `/files <paths...>`: replace context manually with the provided text files
   for debug/design work. Directory inputs and unsupported files are rejected or
   skipped with a reason. This remains available but is not the normal
   human-facing workflow.
-- `/reset`: clear task, context, latest routing/result, and skipped/rejected
-  context and discovery state; preserve the selected workspace.
-- `/quit` and `/exit`: exit the TUI.
-
 Setting a new `/task` invalidates any previous discovery result. Run
 `/discover` again before `/dry-run`, `/ask`, or `/patch` unless you are using
 manual `/files` context.

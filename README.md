@@ -214,30 +214,16 @@ The current canonical TUI path uses `DirectBackend` and follows:
 
 ```text
 /task <question>
-/discover
-/dry-run
-/context
-/ask
+/run
 ```
 
-For write-oriented TUI experiments, `/patch` is proposal-only and `/apply-patch`
-is the explicit write boundary. `/patch` stores structured full-file replacement
-proposals and never writes files. The readable unified diff shown by the TUI is
-computed locally by SFE from the current file content and proposed replacement
-content; provider-supplied diff previews are not trusted as the source of
-truth. `/apply-patch` asks the configured router reviewer for `OK_APPLY` or
-`KO_BLOCK` and writes only after `OK_APPLY`.
-
-The TUI also has an experimental Git Worktree isolation flow. `/isolate`
-creates an SFE-owned worktree outside the source workspace and switches the
-active TUI workspace to it, so later `/patch` and `/apply-patch` operations
-target the isolated worktree rather than the original checkout. `/review-worktree`
-asks the configured router reviewer for `OK_PROMOTE` or `KO_BLOCK` over the
-actual worktree status and git diff. `OK_PROMOTE` is only a semantic review
-decision; it does not merge, push, commit, create a PR, or mutate the source
-branch. `/cleanup-worktree` removes only the active SFE-created worktree, and
-`/gc-worktrees` is a dry-run report by default. `/gc-worktrees --clean` removes
-only clean SFE-created orphan worktrees and protects the active TUI session.
+`/run` discovers context, routes a reduced context payload to the executor,
+generates a patch, and applies it in an SFE-created isolated worktree. If the
+selected workspace is not yet a Git repository, `/run` can initialize a local
+snapshot first; it does not create a remote, push, run tests/lint, require diff
+inspection, or require router review. Historical and debug commands such as
+`/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
+`/review-worktree` remain available through `/help-advanced`.
 
 The architecture boundary is:
 
