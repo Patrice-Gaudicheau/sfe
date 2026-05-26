@@ -37,6 +37,7 @@ from sfe_tui.contracts import (
     resolve_workspace,
 )
 from sfe_tui.executors import (
+    CONSOLE_SYSTEM_INSTRUCTION,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_PATCH_OUTPUT_TOKENS,
     ExecutorResponse,
@@ -4776,6 +4777,33 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["system_instruction"] != READ_ONLY_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == 12000
+
+
+def test_openai_executor_console_uses_console_instruction_and_output_budget() -> None:
+    provider = FakeProvider()
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.answer_console(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["system_instruction"] == CONSOLE_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["system_instruction"] != PATCH_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["max_tokens"] == DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def test_console_system_instruction_forbids_diffs_and_file_edits() -> None:
+    instruction = CONSOLE_SYSTEM_INSTRUCTION
+
+    assert "Answer the user's task directly" in instruction
+    assert "general questions without selected workspace context" in instruction
+    assert "Do not modify files" in instruction
+    assert "Do not produce a patch, diff, or file replacement JSON" in instruction
 
 
 def test_patch_system_instruction_allows_safe_core_validated_creations() -> None:

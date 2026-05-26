@@ -36,6 +36,14 @@ READ_ONLY_SYSTEM_INSTRUCTION = (
     "context and the user's task. Do not claim to edit files, run commands, "
     "or use tools."
 )
+CONSOLE_SYSTEM_INSTRUCTION = (
+    "You are the SFE console_output executor. Answer the user's task directly "
+    "and naturally for display in the TUI console. Use selected context when "
+    "it is provided, but you may answer general questions without selected "
+    "workspace context. Do not modify files, call tools, run commands, or "
+    "claim to have changed the workspace. Do not produce a patch, diff, or "
+    "file replacement JSON."
+)
 PATCH_SYSTEM_INSTRUCTION = (
     "You are the SFE TUI patch proposal executor. Return only one strict JSON "
     "object with this shape: {\"edits\":[{\"path\":\"relative/path\","
@@ -66,6 +74,9 @@ class ExecutorResponse:
 
 class ReadOnlyExecutor(Protocol):
     provider_name: str
+
+    def answer_console(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        ...
 
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         ...
@@ -104,6 +115,13 @@ class DirectProviderReadOnlyExecutor:
         return self._execute_with_instruction(
             executor_payload,
             system_instruction=READ_ONLY_SYSTEM_INSTRUCTION,
+            max_tokens=self.max_output_tokens,
+        )
+
+    def answer_console(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return self._execute_with_instruction(
+            executor_payload,
+            system_instruction=CONSOLE_SYSTEM_INSTRUCTION,
             max_tokens=self.max_output_tokens,
         )
 
@@ -221,6 +239,9 @@ class ProviderConfigurationErrorExecutor:
 
     provider_name = "invalid"
 
+    def answer_console(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return _configuration_error_response(self.provider_name)
+
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _configuration_error_response(self.provider_name)
 
@@ -233,6 +254,9 @@ class UnsupportedProviderExecutor:
 
     def __init__(self, provider_name: str) -> None:
         self.provider_name = provider_name
+
+    def answer_console(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return _unsupported_provider_response(self.provider_name)
 
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _unsupported_provider_response(self.provider_name)

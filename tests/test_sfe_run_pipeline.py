@@ -40,9 +40,33 @@ from sfe_tui.renderer import render_help, render_run_result
 class FakeExecutor:
     provider_name = "fake-executor"
 
-    def __init__(self, patch_answer: str | None = None) -> None:
+    def __init__(
+        self,
+        patch_answer: str | None = None,
+        console_answer: str | None = None,
+        console_error_category: str | None = None,
+    ) -> None:
         self.patch_answer = patch_answer or _replacement_proposal()
+        self.console_answer = console_answer or "Symfony is a PHP framework."
+        self.console_error_category = console_error_category
+        self.console_calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
+
+    def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        self.console_calls.append(executor_payload)
+        if self.console_error_category is not None:
+            return ExecutorResponse(
+                None,
+                self.console_error_category,
+                1,
+                provider_name=self.provider_name,
+            )
+        return ExecutorResponse(
+            self.console_answer,
+            None,
+            1,
+            provider_name=self.provider_name,
+        )
 
     def execute(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         return ExecutorResponse("unused", None, 1, provider_name=self.provider_name)
@@ -58,6 +82,7 @@ class FakeDiscoveryRouter:
 
     def __init__(self, files_to_inspect: tuple[str, ...] = ("context.txt",)) -> None:
         self.files_to_inspect = files_to_inspect
+        self.calls: list[dict[str, object]] = []
 
     def select_files(
         self,
@@ -66,7 +91,13 @@ class FakeDiscoveryRouter:
         workspace_map: list[dict[str, object]],
         max_files: int,
     ) -> DiscoveryRouterSelection:
-        del workspace_map, max_files
+        self.calls.append(
+            {
+                "task": task,
+                "workspace_map": workspace_map,
+                "max_files": max_files,
+            }
+        )
         return DiscoveryRouterSelection(
             files_to_inspect=self.files_to_inspect,
             reason=f"selected files for {task}",
@@ -157,18 +188,21 @@ def test_run_pipeline_refuses_without_workspace() -> None:
     assert result.issue.reason == "workspace_not_selected"
 
 
-def test_run_pipeline_console_output_returns_before_worktree_or_patch(
+def test_run_pipeline_console_output_generates_answer_before_worktree_or_patch(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
-    executor = FakeExecutor()
+    executor = FakeExecutor(console_answer="Symfony is a PHP framework.")
     router = FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT)
+    discovery_router = FakeDiscoveryRouter()
 
     result = _pipeline(
         executor=executor,
+        discovery_router=discovery_router,
         execution_mode_router=router,
+        git_preparer=FailingGitPreparer(),
     ).run(
         RunRequest(
             workspace_root=workspace,
@@ -179,13 +213,61 @@ def test_run_pipeline_console_output_returns_before_worktree_or_patch(
     assert result.status == RUN_STATUS_COMPLETED
     assert result.execution_mode_decision is not None
     assert result.execution_mode_decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
-    assert result.console_output is not None
+    assert result.console_output == "Symfony is a PHP framework."
+    assert "answer generation is not implemented" not in result.console_output
     assert result.workspace_session is None
     assert result.worktree_created is False
+    assert result.discovery_result is None
+    assert result.dry_run_result is None
+    assert result.patch_result is None
     assert result.patch_generated is False
     assert result.patch_applied is False
+    assert result.promotion_applied is False
+    assert result.executor_provider == "fake-executor"
+    assert len(executor.console_calls) == 1
+    assert executor.console_calls[0]["selected_context_segments"] == []
     assert executor.patch_calls == []
+    assert discovery_router.calls == []
     assert router.calls == [{"task": "Connais le Framework PHP intitulé Symfony ?"}]
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+
+def test_run_pipeline_console_output_failure_returns_before_worktree_or_patch(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor(console_error_category="provider_error")
+    discovery_router = FakeDiscoveryRouter()
+
+    result = _pipeline(
+        executor=executor,
+        discovery_router=discovery_router,
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        git_preparer=FailingGitPreparer(),
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Connais le Framework PHP intitulé Symfony ?",
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "console_output"
+    assert result.issue.reason == "provider_error"
+    assert result.console_output is None
+    assert result.workspace_session is None
+    assert result.worktree_created is False
+    assert result.discovery_result is None
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert len(executor.console_calls) == 1
+    assert executor.patch_calls == []
+    assert discovery_router.calls == []
     assert not (workspace / ".git").exists()
     assert not (workspace / ".sfe-worktrees").exists()
     assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
@@ -704,7 +786,10 @@ def test_tui_run_renders_console_output_without_worktree(
     assert "patch generated: no" in rendered
     assert "patch applied: no" in rendered
     assert "SFE console output" in rendered
+    assert "Symfony is a PHP framework." in rendered
+    assert "answer generation is not implemented" not in rendered
     assert "missing_diff_header" not in rendered
+    assert len(executor.console_calls) == 1
     assert executor.patch_calls == []
     assert app.workspace_session is None
     assert not (workspace / ".git").exists()
@@ -753,13 +838,14 @@ def _pipeline(
     *,
     workspace_manager: WorkspaceManager | None = None,
     executor: FakeExecutor | None = None,
+    discovery_router: FakeDiscoveryRouter | None = None,
     execution_mode_router: object | None = None,
     git_preparer: object | None = None,
 ) -> RunPipeline:
     return RunPipeline(
         backend=DirectBackend(executor=executor or FakeExecutor()),
         workspace_manager=workspace_manager or _manager(),
-        discovery_router=FakeDiscoveryRouter(),
+        discovery_router=discovery_router or FakeDiscoveryRouter(),
         execution_mode_router=execution_mode_router or FakeExecutionModeRouter(),
         git_preparer=git_preparer,
     )

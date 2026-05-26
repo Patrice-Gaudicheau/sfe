@@ -71,6 +71,9 @@ class BackendResult:
 class BackendAdapter(Protocol):
     name: str
 
+    def console(self, contract: SFEContract) -> BackendResult:
+        ...
+
     def dry_run(self, contract: SFEContract) -> BackendResult:
         ...
 
@@ -93,6 +96,17 @@ class DirectBackend:
 
     def dry_run(self, contract: SFEContract) -> BackendResult:
         return _local_router_preview_result(self.name, contract)
+
+    def console(self, contract: SFEContract) -> BackendResult:
+        routed = self.dry_run(contract)
+        if contract.task is None:
+            return console_error_result(routed, "missing_task")
+        if routed.execution_preview is None:
+            return console_error_result(routed, "invalid_execution_preview")
+        executor_response = self.executor.answer_console(
+            routed.execution_preview.executor_payload
+        )
+        return _console_result_from_executor_response(routed, executor_response)
 
     def run(self, contract: SFEContract) -> BackendResult:
         routed = self.dry_run(contract)
@@ -133,6 +147,9 @@ class ProxyBackend:
     def dry_run(self, contract: SFEContract) -> BackendResult:
         return _dry_run_result(self.name, contract, selector_mode="proxy_not_connected")
 
+    def console(self, contract: SFEContract) -> BackendResult:
+        raise NotImplementedError("Proxy backend console execution is not implemented yet.")
+
     def run(self, contract: SFEContract) -> BackendResult:
         raise NotImplementedError("Proxy backend execution is not implemented yet.")
 
@@ -163,6 +180,20 @@ def ask_error_result(result: BackendResult, error_category: str) -> BackendResul
     )
 
 
+def console_error_result(result: BackendResult, error_category: str) -> BackendResult:
+    return BackendResult(
+        backend=result.backend,
+        status="console_failed",
+        provider_calls_made=0,
+        summary={**result.summary, "console_error_category": error_category},
+        contract=result.contract,
+        execution_preview=result.execution_preview,
+        router_preview=result.router_preview,
+        answer=None,
+        error_category=error_category,
+    )
+
+
 def patch_error_result(result: BackendResult, error_category: str) -> BackendResult:
     return BackendResult(
         backend=result.backend,
@@ -174,6 +205,29 @@ def patch_error_result(result: BackendResult, error_category: str) -> BackendRes
         router_preview=result.router_preview,
         answer=None,
         error_category=error_category,
+    )
+
+
+def _console_result_from_executor_response(
+    routed: BackendResult,
+    executor_response: ExecutorResponse,
+) -> BackendResult:
+    status = "console_completed" if executor_response.answer else "console_failed"
+    return BackendResult(
+        backend=routed.backend,
+        status=status,
+        provider_calls_made=executor_response.provider_calls_made,
+        summary={
+            **routed.summary,
+            "provider_calls_made": executor_response.provider_calls_made,
+            "console_error_category": executor_response.error_category,
+            "executor_provider": executor_response.provider_name,
+        },
+        contract=routed.contract,
+        execution_preview=routed.execution_preview,
+        router_preview=routed.router_preview,
+        answer=executor_response.answer,
+        error_category=executor_response.error_category,
     )
 
 

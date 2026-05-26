@@ -263,15 +263,7 @@ class RunPipeline:
             )
 
         if execution_mode_decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT:
-            return RunResult(
-                status=RUN_STATUS_COMPLETED,
-                execution_mode_decision=execution_mode_decision,
-                console_output=(
-                    "console_output selected; answer generation is not implemented "
-                    "in this slice. No workspace write was attempted."
-                ),
-                warnings=("console_output_placeholder",),
-            )
+            return self._run_console_output(request, execution_mode_decision)
         if execution_mode_decision.execution_mode == EXECUTION_MODE_EXTERNAL_ACTION:
             return RunResult(
                 status=RUN_STATUS_FAILED,
@@ -501,6 +493,45 @@ class RunPipeline:
         if request.workspace_session is not None:
             return GitPreparationResult(ok=True)
         return self.git_preparer.prepare(request.workspace_root)
+
+    def _run_console_output(
+        self,
+        request: RunRequest,
+        execution_mode_decision: ExecutionModeDecision,
+    ) -> RunResult:
+        contract = build_contract(
+            workspace_root=request.workspace_root,
+            task=request.task,
+            file_paths=[],
+            context_files=[],
+        )
+        try:
+            console_result = self.backend.console(contract)
+        except NotImplementedError:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue("console_output", "console_not_supported"),
+                execution_mode_decision=execution_mode_decision,
+                warnings=("console_output_failed",),
+            )
+        if not console_result.answer:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue(
+                    "console_output",
+                    console_result.error_category or "invalid_response",
+                ),
+                execution_mode_decision=execution_mode_decision,
+                executor_provider=_executor_provider(console_result),
+                warnings=("console_output_failed",),
+            )
+        return RunResult(
+            status=RUN_STATUS_COMPLETED,
+            execution_mode_decision=execution_mode_decision,
+            console_output=console_result.answer,
+            executor_provider=_executor_provider(console_result),
+            warnings=("no_workspace_write_attempted",),
+        )
 
     def _ensure_worktree(
         self,
