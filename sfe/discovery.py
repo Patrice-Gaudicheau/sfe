@@ -12,7 +12,7 @@ from sfe.discovery_router import (
     DiscoveryRouterError,
     create_configured_discovery_router,
 )
-from sfe_tui.contracts import (
+from sfe.contracts import (
     ContextLoadResult,
     PRIVATE_KEY_MARKERS,
     SECRET_FILE_NAMES,

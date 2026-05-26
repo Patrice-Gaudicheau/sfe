@@ -21,7 +21,7 @@ from sfe.discovery_router import (
     DiscoveryRouterSelection,
     parse_discovery_router_output,
 )
-from sfe_tui.contracts import build_contract
+from sfe.contracts import build_contract
 from sfe_tui.routers import LocalSegmentRouter
 
 

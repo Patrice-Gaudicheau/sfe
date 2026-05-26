@@ -17,6 +17,7 @@ from sfe.discovery import (
     discover_workspace_context,
     load_discovered_context,
 )
+from sfe.contracts import build_contract
 from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
@@ -52,7 +53,6 @@ from sfe.workspace_isolation import (
     WorkspaceStatusResult,
 )
 from sfe_tui.backends import BackendAdapter, BackendResult
-from sfe_tui.contracts import build_contract
 from sfe_tui.patch_json_repair import PATCH_JSON_REPAIR_MAX_INPUT_CHARS
 
 

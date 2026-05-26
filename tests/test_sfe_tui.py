@@ -733,12 +733,12 @@ def test_files_loads_source_file_with_secret_marker_literal(tmp_path) -> None:
 
 
 def test_files_loads_real_contracts_source_with_secret_marker_literals() -> None:
-    loaded = load_context_file(PROJECT_ROOT, "sfe_tui/contracts.py")
+    loaded = load_context_file(PROJECT_ROOT, "sfe/contracts.py")
 
     assert loaded.loaded is True
     assert loaded.reason is None
     assert loaded.warning_reason == "secret_marker_literal_in_source"
-    assert loaded.source_ref == "sfe_tui/contracts.py"
+    assert loaded.source_ref == "sfe/contracts.py"
 
 
 def test_generated_context_source_ref_does_not_expose_absolute_path(tmp_path) -> None:
