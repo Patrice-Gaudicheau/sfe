@@ -33,9 +33,11 @@ statistical reliability, or general model-safety guarantees.
   standby experimental proxy path, and what remains unproven.
 - [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current user-facing TUI
   workflow and command reference for the canonical DirectBackend path.
-- [tui_apply_patch_design.md](tui_apply_patch_design.md): current
+- [tui_apply_patch_design.md](tui_apply_patch_design.md): advanced/debug
   router-reviewed `/patch` -> `/apply-patch` write boundary, including
   full-file replacement proposals and SFE-computed effective diff previews.
+  This is retained for compatibility; the primary user workflow is `/task`
+  followed by `/run`.
 - [tui_direct_backend_strategy.md](tui_direct_backend_strategy.md): current
   first-party TUI direction, with DirectBackend as the canonical exposed path
   and the Proxy/CodexCLI path frozen as standby compatibility infrastructure.

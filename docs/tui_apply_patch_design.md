@@ -3,6 +3,11 @@
 This note defines the safety boundary for the first-party SFE TUI
 `/patch` -> `/apply-patch` workflow.
 
+Current status: this is an advanced/debug compatibility flow. The primary user
+workflow is `/task <request>` followed by `/run`, which applies inside an
+SFE-created isolated worktree and does not require router review or mandatory
+diff inspection before applying there.
+
 ## Purpose
 
 `/patch` asks the configured executor/provider for a structured edit proposal.

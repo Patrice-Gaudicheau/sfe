@@ -220,10 +220,18 @@ The current canonical TUI path uses `DirectBackend` and follows:
 `/run` discovers context, routes a reduced context payload to the executor,
 generates a patch, and applies it in an SFE-created isolated worktree. If the
 selected workspace is not yet a Git repository, `/run` can initialize a local
-snapshot first; it does not create a remote, push, run tests/lint, require diff
-inspection, or require router review. Historical and debug commands such as
-`/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
-`/review-worktree` remain available through `/help-advanced`.
+snapshot first; it does not create a remote, push, run syntax checks, run tests
+or lint, require diff inspection, require human approval, or require router
+review. Historical and debug commands such as `/discover`, `/dry-run`,
+`/patch`, `/apply-patch`, `/isolate`, and `/review-worktree` remain available
+through `/help-advanced`.
+
+SFE's current product doctrine is intentionally narrow: it is a context routing
+and token reduction layer. It is meant to send the executor less context, but
+better selected context, and to bound writes mechanically with Git/worktree
+isolation. It is not meant to make the model smarter, replace code review,
+control every executor response, or require mandatory diff inspection, human
+approval, syntax checks, tests, or lint before the worktree apply step.
 
 The architecture boundary is:
 
@@ -238,11 +246,12 @@ metadata-only workspace map, asks the configured discovery router which files to
 inspect, and then locally revalidates selected paths before loading them. The
 `/dry-run` context preview is still a provider-free local lexical preview, and
 the Executor is the configured executor behind `DirectBackend`. Separate
-router-review calls are used for `/apply-patch` and `/review-worktree`; these
-are semantic LLM reviews, not formal security proofs. `/discover` does not write
-files, run shell commands, or expose raw file contents in diagnostics. `/dry-run`
-still makes zero provider calls. `/ask` calls the configured executor only after
-routing selected context. No proxy is used in the canonical TUI path.
+router-review calls are used by the advanced `/apply-patch` and
+`/review-worktree` flows; these are semantic LLM reviews, not formal security
+proofs and are not mandatory for `/run`. `/discover` does not write files, run
+shell commands, initialize Git, or expose raw file contents in diagnostics.
+`/dry-run` still makes zero provider calls. `/ask` calls the configured executor
+only after routing selected context. No proxy is used in the canonical TUI path.
 
 Manual `/files` context loading remains available for debug/design work, but it
 is not the normal human-facing TUI workflow.
@@ -310,7 +319,7 @@ python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
 Proxy tests remain available for standby/historical compatibility work, but
 they are not the current user-facing smoke path.
 
-For the current repository-root TUI smoke path:
+For the current repository-root read-only TUI smoke path:
 
 ```bash
 make sfe-tui
@@ -329,11 +338,13 @@ Then accept the current workspace and run:
 /quit
 ```
 
-Expected observations are modest: `/discover` reports safe candidate metadata,
-`/dry-run` reports `provider calls made: 0`, and `/ask` requires a configured
-provider. With `SFE_PROVIDER=lemonade` and Lemonade reachable, `/ask` can
-complete through `DirectBackend`. Provider errors should be reported safely if
-the configured provider is unavailable. No proxy is used.
+Expected observations are modest: `/discover` reports safe candidate metadata
+and remains read-only, `/dry-run` reports `provider calls made: 0`, and `/ask`
+requires a configured provider. With `SFE_PROVIDER=lemonade` and Lemonade
+reachable, `/ask` can complete through `DirectBackend`. Provider errors should
+be reported safely if the configured provider is unavailable. No proxy is used.
+This read-only smoke uses advanced diagnostics; the canonical editing path is
+`/task <question>` followed by `/run`.
 
 The full test suite can also be run from the repository root:
 
@@ -543,8 +554,9 @@ model intelligence.
 
 - `docs/INDEX.md`: recommended starting point and runner-category map for technical reviewers.
 - `docs/tui_v0_1_user_guide.md`: current canonical SFE-aware TUI workflow.
-- `docs/tui_apply_patch_design.md`: explicit `/patch` -> `/apply-patch` write
-  boundary and router-reviewed full-file replacement design.
+- `docs/tui_apply_patch_design.md`: advanced/debug `/patch` -> `/apply-patch`
+  write boundary and router-reviewed full-file replacement design, retained for
+  compatibility rather than the primary `/run` workflow.
 - `docs/current_architecture_status.md`: current boundary between the TUI
   canonical path and standby/experimental proxy infrastructure.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.

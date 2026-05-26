@@ -13,38 +13,49 @@ development. It should remain CLI/TUI-first for now.
 
 The canonical TUI backend is `DirectBackend`. It works from an explicit SFE
 contract: selected workspace, protected task, protected instructions, explicit
-context segments, reducibility metadata, local routing diagnostics, and a
-executor boundary plus explicit router-reviewed write boundaries.
+context segments, reducibility metadata, local routing diagnostics, an executor
+boundary, and mechanically bounded writes in an isolated worktree.
 
 The current canonical TUI workflow is:
 
 ```text
 /task <question>
+/run
+```
+
+`/run` is the simple user path. It discovers workspace context, builds the
+internal routing/preflight state needed for a reduced executor payload, asks the
+configured executor for a structured patch proposal, applies the proposal inside
+an SFE-created Git worktree, and returns compact safe metadata. It does not
+require human approval, diff inspection, router review, syntax checks, tests, or
+lint before applying inside the worktree.
+
+The worktree is the main operational guard. If the selected workspace is already
+inside a Git repository, `/run` uses that repository to create or reuse an
+SFE-owned worktree. If the selected workspace is not yet a Git repository,
+`/run` may initialize a local repository snapshot first, create an initial
+commit, and then continue with the worktree-first flow. It does not configure a
+remote, push, merge, create a PR, or mutate the source branch with the generated
+patch.
+
+Advanced/debug commands remain available for compatibility and inspection:
+
+```text
 /discover
 /dry-run
-/context
-/ask
-```
-
-Write-oriented experiments use explicit commands rather than automatic writes:
-
-```text
 /patch
 /apply-patch
-```
-
-The isolated worktree path is:
-
-```text
 /isolate
-/patch
-/apply-patch
 /worktree-diff
 /review-worktree
 /cleanup-worktree
+/gc-worktrees
+/auto-patch
+/auto-worktree
+/files
 ```
 
-This is the first controlled TUI discovery workflow. It follows the intended
+The underlying discovery and execution layers still follow the intended
 architecture boundary:
 
 ```text
@@ -62,16 +73,19 @@ explicit discovery loading boundary when the TUI builds an SFE contract.
 The `/dry-run` context-selection preview remains the provider-free local lexical
 preview for now. It is not an LLM router result and should not be described as
 robust general retrieval. The Executor remains the configured executor behind
-`DirectBackend`. Separate configured router-review calls are used for
-`/apply-patch` and `/review-worktree`; those reviews are semantic checks, not
-formal security proofs.
+`DirectBackend`. Separate configured router-review calls are used by the
+advanced `/apply-patch` and `/review-worktree` flows; those reviews are
+semantic checks, not formal security proofs. They are not part of the canonical
+`/run` path.
 
 The currently validated TUI commands are:
 
 - `/help`
+- `/help-advanced`
 - `/directory`
 - `/status`
 - `/task`
+- `/run`
 - `/discover`
 - `/dry-run`
 - `/context`
@@ -88,6 +102,11 @@ The currently validated TUI commands are:
 - `/auto-worktree`
 - `/files`
 - `/reset`
+
+`/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`,
+`/worktree-diff`, `/review-worktree`, `/auto-patch`, `/auto-worktree`, and
+`/files` are advanced/debug or legacy compatibility commands, not the
+recommended user flow.
 
 `/dry-run` uses the local provider-free `local_lexical_preview` router. It is
 deterministic and useful for previewing selected segment ids, token estimates,
@@ -123,7 +142,7 @@ branch. `/cleanup-worktree` removes only the active SFE-created worktree.
 `/gc-worktrees` is dry-run by default; `/gc-worktrees --clean` removes only
 clean SFE-created orphan worktrees and protects the active TUI session.
 
-`/auto-patch` and `/auto-worktree` are macro commands over the existing
+`/auto-patch` and `/auto-worktree` are legacy macro commands over the existing
 handlers. They stop on failure or router `KO_BLOCK`, preserve the same router
 review boundaries, and do not introduce shell execution, test/lint execution,
 merge, push, PR creation, or automatic cleanup.
@@ -173,7 +192,7 @@ general token savings, or broad provider behavior.
 ## What Remains Unproven
 
 Before making practical value claims, SFE still needs evidence that the
-canonical TUI path can repeatedly deliver useful context reduction without
+canonical `/run` path can repeatedly deliver useful context reduction without
 hurting task correctness.
 
 The minimum proof still missing includes:
@@ -185,8 +204,8 @@ The minimum proof still missing includes:
   cost;
 - failure reporting for no-match routing, over-selection, under-selection, and
   provider errors;
-- repeated evidence for the router-reviewed write and worktree flows beyond
-  unit tests and manual validation;
+- repeated evidence for the `/run` worktree-first flow and the advanced
+  router-reviewed write/worktree flows beyond unit tests and manual validation;
 - stronger evidence for real Responses streaming context replacement before it
   is treated as generally usable;
 - clearer operational guidance for secrets, logs, provider limits, and local

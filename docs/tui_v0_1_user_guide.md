@@ -9,17 +9,19 @@ this guide.
 
 ## What The TUI Is
 
-The SFE-aware TUI is a command-line interactive workflow for setting a task,
-discovering a controlled pool of workspace context, previewing local context
-routing, and optionally asking a configured executor/provider for an answer or
-patch proposal.
+The SFE-aware TUI is a command-line interactive workflow for setting a task and
+running it through SFE's context-routing layer. Its primary job is to reduce the
+context sent to the executor while keeping writes mechanically bounded inside an
+isolated worktree.
 
 The TUI keeps the current task, selected workspace, loaded context metadata,
 local routing diagnostics, latest ask/patch result, pending patch proposal
 metadata, and optional isolated worktree session metadata in the session. It
-does not run shell commands, execute tools, or switch backends. Automatic writes
-are disabled; explicit `/apply-patch` is available for applying the latest
-pending patch proposal after router review.
+does not run shell commands, execute tools, switch backends, push, merge, or
+create pull requests. `/run` may apply a generated patch inside an SFE-created
+worktree without human approval or mandatory diff inspection. The original
+workspace remains protected by Git/worktree isolation. Advanced primitives such
+as `/patch` and `/apply-patch` remain available for debug and compatibility.
 
 ## Launch
 
@@ -99,8 +101,8 @@ For debug and compatibility commands, use:
 - `/run`: discover context, route selected context to the executor, request a
   patch, and apply it inside an SFE-created isolated worktree. If the workspace
   is not yet a Git repository, `/run` can initialize a local repository snapshot
-  first; it does not create a remote, push, run tests/lint, require diff
-  inspection, or require router review.
+  first; it does not create a remote, push, run syntax checks, run tests or lint,
+  require diff inspection, require human approval, or require router review.
 - `/context`: show loaded context segment count, opaque ids, safe source refs,
   approximate sizes/tokens, latest selected ids, and skipped/rejected metadata.
 - `/ask`: send selected context plus protected task/instructions to the
@@ -157,6 +159,9 @@ manual `/files` context.
 
 ## Discovery
 
+In normal use, `/run` performs discovery internally. The explicit `/discover`
+command is retained as an advanced read-only diagnostic primitive.
+
 `/discover` uses the reusable core discovery layer in `sfe/discovery.py`. It
 scans only inside the selected workspace and builds a bounded, deterministic
 candidate pool for the current task.
@@ -192,6 +197,9 @@ discovery, context, or dry-run diagnostics.
 
 ## Dry Run
 
+In normal use, `/run` performs the needed preflight/routing work internally.
+The explicit `/dry-run` command is retained as an advanced diagnostic preview.
+
 `/dry-run` is a local preview. It uses the provider-free
 `local_lexical_preview` router to estimate which loaded or discovered context
 segments would be selected for the current task.
@@ -205,9 +213,9 @@ apply patches.
 
 `/ask` routes active context locally, then sends only the selected context
 segments, protected instructions, and protected task to the configured
-read-only executor/provider. In the canonical path, active context comes from
-`/discover`; manual `/files` context remains available for debug/design work
-and takes precedence when present.
+read-only executor/provider. For this read-only command, active context usually
+comes from `/discover`; manual `/files` context remains available for
+debug/design work and takes precedence when present.
 
 The answer returned by the provider is displayed to the user. Diagnostics remain
 limited to safe metadata such as counts, opaque segment ids, safe source refs,
@@ -220,6 +228,10 @@ rather than treating the run as a successful answer.
 
 ## Patch
 
+The current primary write path is `/run`, which applies inside an isolated
+worktree. The explicit `/patch` and `/apply-patch` commands below are advanced
+debug/compatibility primitives.
+
 `/patch` uses the same local selection boundary as `/ask`, but asks the
 configured read-only executor/provider for a patch proposal.
 
@@ -227,7 +239,7 @@ The result is proposal-only:
 
 - not applied;
 - no files are modified;
-- automatic writes are disabled;
+- the explicit advanced primitive does not write;
 - explicit `/apply-patch` is available when a structured proposal is pending.
 
 The provider is asked for structured full-file replacements. The stored proposal
@@ -252,15 +264,22 @@ not a formal security proof.
 
 ## Worktree Isolation
 
+`/run` is worktree-first and uses Git/worktree isolation as its main operational
+guard. It may initialize a local Git repository snapshot when the selected
+workspace is not already a repository, then create or reuse an SFE-owned
+worktree and apply there.
+
 `/isolate` creates an isolated Git Worktree using core SFE workspace isolation
 support. The worktree is created outside the original workspace on a generated
 branch named like `sfe/worktree/<session-id>`. The TUI then switches its active
 workspace to the worktree, so `/patch` and `/apply-patch` operate on the
 isolated copy.
 
-The default policy refuses non-Git workspaces and dirty source repositories.
-The original workspace is not deleted, force-checked-out, merged into, pushed,
-or otherwise mutated by the isolation flow.
+The explicit `/isolate` primitive refuses non-Git workspaces and dirty source
+repositories by default. `/run` can prepare a non-Git workspace by creating a
+local Git snapshot before using the worktree flow. The original workspace is not
+deleted, force-checked-out, merged into, pushed, or otherwise patched by the
+isolation flow.
 
 `/review-worktree` collects the actual worktree git status, changed files, and
 git diff, then asks the configured router reviewer for `OK_PROMOTE` or
@@ -300,13 +319,17 @@ The current TUI behavior intentionally keeps these boundaries:
 - no proxy in the canonical TUI path;
 - discovery does not call providers, write files, or expose raw contents in
   diagnostics;
-- automatic writes disabled; explicit `/apply-patch` available;
+- `/run` applies only inside an SFE-created isolated worktree;
+- `/run` does not require diff inspection, human approval, router review,
+  syntax checks, tests, or lint;
+- `/run` can auto-initialize a local Git snapshot for a non-Git workspace, but
+  does not create remotes or push;
+- advanced `/patch` is proposal-only and does not write files;
+- advanced `/apply-patch` is explicit, router-reviewed, and applies only
+  pending structured full-file replacements;
 - `/dry-run` makes no executor/provider call;
 - `/ask` calls the configured executor only after local routing selects
   context;
-- `/patch` is proposal-only and does not write files;
-- `/apply-patch` is explicit, router-reviewed, and applies only pending
-  structured full-file replacements;
 - displayed patch diffs are computed locally from actual proposed full-file
   replacements; provider diff previews are untrusted diagnostics only;
 - `/review-worktree` reviews the actual worktree git diff and status;
@@ -327,8 +350,10 @@ The current TUI behavior intentionally keeps these boundaries:
   review, not a formal security proof.
 - Discovery is a first controlled TUI workflow, not robust general retrieval.
 - Routing quality is not yet proven across repeated realistic workflows.
-- `/patch` does not apply patches; `/apply-patch` is required for writes.
-- There is no CLI/API pipeline integration for the canonical TUI workflow yet.
+- Advanced `/patch` does not apply patches; advanced `/apply-patch` is required
+  only for that legacy/debug proposal flow.
+- The canonical `/run` pipeline is available through the TUI; there is no
+  separate stable CLI/API integration for it yet.
 - There is no automatic merge, push, PR creation, arbitrary shell execution, or
   test/lint runner.
 - The proxy remains standby experimental compatibility and observability
@@ -336,7 +361,11 @@ The current TUI behavior intentionally keeps these boundaries:
 - The current test suite validates expected behavior and safety boundaries, but
   it does not establish production reliability or general practical value.
 
-## Repository-Root Smoke Test
+## Repository-Root Read-Only Smoke Test
+
+This smoke uses advanced read-only diagnostics. It is useful for local
+provider/configuration checks, but it is not the canonical editing workflow.
+The canonical editing workflow is `/task <question>` followed by `/run`.
 
 From the repository root:
 

@@ -4,6 +4,12 @@ This note defines a small SFE-side continuity and orientation layer inspired by
 TPCE vocabulary. It is an architecture boundary, not an implementation plan for
 importing TPCE into SFE.
 
+Current status note: this document predates the `/run`-first TUI workflow and
+should be read as orientation vocabulary, not as current user guidance. The
+current canonical editing path is `/task <request>` followed by `/run`;
+discovery, patch, apply, review, and manual file commands remain available as
+advanced/debug primitives.
+
 ## Decision
 
 SFE should not integrate TPCE directly right now.
