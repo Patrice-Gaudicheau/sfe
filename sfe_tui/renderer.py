@@ -648,6 +648,7 @@ def render_patch_result(
     pending_patch_summary: PatchSummary | None = None,
     pending_patch_issue: object | None = None,
     pending_patch_preview: str | None = None,
+    pending_patch_diagnostics: object | None = None,
 ) -> str:
     audit = result.contract.audit
     selected_ids = list(audit.get("selected_segment_ids") or [])
@@ -679,7 +680,16 @@ def render_patch_result(
         "  not applied",
         "  no files were modified",
         f"  pending patch stored: {_yes_no(pending_patch_summary is not None)}",
+        "  pending patch repair attempted: "
+        + _yes_no(bool(getattr(pending_patch_diagnostics, "repair_attempted", False))),
+        "  pending patch repair result: "
+        + _display_value(
+            getattr(pending_patch_diagnostics, "repair_result", None) or "not_needed"
+        ),
     ]
+    detail = getattr(pending_patch_diagnostics, "detail", None)
+    if detail is not None:
+        lines.append(f"  pending patch detail: {_display_value(detail)}")
     if pending_patch_summary is not None:
         lines.extend(
             [

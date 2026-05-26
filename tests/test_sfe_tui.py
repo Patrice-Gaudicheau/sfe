@@ -51,6 +51,10 @@ from sfe_tui.patch_review import (
     PatchReviewDecision,
     _build_review_prompt,
 )
+from sfe_tui.patch_json_repair import (
+    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
+    PatchJsonRepairResult,
+)
 from sfe.workspace_review import WorkspaceReviewDecision
 from sfe_tui.renderer import (
     render_context_summary,
@@ -165,6 +169,34 @@ class FakeDiscoveryRouter:
             provider_name=self.provider_name,
             model=self.model,
             provider_calls_made=1,
+        )
+
+
+class FakePatchJsonRepairer:
+    provider_name = "fake-json-repairer"
+    model = "fake-json-repair-model"
+
+    def __init__(self, repaired_text: str | None) -> None:
+        self.repaired_text = repaired_text
+        self.calls: list[dict[str, object]] = []
+
+    def repair(
+        self,
+        *,
+        raw_response: str,
+        parse_error: str,
+    ) -> PatchJsonRepairResult:
+        self.calls.append(
+            {
+                "raw_response": raw_response,
+                "parse_error": parse_error,
+            }
+        )
+        return PatchJsonRepairResult(
+            self.repaired_text,
+            error_category=None if self.repaired_text is not None else "failed",
+            provider_name=self.provider_name,
+            model=self.model,
         )
 
 
@@ -373,6 +405,25 @@ def replacement_proposal(
                 }
             ],
             "diff_preview": diff_preview or valid_text_diff(path, old=old, new=preview_new),
+        }
+    )
+
+
+def multi_replacement_proposal(files: dict[str, str]) -> str:
+    return json.dumps(
+        {
+            "edits": [
+                {
+                    "path": path,
+                    "action": "replace_existing_file",
+                    "content": content,
+                }
+                for path, content in files.items()
+            ],
+            "diff_preview": "\n".join(
+                valid_text_diff(path, old="old context", new=content.rstrip("\n"))
+                for path, content in files.items()
+            ),
         }
     )
 
@@ -2418,6 +2469,251 @@ def test_patch_stores_pending_file_replacement_proposal(tmp_path) -> None:
     assert "pending patch hunks: 1" in status_block
 
 
+def test_patch_stores_pending_multi_file_json_without_repair(tmp_path) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("old context\n", encoding="utf-8")
+    second.write_text("old context\n", encoding="utf-8")
+    repairer = FakePatchJsonRepairer(replacement_proposal())
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=multi_replacement_proposal(
+                {
+                    "first.txt": "new first\n",
+                    "second.txt": "new second\n",
+                }
+            ),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files first.txt second.txt",
+                "/task Patch old context in both files",
+                "/patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
+    )
+
+    assert app.run() == 0
+
+    rendered = "\n".join(output)
+    assert app.pending_patch is not None
+    assert repairer.calls == []
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch files: 2" in rendered
+    assert "pending patch repair attempted: no" in rendered
+    assert "pending patch repair result: not_needed" in rendered
+
+
+def test_patch_repairs_invalid_structured_json_once_and_stores_pending_patch(
+    tmp_path,
+) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    repaired = replacement_proposal(content="new context\n")
+    repairer = FakePatchJsonRepairer(repaired)
+    raw = 'Here is the JSON:\n{"edits":[{"path":"context.txt","action":"replace_existing_file","content":"new context\n"}]}\nThanks'
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw,
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
+    )
+
+    assert app.run() == 0
+
+    rendered = "\n".join(output)
+    assert app.pending_patch is not None
+    assert len(repairer.calls) == 1
+    assert repairer.calls[0]["parse_error"] == "invalid_json"
+    assert app.pending_patch.text == repaired
+    assert "pending patch stored: yes" in rendered
+    assert "pending patch repair attempted: yes" in rendered
+    assert "pending patch repair result: success" in rendered
+    assert "pending patch detail: invalid_json_repaired" in rendered
+
+
+def test_apply_patch_after_json_repair_still_uses_router_review(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    repairer = FakePatchJsonRepairer(replacement_proposal(content="new context\n"))
+    reviewer = FakePatchReviewer()
+    raw = '{"edits":[{"path":"context.txt","action":"replace_existing_file","content":"new context\n"}]}'
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw,
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Patch old context",
+                "/patch",
+                "/apply-patch",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
+        patch_reviewer=reviewer,
+    )
+
+    assert app.run() == 0
+
+    rendered = "\n".join(output)
+    assert source.read_text(encoding="utf-8") == "new context\n"
+    assert len(repairer.calls) == 1
+    assert len(reviewer.calls) == 1
+    assert reviewer.calls[0]["patch_summary"]["paths"] == ["context.txt"]
+    assert "pending patch repair result: success" in rendered
+    assert "router decision: OK_APPLY" in rendered
+
+
+def test_patch_failed_json_repair_does_not_store_pending_patch(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    repairer = FakePatchJsonRepairer(None)
+    raw = '{"edits":[{"path":"context.txt","action":"replace_existing_file","content":"new context\n"}]}'
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw,
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
+    )
+
+    assert app.run() == 0
+
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert len(repairer.calls) == 1
+    assert "pending patch stored: no" in rendered
+    assert "pending patch reason: unsupported_pending_patch_format" in rendered
+    assert "pending patch repair attempted: yes" in rendered
+    assert "pending patch repair result: failed" in rendered
+    assert "pending patch detail: invalid_json_repair_failed" in rendered
+
+
+def test_patch_repair_invalid_schema_does_not_store_pending_patch(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    repairer = FakePatchJsonRepairer(
+        json.dumps(
+            {
+                "edits": [
+                    {
+                        "path": "context.txt",
+                        "action": "delete_file",
+                        "content": "new context\n",
+                    }
+                ]
+            }
+        )
+    )
+    raw = '{"edits":[{"path":"context.txt","action":"replace_existing_file","content":"new context\n"}]}'
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw,
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
+    )
+
+    assert app.run() == 0
+
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert len(repairer.calls) == 1
+    assert "pending patch stored: no" in rendered
+    assert "pending patch detail: invalid_json_repair_failed" in rendered
+
+
+def test_patch_skips_json_repair_for_too_large_response(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    repairer = FakePatchJsonRepairer(replacement_proposal())
+    raw = (
+        '{"edits":[{"path":"context.txt","action":"replace_existing_file",'
+        '"content":"'
+        + ("x" * PATCH_JSON_REPAIR_MAX_INPUT_CHARS)
+    )
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw,
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch old context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
+    )
+
+    assert app.run() == 0
+
+    rendered = "\n".join(output)
+    assert app.pending_patch is None
+    assert repairer.calls == []
+    assert "pending patch stored: no" in rendered
+    assert "pending patch repair attempted: no" in rendered
+    assert "pending patch repair result: skipped" in rendered
+    assert "pending patch detail: invalid_json_too_large_for_repair" in rendered
+
+
 def test_patch_non_diff_output_does_not_store_pending_patch(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("old context\n", encoding="utf-8")
@@ -4203,6 +4499,7 @@ def test_patch_unsupported_edit_format_does_not_store_pending_proposal(tmp_path)
         )
     )
     output: list[str] = []
+    repairer = FakePatchJsonRepairer(replacement_proposal())
     app = SfeTuiApp(
         input_provider=FakeInput(
             ["", "/files context.txt", "/task Patch old context", "/patch", "/quit"]
@@ -4210,6 +4507,7 @@ def test_patch_unsupported_edit_format_does_not_store_pending_proposal(tmp_path)
         output=output.append,
         cwd=tmp_path,
         backend=DirectBackend(executor=executor),
+        patch_json_repairer=repairer,
     )
 
     assert app.run() == 0
@@ -4217,8 +4515,10 @@ def test_patch_unsupported_edit_format_does_not_store_pending_proposal(tmp_path)
     rendered = "\n".join(output)
     assert source.read_text(encoding="utf-8") == "old context\n"
     assert app.pending_patch is None
+    assert repairer.calls == []
     assert "pending patch stored: no" in rendered
     assert "pending patch reason: unsupported_edit_format" in rendered
+    assert "pending patch repair attempted: no" in rendered
 
 
 def test_apply_patch_json_replace_existing_file_absent_target_is_refused(tmp_path) -> None:

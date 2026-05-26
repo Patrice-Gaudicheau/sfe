@@ -66,6 +66,11 @@ from .patch_review import (
     PatchReviewer,
     create_tui_patch_reviewer,
 )
+from .patch_json_repair import (
+    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
+    PatchJsonRepairer,
+    create_tui_patch_json_repairer,
+)
 from . import renderer
 
 
@@ -85,6 +90,13 @@ class PendingPatchProposal:
     parse_status: str = "accepted"
 
 
+@dataclass(frozen=True)
+class PendingPatchParseDiagnostics:
+    repair_attempted: bool = False
+    repair_result: str = "not_needed"
+    detail: str | None = None
+
+
 class SfeTuiApp:
     def __init__(
         self,
@@ -94,6 +106,7 @@ class SfeTuiApp:
         cwd: Path | None = None,
         backend: BackendAdapter | None = None,
         discovery_router: DiscoveryRouter | None = None,
+        patch_json_repairer: PatchJsonRepairer | None = None,
         patch_reviewer: PatchReviewer | None = None,
         workspace_manager: WorkspaceManager | None = None,
         workspace_reviewer: WorkspaceReviewer | None = None,
@@ -103,6 +116,7 @@ class SfeTuiApp:
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
         self.discovery_router = discovery_router
+        self.patch_json_repairer = patch_json_repairer or create_tui_patch_json_repairer()
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
         self.workspace_reviewer = workspace_reviewer or create_workspace_reviewer()
@@ -597,7 +611,9 @@ class SfeTuiApp:
         self.output("calling provider")
         result = self.backend.patch(contract)
         self.latest_result = result
-        pending_patch, pending_issue = self._pending_patch_from_result(result)
+        pending_patch, pending_issue, pending_diagnostics = (
+            self._pending_patch_from_result(result)
+        )
         self.pending_patch = pending_patch
         self.output(
             renderer.render_patch_result(
@@ -609,6 +625,7 @@ class SfeTuiApp:
                 pending_patch_preview=(
                     pending_patch.preview if pending_patch is not None else None
                 ),
+                pending_patch_diagnostics=pending_diagnostics,
             )
         )
         return pending_patch is not None
@@ -731,10 +748,12 @@ class SfeTuiApp:
     def _pending_patch_from_result(
         self,
         result: BackendResult,
-    ) -> tuple[PendingPatchProposal | None, object | None]:
+    ) -> tuple[PendingPatchProposal | None, object | None, PendingPatchParseDiagnostics | None]:
         if self.workspace_root is None or not result.answer:
-            return None, result.error_category
+            return None, result.error_category, None
         parsed = parse_file_replacement_proposal(result.answer)
+        effective_answer = result.answer
+        diagnostics = PendingPatchParseDiagnostics()
         if parsed.proposal is not None and parsed.summary is not None:
             preview = generate_replacement_diff_preview(
                 self.workspace_root,
@@ -744,18 +763,50 @@ class SfeTuiApp:
             summary = summarize_file_replacements(proposal)
             parse_status = "structured_replacements"
         else:
-            diff_parsed = parse_unified_diff(result.answer)
-            if diff_parsed.patch is None or diff_parsed.summary is None:
-                if result.answer.lstrip().startswith("diff --git "):
-                    return None, diff_parsed.issue or parsed.issue
-                return None, parsed.issue
-            validation = validate_patch_targets(self.workspace_root, diff_parsed.patch)
-            if not validation.ok:
-                return None, validation.issue
-            proposal = validation.patch or diff_parsed.patch
-            preview = result.answer
-            summary = validation.summary or diff_parsed.summary
-            parse_status = "unified_diff"
+            if _should_attempt_patch_json_repair(result.answer, parsed.issue):
+                repaired_text, diagnostics = self._repair_patch_json(
+                    result.answer,
+                    parsed.issue,
+                )
+                if repaired_text is not None:
+                    repaired = parse_file_replacement_proposal(repaired_text)
+                    if repaired.proposal is not None and repaired.summary is not None:
+                        effective_answer = repaired_text
+                        preview = generate_replacement_diff_preview(
+                            self.workspace_root,
+                            repaired.proposal,
+                        )
+                        proposal = FileReplacementProposal(
+                            repaired.proposal.edits,
+                            preview or None,
+                        )
+                        summary = summarize_file_replacements(proposal)
+                        parse_status = "structured_replacements_repaired"
+                    else:
+                        return None, parsed.issue, diagnostics
+                elif diagnostics.repair_result in {"failed", "skipped", "disabled"}:
+                    return None, parsed.issue, diagnostics
+                else:
+                    return None, parsed.issue, diagnostics
+            else:
+                diagnostics = _patch_parse_diagnostics_for_unrepaired_issue(
+                    result.answer,
+                    parsed.issue,
+                )
+                if diagnostics.detail == "invalid_json_too_large_for_repair":
+                    return None, parsed.issue, diagnostics
+                diff_parsed = parse_unified_diff(result.answer)
+                if diff_parsed.patch is None or diff_parsed.summary is None:
+                    if result.answer.lstrip().startswith("diff --git "):
+                        return None, diff_parsed.issue or parsed.issue, diagnostics
+                    return None, parsed.issue, diagnostics
+                validation = validate_patch_targets(self.workspace_root, diff_parsed.patch)
+                if not validation.ok:
+                    return None, validation.issue, diagnostics
+                proposal = validation.patch or diff_parsed.patch
+                preview = result.answer
+                summary = validation.summary or diff_parsed.summary
+                parse_status = "unified_diff"
         selected_ids = list(result.contract.audit.get("selected_segment_ids") or [])
         selected_refs = tuple(
             segment.source_ref
@@ -764,7 +815,7 @@ class SfeTuiApp:
         )
         return (
             PendingPatchProposal(
-                text=result.answer,
+                text=effective_answer,
                 proposal=proposal,
                 preview=preview,
                 source="patch",
@@ -779,6 +830,42 @@ class SfeTuiApp:
                 parse_status=parse_status,
             ),
             None,
+            diagnostics,
+        )
+
+    def _repair_patch_json(
+        self,
+        raw_response: str,
+        issue: object | None,
+    ) -> tuple[str | None, PendingPatchParseDiagnostics]:
+        repairer = self.patch_json_repairer
+        if getattr(repairer, "provider_name", None) is None and getattr(repairer, "model", None) is None:
+            return None, PendingPatchParseDiagnostics(
+                repair_attempted=False,
+                repair_result="disabled",
+                detail="invalid_json",
+            )
+        result = repairer.repair(
+            raw_response=raw_response,
+            parse_error=_patch_issue_reason(issue) or "invalid_json",
+        )
+        if result.repaired_text is None:
+            return None, PendingPatchParseDiagnostics(
+                repair_attempted=True,
+                repair_result="failed",
+                detail="invalid_json_repair_failed",
+            )
+        repaired = parse_file_replacement_proposal(result.repaired_text)
+        if repaired.proposal is None or repaired.summary is None:
+            return None, PendingPatchParseDiagnostics(
+                repair_attempted=True,
+                repair_result="failed",
+                detail="invalid_json_repair_failed",
+            )
+        return result.repaired_text, PendingPatchParseDiagnostics(
+            repair_attempted=True,
+            repair_result="success",
+            detail="invalid_json_repaired",
         )
 
     def _build_patch_review_payload(self) -> dict[str, object]:
@@ -965,6 +1052,53 @@ def _pending_patch_proposed_files(
             }
         )
     return proposed
+
+
+def _should_attempt_patch_json_repair(
+    raw_response: str,
+    issue: object | None,
+) -> bool:
+    return (
+        _patch_issue_reason(issue) == "invalid_json"
+        and len(raw_response) <= PATCH_JSON_REPAIR_MAX_INPUT_CHARS
+        and _looks_like_structured_patch_response(raw_response)
+    )
+
+
+def _patch_parse_diagnostics_for_unrepaired_issue(
+    raw_response: str,
+    issue: object | None,
+) -> PendingPatchParseDiagnostics:
+    if _patch_issue_reason(issue) != "invalid_json":
+        return PendingPatchParseDiagnostics()
+    if len(raw_response) > PATCH_JSON_REPAIR_MAX_INPUT_CHARS:
+        return PendingPatchParseDiagnostics(
+            repair_attempted=False,
+            repair_result="skipped",
+            detail="invalid_json_too_large_for_repair",
+        )
+    if not _looks_like_structured_patch_response(raw_response):
+        return PendingPatchParseDiagnostics()
+    return PendingPatchParseDiagnostics(
+        repair_attempted=False,
+        repair_result="skipped",
+        detail="invalid_json_repair_skipped",
+    )
+
+
+def _patch_issue_reason(issue: object | None) -> str | None:
+    reason = getattr(issue, "reason", None)
+    return str(reason) if reason is not None else None
+
+
+def _looks_like_structured_patch_response(raw_response: str) -> bool:
+    lowered = raw_response.lower()
+    return (
+        "{" in raw_response
+        and "edits" in lowered
+        and "path" in lowered
+        and "content" in lowered
+    )
 
 
 def main() -> int:
