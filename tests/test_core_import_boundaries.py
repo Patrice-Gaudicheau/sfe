@@ -3,10 +3,38 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from sfe.contracts import SFEContract
+from sfe.execution_backend import ExecutionResult
+from sfe.patch_json_repair import PatchJsonRepairResult
+from sfe_tui import backends as tui_backends
+from sfe_tui import contracts as tui_contracts
+from sfe_tui import patch_json_repair as tui_patch_json_repair
+
+
+def test_core_modules_do_not_import_tui_modules() -> None:
+    offenders: list[str] = []
+
+    for path in _python_files_under("sfe"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imports = _imported_modules(tree)
+        tui_imports = sorted(
+            module
+            for module in imports
+            if module == "sfe_tui" or module.startswith("sfe_tui.")
+        )
+        if tui_imports:
+            relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+            offenders.append(f"{relative_path}: {', '.join(tui_imports)}")
+
+    assert offenders == []
 
 
 def test_core_run_and_discovery_do_not_import_tui_contracts() -> None:
@@ -32,6 +60,16 @@ def test_run_pipeline_does_not_import_tui_modules() -> None:
         module == "sfe_tui" or module.startswith("sfe_tui.")
         for module in imports
     )
+
+
+def test_tui_compatibility_aliases_point_to_core_types() -> None:
+    assert tui_contracts.SFEContract is SFEContract
+    assert tui_backends.BackendResult is ExecutionResult
+    assert tui_patch_json_repair.PatchJsonRepairResult is PatchJsonRepairResult
+
+
+def _python_files_under(relative_root: str) -> list[Path]:
+    return sorted((PROJECT_ROOT / relative_root).rglob("*.py"))
 
 
 def _imported_modules(tree: ast.AST) -> set[str]:
