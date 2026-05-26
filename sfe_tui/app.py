@@ -25,6 +25,7 @@ from sfe.patching import (
     validate_patch_paths,
     validate_patch_targets,
 )
+from sfe.run_pipeline import RunPipeline, RunRequest
 from sfe.env import load_repo_env
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.workspace_isolation import (
@@ -230,6 +231,9 @@ class SfeTuiApp:
             return False
         if name == "/patch":
             self._handle_patch()
+            return False
+        if name == "/run":
+            self._handle_run()
             return False
         if name == "/apply-patch":
             self._handle_apply_patch()
@@ -629,6 +633,36 @@ class SfeTuiApp:
             )
         )
         return pending_patch is not None
+
+    def _handle_run(self) -> bool:
+        if self.workspace_root is None:
+            self.output(renderer.render_error("workspace_not_selected"))
+            return False
+        if not self.task.strip():
+            self.output(renderer.render_error("missing_task"))
+            return False
+        pipeline = RunPipeline(
+            backend=self.backend,
+            workspace_manager=self.workspace_manager,
+            discovery_router=self.discovery_router,
+            patch_json_repairer=self.patch_json_repairer,
+        )
+        result = pipeline.run(
+            RunRequest(
+                workspace_root=self.workspace_root,
+                task=self.task,
+                workspace_session=self.workspace_session,
+            )
+        )
+        if result.workspace_session is not None:
+            self.workspace_session = result.workspace_session
+        if result.active_workspace is not None:
+            self.workspace_root = result.active_workspace
+        self.discovery_result = result.discovery_result
+        self.latest_result = result.patch_result or result.dry_run_result
+        self._clear_pending_patch()
+        self.output(renderer.render_run_result(result, launch_cwd=self.cwd))
+        return result.status == "completed"
 
     def _handle_apply_patch(self) -> bool:
         if self.workspace_root is None:

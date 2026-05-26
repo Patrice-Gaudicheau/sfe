@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sfe.discovery import DiscoveryResult
 from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
+from sfe.run_pipeline import RunResult
 from sfe.router_review import JsonReviewDecision
 from sfe.workspace_isolation import (
     WorkspaceCleanupResult,
@@ -32,6 +33,7 @@ def render_help() -> str:
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /context           Show safe loaded/selected context metadata",
             "  /ask               Ask a read-only question using selected context",
+            "  /run               Discover, patch, and apply in an isolated worktree",
             "  /patch             Propose a patch without applying it",
             "  /apply-patch       Apply latest pending patch proposal",
             "  /isolate           Create and switch to an isolated Git worktree",
@@ -269,6 +271,57 @@ def render_worktree_diff(status_result: WorkspaceStatusResult) -> str:
             status.git_status_porcelain.rstrip() or "  clean",
             "Git diff",
             diff.rstrip() or "  no diff",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> str:
+    discovery = result.discovery_result
+    dry_run = result.dry_run_result
+    summary = result.patch_summary
+    session = result.workspace_session
+    issue = result.issue
+    worktree_path = (
+        safe_workspace_label(session.worktree_path, launch_cwd)
+        if session is not None
+        else None
+    )
+    lines = [
+        "SFE run",
+        f"  status: {result.status}",
+        f"  worktree session: {_display_value(session.session_id if session is not None else None)}",
+        f"  worktree path: {_display_value(worktree_path)}",
+        f"  worktree created: {_yes_no(result.worktree_created)}",
+        f"  discovery mode: {_display_value(discovery.discovery_mode if discovery is not None else None)}",
+        f"  discovery candidates: {discovery.candidate_count if discovery is not None else 0}",
+        f"  selected source refs: {_format_string_list(list(result.selected_source_refs))}",
+        f"  selected context tokens: {_display_value(_run_selected_tokens(dry_run))}",
+        f"  estimated reduction pct: {_display_value(_run_reduction_pct(dry_run))}",
+        f"  executor provider: {_display_value(result.executor_provider)}",
+        f"  patch generated: {_yes_no(result.patch_generated)}",
+        f"  patch applied: {_yes_no(result.patch_applied)}",
+        f"  changed files: {_format_string_list(list(result.changed_files))}",
+        f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
+        f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
+        f"  warnings: {_format_string_list(list(result.warnings))}",
+    ]
+    if issue is not None:
+        lines.extend(
+            [
+                f"  issue category: {issue.category}",
+                f"  issue reason: {issue.reason}",
+            ]
+        )
+        if issue.path is not None:
+            lines.append(f"  issue path: {issue.path}")
+    lines.extend(
+        [
+            "  router review: not run",
+            "  worktree review: not run",
+            "  tests: not run",
+            "  lint: not run",
+            "  diff: not shown",
         ]
     )
     return "\n".join(lines)
@@ -844,6 +897,18 @@ def _patch_summary_count(summary: PatchSummary | None, attr_name: str) -> int:
     if summary is None:
         return 0
     return int(getattr(summary, attr_name))
+
+
+def _run_selected_tokens(result: BackendResult | None) -> object | None:
+    if result is None:
+        return None
+    return result.contract.audit.get("estimated_selected_tokens")
+
+
+def _run_reduction_pct(result: BackendResult | None) -> object | None:
+    if result is None:
+        return None
+    return result.contract.audit.get("estimated_reduction_pct")
 
 
 def _safe_patch_issue_category(issue: object) -> str:
