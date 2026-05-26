@@ -28,6 +28,7 @@ from sfe.execution_mode_router import (
     ExecutionModeRouterError,
     create_configured_execution_mode_router,
 )
+from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
@@ -52,7 +53,6 @@ from sfe.workspace_isolation import (
     WorkspaceSession,
     WorkspaceStatusResult,
 )
-from sfe_tui.backends import BackendAdapter, BackendResult
 from sfe_tui.patch_json_repair import PATCH_JSON_REPAIR_MAX_INPUT_CHARS
 
 
@@ -129,8 +129,8 @@ class RunResult:
     active_workspace: Path | None = None
     worktree_created: bool = False
     discovery_result: DiscoveryResult | None = None
-    dry_run_result: BackendResult | None = None
-    patch_result: BackendResult | None = None
+    dry_run_result: ExecutionResult | None = None
+    patch_result: ExecutionResult | None = None
     patch_generated: bool = False
     patch_applied: bool = False
     patch_summary: PatchSummary | None = None
@@ -227,7 +227,7 @@ class RunPipeline:
     def __init__(
         self,
         *,
-        backend: BackendAdapter,
+        backend: ExecutionBackend,
         workspace_manager: WorkspaceManager | None = None,
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
@@ -570,7 +570,7 @@ class RunPipeline:
     def _parse_patch_response(
         self,
         workspace_root: Path,
-        result: BackendResult,
+        result: ExecutionResult,
     ) -> RunPatchProposal | RunIssue:
         raw_answer = result.answer or ""
         structured = parse_structured_file_patch_json(raw_answer)
@@ -647,8 +647,8 @@ def _patch_failed_result(
     active_workspace: Path,
     worktree_created: bool,
     discovery_result: DiscoveryResult,
-    dry_run_result: BackendResult,
-    patch_result: BackendResult,
+    dry_run_result: ExecutionResult,
+    patch_result: ExecutionResult,
     proposal: RunPatchProposal,
     selected_source_refs: tuple[str, ...],
     git_preparation: GitPreparationResult,
@@ -683,8 +683,8 @@ def _promotion_failed_result(
     active_workspace: Path,
     worktree_created: bool,
     discovery_result: DiscoveryResult,
-    dry_run_result: BackendResult,
-    patch_result: BackendResult,
+    dry_run_result: ExecutionResult,
+    patch_result: ExecutionResult,
     proposal: RunPatchProposal,
     selected_source_refs: tuple[str, ...],
     git_preparation: GitPreparationResult,
@@ -767,7 +767,7 @@ def _active_path_for_session(session: WorkspaceSession) -> Path:
 
 
 def _selected_source_refs(
-    result: BackendResult,
+    result: ExecutionResult,
     selected_ids: list[str],
 ) -> tuple[str, ...]:
     selected = set(selected_ids)
@@ -778,7 +778,7 @@ def _selected_source_refs(
     )
 
 
-def _executor_provider(result: BackendResult | None) -> str | None:
+def _executor_provider(result: ExecutionResult | None) -> str | None:
     if result is None:
         return None
     provider = result.summary.get("executor_provider")

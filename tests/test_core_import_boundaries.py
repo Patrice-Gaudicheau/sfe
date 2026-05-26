@@ -17,6 +17,13 @@ def test_core_run_and_discovery_do_not_import_tui_contracts() -> None:
         assert "sfe_tui.contracts" not in imports
 
 
+def test_run_pipeline_does_not_import_tui_backend_types() -> None:
+    tree = ast.parse((PROJECT_ROOT / "sfe/run_pipeline.py").read_text(encoding="utf-8"))
+    imports = _imported_modules(tree)
+
+    assert "sfe_tui.backends" not in imports
+
+
 def _imported_modules(tree: ast.AST) -> set[str]:
     imports: set[str] = set()
     for node in ast.walk(tree):
