@@ -16,6 +16,7 @@ from sfe.discovery import discover_workspace_context
 from sfe.discovery_router import DiscoveryRouterSelection
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
+    EXECUTION_MODE_EXTERNAL_ACTION,
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
     ExecutionModeRouterError,
@@ -218,6 +219,78 @@ def test_run_pipeline_execution_mode_failure_returns_before_worktree(
     assert executor.patch_calls == []
     assert not (workspace / ".git").exists()
     assert not (workspace / ".sfe-worktrees").exists()
+
+
+def test_run_pipeline_external_action_fails_before_worktree_or_patch(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor()
+    router = FakeExecutionModeRouter(EXECUTION_MODE_EXTERNAL_ACTION)
+
+    result = _pipeline(
+        executor=executor,
+        execution_mode_router=router,
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Create a calendar event for tomorrow.",
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "unsupported_execution_mode"
+    assert result.issue.reason == "external_action_not_implemented"
+    assert result.execution_mode_decision is not None
+    assert result.execution_mode_decision.execution_mode == EXECUTION_MODE_EXTERNAL_ACTION
+    assert result.workspace_session is None
+    assert result.worktree_created is False
+    assert result.discovery_result is None
+    assert result.dry_run_result is None
+    assert result.patch_result is None
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert result.promotion_applied is False
+    assert executor.patch_calls == []
+    assert router.calls == [{"task": "Create a calendar event for tomorrow."}]
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+
+def test_run_pipeline_unknown_execution_mode_fails_closed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor()
+
+    result = _pipeline(
+        executor=executor,
+        execution_mode_router=FakeExecutionModeRouter("unknown_mode"),
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Patch context",
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "execution_mode_routing"
+    assert result.issue.reason == "invalid_execution_mode"
+    assert result.workspace_session is None
+    assert result.worktree_created is False
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert executor.patch_calls == []
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
 
 
 def test_run_pipeline_creates_worktree_applies_patch_and_promotes(tmp_path: Path) -> None:
@@ -632,6 +705,43 @@ def test_tui_run_renders_console_output_without_worktree(
     assert "patch applied: no" in rendered
     assert "SFE console output" in rendered
     assert "missing_diff_header" not in rendered
+    assert executor.patch_calls == []
+    assert app.workspace_session is None
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+
+def test_tui_run_renders_external_action_without_worktree(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Create a calendar event for tomorrow", "/run", "/quit"]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_EXTERNAL_ACTION),
+        patch_reviewer=ExplodingReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE run" in rendered
+    assert "status: failed" in rendered
+    assert "execution mode: external_action" in rendered
+    assert "issue category: unsupported_execution_mode" in rendered
+    assert "issue reason: external_action_not_implemented" in rendered
+    assert "worktree created: no" in rendered
+    assert "patch generated: no" in rendered
+    assert "patch applied: no" in rendered
     assert executor.patch_calls == []
     assert app.workspace_session is None
     assert not (workspace / ".git").exists()

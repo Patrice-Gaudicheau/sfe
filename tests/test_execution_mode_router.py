@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
+    EXECUTION_MODE_EXTERNAL_ACTION,
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeRouterError,
     build_execution_mode_prompt,
@@ -39,6 +40,16 @@ def test_parse_execution_mode_router_accepts_workspace_write() -> None:
     assert decision.execution_mode == EXECUTION_MODE_WORKSPACE_WRITE
     assert decision.reason == "The task asks to modify files."
     assert decision.confidence is None
+
+
+def test_parse_execution_mode_router_accepts_external_action() -> None:
+    decision = parse_execution_mode_router_output(
+        '{"execution_mode":"external_action","reason":"The task asks to create a calendar event.","confidence":0.82}'
+    )
+
+    assert decision.execution_mode == EXECUTION_MODE_EXTERNAL_ACTION
+    assert decision.reason == "The task asks to create a calendar event."
+    assert decision.confidence == 0.82
 
 
 def test_parse_execution_mode_router_rejects_invalid_json() -> None:
@@ -75,3 +86,5 @@ def test_execution_mode_prompt_asks_semantic_routing_question() -> None:
     assert "writing files to the workspace" in prompt
     assert "console_output" in prompt
     assert "workspace_write" in prompt
+    assert "external_action" in prompt
+    assert "outside the workspace" in prompt

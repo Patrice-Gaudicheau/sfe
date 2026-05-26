@@ -20,6 +20,7 @@ from sfe.discovery import (
 from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
+    EXECUTION_MODE_EXTERNAL_ACTION,
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
     ExecutionModeRouter,
@@ -270,6 +271,16 @@ class RunPipeline:
                     "in this slice. No workspace write was attempted."
                 ),
                 warnings=("console_output_placeholder",),
+            )
+        if execution_mode_decision.execution_mode == EXECUTION_MODE_EXTERNAL_ACTION:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue(
+                    "unsupported_execution_mode",
+                    "external_action_not_implemented",
+                ),
+                execution_mode_decision=execution_mode_decision,
+                warnings=("external_action_not_implemented",),
             )
         if execution_mode_decision.execution_mode != EXECUTION_MODE_WORKSPACE_WRITE:
             return RunResult(

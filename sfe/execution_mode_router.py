@@ -30,10 +30,12 @@ from sfe.provider_config import resolve_sfe_provider
 
 
 EXECUTION_MODE_CONSOLE_OUTPUT = "console_output"
+EXECUTION_MODE_EXTERNAL_ACTION = "external_action"
 EXECUTION_MODE_WORKSPACE_WRITE = "workspace_write"
 EXECUTION_MODES = frozenset(
     {
         EXECUTION_MODE_CONSOLE_OUTPUT,
+        EXECUTION_MODE_EXTERNAL_ACTION,
         EXECUTION_MODE_WORKSPACE_WRITE,
     }
 )
@@ -45,9 +47,13 @@ EXECUTION_MODE_ROUTER_SYSTEM_INSTRUCTION = (
     "the console, or by writing files in the workspace. Do not use keyword "
     "matching. Do not execute the task. Return exactly one JSON object with "
     "keys execution_mode, reason, and optional confidence. execution_mode "
-    "must be console_output or workspace_write. console_output means no "
+    "must be console_output, workspace_write, or external_action. "
+    "console_output means no "
     "worktree, no patch, and no workspace write is needed. workspace_write "
     "means the task requires creating, modifying, or deleting workspace files. "
+    "external_action means the task requires acting outside the workspace, "
+    "such as sending email, creating calendar events, publishing something, "
+    "opening pull requests or issues, or calling external services, tools, or APIs. "
     "Do not return Markdown, comments, or extra text."
 )
 
@@ -230,11 +236,12 @@ def build_execution_mode_prompt(*, task: str) -> str:
         "task": task,
         "routing_question": (
             "Given this user task, should SFE resolve it by printing a "
-            "response in the console, or by writing files to the workspace?"
+            "response in the console, by writing files to the workspace, or "
+            "by taking an external action outside the workspace?"
         ),
         "allowed_execution_modes": sorted(EXECUTION_MODES),
         "required_output_schema": {
-            "execution_mode": "console_output|workspace_write",
+            "execution_mode": "console_output|workspace_write|external_action",
             "reason": "short explanation",
             "confidence": 0.0,
         },
