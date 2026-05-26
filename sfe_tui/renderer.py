@@ -313,11 +313,22 @@ def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> s
         f"  executor provider: {_display_value(result.executor_provider)}",
         f"  patch generated: {_yes_no(result.patch_generated)}",
         f"  patch applied: {_yes_no(result.patch_applied)}",
+        f"  promotion: {result.promotion_status}",
+        f"  promoted files: {_format_string_list(list(result.promoted_files))}",
         f"  changed files: {_format_string_list(list(result.changed_files))}",
         f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
         f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
         f"  warnings: {_format_string_list(list(result.warnings))}",
     ]
+    if result.promotion_issue is not None:
+        lines.extend(
+            [
+                f"  promotion issue category: {result.promotion_issue.category}",
+                f"  promotion issue reason: {result.promotion_issue.reason}",
+            ]
+        )
+        if result.promotion_issue.path is not None:
+            lines.append(f"  promotion issue path: {result.promotion_issue.path}")
     if issue is not None:
         lines.extend(
             [

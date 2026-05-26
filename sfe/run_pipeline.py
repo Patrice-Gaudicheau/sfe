@@ -68,6 +68,27 @@ class GitPreparationResult:
 
 
 @dataclass(frozen=True)
+class PromotionTarget:
+    relative_path: str
+    source_path: Path
+    worktree_path: Path
+    source_before: bytes | None
+
+
+@dataclass(frozen=True)
+class PromotionBaseline:
+    targets: tuple[PromotionTarget, ...] = ()
+    issue: RunIssue | None = None
+
+
+@dataclass(frozen=True)
+class PromotionResult:
+    status: str
+    promoted_files: tuple[str, ...] = ()
+    issue: RunIssue | None = None
+
+
+@dataclass(frozen=True)
 class RunRequest:
     workspace_root: Path | None
     task: str
@@ -109,6 +130,10 @@ class RunResult:
     git_auto_init: bool = False
     git_initial_commit_hash: str | None = None
     git_init_warning: str | None = None
+    promotion_status: str = "skipped"
+    promotion_applied: bool = False
+    promoted_files: tuple[str, ...] = ()
+    promotion_issue: RunIssue | None = None
 
 
 class PatchJsonRepairer(Protocol):
@@ -320,6 +345,26 @@ class RunPipeline:
                 git_preparation=git_preparation,
             )
 
+        promotion_baseline = _capture_promotion_baseline(
+            session,
+            active_workspace,
+            proposal.summary.paths,
+        )
+        if promotion_baseline.issue is not None:
+            return _promotion_failed_result(
+                promotion_baseline.issue,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=patch_result,
+                proposal=proposal,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_applied=False,
+            )
+
         apply_result = _apply_run_patch(active_workspace, proposal.proposal)
         if not apply_result.applied:
             return _patch_failed_result(
@@ -337,6 +382,26 @@ class RunPipeline:
 
         status_result = self.workspace_manager.status(session)
         changed_files = _changed_files(status_result, proposal.summary)
+        patch_summary = apply_result.summary or proposal.summary
+        promotion_result = _promote_run_changes(promotion_baseline)
+        if promotion_result.status != "applied":
+            return _promotion_failed_result(
+                promotion_result.issue
+                or RunIssue("promotion", "promotion_not_applied"),
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=patch_result,
+                proposal=proposal,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_applied=True,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                promotion_result=promotion_result,
+            )
         return RunResult(
             status=RUN_STATUS_COMPLETED,
             workspace_session=session,
@@ -347,14 +412,17 @@ class RunPipeline:
             patch_result=patch_result,
             patch_generated=True,
             patch_applied=True,
-            patch_summary=apply_result.summary or proposal.summary,
+            patch_summary=patch_summary,
             changed_files=changed_files,
             selected_source_refs=selected_source_refs,
             executor_provider=_executor_provider(patch_result),
-            warnings=_warnings_for_summary(apply_result.summary or proposal.summary),
+            warnings=_warnings_for_summary(patch_summary),
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
+            promotion_status=promotion_result.status,
+            promotion_applied=True,
+            promoted_files=promotion_result.promoted_files,
         )
 
     def _prepare_git_workspace(self, request: RunRequest) -> GitPreparationResult:
@@ -503,6 +571,49 @@ def _patch_failed_result(
     )
 
 
+def _promotion_failed_result(
+    issue: RunIssue,
+    *,
+    session: WorkspaceSession,
+    active_workspace: Path,
+    worktree_created: bool,
+    discovery_result: DiscoveryResult,
+    dry_run_result: BackendResult,
+    patch_result: BackendResult,
+    proposal: RunPatchProposal,
+    selected_source_refs: tuple[str, ...],
+    git_preparation: GitPreparationResult,
+    patch_applied: bool,
+    patch_summary: PatchSummary | None = None,
+    changed_files: tuple[str, ...] = (),
+    promotion_result: PromotionResult | None = None,
+) -> RunResult:
+    return RunResult(
+        status=RUN_STATUS_FAILED,
+        issue=issue,
+        workspace_session=session,
+        active_workspace=active_workspace,
+        worktree_created=worktree_created,
+        discovery_result=discovery_result,
+        dry_run_result=dry_run_result,
+        patch_result=patch_result,
+        patch_generated=True,
+        patch_applied=patch_applied,
+        patch_summary=patch_summary or proposal.summary,
+        changed_files=changed_files,
+        selected_source_refs=selected_source_refs,
+        executor_provider=_executor_provider(patch_result),
+        warnings=_warnings_for_summary(patch_summary or proposal.summary),
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
+        promotion_status=promotion_result.status if promotion_result else "rejected",
+        promotion_applied=False,
+        promoted_files=promotion_result.promoted_files if promotion_result else (),
+        promotion_issue=promotion_result.issue if promotion_result else issue,
+    )
+
+
 def _failed(category: str, reason: str) -> RunResult:
     return RunResult(
         status=RUN_STATUS_FAILED,
@@ -574,6 +685,163 @@ def _changed_files(
     if status_result.ok and status_result.status is not None:
         return status_result.status.changed_files
     return summary.paths
+
+
+def _capture_promotion_baseline(
+    session: WorkspaceSession,
+    active_workspace: Path,
+    paths: tuple[str, ...],
+) -> PromotionBaseline:
+    source_root = session.source_path.resolve()
+    worktree_root = active_workspace.resolve()
+    path_issue = validate_patch_paths(source_root, paths)
+    if path_issue is not None:
+        return PromotionBaseline(
+            issue=_run_issue_from_patch(path_issue, default_reason="promotion_path_rejected")
+        )
+    targets: list[PromotionTarget] = []
+    for relative_path in paths:
+        if _is_internal_promotion_path(relative_path):
+            return PromotionBaseline(
+                issue=RunIssue("promotion", "internal_path_not_promoted", relative_path)
+            )
+        source_target = (source_root / relative_path).resolve()
+        worktree_target = (worktree_root / relative_path).resolve()
+        try:
+            source_target.relative_to(source_root)
+            worktree_target.relative_to(worktree_root)
+        except ValueError:
+            return PromotionBaseline(
+                issue=RunIssue("promotion", "path_outside_workspace", relative_path)
+            )
+        source_before = _read_optional_file_bytes(source_target, relative_path)
+        if isinstance(source_before, RunIssue):
+            return PromotionBaseline(issue=source_before)
+        worktree_before = _read_optional_file_bytes(worktree_target, relative_path)
+        if isinstance(worktree_before, RunIssue):
+            return PromotionBaseline(issue=worktree_before)
+        if source_before != worktree_before:
+            return PromotionBaseline(
+                issue=RunIssue("promotion", "source_workspace_changed", relative_path)
+            )
+        targets.append(
+            PromotionTarget(
+                relative_path=relative_path,
+                source_path=source_target,
+                worktree_path=worktree_target,
+                source_before=source_before,
+            )
+        )
+    return PromotionBaseline(targets=tuple(targets))
+
+
+def _promote_run_changes(baseline: PromotionBaseline) -> PromotionResult:
+    if baseline.issue is not None:
+        return PromotionResult("rejected", issue=baseline.issue)
+    if not baseline.targets:
+        return PromotionResult("skipped")
+
+    # Deletes are intentionally not promoted in V1. The current patch parser
+    # rejects delete operations; if that changes later, missing worktree files
+    # are rejected here instead of being interpreted as source deletes.
+    planned: list[tuple[PromotionTarget, bytes]] = []
+    for target in baseline.targets:
+        current_source = _read_optional_file_bytes(target.source_path, target.relative_path)
+        if isinstance(current_source, RunIssue):
+            return PromotionResult("rejected", issue=current_source)
+        if current_source != target.source_before:
+            return PromotionResult(
+                "rejected",
+                issue=RunIssue(
+                    "promotion",
+                    "source_workspace_changed",
+                    target.relative_path,
+                ),
+            )
+        try:
+            if not target.worktree_path.is_file():
+                return PromotionResult(
+                    "rejected",
+                    issue=RunIssue(
+                        "promotion",
+                        "worktree_promoted_file_missing",
+                        target.relative_path,
+                    ),
+                )
+            planned.append((target, target.worktree_path.read_bytes()))
+        except OSError:
+            return PromotionResult(
+                "rejected",
+                issue=RunIssue("promotion", "worktree_read_failed", target.relative_path),
+            )
+
+    written: list[PromotionTarget] = []
+    created_dirs: list[Path] = []
+    try:
+        for target, content in planned:
+            created_dirs.extend(_ensure_parent_dirs(target.source_path.parent))
+            target.source_path.write_bytes(content)
+            written.append(target)
+    except OSError:
+        _rollback_promotion(written)
+        _cleanup_created_dirs(created_dirs)
+        failed_path = written[-1].relative_path if written else None
+        return PromotionResult(
+            "rejected",
+            issue=RunIssue("promotion", "source_write_failed", failed_path),
+        )
+    return PromotionResult(
+        "applied",
+        promoted_files=tuple(target.relative_path for target, _content in planned),
+    )
+
+
+def _read_optional_file_bytes(path: Path, relative_path: str) -> bytes | None | RunIssue:
+    if not path.exists():
+        return None
+    if not path.is_file():
+        return RunIssue("promotion", "promotion_target_not_file", relative_path)
+    try:
+        return path.read_bytes()
+    except OSError:
+        return RunIssue("promotion", "source_read_failed", relative_path)
+
+
+def _rollback_promotion(written: list[PromotionTarget]) -> None:
+    for target in reversed(written):
+        try:
+            if target.source_before is None:
+                target.source_path.unlink(missing_ok=True)
+            else:
+                target.source_path.write_bytes(target.source_before)
+        except OSError:
+            continue
+
+
+def _ensure_parent_dirs(path: Path) -> list[Path]:
+    created: list[Path] = []
+    current = path
+    missing: list[Path] = []
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        created.append(directory)
+    return created
+
+
+def _cleanup_created_dirs(paths: list[Path]) -> None:
+    for path in reversed(paths):
+        try:
+            path.rmdir()
+        except OSError:
+            continue
+
+
+def _is_internal_promotion_path(path: str) -> bool:
+    parts = {part.lower() for part in Path(path).parts}
+    return bool(parts & {".git", ".sfe-worktrees", ".sfe"})
 
 
 def _should_attempt_repair(raw_response: str, issue: PatchIssue | None) -> bool:

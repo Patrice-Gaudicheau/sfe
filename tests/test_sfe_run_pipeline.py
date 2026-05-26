@@ -27,7 +27,7 @@ from sfe.workspace_isolation import WorkspaceIsolationPolicy, WorkspaceManager
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import DirectBackend
 from sfe_tui.executors import ExecutorResponse
-from sfe_tui.renderer import render_help
+from sfe_tui.renderer import render_help, render_run_result
 
 
 class FakeExecutor:
@@ -115,7 +115,7 @@ def test_run_pipeline_refuses_without_workspace() -> None:
     assert result.issue.reason == "workspace_not_selected"
 
 
-def test_run_pipeline_creates_worktree_and_applies_patch_only_there(tmp_path: Path) -> None:
+def test_run_pipeline_creates_worktree_applies_patch_and_promotes(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
     pipeline = _pipeline(workspace_manager=manager)
@@ -135,10 +135,13 @@ def test_run_pipeline_creates_worktree_and_applies_patch_only_there(tmp_path: Pa
     assert result.git_initial_commit_hash is None
     assert result.patch_generated is True
     assert result.patch_applied is True
+    assert result.promotion_status == "applied"
+    assert result.promotion_applied is True
+    assert result.promoted_files == ("context.txt",)
     assert result.changed_files == ("context.txt",)
     assert result.patch_summary is not None
     assert result.patch_summary.modified_paths == ("context.txt",)
-    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
     assert (result.workspace_session.worktree_path / "context.txt").read_text(
         encoding="utf-8"
     ) == "new context\n"
@@ -170,14 +173,44 @@ def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
     assert (workspace / ".git").is_dir()
     assert _git(workspace, "branch", "--show-current").stdout.strip() == "main"
     assert _git(workspace, "remote", "-v").stdout.strip() == ""
-    assert _git(workspace, "status", "--short").stdout.strip() == ""
     assert ".sfe-worktrees/stale.txt" not in _git(workspace, "ls-files").stdout
-    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "new context\n"
+    assert _git(workspace, "status", "--short").stdout.strip() == "M context.txt"
     assert result.workspace_session is not None
     assert (result.workspace_session.worktree_path / "context.txt").read_text(
         encoding="utf-8"
     ) == "new context\n"
     assert result.changed_files == ("context.txt",)
+    assert result.promotion_status == "applied"
+    assert result.promoted_files == ("context.txt",)
+
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_promotes_created_files_to_source_workspace(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(_create_file_proposal("docs/example.txt")),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context by creating a small docs file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_applied is True
+    assert result.promotion_status == "applied"
+    assert result.promoted_files == ("docs/example.txt",)
+    assert (repo / "docs" / "example.txt").read_text(encoding="utf-8") == "escaped\n"
+    assert result.workspace_session is not None
+    assert (
+        result.workspace_session.worktree_path / "docs" / "example.txt"
+    ).read_text(encoding="utf-8") == "escaped\n"
 
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -235,12 +268,87 @@ def test_run_pipeline_reuses_active_worktree(tmp_path: Path) -> None:
     assert result.status == RUN_STATUS_COMPLETED
     assert result.workspace_session == created.session
     assert result.worktree_created is False
-    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert result.promotion_status == "applied"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
     assert (created.session.worktree_path / "context.txt").read_text(
         encoding="utf-8"
     ) == "new context\n"
 
     assert manager.cleanup(created.session).cleaned is True
+
+
+def test_run_pipeline_rejects_promotion_when_source_diverged(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    created = manager.create(
+        repo,
+        WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+    )
+    assert created.session is not None
+    (repo / "context.txt").write_text("user changed source\n", encoding="utf-8")
+
+    result = _pipeline(workspace_manager=manager).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_session=created.session,
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.patch_generated is True
+    assert result.patch_applied is False
+    assert result.promotion_status == "rejected"
+    assert result.promotion_applied is False
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "source_workspace_changed"
+    assert result.issue.path == "context.txt"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "user changed source\n"
+    assert (created.session.worktree_path / "context.txt").read_text(
+        encoding="utf-8"
+    ) == "old context\n"
+
+    assert manager.cleanup(created.session).cleaned is True
+
+
+def test_run_pipeline_rejects_internal_promotion_paths(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(_create_file_proposal(".sfe-worktrees/leak.txt")),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context by creating an internal file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.patch_generated is True
+    assert result.patch_applied is False
+    assert result.promotion_status == "rejected"
+    assert result.promotion_applied is False
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe-worktrees/leak.txt"
+    rendered = render_run_result(result)
+    assert "promotion: rejected" in rendered
+    assert "promotion issue reason: internal_path_not_promoted" in rendered
+    assert "promotion issue path: .sfe-worktrees/leak.txt" in rendered
+    assert not (repo / ".sfe-worktrees" / "leak.txt").exists()
+
+    assert result.workspace_session is not None
+    assert not (
+        result.workspace_session.worktree_path / ".sfe-worktrees" / "leak.txt"
+    ).exists()
+    assert manager.cleanup(result.workspace_session).cleaned is True
 
 
 def test_run_pipeline_does_not_require_router_review_or_diff_inspection(
@@ -341,6 +449,8 @@ def test_run_pipeline_returns_compact_summary_with_changed_files(tmp_path: Path)
     assert result.selected_source_refs == ("context.txt",)
     assert result.executor_provider == "fake-executor"
     assert result.changed_files == ("context.txt",)
+    assert result.promotion_status == "applied"
+    assert result.promoted_files == ("context.txt",)
     assert result.patch_summary is not None
     assert result.patch_summary.file_count == 1
 
@@ -372,10 +482,12 @@ def test_tui_run_uses_pipeline_without_patch_reviewer(tmp_path: Path) -> None:
     assert "SFE run" in rendered
     assert "status: completed" in rendered
     assert "patch applied: yes" in rendered
+    assert "promotion: applied" in rendered
+    assert "promoted files: context.txt" in rendered
     assert "router review: not run" in rendered
     assert "diff: not shown" in rendered
     assert "diff --git" not in rendered
-    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
     assert app.workspace_session is not None
     assert (app.workspace_session.worktree_path / "context.txt").read_text(
         encoding="utf-8"
