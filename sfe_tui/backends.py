@@ -11,7 +11,7 @@ from sfe.execution_backend import (
     ExecutionResult,
     RouterPreviewDiagnostics,
 )
-from .contracts import ContextSegment, SFEContract
+from sfe.contracts import ContextSegment, SFEContract
 from .executors import ExecutorResponse, ReadOnlyExecutor, create_tui_executor
 from .routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
@@ -22,11 +22,8 @@ from .routers import (
 MISSING_TASK = "missing_task"
 
 
-BackendResult = ExecutionResult
-
-
 class BackendAdapter(ExecutionBackend, Protocol):
-    def run(self, contract: SFEContract) -> BackendResult:
+    def run(self, contract: SFEContract) -> ExecutionResult:
         ...
 
 
@@ -40,10 +37,10 @@ class DirectBackend:
     def executor_provider_name(self) -> str | None:
         return getattr(self.executor, "provider_name", None)
 
-    def dry_run(self, contract: SFEContract) -> BackendResult:
+    def dry_run(self, contract: SFEContract) -> ExecutionResult:
         return _local_router_preview_result(self.name, contract)
 
-    def console(self, contract: SFEContract) -> BackendResult:
+    def console(self, contract: SFEContract) -> ExecutionResult:
         routed = self.dry_run(contract)
         if contract.task is None:
             return console_error_result(routed, "missing_task")
@@ -54,7 +51,7 @@ class DirectBackend:
         )
         return _console_result_from_executor_response(routed, executor_response)
 
-    def run(self, contract: SFEContract) -> BackendResult:
+    def run(self, contract: SFEContract) -> ExecutionResult:
         routed = self.dry_run(contract)
         if contract.task is None:
             return ask_error_result(routed, "missing_task")
@@ -70,7 +67,7 @@ class DirectBackend:
         )
         return _ask_result_from_executor_response(routed, executor_response)
 
-    def patch(self, contract: SFEContract) -> BackendResult:
+    def patch(self, contract: SFEContract) -> ExecutionResult:
         routed = self.dry_run(contract)
         if contract.task is None:
             return patch_error_result(routed, "missing_task")
@@ -90,16 +87,16 @@ class DirectBackend:
 class ProxyBackend:
     name = "proxy"
 
-    def dry_run(self, contract: SFEContract) -> BackendResult:
+    def dry_run(self, contract: SFEContract) -> ExecutionResult:
         return _dry_run_result(self.name, contract, selector_mode="proxy_not_connected")
 
-    def console(self, contract: SFEContract) -> BackendResult:
+    def console(self, contract: SFEContract) -> ExecutionResult:
         raise NotImplementedError("Proxy backend console execution is not implemented yet.")
 
-    def run(self, contract: SFEContract) -> BackendResult:
+    def run(self, contract: SFEContract) -> ExecutionResult:
         raise NotImplementedError("Proxy backend execution is not implemented yet.")
 
-    def patch(self, contract: SFEContract) -> BackendResult:
+    def patch(self, contract: SFEContract) -> ExecutionResult:
         raise NotImplementedError("Proxy backend patching is not implemented yet.")
 
 
@@ -112,8 +109,8 @@ def backend_by_name(name: str) -> BackendAdapter:
     raise ValueError("unsupported_backend")
 
 
-def ask_error_result(result: BackendResult, error_category: str) -> BackendResult:
-    return BackendResult(
+def ask_error_result(result: ExecutionResult, error_category: str) -> ExecutionResult:
+    return ExecutionResult(
         backend=result.backend,
         status="ask_failed",
         provider_calls_made=0,
@@ -126,8 +123,8 @@ def ask_error_result(result: BackendResult, error_category: str) -> BackendResul
     )
 
 
-def console_error_result(result: BackendResult, error_category: str) -> BackendResult:
-    return BackendResult(
+def console_error_result(result: ExecutionResult, error_category: str) -> ExecutionResult:
+    return ExecutionResult(
         backend=result.backend,
         status="console_failed",
         provider_calls_made=0,
@@ -140,8 +137,8 @@ def console_error_result(result: BackendResult, error_category: str) -> BackendR
     )
 
 
-def patch_error_result(result: BackendResult, error_category: str) -> BackendResult:
-    return BackendResult(
+def patch_error_result(result: ExecutionResult, error_category: str) -> ExecutionResult:
+    return ExecutionResult(
         backend=result.backend,
         status="patch_failed",
         provider_calls_made=0,
@@ -155,11 +152,11 @@ def patch_error_result(result: BackendResult, error_category: str) -> BackendRes
 
 
 def _console_result_from_executor_response(
-    routed: BackendResult,
+    routed: ExecutionResult,
     executor_response: ExecutorResponse,
-) -> BackendResult:
+) -> ExecutionResult:
     status = "console_completed" if executor_response.answer else "console_failed"
-    return BackendResult(
+    return ExecutionResult(
         backend=routed.backend,
         status=status,
         provider_calls_made=executor_response.provider_calls_made,
@@ -178,11 +175,11 @@ def _console_result_from_executor_response(
 
 
 def _ask_result_from_executor_response(
-    routed: BackendResult,
+    routed: ExecutionResult,
     executor_response: ExecutorResponse,
-) -> BackendResult:
+) -> ExecutionResult:
     status = "ask_completed" if executor_response.answer else "ask_failed"
-    return BackendResult(
+    return ExecutionResult(
         backend=routed.backend,
         status=status,
         provider_calls_made=executor_response.provider_calls_made,
@@ -201,11 +198,11 @@ def _ask_result_from_executor_response(
 
 
 def _patch_result_from_executor_response(
-    routed: BackendResult,
+    routed: ExecutionResult,
     executor_response: ExecutorResponse,
-) -> BackendResult:
+) -> ExecutionResult:
     status = "patch_proposed" if executor_response.answer else "patch_failed"
-    return BackendResult(
+    return ExecutionResult(
         backend=routed.backend,
         status=status,
         provider_calls_made=executor_response.provider_calls_made,
@@ -224,7 +221,7 @@ def _patch_result_from_executor_response(
     )
 
 
-def _local_router_preview_result(name: str, contract: SFEContract) -> BackendResult:
+def _local_router_preview_result(name: str, contract: SFEContract) -> ExecutionResult:
     task_text = contract.task.text if contract.task is not None else ""
     router_result = LocalSegmentRouter().route(task_text, contract.context_segments)
     selected_segment_ids = router_result.selected_segment_ids
@@ -289,8 +286,8 @@ def _dry_run_result(
     selector_mode: str,
     execution_preview: DirectExecutionPreview | None = None,
     router_preview: RouterPreviewDiagnostics | None = None,
-) -> BackendResult:
-    return BackendResult(
+) -> ExecutionResult:
+    return ExecutionResult(
         backend=name,
         status="dry_run_only",
         provider_calls_made=0,

@@ -16,6 +16,7 @@ from sfe.discovery import (
 )
 from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_mode_router import ExecutionModeRouter
+from sfe.execution_backend import ExecutionResult
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
     ParsedPatch,
@@ -41,20 +42,23 @@ from sfe.workspace_review import (
     build_workspace_review_payload,
     create_workspace_reviewer,
 )
-
-from .backends import (
-    BackendAdapter,
-    BackendResult,
-    ask_error_result,
-    backend_by_name,
-    patch_error_result,
-)
-from .contracts import (
+from sfe.contracts import (
     ContextLoadResult,
     SFEContract,
     build_contract,
     load_context_file,
     resolve_workspace,
+)
+from sfe.patch_json_repair import (
+    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
+    PatchJsonRepairer,
+)
+
+from .backends import (
+    BackendAdapter,
+    ask_error_result,
+    backend_by_name,
+    patch_error_result,
 )
 from .input import TerminalInput, is_interactive
 from .file_edits import (
@@ -70,8 +74,6 @@ from .patch_review import (
     create_tui_patch_reviewer,
 )
 from .patch_json_repair import (
-    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
-    PatchJsonRepairer,
     create_tui_patch_json_repairer,
 )
 from . import renderer
@@ -140,7 +142,7 @@ class SfeTuiApp:
         self.context_files: list[ContextLoadResult] = []
         self.discovery_result: DiscoveryResult | None = None
         self.task = ""
-        self.latest_result: BackendResult | None = None
+        self.latest_result: ExecutionResult | None = None
         self.pending_patch: PendingPatchProposal | None = None
 
     def run(self) -> int:
@@ -805,7 +807,7 @@ class SfeTuiApp:
 
     def _pending_patch_from_result(
         self,
-        result: BackendResult,
+        result: ExecutionResult,
     ) -> tuple[PendingPatchProposal | None, object | None, PendingPatchParseDiagnostics | None]:
         if self.workspace_root is None or not result.answer:
             return None, result.error_category, None

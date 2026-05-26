@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sfe.contracts import ContextLoadResult, SFEContract
 from sfe.discovery import DiscoveryResult
+from sfe.execution_backend import ExecutionResult
 from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
 from sfe.run_pipeline import RunResult
 from sfe.router_review import JsonReviewDecision
@@ -16,8 +18,6 @@ from sfe.workspace_isolation import (
     WorkspaceStatusResult,
 )
 
-from .backends import BackendResult
-from .contracts import ContextLoadResult, SFEContract
 from .patch_review import PatchReviewDecision
 
 
@@ -146,7 +146,7 @@ def render_status(
     task_present: bool,
     backend_name: str,
     executor_provider_name: str | None = None,
-    latest_result: BackendResult | None = None,
+    latest_result: ExecutionResult | None = None,
     discovery_result: DiscoveryResult | None = None,
     pending_patch_summary: PatchSummary | None = None,
 ) -> str:
@@ -524,7 +524,7 @@ def render_context_summary(
     *,
     contract: SFEContract,
     context_files: list[ContextLoadResult],
-    latest_result: BackendResult | None,
+    latest_result: ExecutionResult | None,
     discovery_result: DiscoveryResult | None = None,
     pending_patch_summary: PatchSummary | None = None,
 ) -> str:
@@ -625,7 +625,7 @@ def render_discovery_summary(discovery_result: DiscoveryResult | None) -> str:
     )
 
 
-def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
+def render_dry_run_summary(contract: SFEContract, result: ExecutionResult) -> str:
     audit = result.contract.audit
     selected_ids = list(audit.get("selected_segment_ids") or [])
     selected_refs = _selected_source_refs(result.contract, selected_ids)
@@ -688,7 +688,7 @@ def render_dry_run_summary(contract: SFEContract, result: BackendResult) -> str:
     return "\n".join(lines)
 
 
-def render_ask_result(result: BackendResult) -> str:
+def render_ask_result(result: ExecutionResult) -> str:
     audit = result.contract.audit
     selected_ids = list(audit.get("selected_segment_ids") or [])
     selected_refs = _selected_source_refs(result.contract, selected_ids)
@@ -737,7 +737,7 @@ def render_ask_result(result: BackendResult) -> str:
 
 
 def render_patch_result(
-    result: BackendResult,
+    result: ExecutionResult,
     *,
     pending_patch_summary: PatchSummary | None = None,
     pending_patch_issue: object | None = None,
@@ -940,13 +940,13 @@ def _patch_summary_count(summary: PatchSummary | None, attr_name: str) -> int:
     return int(getattr(summary, attr_name))
 
 
-def _run_selected_tokens(result: BackendResult | None) -> object | None:
+def _run_selected_tokens(result: ExecutionResult | None) -> object | None:
     if result is None:
         return None
     return result.contract.audit.get("estimated_selected_tokens")
 
 
-def _run_reduction_pct(result: BackendResult | None) -> object | None:
+def _run_reduction_pct(result: ExecutionResult | None) -> object | None:
     if result is None:
         return None
     return result.contract.audit.get("estimated_reduction_pct")
@@ -1010,7 +1010,7 @@ def _selected_source_refs(contract: SFEContract, selected_ids: list[str]) -> lis
     ]
 
 
-def _ask_provider_status(result: BackendResult) -> str:
+def _ask_provider_status(result: ExecutionResult) -> str:
     if result.answer:
         return "answer received"
     if result.error_category:
@@ -1018,7 +1018,7 @@ def _ask_provider_status(result: BackendResult) -> str:
     return "no answer returned"
 
 
-def _patch_provider_status(result: BackendResult) -> str:
+def _patch_provider_status(result: ExecutionResult) -> str:
     if result.answer:
         return "proposal received"
     if result.error_category:

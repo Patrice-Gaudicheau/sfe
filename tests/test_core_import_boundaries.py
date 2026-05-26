@@ -11,11 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from sfe.contracts import SFEContract
-from sfe.execution_backend import ExecutionResult
-from sfe.patch_json_repair import PatchJsonRepairResult
 from sfe_tui import backends as tui_backends
-from sfe_tui import contracts as tui_contracts
 from sfe_tui import patch_json_repair as tui_patch_json_repair
 
 
@@ -62,10 +58,12 @@ def test_run_pipeline_does_not_import_tui_modules() -> None:
     )
 
 
-def test_tui_compatibility_aliases_point_to_core_types() -> None:
-    assert tui_contracts.SFEContract is SFEContract
-    assert tui_backends.BackendResult is ExecutionResult
-    assert tui_patch_json_repair.PatchJsonRepairResult is PatchJsonRepairResult
+def test_unused_tui_compatibility_reexports_are_removed() -> None:
+    assert not (PROJECT_ROOT / "sfe_tui/contracts.py").exists()
+    assert not hasattr(tui_backends, "BackendResult")
+    assert not hasattr(tui_patch_json_repair, "PATCH_JSON_REPAIR_MAX_INPUT_CHARS")
+    assert not hasattr(tui_patch_json_repair, "PatchJsonRepairer")
+    assert not hasattr(tui_patch_json_repair, "PatchJsonRepairResult")
 
 
 def _python_files_under(relative_root: str) -> list[Path]:

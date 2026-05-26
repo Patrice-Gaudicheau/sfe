@@ -18,15 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
-from sfe.discovery_router import DiscoveryRouterSelection
-from sfe_tui.app import SfeTuiApp
-from sfe_tui.backends import (
-    DirectBackend,
-    MISSING_TASK,
-    ProxyBackend,
-    backend_by_name,
-)
-from sfe_tui.contracts import (
+from sfe.contracts import (
     ContextSegment,
     MAX_CONTEXT_FILE_BYTES,
     PRIVATE_KEY_MARKERS,
@@ -35,6 +27,18 @@ from sfe_tui.contracts import (
     load_context_file,
     resolve_context_path,
     resolve_workspace,
+)
+from sfe.discovery_router import DiscoveryRouterSelection
+from sfe.patch_json_repair import (
+    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
+    PatchJsonRepairResult,
+)
+from sfe_tui.app import SfeTuiApp
+from sfe_tui.backends import (
+    DirectBackend,
+    MISSING_TASK,
+    ProxyBackend,
+    backend_by_name,
 )
 from sfe_tui.executors import (
     CONSOLE_SYSTEM_INSTRUCTION,
@@ -51,10 +55,6 @@ from sfe_tui.patch_review import (
     DirectProviderPatchReviewer,
     PatchReviewDecision,
     _build_review_prompt,
-)
-from sfe_tui.patch_json_repair import (
-    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
-    PatchJsonRepairResult,
 )
 from sfe.workspace_review import WorkspaceReviewDecision
 from sfe_tui.renderer import (

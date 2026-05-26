@@ -10,9 +10,8 @@ from providers.alibaba import DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MOD
 from providers.anthropic import DEFAULT_ROUTER_MODEL as DEFAULT_ANTHROPIC_ROUTER_MODEL
 from providers.openai_api import DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL
 from sfe.patch_json_repair import (
-    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
-    PatchJsonRepairer,
-    PatchJsonRepairResult,
+    PatchJsonRepairer as _PatchJsonRepairer,
+    PatchJsonRepairResult as _PatchJsonRepairResult,
 )
 from sfe.router_review import (
     DEFAULT_LEMONADE_ROUTER_MODEL,
@@ -46,9 +45,9 @@ class DisabledPatchJsonRepairer:
         *,
         raw_response: str,
         parse_error: str,
-    ) -> PatchJsonRepairResult:
+    ) -> _PatchJsonRepairResult:
         del raw_response, parse_error
-        return PatchJsonRepairResult(None, error_category="disabled")
+        return _PatchJsonRepairResult(None, error_category="disabled")
 
 
 class ConfiguredPatchJsonRepairer:
@@ -70,10 +69,10 @@ class ConfiguredPatchJsonRepairer:
         *,
         raw_response: str,
         parse_error: str,
-    ) -> PatchJsonRepairResult:
+    ) -> _PatchJsonRepairResult:
         health = self.provider.health()
         if not health.get("ok"):
-            return PatchJsonRepairResult(
+            return _PatchJsonRepairResult(
                 None,
                 error_category="repairer_not_configured",
                 provider_name=self.provider_name,
@@ -92,14 +91,14 @@ class ConfiguredPatchJsonRepairer:
                 system_instruction=PATCH_JSON_REPAIR_SYSTEM_INSTRUCTION,
             )
         except TimeoutError:
-            return PatchJsonRepairResult(
+            return _PatchJsonRepairResult(
                 None,
                 error_category="repairer_timeout",
                 provider_name=self.provider_name,
                 model=self.model,
             )
         except Exception:
-            return PatchJsonRepairResult(
+            return _PatchJsonRepairResult(
                 None,
                 error_category="repairer_provider_error",
                 provider_name=self.provider_name,
@@ -107,13 +106,13 @@ class ConfiguredPatchJsonRepairer:
             )
         repaired = extract_answer(response)
         if not repaired:
-            return PatchJsonRepairResult(
+            return _PatchJsonRepairResult(
                 None,
                 error_category="empty_repair_response",
                 provider_name=self.provider_name,
                 model=self.model,
             )
-        return PatchJsonRepairResult(
+        return _PatchJsonRepairResult(
             repaired,
             provider_name=self.provider_name,
             model=self.model,
@@ -124,7 +123,7 @@ def create_tui_patch_json_repairer(
     *,
     environ: Mapping[str, str] | None = None,
     provider_factories: Mapping[str, Any] | None = None,
-) -> PatchJsonRepairer:
+) -> _PatchJsonRepairer:
     if not patch_json_repair_enabled(environ):
         return DisabledPatchJsonRepairer()
     try:

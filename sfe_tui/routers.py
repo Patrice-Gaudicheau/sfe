@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .contracts import ContextSegment
+from sfe.contracts import ContextSegment
 
 
 LOCAL_LEXICAL_PREVIEW_MODE = "local_lexical_preview"
