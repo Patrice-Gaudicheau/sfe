@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import shlex
 import hashlib
+import os
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -54,7 +55,7 @@ from .contracts import (
     load_context_file,
     resolve_workspace,
 )
-from .input import TerminalInput
+from .input import TerminalInput, is_interactive
 from .file_edits import (
     FileReplacementProposal,
     apply_file_replacements,
@@ -76,6 +77,11 @@ from . import renderer
 
 
 OutputFunc = Callable[[str], None]
+
+
+def _default_color_enabled() -> bool:
+    term = os.environ.get("TERM", "")
+    return is_interactive() and "NO_COLOR" not in os.environ and term != "dumb"
 
 
 @dataclass(frozen=True)
@@ -111,9 +117,14 @@ class SfeTuiApp:
         patch_reviewer: PatchReviewer | None = None,
         workspace_manager: WorkspaceManager | None = None,
         workspace_reviewer: WorkspaceReviewer | None = None,
+        color_enabled: bool | None = None,
     ) -> None:
         self.input_provider = input_provider or TerminalInput()
-        self.output = output
+        self.color_enabled = (
+            _default_color_enabled() if color_enabled is None else color_enabled
+        )
+        self._plain_output = output
+        self.output = self._render_output
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
         self.discovery_router = discovery_router
@@ -152,6 +163,9 @@ class SfeTuiApp:
             return False
         self.output(renderer.render_workspace_selected(self.workspace_root, self.cwd))
         return True
+
+    def _render_output(self, text: str) -> None:
+        self._plain_output(renderer.color_sfe_output(text, enabled=self.color_enabled))
 
     def _handle_command(self, command: str) -> bool:
         name, _, rest = command.partition(" ")

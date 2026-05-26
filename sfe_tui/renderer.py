@@ -21,6 +21,16 @@ from .contracts import ContextLoadResult, SFEContract
 from .patch_review import PatchReviewDecision
 
 
+SFE_OUTPUT_COLOR = "\033[96m"
+ANSI_RESET = "\033[0m"
+
+
+def color_sfe_output(text: str, *, enabled: bool) -> str:
+    if not enabled or not text:
+        return text
+    return f"{SFE_OUTPUT_COLOR}{text}{ANSI_RESET}"
+
+
 def render_help() -> str:
     return "\n".join(
         [
@@ -62,15 +72,14 @@ def render_advanced_help() -> str:
 
 def safe_workspace_label(workspace_root: Path, launch_cwd: Path | None = None) -> str:
     root = workspace_root.resolve()
-    if launch_cwd is not None:
-        cwd = launch_cwd.resolve()
-        if root == cwd:
-            return "."
-        try:
-            return root.relative_to(cwd).as_posix()
-        except ValueError:
-            pass
-    return root.name or "<workspace>"
+    del launch_cwd
+    home = Path.home().resolve()
+    try:
+        if root == home:
+            return "~"
+        return f"~/{root.relative_to(home).as_posix()}"
+    except ValueError:
+        return root.as_posix() or "<workspace>"
 
 
 def render_workspace_selected(

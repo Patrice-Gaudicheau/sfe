@@ -124,12 +124,12 @@ def test_run_pipeline_creates_worktree_applies_patch_and_promotes(tmp_path: Path
         RunRequest(
             workspace_root=repo,
             task="Patch context",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
         )
     )
 
     assert result.status == RUN_STATUS_COMPLETED
     assert result.workspace_session is not None
+    assert result.workspace_session.worktree_path.parent == repo / ".sfe-worktrees"
     assert result.worktree_created is True
     assert result.git_auto_init is False
     assert result.git_initial_commit_hash is None
@@ -163,7 +163,6 @@ def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
         RunRequest(
             workspace_root=workspace,
             task="Patch context",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
         )
     )
 
@@ -177,6 +176,7 @@ def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
     assert (workspace / "context.txt").read_text(encoding="utf-8") == "new context\n"
     assert _git(workspace, "status", "--short").stdout.strip() == "M context.txt"
     assert result.workspace_session is not None
+    assert result.workspace_session.worktree_path.parent == workspace / ".sfe-worktrees"
     assert (result.workspace_session.worktree_path / "context.txt").read_text(
         encoding="utf-8"
     ) == "new context\n"

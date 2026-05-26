@@ -24,6 +24,7 @@ from sfe.workspace_isolation import (
 
 SFE_WORKTREE_BRANCH_PREFIX = "sfe/worktree/"
 SFE_CREATED_BY = "sfe"
+SFE_WORKTREE_TTL_SECONDS = 60 * 60
 
 
 class GitWorktreeBackend:
@@ -49,6 +50,14 @@ class GitWorktreeBackend:
                 issue=WorkspaceIssue("invalid_workspace", "workspace_not_directory"),
             )
 
+        worktree_parent = _resolve_worktree_parent(source_git_root, policy)
+        if _is_relative_to(worktree_parent, _default_worktree_parent(source_git_root)):
+            if not _ensure_git_info_exclude(source_git_root, ".sfe-worktrees/"):
+                return WorkspaceCreateResult(
+                    False,
+                    issue=WorkspaceIssue("filesystem_error", "git_exclude_update_failed"),
+                )
+
         dirty_status = _git(source_git_root, "status", "--porcelain")
         if not dirty_status.ok:
             return WorkspaceCreateResult(
@@ -70,9 +79,11 @@ class GitWorktreeBackend:
         source_branch = _current_branch(source_git_root)
         session_id = _new_session_id()
         worktree_branch = f"{SFE_WORKTREE_BRANCH_PREFIX}{session_id}"
-        worktree_parent = _resolve_worktree_parent(source_git_root, policy)
         worktree_path = (worktree_parent / f"{source_git_root.name}-{session_id}").resolve()
-        if _is_relative_to(worktree_path, source_path):
+        if _is_relative_to(worktree_path, source_path) and not _is_relative_to(
+            worktree_path,
+            _default_worktree_parent(source_git_root),
+        ):
             return WorkspaceCreateResult(
                 False,
                 issue=WorkspaceIssue("unsafe_worktree_path", "worktree_path_inside_source_workspace"),
@@ -245,6 +256,7 @@ class GitWorktreeBackend:
         sessions = _load_sfe_sessions(worktree_parent)
         worktree_entries = _git_worktree_entries(source_git_root)
         sfe_paths = {session.worktree_path.resolve() for session in sessions}
+        now = datetime.now(timezone.utc)
 
         entries: list[WorkspaceGCEntry] = []
         eligible_count = 0
@@ -292,6 +304,19 @@ class GitWorktreeBackend:
                         status="dirty_skipped",
                         reason="dirty_worktree_refused_by_policy",
                         changed_files=status_result.status.changed_files,
+                    )
+                )
+                continue
+
+            if not _session_is_older_than(session, now, SFE_WORKTREE_TTL_SECONDS):
+                entries.append(
+                    WorkspaceGCEntry(
+                        session=session,
+                        worktree_path=session.worktree_path,
+                        worktree_branch=session.worktree_branch,
+                        metadata_path=session.metadata_path,
+                        status="recent_skipped",
+                        reason="recent_worktree_retained",
                     )
                 )
                 continue
@@ -439,7 +464,11 @@ def _resolve_worktree_parent(
 ) -> Path:
     if policy.worktree_parent is not None:
         return policy.worktree_parent.expanduser().resolve()
-    return (source_git_root.parent / ".sfe-worktrees").resolve()
+    return _default_worktree_parent(source_git_root)
+
+
+def _default_worktree_parent(source_git_root: Path) -> Path:
+    return (source_git_root / ".sfe-worktrees").resolve()
 
 
 def _changed_files_from_status(status_text: str) -> tuple[str, ...]:
@@ -546,6 +575,40 @@ def _is_sfe_session(session: WorkspaceSession) -> bool:
         and session.backend_name == GitWorktreeBackend.name
         and session.worktree_branch.startswith(SFE_WORKTREE_BRANCH_PREFIX)
     )
+
+
+def _session_is_older_than(
+    session: WorkspaceSession,
+    now: datetime,
+    seconds: int,
+) -> bool:
+    created_at = session.metadata.get("created_at")
+    if created_at:
+        try:
+            created = datetime.fromisoformat(created_at)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            return (now - created).total_seconds() > seconds
+        except ValueError:
+            pass
+    try:
+        created_ts = session.worktree_path.stat().st_mtime
+    except OSError:
+        return False
+    return (now.timestamp() - created_ts) > seconds
+
+
+def _ensure_git_info_exclude(git_root: Path, pattern: str) -> bool:
+    exclude_path = git_root / ".git" / "info" / "exclude"
+    try:
+        existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+        if pattern in existing.splitlines():
+            return True
+        suffix = "" if not existing or existing.endswith("\n") else "\n"
+        exclude_path.write_text(f"{existing}{suffix}{pattern}\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:

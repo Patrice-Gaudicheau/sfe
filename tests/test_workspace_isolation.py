@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import json
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -30,33 +32,33 @@ def test_clean_git_repo_creates_isolated_worktree(tmp_path) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = WorkspaceManager(GitWorktreeBackend())
 
-    result = manager.create(
-        repo,
-        WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-    )
+    result = manager.create(repo)
 
     assert result.created is True
     assert result.session is not None
     session = result.session
     assert session.worktree_path.exists()
+    assert session.worktree_path.parent == repo / ".sfe-worktrees"
     assert session.worktree_branch.startswith("sfe/worktree/")
     assert session.source_branch == "main"
     assert session.metadata_path is not None
     assert session.metadata_path.exists()
+    assert session.metadata_path.parent == repo / ".sfe-worktrees"
+    assert ".sfe-worktrees/" in (repo / ".git" / "info" / "exclude").read_text(
+        encoding="utf-8"
+    )
 
     cleanup = manager.cleanup(session)
     assert cleanup.cleaned is True
 
 
-def test_worktree_path_is_outside_original_workspace(tmp_path) -> None:
+def test_default_worktree_path_is_inside_source_sfe_worktrees_directory(tmp_path) -> None:
     repo = _init_repo(tmp_path / "repo")
-    result = GitWorktreeBackend().create(
-        repo,
-        WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-    )
+    result = GitWorktreeBackend().create(repo)
     assert result.session is not None
 
-    assert not _is_relative_to(result.session.worktree_path, repo)
+    assert _is_relative_to(result.session.worktree_path, repo / ".sfe-worktrees")
+    assert _git(repo, "status", "--porcelain").stdout.strip() == ""
 
     GitWorktreeBackend().cleanup(result.session)
 
@@ -170,11 +172,14 @@ def test_gc_dry_run_reports_sfe_created_orphan_worktree_without_removing(
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
     backend = GitWorktreeBackend()
-    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
-    result = backend.create(repo, policy)
+    result = backend.create(repo)
     assert result.session is not None
+    _mark_session_created_at(
+        result.session,
+        datetime.now(timezone.utc) - timedelta(hours=2),
+    )
 
-    gc_result = backend.gc(repo, clean=False, policy=policy)
+    gc_result = backend.gc(repo, clean=False)
 
     assert gc_result.clean is False
     assert gc_result.sfe_worktree_count == 1
@@ -192,13 +197,16 @@ def test_gc_dry_run_reports_sfe_created_orphan_worktree_without_removing(
 def test_gc_clean_removes_only_clean_sfe_created_worktrees(tmp_path) -> None:
     repo = _init_repo(tmp_path / "repo")
     backend = GitWorktreeBackend()
-    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
-    sfe_result = backend.create(repo, policy)
+    sfe_result = backend.create(repo)
     assert sfe_result.session is not None
+    _mark_session_created_at(
+        sfe_result.session,
+        datetime.now(timezone.utc) - timedelta(hours=2),
+    )
     user_worktree = tmp_path / "user-worktree"
     _git(repo, "worktree", "add", "-b", "user/worktree", str(user_worktree), "HEAD")
 
-    gc_result = backend.gc(repo, clean=True, policy=policy)
+    gc_result = backend.gc(repo, clean=True)
 
     assert gc_result.clean is True
     assert gc_result.sfe_worktree_count == 1
@@ -217,12 +225,11 @@ def test_gc_clean_removes_only_clean_sfe_created_worktrees(tmp_path) -> None:
 def test_gc_skips_dirty_sfe_created_worktree(tmp_path) -> None:
     repo = _init_repo(tmp_path / "repo")
     backend = GitWorktreeBackend()
-    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
-    result = backend.create(repo, policy)
+    result = backend.create(repo)
     assert result.session is not None
     (result.session.worktree_path / "example.txt").write_text("dirty\n", encoding="utf-8")
 
-    gc_result = backend.gc(repo, clean=True, policy=policy)
+    gc_result = backend.gc(repo, clean=True)
 
     assert gc_result.sfe_worktree_count == 1
     assert gc_result.eligible_count == 0
@@ -239,14 +246,16 @@ def test_gc_skips_dirty_sfe_created_worktree(tmp_path) -> None:
 def test_gc_clean_does_not_remove_protected_active_session(tmp_path) -> None:
     repo = _init_repo(tmp_path / "repo")
     backend = GitWorktreeBackend()
-    policy = WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees")
-    result = backend.create(repo, policy)
+    result = backend.create(repo)
     assert result.session is not None
+    _mark_session_created_at(
+        result.session,
+        datetime.now(timezone.utc) - timedelta(hours=2),
+    )
 
     gc_result = backend.gc(
         repo,
         clean=True,
-        policy=policy,
         protected_session_ids=(result.session.session_id,),
     )
 
@@ -258,6 +267,43 @@ def test_gc_clean_does_not_remove_protected_active_session(tmp_path) -> None:
 
     cleanup = backend.cleanup(result.session)
     assert cleanup.cleaned is True
+
+
+def test_gc_clean_keeps_recent_sfe_created_worktree(tmp_path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    backend = GitWorktreeBackend()
+    result = backend.create(repo)
+    assert result.session is not None
+
+    gc_result = backend.gc(repo, clean=True)
+
+    assert gc_result.sfe_worktree_count == 1
+    assert gc_result.eligible_count == 0
+    assert gc_result.removed_count == 0
+    assert gc_result.entries[0].status == "recent_skipped"
+    assert result.session.worktree_path.exists()
+
+    cleanup = backend.cleanup(result.session)
+    assert cleanup.cleaned is True
+
+
+def test_gc_clean_does_not_remove_paths_outside_sfe_worktrees(tmp_path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    backend = GitWorktreeBackend()
+    result = backend.create(repo)
+    assert result.session is not None
+    _mark_session_created_at(
+        result.session,
+        datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    outside = repo / "old-outside-dir"
+    outside.mkdir()
+
+    gc_result = backend.gc(repo, clean=True)
+
+    assert gc_result.removed_count == 1
+    assert not result.session.worktree_path.exists()
+    assert outside.exists()
 
 
 def _init_repo(path: Path) -> Path:
@@ -282,6 +328,16 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
     assert completed.returncode == 0, completed.stderr
     return completed
+
+
+def _mark_session_created_at(session, created_at: datetime) -> None:
+    assert session.metadata_path is not None
+    payload = json.loads(session.metadata_path.read_text(encoding="utf-8"))
+    payload["session"]["metadata"]["created_at"] = created_at.isoformat()
+    session.metadata_path.write_text(
+        json.dumps(payload, sort_keys=True, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _branch_exists(cwd: Path, branch: str) -> bool:

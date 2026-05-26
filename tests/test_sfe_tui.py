@@ -57,6 +57,7 @@ from sfe_tui.patch_json_repair import (
 )
 from sfe.workspace_review import WorkspaceReviewDecision
 from sfe_tui.renderer import (
+    color_sfe_output,
     render_advanced_help,
     render_context_summary,
     render_dry_run_summary,
@@ -489,9 +490,8 @@ def test_startup_prompt_uses_current_without_absolute_path(tmp_path) -> None:
 
     assert app.run() == 0
     assert input_provider.prompts[0] == "Workspace [current]: "
-    assert "Workspace: ." in output
+    assert f"Workspace: {safe_workspace_label(tmp_path, tmp_path)}" in output
     assert str(tmp_path.resolve()) not in input_provider.prompts[0]
-    assert str(tmp_path.resolve()) not in "\n".join(output)
     assert app.workspace_root == tmp_path.resolve()
 
 
@@ -526,8 +526,7 @@ def test_directory_reports_selected_workspace_safely(tmp_path) -> None:
     assert app.run() == 0
     directory_outputs = [line for line in output if line.startswith("Workspace:")]
     assert directory_outputs
-    assert directory_outputs[-1] == "Workspace: ."
-    assert str(tmp_path.resolve()) not in "\n".join(output)
+    assert directory_outputs[-1] == f"Workspace: {safe_workspace_label(tmp_path, tmp_path)}"
     assert "Authorization" not in "\n".join(output)
 
 
@@ -541,9 +540,8 @@ def test_pwd_remains_undocumented_workspace_alias(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "Workspace: ." in rendered
+    assert f"Workspace: {safe_workspace_label(tmp_path, tmp_path)}" in rendered
     assert "/pwd" not in render_help()
-    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_workspace_root_remains_absolute_resolved_internally(tmp_path) -> None:
@@ -557,10 +555,9 @@ def test_workspace_root_remains_absolute_resolved_internally(tmp_path) -> None:
     assert app.run() == 0
     assert app.workspace_root == tmp_path.resolve()
     assert app.workspace_root.is_absolute()
-    assert str(tmp_path.resolve()) not in "\n".join(output)
 
 
-def test_workspace_label_uses_relative_or_basename_without_absolute_path(
+def test_workspace_label_uses_full_path_with_home_shortening(
     tmp_path,
 ) -> None:
     child = tmp_path / "child"
@@ -568,10 +565,30 @@ def test_workspace_label_uses_relative_or_basename_without_absolute_path(
     outside = tmp_path.parent / "outside-workspace-label"
     outside.mkdir(exist_ok=True)
 
-    assert safe_workspace_label(tmp_path, tmp_path) == "."
-    assert safe_workspace_label(child, tmp_path) == "child"
-    assert safe_workspace_label(outside, tmp_path) == "outside-workspace-label"
-    assert str(tmp_path) not in render_workspace_selected(child, tmp_path)
+    assert safe_workspace_label(tmp_path, tmp_path) == tmp_path.resolve().as_posix()
+    assert safe_workspace_label(child, tmp_path) == child.resolve().as_posix()
+    assert safe_workspace_label(outside, tmp_path) == outside.resolve().as_posix()
+    assert str(child.resolve()) in render_workspace_selected(child, tmp_path)
+
+
+def test_tui_color_mode_wraps_prompts_and_output(tmp_path) -> None:
+    input_provider = FakeInput(["", "/quit"])
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=input_provider,
+        output=output.append,
+        cwd=tmp_path,
+        color_enabled=True,
+    )
+
+    assert app.run() == 0
+    assert input_provider.prompts[0] == "Workspace [current]: "
+    assert input_provider.prompts[1] == "sfe> "
+    assert "\033[" not in "".join(input_provider.prompts)
+    assert output[0] == color_sfe_output(
+        render_workspace_selected(tmp_path, tmp_path),
+        enabled=True,
+    )
 
 
 def test_files_reads_text_file_and_populates_context_segment_text(tmp_path) -> None:
@@ -869,7 +886,7 @@ def test_dry_run_with_context_but_missing_task_does_not_fake_reduction(
     assert "shell disabled" in dry_run_block
     assert "patch application available through explicit /apply-patch" in dry_run_block
     assert "SECRET_FILE_CONTENT" not in dry_run_block
-    assert str(tmp_path.resolve()) not in rendered
+    assert str(tmp_path.resolve()) not in dry_run_block
 
 
 def test_dry_run_after_task_requires_discovery_without_manual_context(tmp_path) -> None:
@@ -1030,13 +1047,12 @@ def test_status_renders_state_without_file_contents(tmp_path) -> None:
     assert "skipped context files: 0" in rendered
     assert "loaded context segments: 1" in rendered
     assert "task present: True" in rendered
-    assert "workspace: ." in status_block
+    assert f"workspace: {safe_workspace_label(tmp_path, tmp_path)}" in status_block
     assert "latest result present: no" in status_block
     assert "latest result kind: none" in status_block
     assert "latest provider calls made: 0" in status_block
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "Explain the context" not in rendered
-    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
@@ -1051,7 +1067,7 @@ def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
     rendered = "\n".join(output)
     status_block = rendered.split("SFE TUI status", 1)[1]
     assert "workspace selected: True" in status_block
-    assert "workspace: ." in status_block
+    assert f"workspace: {safe_workspace_label(tmp_path, tmp_path)}" in status_block
     assert "loaded context files: 0" in status_block
     assert "skipped context files: 0" in status_block
     assert "loaded context segments: 0" in status_block
@@ -1064,7 +1080,6 @@ def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
     assert "patch application enabled: explicit /apply-patch available" in status_block
     assert "/backend" not in status_block
     assert "ProxyBackend" not in status_block
-    assert str(tmp_path.resolve()) not in status_block
 
 
 def test_status_after_task_reports_task_without_content(tmp_path) -> None:
@@ -1103,7 +1118,6 @@ def test_status_after_files_reports_context_counts_without_content(tmp_path) -> 
     assert "task present: False" in status_block
     assert "latest result present: no" in status_block
     assert "SECRET_FILE_CONTENT" not in status_block
-    assert str(tmp_path.resolve()) not in status_block
 
 
 def test_status_after_dry_run_reports_latest_result_and_no_provider_calls(
@@ -1189,7 +1203,6 @@ def test_status_reports_discovery_state_without_content(tmp_path) -> None:
     assert "discovered loaded candidates: 1" in status_block
     assert "SECRET_FILE_CONTENT" not in status_block
     assert "Explain context" not in status_block
-    assert str(tmp_path.resolve()) not in status_block
 
 
 def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
@@ -1446,7 +1459,7 @@ def test_discover_then_dry_run_reloads_full_text_for_routing(tmp_path) -> None:
     assert "selected segments: 1" in dry_run_block
     assert "selected source refs: context.md" in dry_run_block
     assert "alpha routing content" not in rendered
-    assert str(tmp_path.resolve()) not in rendered
+    assert str(tmp_path.resolve()) not in dry_run_block
 
 
 def test_discover_with_no_candidates_allows_dry_run_but_not_provider_call(
@@ -1670,7 +1683,6 @@ def test_discovered_context_summary_is_content_safe(tmp_path) -> None:
     assert "discovered source refs: context.md" in rendered
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "SECRET_TASK_TEXT" not in rendered
-    assert str(tmp_path.resolve()) not in rendered
     assert "Authorization" not in rendered
     assert "request body" not in rendered.lower()
 
@@ -1828,8 +1840,7 @@ def test_reset_clears_task_context_skips_and_latest_state(tmp_path) -> None:
     assert "empty: no context loaded" in context_block
     assert "selected=yes" not in context_block
     assert "latest selected segment ids: ['ctx_" not in context_block
-    assert "Workspace: ." in rendered
-    assert str(tmp_path.resolve()) not in rendered
+    assert f"Workspace: {safe_workspace_label(tmp_path, tmp_path)}" in rendered
     assert str(outside) not in rendered
 
 
@@ -1887,7 +1898,6 @@ def test_ask_and_patch_fail_safely_after_reset(tmp_path) -> None:
     assert not executor.calls
     assert not executor.patch_calls
     assert "calling provider" not in rendered
-    assert str(tmp_path.resolve()) not in rendered
 
 
 def test_context_after_ask_marks_selected_segments(tmp_path) -> None:
@@ -2141,7 +2151,7 @@ def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    diagnostics = rendered.split("SFE answer", 1)[0]
+    diagnostics = rendered.split("building contract", 1)[1].split("SFE answer", 1)[0]
     assert "calling provider" in rendered
     assert "answer received" in rendered
     assert "SFE answer\nmock answer" in rendered
@@ -2158,7 +2168,6 @@ def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
     assert "SECRET_FILE_CONTENT" not in diagnostics
     assert "Explain context" not in diagnostics
     assert str(tmp_path) not in diagnostics
-    assert str(tmp_path.resolve()) not in rendered
     assert "ProxyBackend" not in rendered
     assert "backend switching" not in rendered
 
@@ -2357,7 +2366,10 @@ def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    diagnostics = rendered.split("Patch proposal only, not applied", 1)[0]
+    diagnostics = rendered.split("building contract", 1)[1].split(
+        "Patch proposal only, not applied",
+        1,
+    )[0]
     assert "calling provider" in rendered
     assert "Patch proposal only, not applied" in rendered
     assert "not applied" in rendered
@@ -2376,7 +2388,6 @@ def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
     assert "SECRET_FILE_CONTENT" not in diagnostics
     assert "Patch context" not in diagnostics
     assert str(tmp_path) not in diagnostics
-    assert str(tmp_path.resolve()) not in rendered
     assert "request body" not in diagnostics.lower()
     assert "provider payload" not in diagnostics.lower()
     assert "Authorization" not in diagnostics
@@ -4641,13 +4652,14 @@ def test_status_and_context_show_safe_pending_patch_metadata(tmp_path) -> None:
     rendered = "\n".join(output)
     status_block = rendered.split("SFE TUI status", 1)[1].split("SFE context", 1)[0]
     context_block = rendered.split("SFE context", 1)[1]
+    assert f"workspace: {safe_workspace_label(tmp_path, tmp_path)}" in status_block
     for block in (status_block, context_block):
         assert "pending patch: yes" in block
         assert "pending patch files: 1" in block
         assert "pending patch hunks: 1" in block
         assert "SECRET_FILE_CONTENT" not in block
         assert "SECRET_TASK_TEXT" not in block
-        assert str(tmp_path.resolve()) not in block
+    assert str(tmp_path.resolve()) not in context_block
 
 
 def test_apply_diagnostics_omit_raw_sensitive_material(tmp_path) -> None:
