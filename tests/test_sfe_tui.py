@@ -1076,9 +1076,9 @@ def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
     assert "latest result present: no" in status_block
     assert "latest result kind: none" in status_block
     assert "latest provider calls made: 0" in status_block
-    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in status_block
+    assert "writes: routed /run workspace_write or explicit /apply-patch only" in status_block
     assert "shell enabled: no" in status_block
-    assert "patch application enabled: explicit /apply-patch available" in status_block
+    assert "patch application: routed /run workspace_write or explicit /apply-patch" in status_block
     assert "/backend" not in status_block
     assert "ProxyBackend" not in status_block
 
@@ -1148,9 +1148,9 @@ def test_status_after_dry_run_reports_latest_result_and_no_provider_calls(
     assert "latest result present: yes" in status_block
     assert "latest result kind: dry_run_only" in status_block
     assert "latest provider calls made: 0" in status_block
-    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in status_block
+    assert "writes: routed /run workspace_write or explicit /apply-patch only" in status_block
     assert "shell enabled: no" in status_block
-    assert "patch application enabled: explicit /apply-patch available" in status_block
+    assert "patch application: routed /run workspace_write or explicit /apply-patch" in status_block
 
 
 def test_status_after_ask_reports_latest_provider_calls(tmp_path) -> None:
@@ -1179,9 +1179,9 @@ def test_status_after_ask_reports_latest_provider_calls(tmp_path) -> None:
     assert "latest result present: yes" in status_block
     assert "latest result kind: ask_completed" in status_block
     assert "latest provider calls made: 1" in status_block
-    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in status_block
+    assert "writes: routed /run workspace_write or explicit /apply-patch only" in status_block
     assert "shell enabled: no" in status_block
-    assert "patch application enabled: explicit /apply-patch available" in status_block
+    assert "patch application: routed /run workspace_write or explicit /apply-patch" in status_block
 
 
 def test_status_reports_discovery_state_without_content(tmp_path) -> None:
@@ -1221,9 +1221,9 @@ def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
     assert "backend: direct" in rendered
     assert "workspace: ." in rendered
     assert "latest provider calls made: 0" in rendered
-    assert "writes enabled: automatic writes disabled; explicit /apply-patch available" in rendered
+    assert "writes: routed /run workspace_write or explicit /apply-patch only" in rendered
     assert "shell enabled: no" in rendered
-    assert "patch application enabled: explicit /apply-patch available" in rendered
+    assert "patch application: routed /run workspace_write or explicit /apply-patch" in rendered
     assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
@@ -1240,7 +1240,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/status" in rendered
     assert "/context" in rendered
     assert "/run" in rendered
-    assert "Run the task in an isolated worktree" in rendered
+    assert "Resolve the task via console answer or workspace write" in rendered
     assert not any(line.strip().startswith("/discover") for line in help_lines)
     assert not any(line.strip().startswith("/dry-run") for line in help_lines)
     assert not any(line.strip().startswith("/patch") for line in help_lines)

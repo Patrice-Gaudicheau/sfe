@@ -1,7 +1,7 @@
 # TUI Read-Only Ask Milestone
 
 This note records the first useful end-to-end first-party SFE TUI milestone.
-It is historical: the current canonical editing workflow is `/task <request>`
+It is historical: the current canonical task workflow is `/task <request>`
 followed by `/run`. The `/ask`, `/patch`, and `/apply-patch` details below are
 kept as milestone context and advanced/debug compatibility history.
 

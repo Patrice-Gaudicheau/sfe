@@ -1,4 +1,4 @@
-"""Tests for the worktree-first SFE run pipeline."""
+"""Tests for the intention-aware SFE run pipeline."""
 
 from __future__ import annotations
 
@@ -722,7 +722,7 @@ def test_tui_run_is_in_help() -> None:
     rendered = render_help()
 
     assert "/run" in rendered
-    assert "Run the task in an isolated worktree" in rendered
+    assert "Resolve the task via console answer or workspace write" in rendered
 
 
 def test_tui_run_uses_pipeline_without_patch_reviewer(tmp_path: Path) -> None:

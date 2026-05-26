@@ -217,21 +217,26 @@ The current canonical TUI path uses `DirectBackend` and follows:
 /run
 ```
 
-`/run` discovers context, routes a reduced context payload to the executor,
-generates a patch, and applies it in an SFE-created isolated worktree. If the
-selected workspace is not yet a Git repository, `/run` can initialize a local
+`/run` first asks the core execution-mode router how to resolve the task.
+`console_output` produces a natural-language answer in the TUI with no Git
+preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
+existing discovery, context-routing, executor, patch, and isolated worktree
+pipeline for creating, modifying, or deleting workspace files. If the selected
+workspace is not yet a Git repository, `workspace_write` can initialize a local
 snapshot first; it does not create a remote, push, run syntax checks, run tests
 or lint, require diff inspection, require human approval, or require router
-review. Historical and debug commands such as `/discover`, `/dry-run`,
-`/patch`, `/apply-patch`, `/isolate`, and `/review-worktree` remain available
-through `/help-advanced`.
+review. `external_action` is recognized as outside-workspace work, but is not
+implemented yet and fails cleanly. Historical and debug commands such as
+`/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
+`/review-worktree` remain available through `/help-advanced`.
 
 SFE's current product doctrine is intentionally narrow: it is a context routing
 and token reduction layer. It is meant to send the executor less context, but
 better selected context, and to bound writes mechanically with Git/worktree
-isolation. It is not meant to make the model smarter, replace code review,
-control every executor response, or require mandatory diff inspection, human
-approval, syntax checks, tests, or lint before the worktree apply step.
+isolation when a workspace write is selected. It is not meant to make the model
+smarter, replace code review, control every executor response, or require
+mandatory diff inspection, human approval, syntax checks, tests, or lint before
+the worktree apply step.
 
 The architecture boundary is:
 
@@ -239,14 +244,14 @@ The architecture boundary is:
 Discoverer -> Router -> Executor
 ```
 
-For TUI context selection today, the Discoverer is core workspace discovery in
-`sfe/discovery.py`, backed by the dedicated discovery router in
-`sfe/discovery_router.py`. `/discover` scans the selected workspace, builds a
-metadata-only workspace map, asks the configured discovery router which files to
-inspect, and then locally revalidates selected paths before loading them. The
-`/dry-run` context preview is still a provider-free local lexical preview, and
-the Executor is the configured executor behind `DirectBackend`. Separate
-router-review calls are used by the advanced `/apply-patch` and
+For TUI workspace-write context selection today, the Discoverer is core
+workspace discovery in `sfe/discovery.py`, backed by the dedicated discovery
+router in `sfe/discovery_router.py`. `/discover` scans the selected workspace,
+builds a metadata-only workspace map, asks the configured discovery router which
+files to inspect, and then locally revalidates selected paths before loading
+them. The `/dry-run` context preview is still a provider-free local lexical
+preview, and the Executor is the configured executor behind `DirectBackend`.
+Separate router-review calls are used by the advanced `/apply-patch` and
 `/review-worktree` flows; these are semantic LLM reviews, not formal security
 proofs and are not mandatory for `/run`. `/discover` does not write files, run
 shell commands, initialize Git, or expose raw file contents in diagnostics.
@@ -343,7 +348,7 @@ and remains read-only, `/dry-run` reports `provider calls made: 0`, and `/ask`
 requires a configured provider. With `SFE_PROVIDER=lemonade` and Lemonade
 reachable, `/ask` can complete through `DirectBackend`. Provider errors should
 be reported safely if the configured provider is unavailable. No proxy is used.
-This read-only smoke uses advanced diagnostics; the canonical editing path is
+This read-only smoke uses advanced diagnostics; the canonical task path is
 `/task <question>` followed by `/run`.
 
 The full test suite can also be run from the repository root:

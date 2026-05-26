@@ -31,7 +31,7 @@ The first-party TUI can expose the SFE contract directly:
 Keeping DirectBackend as the only exposed TUI backend reduces maintenance
 burden, avoids two competing execution structures, and gives users a simpler
 surface: launch the TUI, choose a workspace, enter a task, and run the
-worktree-first SFE flow with `/run`.
+intention-aware SFE flow with `/run`.
 
 ## Current Backend Policy
 
@@ -79,12 +79,15 @@ agent loop. The assistant answer is displayed to the user; diagnostics remain
 sanitized to counts, opaque ids, token estimates, provider call count, and
 disabled capability flags.
 
-The current primary write path is `/run`: it discovers context, routes a
-reduced executor payload, generates a patch, and applies inside an SFE-created
-Git worktree without mandatory router review or diff inspection. The older
-`/patch` -> `/apply-patch` path remains available as an advanced/debug
-router-reviewed boundary. Neither path merges, pushes, creates PRs, runs shell
-commands, or runs tests/lint by default.
+The current primary task path is `/run`: the core execution-mode router first
+chooses `console_output`, `workspace_write`, or `external_action`.
+`console_output` renders a direct answer in the TUI with no worktree or patch.
+`workspace_write` discovers context, routes a reduced executor payload,
+generates a patch, and applies inside an SFE-created Git worktree without
+mandatory router review or diff inspection. `external_action` is recognized but
+not implemented yet. The older `/patch` -> `/apply-patch` path remains
+available as an advanced/debug router-reviewed boundary. These paths do not
+merge, push, create PRs, run shell commands, or run tests/lint by default.
 
 ## Safety Posture
 

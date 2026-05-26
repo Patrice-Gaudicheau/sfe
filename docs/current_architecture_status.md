@@ -14,7 +14,8 @@ development. It should remain CLI/TUI-first for now.
 The canonical TUI backend is `DirectBackend`. It works from an explicit SFE
 contract: selected workspace, protected task, protected instructions, explicit
 context segments, reducibility metadata, local routing diagnostics, an executor
-boundary, and mechanically bounded writes in an isolated worktree.
+boundary, console answers, and mechanically bounded writes in an isolated
+worktree when workspace file changes are selected.
 
 The current canonical TUI workflow is:
 
@@ -23,20 +24,25 @@ The current canonical TUI workflow is:
 /run
 ```
 
-`/run` is the simple user path. It discovers workspace context, builds the
-internal routing/preflight state needed for a reduced executor payload, asks the
-configured executor for a structured patch proposal, applies the proposal inside
-an SFE-created Git worktree, and returns compact safe metadata. It does not
-require human approval, diff inspection, router review, syntax checks, tests, or
-lint before applying inside the worktree.
+`/run` is the simple user path. It first asks the core execution-mode router
+whether the task should produce a console answer, write workspace files, or be
+treated as an outside-workspace action. `console_output` returns a
+natural-language answer with no worktree or patch. `workspace_write` discovers
+workspace context, builds the internal routing/preflight state needed for a
+reduced executor payload, asks the configured executor for a structured patch
+proposal, applies the proposal inside an SFE-created Git worktree, and returns
+compact safe metadata. It does not require human approval, diff inspection,
+router review, syntax checks, tests, or lint before applying inside the
+worktree. `external_action` is recognized but not implemented yet and fails
+cleanly before workspace work starts.
 
-The worktree is the main operational guard. If the selected workspace is already
-inside a Git repository, `/run` uses that repository to create or reuse an
-SFE-owned worktree. If the selected workspace is not yet a Git repository,
-`/run` may initialize a local repository snapshot first, create an initial
-commit, and then continue with the worktree-first flow. It does not configure a
-remote, push, merge, create a PR, or mutate the source branch with the generated
-patch.
+The worktree is the main operational guard for `workspace_write`. If the
+selected workspace is already inside a Git repository, `/run` uses that
+repository to create or reuse an SFE-owned worktree. If the selected workspace
+is not yet a Git repository, `/run` may initialize a local repository snapshot
+first, create an initial commit, and then continue with the isolated worktree
+flow. It does not configure a remote, push, merge, create a PR, or mutate the
+source branch with the generated patch.
 
 Advanced/debug commands remain available for compatibility and inspection:
 
@@ -192,8 +198,9 @@ general token savings, or broad provider behavior.
 ## What Remains Unproven
 
 Before making practical value claims, SFE still needs evidence that the
-canonical `/run` path can repeatedly deliver useful context reduction without
-hurting task correctness.
+canonical `/run` path can repeatedly choose the right execution mode, produce
+useful console answers, and deliver useful context reduction for workspace
+writes without hurting task correctness.
 
 The minimum proof still missing includes:
 
@@ -204,8 +211,9 @@ The minimum proof still missing includes:
   cost;
 - failure reporting for no-match routing, over-selection, under-selection, and
   provider errors;
-- repeated evidence for the `/run` worktree-first flow and the advanced
-  router-reviewed write/worktree flows beyond unit tests and manual validation;
+- repeated evidence for the routed `/run` flow, including console answers and
+  workspace writes, plus the advanced router-reviewed write/worktree flows
+  beyond unit tests and manual validation;
 - stronger evidence for real Responses streaming context replacement before it
   is treated as generally usable;
 - clearer operational guidance for secrets, logs, provider limits, and local

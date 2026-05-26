@@ -40,7 +40,7 @@ def render_help() -> str:
             "  /directory         Show selected workspace directory",
             "  /status            Show current TUI state",
             "  /task <text>       Set the current task",
-            "  /run               Run the task in an isolated worktree",
+            "  /run               Resolve the task via console answer or workspace write",
             "  /context           Show selected context metadata",
             "  /ask               Ask a read-only question using selected context",
             "  /workspace-status  Show original/isolated workspace state",
@@ -179,9 +179,9 @@ def render_status(
             f"  pending patch: {_yes_no(pending_patch_summary is not None)}",
             f"  pending patch files: {_patch_summary_count(pending_patch_summary, 'file_count')}",
             f"  pending patch hunks: {_patch_summary_count(pending_patch_summary, 'hunk_count')}",
-            "  writes enabled: automatic writes disabled; explicit /apply-patch available",
+            "  writes: routed /run workspace_write or explicit /apply-patch only",
             "  shell enabled: no",
-            "  patch application enabled: explicit /apply-patch available",
+            "  patch application: routed /run workspace_write or explicit /apply-patch",
         ]
     )
     return "\n".join(lines)
