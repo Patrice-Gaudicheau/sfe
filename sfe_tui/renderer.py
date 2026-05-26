@@ -300,6 +300,7 @@ def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> s
     summary = result.patch_summary
     session = result.workspace_session
     issue = result.issue
+    execution_mode_decision = result.execution_mode_decision
     worktree_path = (
         safe_workspace_label(session.worktree_path, launch_cwd)
         if session is not None
@@ -308,6 +309,12 @@ def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> s
     lines = [
         "SFE run",
         f"  status: {result.status}",
+        f"  execution mode: {_display_value(execution_mode_decision.execution_mode if execution_mode_decision is not None else None)}",
+        f"  execution-mode router provider: {_display_value(execution_mode_decision.provider_name if execution_mode_decision is not None else None)}",
+        f"  execution-mode router model: {_display_value(execution_mode_decision.model if execution_mode_decision is not None else None)}",
+        f"  execution-mode router calls made: {execution_mode_decision.provider_calls_made if execution_mode_decision is not None else 0}",
+        f"  execution-mode router confidence: {_display_value(execution_mode_decision.confidence if execution_mode_decision is not None else None)}",
+        f"  execution-mode router reason: {_display_value(execution_mode_decision.reason if execution_mode_decision is not None else None)}",
         f"  worktree session: {_display_value(session.session_id if session is not None else None)}",
         f"  worktree path: {_display_value(worktree_path)}",
         f"  worktree created: {_yes_no(result.worktree_created)}",
@@ -347,6 +354,8 @@ def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> s
         )
         if issue.path is not None:
             lines.append(f"  issue path: {issue.path}")
+    if result.console_output:
+        lines.extend(["SFE console output", result.console_output])
     lines.extend(
         [
             "  router review: not run",

@@ -15,6 +15,7 @@ from sfe.discovery import (
     load_discovered_context,
 )
 from sfe.discovery_router import DiscoveryRouter
+from sfe.execution_mode_router import ExecutionModeRouter
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
     ParsedPatch,
@@ -113,6 +114,7 @@ class SfeTuiApp:
         cwd: Path | None = None,
         backend: BackendAdapter | None = None,
         discovery_router: DiscoveryRouter | None = None,
+        execution_mode_router: ExecutionModeRouter | None = None,
         patch_json_repairer: PatchJsonRepairer | None = None,
         patch_reviewer: PatchReviewer | None = None,
         workspace_manager: WorkspaceManager | None = None,
@@ -128,6 +130,7 @@ class SfeTuiApp:
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend or backend_by_name("direct")
         self.discovery_router = discovery_router
+        self.execution_mode_router = execution_mode_router
         self.patch_json_repairer = patch_json_repairer or create_tui_patch_json_repairer()
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
@@ -665,6 +668,7 @@ class SfeTuiApp:
             backend=self.backend,
             workspace_manager=self.workspace_manager,
             discovery_router=self.discovery_router,
+            execution_mode_router=self.execution_mode_router,
             patch_json_repairer=self.patch_json_repairer,
         )
         result = pipeline.run(

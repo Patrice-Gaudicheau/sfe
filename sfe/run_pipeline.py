@@ -18,6 +18,14 @@ from sfe.discovery import (
     load_discovered_context,
 )
 from sfe.discovery_router import DiscoveryRouter
+from sfe.execution_mode_router import (
+    EXECUTION_MODE_CONSOLE_OUTPUT,
+    EXECUTION_MODE_WORKSPACE_WRITE,
+    ExecutionModeDecision,
+    ExecutionModeRouter,
+    ExecutionModeRouterError,
+    create_configured_execution_mode_router,
+)
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
@@ -114,6 +122,8 @@ class RunPatchProposal:
 class RunResult:
     status: str
     issue: RunIssue | None = None
+    execution_mode_decision: ExecutionModeDecision | None = None
+    console_output: str | None = None
     workspace_session: WorkspaceSession | None = None
     active_workspace: Path | None = None
     worktree_created: bool = False
@@ -219,6 +229,7 @@ class RunPipeline:
         backend: BackendAdapter,
         workspace_manager: WorkspaceManager | None = None,
         discovery_router: DiscoveryRouter | None = None,
+        execution_mode_router: ExecutionModeRouter | None = None,
         patch_json_repairer: PatchJsonRepairer | None = None,
         git_preparer: GitWorkspacePreparer | None = None,
     ) -> None:
@@ -227,6 +238,9 @@ class RunPipeline:
             GitWorktreeBackend()
         )
         self.discovery_router = discovery_router
+        self.execution_mode_router = (
+            execution_mode_router or create_configured_execution_mode_router()
+        )
         self.patch_json_repairer = patch_json_repairer
         self.git_preparer = git_preparer or GitWorkspacePreparer()
 
@@ -236,12 +250,45 @@ class RunPipeline:
         if not request.task.strip():
             return _failed("task", "missing_task")
 
+        try:
+            execution_mode_decision = self.execution_mode_router.decide(
+                task=request.task,
+            )
+        except ExecutionModeRouterError as exc:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue("execution_mode_routing", exc.category),
+                warnings=_base_warnings(),
+            )
+
+        if execution_mode_decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT:
+            return RunResult(
+                status=RUN_STATUS_COMPLETED,
+                execution_mode_decision=execution_mode_decision,
+                console_output=(
+                    "console_output selected; answer generation is not implemented "
+                    "in this slice. No workspace write was attempted."
+                ),
+                warnings=("console_output_placeholder",),
+            )
+        if execution_mode_decision.execution_mode != EXECUTION_MODE_WORKSPACE_WRITE:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue(
+                    "execution_mode_routing",
+                    "invalid_execution_mode",
+                ),
+                execution_mode_decision=execution_mode_decision,
+                warnings=_base_warnings(),
+            )
+
         git_preparation = self._prepare_git_workspace(request)
         if not git_preparation.ok:
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=git_preparation.issue
                 or RunIssue("git_auto_init", "git_preparation_failed"),
+                execution_mode_decision=execution_mode_decision,
                 warnings=_base_warnings(),
                 git_auto_init=git_preparation.auto_initialized,
                 git_initial_commit_hash=git_preparation.initial_commit_hash,
@@ -250,7 +297,13 @@ class RunPipeline:
 
         session_result = self._ensure_worktree(request)
         if isinstance(session_result, RunResult):
-            return _with_git_preparation(session_result, git_preparation)
+            return _with_git_preparation(
+                replace(
+                    session_result,
+                    execution_mode_decision=execution_mode_decision,
+                ),
+                git_preparation,
+            )
         session, active_workspace, created = session_result
 
         discovery_result = discover_workspace_context(
@@ -277,6 +330,7 @@ class RunPipeline:
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=RunIssue("routing", "no_selected_context"),
+                execution_mode_decision=execution_mode_decision,
                 workspace_session=session,
                 active_workspace=active_workspace,
                 worktree_created=created,
@@ -297,6 +351,7 @@ class RunPipeline:
                     "patch_generation",
                     patch_result.error_category or "invalid_response",
                 ),
+                execution_mode_decision=execution_mode_decision,
                 workspace_session=session,
                 active_workspace=active_workspace,
                 worktree_created=created,
@@ -316,6 +371,7 @@ class RunPipeline:
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=proposal,
+                execution_mode_decision=execution_mode_decision,
                 workspace_session=session,
                 active_workspace=active_workspace,
                 worktree_created=created,
@@ -343,6 +399,7 @@ class RunPipeline:
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
             )
 
         promotion_baseline = _capture_promotion_baseline(
@@ -362,6 +419,7 @@ class RunPipeline:
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
                 patch_applied=False,
             )
 
@@ -378,6 +436,7 @@ class RunPipeline:
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
             )
 
         status_result = self.workspace_manager.status(session)
@@ -397,6 +456,7 @@ class RunPipeline:
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
                 patch_applied=True,
                 patch_summary=patch_summary,
                 changed_files=changed_files,
@@ -404,6 +464,7 @@ class RunPipeline:
             )
         return RunResult(
             status=RUN_STATUS_COMPLETED,
+            execution_mode_decision=execution_mode_decision,
             workspace_session=session,
             active_workspace=active_workspace,
             worktree_created=created,
@@ -549,10 +610,12 @@ def _patch_failed_result(
     proposal: RunPatchProposal,
     selected_source_refs: tuple[str, ...],
     git_preparation: GitPreparationResult,
+    execution_mode_decision: ExecutionModeDecision,
 ) -> RunResult:
     return RunResult(
         status=RUN_STATUS_FAILED,
         issue=_run_issue_from_patch(issue, default_reason="patch_not_applicable"),
+        execution_mode_decision=execution_mode_decision,
         workspace_session=session,
         active_workspace=active_workspace,
         worktree_created=worktree_created,
@@ -583,6 +646,7 @@ def _promotion_failed_result(
     proposal: RunPatchProposal,
     selected_source_refs: tuple[str, ...],
     git_preparation: GitPreparationResult,
+    execution_mode_decision: ExecutionModeDecision,
     patch_applied: bool,
     patch_summary: PatchSummary | None = None,
     changed_files: tuple[str, ...] = (),
@@ -591,6 +655,7 @@ def _promotion_failed_result(
     return RunResult(
         status=RUN_STATUS_FAILED,
         issue=issue,
+        execution_mode_decision=execution_mode_decision,
         workspace_session=session,
         active_workspace=active_workspace,
         worktree_created=worktree_created,

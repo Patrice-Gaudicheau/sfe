@@ -14,6 +14,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sfe.discovery import discover_workspace_context
 from sfe.discovery_router import DiscoveryRouterSelection
+from sfe.execution_mode_router import (
+    EXECUTION_MODE_CONSOLE_OUTPUT,
+    EXECUTION_MODE_WORKSPACE_WRITE,
+    ExecutionModeDecision,
+    ExecutionModeRouterError,
+)
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.run_pipeline import (
     RUN_STATUS_COMPLETED,
@@ -69,6 +75,41 @@ class FakeDiscoveryRouter:
         )
 
 
+class FakeExecutionModeRouter:
+    provider_name = "fake-execution-mode-router"
+    model = "fake-execution-mode-model"
+
+    def __init__(
+        self,
+        execution_mode: str = EXECUTION_MODE_WORKSPACE_WRITE,
+    ) -> None:
+        self.execution_mode = execution_mode
+        self.calls: list[dict[str, object]] = []
+
+    def decide(self, *, task: str) -> ExecutionModeDecision:
+        self.calls.append({"task": task})
+        return ExecutionModeDecision(
+            execution_mode=self.execution_mode,
+            reason=f"fake selected {self.execution_mode}",
+            confidence=0.87,
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
+        )
+
+
+class FailingExecutionModeRouter:
+    provider_name = "failing-execution-mode-router"
+    model = "failing-execution-mode-model"
+
+    def decide(self, *, task: str) -> ExecutionModeDecision:
+        del task
+        raise ExecutionModeRouterError(
+            "invalid_execution_mode_router_response",
+            "simulated invalid routing response",
+        )
+
+
 class FakeInput:
     def __init__(self, values: list[str]) -> None:
         self.values = list(values)
@@ -113,6 +154,70 @@ def test_run_pipeline_refuses_without_workspace() -> None:
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.reason == "workspace_not_selected"
+
+
+def test_run_pipeline_console_output_returns_before_worktree_or_patch(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor()
+    router = FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT)
+
+    result = _pipeline(
+        executor=executor,
+        execution_mode_router=router,
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Connais le Framework PHP intitulé Symfony ?",
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.execution_mode_decision is not None
+    assert result.execution_mode_decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
+    assert result.console_output is not None
+    assert result.workspace_session is None
+    assert result.worktree_created is False
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert executor.patch_calls == []
+    assert router.calls == [{"task": "Connais le Framework PHP intitulé Symfony ?"}]
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+
+def test_run_pipeline_execution_mode_failure_returns_before_worktree(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor()
+
+    result = _pipeline(
+        executor=executor,
+        execution_mode_router=FailingExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Patch context",
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "execution_mode_routing"
+    assert result.issue.reason == "invalid_execution_mode_router_response"
+    assert result.workspace_session is None
+    assert result.worktree_created is False
+    assert result.patch_generated is False
+    assert executor.patch_calls == []
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
 
 
 def test_run_pipeline_creates_worktree_applies_patch_and_promotes(tmp_path: Path) -> None:
@@ -474,6 +579,7 @@ def test_tui_run_uses_pipeline_without_patch_reviewer(tmp_path: Path) -> None:
         cwd=repo,
         backend=DirectBackend(executor=FakeExecutor()),
         discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
         patch_reviewer=ExplodingReviewer(),
     )
 
@@ -496,16 +602,55 @@ def test_tui_run_uses_pipeline_without_patch_reviewer(tmp_path: Path) -> None:
     assert app.workspace_manager.cleanup(app.workspace_session).cleaned is True
 
 
+def test_tui_run_renders_console_output_without_worktree(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run", "/quit"]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        patch_reviewer=ExplodingReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE run" in rendered
+    assert "status: completed" in rendered
+    assert "execution mode: console_output" in rendered
+    assert "worktree created: no" in rendered
+    assert "patch generated: no" in rendered
+    assert "patch applied: no" in rendered
+    assert "SFE console output" in rendered
+    assert "missing_diff_header" not in rendered
+    assert executor.patch_calls == []
+    assert app.workspace_session is None
+    assert not (workspace / ".git").exists()
+    assert not (workspace / ".sfe-worktrees").exists()
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+
 def _pipeline(
     *,
     workspace_manager: WorkspaceManager | None = None,
     executor: FakeExecutor | None = None,
+    execution_mode_router: object | None = None,
     git_preparer: object | None = None,
 ) -> RunPipeline:
     return RunPipeline(
         backend=DirectBackend(executor=executor or FakeExecutor()),
         workspace_manager=workspace_manager or _manager(),
         discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=execution_mode_router or FakeExecutionModeRouter(),
         git_preparer=git_preparer,
     )
 
