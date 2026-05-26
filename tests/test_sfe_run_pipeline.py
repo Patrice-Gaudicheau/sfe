@@ -12,9 +12,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from sfe.discovery import discover_workspace_context
 from sfe.discovery_router import DiscoveryRouterSelection
 from sfe.git_worktree_backend import GitWorktreeBackend
-from sfe.run_pipeline import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED, RunPipeline, RunRequest
+from sfe.run_pipeline import (
+    RUN_STATUS_COMPLETED,
+    RUN_STATUS_FAILED,
+    GitPreparationResult,
+    RunIssue,
+    RunPipeline,
+    RunRequest,
+)
 from sfe.workspace_isolation import WorkspaceIsolationPolicy, WorkspaceManager
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import DirectBackend
@@ -82,6 +90,15 @@ class ExplodingReviewer:
         raise AssertionError("router review must not run for /run")
 
 
+class FailingGitPreparer:
+    def prepare(self, workspace_root: Path) -> GitPreparationResult:
+        del workspace_root
+        return GitPreparationResult(
+            ok=False,
+            issue=RunIssue("git_auto_init", "simulated_git_prepare_failure"),
+        )
+
+
 def test_run_pipeline_refuses_without_task(tmp_path: Path) -> None:
     result = _pipeline().run(RunRequest(workspace_root=tmp_path, task=""))
 
@@ -114,6 +131,8 @@ def test_run_pipeline_creates_worktree_and_applies_patch_only_there(tmp_path: Pa
     assert result.status == RUN_STATUS_COMPLETED
     assert result.workspace_session is not None
     assert result.worktree_created is True
+    assert result.git_auto_init is False
+    assert result.git_initial_commit_hash is None
     assert result.patch_generated is True
     assert result.patch_applied is True
     assert result.changed_files == ("context.txt",)
@@ -125,6 +144,75 @@ def test_run_pipeline_creates_worktree_and_applies_patch_only_there(tmp_path: Pa
     ) == "new context\n"
 
     assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+    (workspace / ".sfe-worktrees").mkdir()
+    (workspace / ".sfe-worktrees" / "stale.txt").write_text("ignore me\n", encoding="utf-8")
+    manager = _manager()
+
+    result = _pipeline(workspace_manager=manager).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.git_auto_init is True
+    assert result.git_initial_commit_hash is not None
+    assert (workspace / ".git").is_dir()
+    assert _git(workspace, "branch", "--show-current").stdout.strip() == "main"
+    assert _git(workspace, "remote", "-v").stdout.strip() == ""
+    assert _git(workspace, "status", "--short").stdout.strip() == ""
+    assert ".sfe-worktrees/stale.txt" not in _git(workspace, "ls-files").stdout
+    assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert result.workspace_session is not None
+    assert (result.workspace_session.worktree_path / "context.txt").read_text(
+        encoding="utf-8"
+    ) == "new context\n"
+    assert result.changed_files == ("context.txt",)
+
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_discover_does_not_auto_initialize_non_git_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+
+    result = discover_workspace_context(
+        workspace_root=workspace,
+        task="Patch context",
+        router=FakeDiscoveryRouter(),
+    )
+
+    assert result.workspace_root_present is True
+    assert result.candidate_count == 1
+    assert not (workspace / ".git").exists()
+
+
+def test_run_pipeline_reports_git_preparation_failure(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "context.txt").write_text("old context\n", encoding="utf-8")
+
+    result = _pipeline(git_preparer=FailingGitPreparer()).run(
+        RunRequest(workspace_root=workspace, task="Patch context")
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "git_auto_init"
+    assert result.issue.reason == "simulated_git_prepare_failure"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
 
 
 def test_run_pipeline_reuses_active_worktree(tmp_path: Path) -> None:
@@ -300,11 +388,13 @@ def _pipeline(
     *,
     workspace_manager: WorkspaceManager | None = None,
     executor: FakeExecutor | None = None,
+    git_preparer: object | None = None,
 ) -> RunPipeline:
     return RunPipeline(
         backend=DirectBackend(executor=executor or FakeExecutor()),
         workspace_manager=workspace_manager or _manager(),
         discovery_router=FakeDiscoveryRouter(),
+        git_preparer=git_preparer,
     )
 
 

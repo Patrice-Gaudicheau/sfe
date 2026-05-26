@@ -7,6 +7,7 @@ an isolated worktree, and return compact structured state.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -58,6 +59,15 @@ class RunIssue:
 
 
 @dataclass(frozen=True)
+class GitPreparationResult:
+    ok: bool
+    auto_initialized: bool = False
+    initial_commit_hash: str | None = None
+    issue: RunIssue | None = None
+    warning: str | None = None
+
+
+@dataclass(frozen=True)
 class RunRequest:
     workspace_root: Path | None
     task: str
@@ -96,6 +106,9 @@ class RunResult:
     selected_source_refs: tuple[str, ...] = ()
     executor_provider: str | None = None
     warnings: tuple[str, ...] = ()
+    git_auto_init: bool = False
+    git_initial_commit_hash: str | None = None
+    git_init_warning: str | None = None
 
 
 class PatchJsonRepairer(Protocol):
@@ -106,6 +119,74 @@ class PatchJsonRepairer(Protocol):
         ...
 
 
+class GitWorkspacePreparer:
+    def prepare(self, workspace_root: Path) -> GitPreparationResult:
+        workspace = workspace_root.expanduser().resolve()
+        if not workspace.exists() or not workspace.is_dir():
+            return GitPreparationResult(
+                ok=False,
+                issue=RunIssue("invalid_workspace", "workspace_not_directory"),
+            )
+        existing = _git(workspace, "rev-parse", "--show-toplevel")
+        if existing.returncode == 0:
+            return GitPreparationResult(ok=True)
+
+        init = _git(workspace, "init", "-b", "main")
+        if init.returncode != 0:
+            return GitPreparationResult(
+                ok=False,
+                issue=RunIssue("git_auto_init", "git_init_failed"),
+            )
+        if not _ensure_git_info_exclude(workspace, ".sfe-worktrees/"):
+            return GitPreparationResult(
+                ok=False,
+                auto_initialized=True,
+                issue=RunIssue("git_auto_init", "git_exclude_update_failed"),
+            )
+        add = _git(
+            workspace,
+            "add",
+            "--all",
+            "--",
+            ".",
+        )
+        if add.returncode != 0:
+            return GitPreparationResult(
+                ok=False,
+                auto_initialized=True,
+                issue=RunIssue("git_auto_init", "git_add_failed"),
+            )
+        commit = _git(
+            workspace,
+            "-c",
+            "user.name=SFE",
+            "-c",
+            "user.email=sfe@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Initial SFE workspace snapshot",
+        )
+        if commit.returncode != 0:
+            return GitPreparationResult(
+                ok=False,
+                auto_initialized=True,
+                issue=RunIssue("git_auto_init", "git_initial_commit_failed"),
+            )
+        head = _git(workspace, "rev-parse", "--short", "HEAD")
+        if head.returncode != 0:
+            return GitPreparationResult(
+                ok=False,
+                auto_initialized=True,
+                issue=RunIssue("git_auto_init", "git_initial_commit_hash_failed"),
+            )
+        return GitPreparationResult(
+            ok=True,
+            auto_initialized=True,
+            initial_commit_hash=head.stdout.strip() or None,
+        )
+
+
 class RunPipeline:
     def __init__(
         self,
@@ -114,6 +195,7 @@ class RunPipeline:
         workspace_manager: WorkspaceManager | None = None,
         discovery_router: DiscoveryRouter | None = None,
         patch_json_repairer: PatchJsonRepairer | None = None,
+        git_preparer: GitWorkspacePreparer | None = None,
     ) -> None:
         self.backend = backend
         self.workspace_manager = workspace_manager or WorkspaceManager(
@@ -121,6 +203,7 @@ class RunPipeline:
         )
         self.discovery_router = discovery_router
         self.patch_json_repairer = patch_json_repairer
+        self.git_preparer = git_preparer or GitWorkspacePreparer()
 
     def run(self, request: RunRequest) -> RunResult:
         if request.workspace_root is None:
@@ -128,9 +211,21 @@ class RunPipeline:
         if not request.task.strip():
             return _failed("task", "missing_task")
 
+        git_preparation = self._prepare_git_workspace(request)
+        if not git_preparation.ok:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=git_preparation.issue
+                or RunIssue("git_auto_init", "git_preparation_failed"),
+                warnings=_base_warnings(),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+            )
+
         session_result = self._ensure_worktree(request)
         if isinstance(session_result, RunResult):
-            return session_result
+            return _with_git_preparation(session_result, git_preparation)
         session, active_workspace, created = session_result
 
         discovery_result = discover_workspace_context(
@@ -164,6 +259,9 @@ class RunPipeline:
                 dry_run_result=dry_run_result,
                 selected_source_refs=selected_source_refs,
                 warnings=_base_warnings(),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
             )
 
         patch_result = self.backend.patch(contract)
@@ -183,6 +281,9 @@ class RunPipeline:
                 selected_source_refs=selected_source_refs,
                 executor_provider=_executor_provider(patch_result),
                 warnings=_base_warnings(),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
             )
 
         proposal = self._parse_patch_response(active_workspace, patch_result)
@@ -199,6 +300,9 @@ class RunPipeline:
                 selected_source_refs=selected_source_refs,
                 executor_provider=_executor_provider(patch_result),
                 warnings=_base_warnings(),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
             )
 
         guard_issue = validate_patch_paths(active_workspace, proposal.paths)
@@ -213,6 +317,7 @@ class RunPipeline:
                 patch_result=patch_result,
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
             )
 
         apply_result = _apply_run_patch(active_workspace, proposal.proposal)
@@ -227,6 +332,7 @@ class RunPipeline:
                 patch_result=patch_result,
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
             )
 
         status_result = self.workspace_manager.status(session)
@@ -246,7 +352,15 @@ class RunPipeline:
             selected_source_refs=selected_source_refs,
             executor_provider=_executor_provider(patch_result),
             warnings=_warnings_for_summary(apply_result.summary or proposal.summary),
+            git_auto_init=git_preparation.auto_initialized,
+            git_initial_commit_hash=git_preparation.initial_commit_hash,
+            git_init_warning=git_preparation.warning,
         )
+
+    def _prepare_git_workspace(self, request: RunRequest) -> GitPreparationResult:
+        if request.workspace_session is not None:
+            return GitPreparationResult(ok=True)
+        return self.git_preparer.prepare(request.workspace_root)
 
     def _ensure_worktree(
         self,
@@ -366,6 +480,7 @@ def _patch_failed_result(
     patch_result: BackendResult,
     proposal: RunPatchProposal,
     selected_source_refs: tuple[str, ...],
+    git_preparation: GitPreparationResult,
 ) -> RunResult:
     return RunResult(
         status=RUN_STATUS_FAILED,
@@ -382,6 +497,9 @@ def _patch_failed_result(
         selected_source_refs=selected_source_refs,
         executor_provider=_executor_provider(patch_result),
         warnings=_warnings_for_summary(proposal.summary),
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
     )
 
 
@@ -390,6 +508,18 @@ def _failed(category: str, reason: str) -> RunResult:
         status=RUN_STATUS_FAILED,
         issue=RunIssue(category, reason),
         warnings=_base_warnings(),
+    )
+
+
+def _with_git_preparation(
+    result: RunResult,
+    git_preparation: GitPreparationResult,
+) -> RunResult:
+    return replace(
+        result,
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
     )
 
 
@@ -493,3 +623,27 @@ def _base_warnings() -> tuple[str, ...]:
 def _is_sensitive_path(path: str) -> bool:
     parts = {part.lower() for part in Path(path).parts}
     return bool(parts & {".env", ".ssh", "secrets", "secret"})
+
+
+def _ensure_git_info_exclude(workspace: Path, pattern: str) -> bool:
+    exclude_path = workspace / ".git" / "info" / "exclude"
+    try:
+        existing = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+        if pattern in existing.splitlines():
+            return True
+        suffix = "" if not existing or existing.endswith("\n") else "\n"
+        exclude_path.write_text(f"{existing}{suffix}{pattern}\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def _git(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=workspace,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
