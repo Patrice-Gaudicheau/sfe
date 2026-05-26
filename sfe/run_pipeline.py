@@ -10,7 +10,6 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
 
 from sfe.discovery import (
     DiscoveryResult,
@@ -46,6 +45,10 @@ from sfe.patching import (
     validate_patch_paths,
     validate_patch_targets,
 )
+from sfe.patch_json_repair import (
+    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
+    PatchJsonRepairer,
+)
 from sfe.workspace_isolation import (
     WorkspaceIsolationPolicy,
     WorkspaceIssue,
@@ -53,7 +56,6 @@ from sfe.workspace_isolation import (
     WorkspaceSession,
     WorkspaceStatusResult,
 )
-from sfe_tui.patch_json_repair import PATCH_JSON_REPAIR_MAX_INPUT_CHARS
 
 
 RUN_STATUS_COMPLETED = "completed"
@@ -145,14 +147,6 @@ class RunResult:
     promotion_applied: bool = False
     promoted_files: tuple[str, ...] = ()
     promotion_issue: RunIssue | None = None
-
-
-class PatchJsonRepairer(Protocol):
-    provider_name: str | None
-    model: str | None
-
-    def repair(self, *, raw_response: str, parse_error: str) -> object:
-        ...
 
 
 class GitWorkspacePreparer:

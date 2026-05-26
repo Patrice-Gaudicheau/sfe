@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping
 
 from providers.alibaba import DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MODEL
 from providers.anthropic import DEFAULT_ROUTER_MODEL as DEFAULT_ANTHROPIC_ROUTER_MODEL
 from providers.openai_api import DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL
+from sfe.patch_json_repair import (
+    PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
+    PatchJsonRepairer,
+    PatchJsonRepairResult,
+)
 from sfe.router_review import (
     DEFAULT_LEMONADE_ROUTER_MODEL,
     call_provider_chat,
@@ -20,7 +24,6 @@ from sfe.router_review import (
 from sfe.provider_config import resolve_sfe_provider
 
 
-PATCH_JSON_REPAIR_MAX_INPUT_CHARS = 120_000
 PATCH_JSON_REPAIR_MAX_OUTPUT_TOKENS = 12_000
 PATCH_JSON_REPAIR_SYSTEM_INSTRUCTION = (
     "You are a JSON repairer, not a code generator. Repair only serialization "
@@ -32,27 +35,6 @@ PATCH_JSON_REPAIR_SYSTEM_INSTRUCTION = (
     "trailing commas when necessary. Return only one strict JSON object. No "
     "Markdown. No comments. No text before or after the JSON."
 )
-
-
-@dataclass(frozen=True)
-class PatchJsonRepairResult:
-    repaired_text: str | None
-    error_category: str | None = None
-    provider_name: str | None = None
-    model: str | None = None
-
-
-class PatchJsonRepairer(Protocol):
-    provider_name: str | None
-    model: str | None
-
-    def repair(
-        self,
-        *,
-        raw_response: str,
-        parse_error: str,
-    ) -> PatchJsonRepairResult:
-        ...
 
 
 class DisabledPatchJsonRepairer:
