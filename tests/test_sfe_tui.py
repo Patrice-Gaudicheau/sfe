@@ -202,6 +202,47 @@ class FakeExecutor:
         return self.patch_response
 
 
+class RecordingActivityIndicator:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.running = False
+
+    def start(self) -> None:
+        self.running = True
+        self.events.append("activity:start")
+
+    def stop(self) -> None:
+        self.events.append("activity:stop")
+        self.running = False
+
+
+class RecordingActivityFactory:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.instances: list[RecordingActivityIndicator] = []
+
+    def __call__(self) -> RecordingActivityIndicator:
+        indicator = RecordingActivityIndicator(self.events)
+        self.instances.append(indicator)
+        return indicator
+
+
+class EventRecordingExecutor(FakeExecutor):
+    def __init__(
+        self,
+        events: list[str],
+        response: ExecutorResponse | None = None,
+    ) -> None:
+        super().__init__(response=response)
+        self.events = events
+
+    def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        self.events.append("backend:start")
+        result = super().answer_console(executor_payload)
+        self.events.append("backend:complete")
+        return result
+
+
 class FakeProvider:
     def __init__(
         self,
@@ -3727,6 +3768,154 @@ def test_patch_apply_after_isolate_writes_only_to_worktree(tmp_path) -> None:
 
     cleanup = app.workspace_manager.cleanup(session)
     assert cleanup.cleaned is True
+
+
+def test_tui_run_starts_activity_indicator_before_backend_completion(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[str] = []
+    activity_factory = RecordingActivityFactory(events)
+    executor = EventRecordingExecutor(
+        events,
+        response=ExecutorResponse(
+            answer="done",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Answer directly", "/run", "/quit"]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        activity_indicator_factory=activity_factory,
+    )
+
+    assert app.run() == 0
+    assert events.index("activity:start") < events.index("backend:complete")
+
+
+def test_tui_run_stops_activity_indicator_after_success(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[str] = []
+    activity_factory = RecordingActivityFactory(events)
+    executor = EventRecordingExecutor(
+        events,
+        response=ExecutorResponse(
+            answer="done",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Answer directly", "/run", "/quit"]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        activity_indicator_factory=activity_factory,
+    )
+
+    assert app.run() == 0
+    assert events.index("backend:complete") < events.index("activity:stop")
+    assert activity_factory.instances[0].running is False
+    assert output[-1] == "done"
+
+
+def test_tui_run_stops_activity_indicator_after_backend_failure(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[str] = []
+    activity_factory = RecordingActivityFactory(events)
+    executor = EventRecordingExecutor(
+        events,
+        response=ExecutorResponse(
+            answer=None,
+            error_category="provider_failed",
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Answer directly", "/run", "/quit"]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        activity_indicator_factory=activity_factory,
+    )
+
+    assert app.run() == 0
+    assert events.index("backend:complete") < events.index("activity:stop")
+    assert activity_factory.instances[0].running is False
+    assert "status: failed" in output[-1]
+    assert "issue reason: provider_failed" in output[-1]
+
+
+def test_tui_run_stops_activity_indicator_after_backend_exception(tmp_path) -> None:
+    class RaisingExecutor(FakeExecutor):
+        def answer_console(
+            self,
+            executor_payload: dict[str, object],
+        ) -> ExecutorResponse:
+            del executor_payload
+            raise RuntimeError("provider exploded")
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[str] = []
+    activity_factory = RecordingActivityFactory(events)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Answer directly", "/run", "/quit"]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=RaisingExecutor()),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        activity_indicator_factory=activity_factory,
+    )
+
+    with pytest.raises(RuntimeError, match="provider exploded"):
+        app.run()
+    assert events == ["activity:start", "activity:stop"]
+    assert activity_factory.instances[0].running is False
+
+
+def test_tui_run_noninteractive_default_does_not_render_activity_output(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run", "/quit"]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE is working" not in rendered
+    assert output[-1] == "Symfony is a PHP framework."
 
 
 def test_tui_run_console_output_renders_only_answer(tmp_path) -> None:

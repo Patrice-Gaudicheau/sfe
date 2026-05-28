@@ -60,6 +60,7 @@ from .backends import (
     backend_by_name,
     patch_error_result,
 )
+from .activity import ActivityIndicator, TerminalActivityIndicator
 from .input import TerminalInput, is_interactive
 from .file_edits import (
     FileReplacementProposal,
@@ -80,6 +81,7 @@ from . import renderer
 
 
 OutputFunc = Callable[[str], None]
+ActivityIndicatorFactory = Callable[[], ActivityIndicator]
 
 
 def _default_color_enabled() -> bool:
@@ -122,6 +124,7 @@ class SfeTuiApp:
         workspace_manager: WorkspaceManager | None = None,
         workspace_reviewer: WorkspaceReviewer | None = None,
         color_enabled: bool | None = None,
+        activity_indicator_factory: ActivityIndicatorFactory | None = None,
     ) -> None:
         self.input_provider = input_provider or TerminalInput()
         self.color_enabled = (
@@ -137,6 +140,11 @@ class SfeTuiApp:
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
         self.workspace_reviewer = workspace_reviewer or create_workspace_reviewer()
+        self.activity_indicator_factory = (
+            activity_indicator_factory
+            if activity_indicator_factory is not None
+            else TerminalActivityIndicator
+        )
         self.workspace_root: Path | None = None
         self.workspace_session: WorkspaceSession | None = None
         self.context_files: list[ContextLoadResult] = []
@@ -676,13 +684,18 @@ class SfeTuiApp:
             execution_mode_router=self.execution_mode_router,
             patch_json_repairer=self.patch_json_repairer,
         )
-        result = pipeline.run(
-            RunRequest(
-                workspace_root=self.workspace_root,
-                task=self.task,
-                workspace_session=self.workspace_session,
+        activity = self.activity_indicator_factory()
+        activity.start()
+        try:
+            result = pipeline.run(
+                RunRequest(
+                    workspace_root=self.workspace_root,
+                    task=self.task,
+                    workspace_session=self.workspace_session,
+                )
             )
-        )
+        finally:
+            activity.stop()
         if result.workspace_session is not None:
             self.workspace_session = result.workspace_session
         if result.active_workspace is not None:
