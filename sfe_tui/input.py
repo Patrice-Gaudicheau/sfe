@@ -7,8 +7,57 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
+
+
+SLASH_COMMANDS = (
+    "/help",
+    "/help-advanced",
+    "/directory",
+    "/status",
+    "/task",
+    "/run",
+    "/run-debug",
+    "/context",
+    "/ask",
+    "/workspace-status",
+    "/reset",
+    "/quit",
+    "/exit",
+    "/discover",
+    "/dry-run",
+    "/patch",
+    "/apply-patch",
+    "/isolate",
+    "/worktree-diff",
+    "/review-worktree",
+    "/cleanup-worktree",
+    "/gc-worktrees",
+    "/auto-patch",
+    "/auto-worktree",
+    "/files",
+)
+
+
+class SlashCommandCompleter(Completer):
+    def __init__(self, commands: tuple[str, ...] = SLASH_COMMANDS) -> None:
+        self.commands = commands
+
+    def get_completions(
+        self,
+        document: Document,
+        complete_event: CompleteEvent,
+    ) -> object:
+        del complete_event
+        prefix = document.text_before_cursor
+        if not prefix.startswith("/") or any(char.isspace() for char in prefix):
+            return
+        for command in self.commands:
+            if command.startswith(prefix):
+                yield Completion(command, start_position=-len(prefix))
 
 
 def is_interactive() -> bool:
@@ -52,6 +101,8 @@ def create_session() -> PromptSession:
         key_bindings=_bindings(),
         history=_history(),
         auto_suggest=AutoSuggestFromHistory(),
+        completer=SlashCommandCompleter(),
+        complete_while_typing=False,
         multiline=False,
         enable_history_search=True,
         mouse_support=False,

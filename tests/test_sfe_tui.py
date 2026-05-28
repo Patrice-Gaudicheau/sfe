@@ -11,6 +11,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +58,7 @@ from sfe_tui.executors import (
     READ_ONLY_SYSTEM_INSTRUCTION,
     create_tui_executor,
 )
+from sfe_tui.input import SLASH_COMMANDS, SlashCommandCompleter
 from sfe_tui.patch_review import (
     PATCH_REVIEW_SYSTEM_INSTRUCTION,
     DirectProviderPatchReviewer,
@@ -92,6 +95,35 @@ class FakeInput:
             return default
         value = self.values.pop(0)
         return value if value else default
+
+
+def slash_command_completions(text: str) -> list[str]:
+    completer = SlashCommandCompleter()
+    document = Document(text=text, cursor_position=len(text))
+    event = CompleteEvent(completion_requested=True)
+    return [completion.text for completion in completer.get_completions(document, event)]
+
+
+def test_slash_command_completer_matches_command_prefixes() -> None:
+    assert slash_command_completions("/he") == ["/help", "/help-advanced"]
+    assert slash_command_completions("/help-a") == ["/help-advanced"]
+    assert slash_command_completions("/run-d") == ["/run-debug"]
+    assert slash_command_completions("/worktree-d") == ["/worktree-diff"]
+    assert slash_command_completions("/workspace-s") == ["/workspace-status"]
+
+
+def test_slash_command_completer_prefers_hyphenated_run_debug() -> None:
+    completions = slash_command_completions("/run")
+
+    assert "/run" in completions
+    assert "/run-debug" in completions
+    assert "/run_debug" not in completions
+    assert "/run_debug" not in SLASH_COMMANDS
+
+
+def test_slash_command_completer_ignores_arguments_and_non_commands() -> None:
+    assert slash_command_completions("/task free text") == []
+    assert slash_command_completions("help") == []
 
 
 class FakeExecutor:
