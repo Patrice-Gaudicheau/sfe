@@ -58,7 +58,12 @@ from sfe_tui.executors import (
     READ_ONLY_SYSTEM_INSTRUCTION,
     create_tui_executor,
 )
-from sfe_tui.input import SLASH_COMMANDS, SlashCommandCompleter
+from sfe_tui.input import (
+    SLASH_COMMANDS,
+    SlashCommandCompleter,
+    should_accept_autosuggestion_on_tab,
+    slash_command_completion_available,
+)
 from sfe_tui.patch_review import (
     PATCH_REVIEW_SYSTEM_INSTRUCTION,
     DirectProviderPatchReviewer,
@@ -124,6 +129,44 @@ def test_slash_command_completer_prefers_hyphenated_run_debug() -> None:
 def test_slash_command_completer_ignores_arguments_and_non_commands() -> None:
     assert slash_command_completions("/task free text") == []
     assert slash_command_completions("help") == []
+
+
+def test_tab_autosuggestion_acceptance_preserves_slash_completion_priority() -> None:
+    assert slash_command_completion_available("/run-d")
+    assert not should_accept_autosuggestion_on_tab(
+        "/run-d",
+        completion_active=False,
+        suggestion_available=True,
+    )
+
+
+def test_tab_autosuggestion_acceptance_waits_for_completion_menu() -> None:
+    assert not should_accept_autosuggestion_on_tab(
+        "/run",
+        completion_active=True,
+        suggestion_available=True,
+    )
+
+
+def test_tab_autosuggestion_acceptance_works_for_non_command_text() -> None:
+    assert should_accept_autosuggestion_on_tab(
+        "/task free text",
+        completion_active=False,
+        suggestion_available=True,
+    )
+    assert should_accept_autosuggestion_on_tab(
+        "free text",
+        completion_active=False,
+        suggestion_available=True,
+    )
+
+
+def test_tab_autosuggestion_acceptance_requires_visible_suggestion() -> None:
+    assert not should_accept_autosuggestion_on_tab(
+        "free text",
+        completion_active=False,
+        suggestion_available=False,
+    )
 
 
 class FakeExecutor:
