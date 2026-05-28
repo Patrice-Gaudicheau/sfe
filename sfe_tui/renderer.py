@@ -354,6 +354,35 @@ def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> s
         )
         if issue.path is not None:
             lines.append(f"  issue path: {issue.path}")
+    if result.patch_proposal_diagnostics is not None:
+        diagnostics = result.patch_proposal_diagnostics
+        file_headers = (
+            diagnostics.contains_old_file_header
+            and diagnostics.contains_new_file_header
+        )
+        lines.extend(
+            [
+                f"  patch proposal output length: {diagnostics.raw_output_length}",
+                f"  patch proposal empty: {_yes_no(diagnostics.is_empty)}",
+                "  patch proposal first line: "
+                f"{_display_value(diagnostics.first_non_empty_line)}",
+                "  patch proposal starts with markdown fence: "
+                f"{_yes_no(diagnostics.starts_with_markdown_fence)}",
+                "  patch proposal contains fenced diff: "
+                f"{_yes_no(diagnostics.contains_fenced_diff)}",
+                "  patch proposal contains diff header: "
+                f"{_yes_no(diagnostics.contains_diff_git_header)}",
+                f"  patch proposal contains file headers: {_yes_no(file_headers)}",
+                "  patch proposal contains hunk header: "
+                f"{_yes_no(diagnostics.contains_hunk_header)}",
+                "  patch proposal looks like JSON: "
+                f"{_yes_no(diagnostics.looks_like_json)}",
+                "  patch proposal mentions selected paths: "
+                f"{_format_string_list(list(diagnostics.mentions_selected_paths))}",
+                "  patch proposal looks like plain text: "
+                f"{_yes_no(diagnostics.looks_like_plain_text_or_markdown)}",
+            ]
+        )
     if result.console_output:
         lines.extend(["SFE console output", result.console_output])
     lines.extend(

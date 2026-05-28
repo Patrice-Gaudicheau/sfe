@@ -49,6 +49,10 @@ from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairer,
 )
+from sfe.patch_proposal_diagnostics import (
+    PatchProposalDiagnostics,
+    build_patch_proposal_diagnostics,
+)
 from sfe.workspace_isolation import (
     WorkspaceIsolationPolicy,
     WorkspaceIssue,
@@ -147,6 +151,7 @@ class RunResult:
     promotion_applied: bool = False
     promoted_files: tuple[str, ...] = ()
     promotion_issue: RunIssue | None = None
+    patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
 
 
 class GitWorkspacePreparer:
@@ -361,10 +366,20 @@ class RunPipeline:
                 git_auto_init=git_preparation.auto_initialized,
                 git_initial_commit_hash=git_preparation.initial_commit_hash,
                 git_init_warning=git_preparation.warning,
+                patch_proposal_diagnostics=build_patch_proposal_diagnostics(
+                    patch_result.answer or "",
+                    selected_source_refs=selected_source_refs,
+                ),
             )
 
         proposal = self._parse_patch_response(active_workspace, patch_result)
         if isinstance(proposal, RunIssue):
+            diagnostics = None
+            if proposal.category == "invalid_patch_proposal":
+                diagnostics = build_patch_proposal_diagnostics(
+                    patch_result.answer or "",
+                    selected_source_refs=selected_source_refs,
+                )
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=proposal,
@@ -381,6 +396,7 @@ class RunPipeline:
                 git_auto_init=git_preparation.auto_initialized,
                 git_initial_commit_hash=git_preparation.initial_commit_hash,
                 git_init_warning=git_preparation.warning,
+                patch_proposal_diagnostics=diagnostics,
             )
 
         guard_issue = validate_patch_paths(active_workspace, proposal.paths)

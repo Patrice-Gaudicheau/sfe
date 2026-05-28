@@ -46,8 +46,10 @@ class FakeExecutor:
         console_answer: str | None = None,
         console_error_category: str | None = None,
     ) -> None:
-        self.patch_answer = patch_answer or _replacement_proposal()
-        self.console_answer = console_answer or "Symfony is a PHP framework."
+        self.patch_answer = _replacement_proposal() if patch_answer is None else patch_answer
+        self.console_answer = (
+            "Symfony is a PHP framework." if console_answer is None else console_answer
+        )
         self.console_error_category = console_error_category
         self.console_calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
@@ -692,6 +694,179 @@ def test_run_pipeline_refuses_symlink_escape_from_worktree(tmp_path: Path) -> No
     assert manager.cleanup(created.session).cleaned is True
 
 
+def test_run_pipeline_reports_plain_text_patch_proposal_diagnostics(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    _add_readme(repo)
+    manager = _manager()
+    raw_output = (
+        "# SFE Test 01\n\n"
+        "Short README sentence.\n\n"
+        "## Checks\n\n"
+        "- README.md selected.\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+        discovery_router=FakeDiscoveryRouter(("README.md",)),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Replace README.md with short content",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    diagnostics = result.patch_proposal_diagnostics
+    assert diagnostics is not None
+    assert diagnostics.raw_output_length == len(raw_output)
+    assert diagnostics.is_empty is False
+    assert diagnostics.first_non_empty_line == "# SFE Test 01"
+    assert diagnostics.contains_diff_git_header is False
+    assert diagnostics.contains_hunk_header is False
+    assert diagnostics.looks_like_json is False
+    assert diagnostics.mentions_selected_paths == ("README.md",)
+    assert diagnostics.looks_like_plain_text_or_markdown is True
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_reports_empty_patch_proposal_diagnostics(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(""),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "patch_generation"
+    assert result.issue.reason == "invalid_response"
+    diagnostics = result.patch_proposal_diagnostics
+    assert diagnostics is not None
+    assert diagnostics.raw_output_length == 0
+    assert diagnostics.is_empty is True
+    assert diagnostics.first_non_empty_line is None
+    assert diagnostics.looks_like_plain_text_or_markdown is False
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_reports_fenced_diff_patch_proposal_diagnostics(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = "```diff\n--- a/context.txt\n+++ b/context.txt\n@@ -1 +1 @@\n-old\n+new\n```"
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    diagnostics = result.patch_proposal_diagnostics
+    assert diagnostics is not None
+    assert diagnostics.starts_with_markdown_fence is True
+    assert diagnostics.contains_fenced_diff is True
+    assert diagnostics.contains_diff_git_header is False
+    assert diagnostics.contains_old_file_header is True
+    assert diagnostics.contains_new_file_header is True
+    assert diagnostics.contains_hunk_header is True
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_reports_json_looking_patch_proposal_diagnostics(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    _add_readme(repo)
+    manager = _manager()
+    raw_output = '{"message": "README.md should be updated"}'
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+        discovery_router=FakeDiscoveryRouter(("README.md",)),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Replace README.md with short content",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    diagnostics = result.patch_proposal_diagnostics
+    assert diagnostics is not None
+    assert diagnostics.looks_like_json is True
+    assert diagnostics.mentions_selected_paths == ("README.md",)
+    assert diagnostics.looks_like_plain_text_or_markdown is False
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_renders_invalid_patch_diagnostics_without_full_output(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    _add_readme(repo)
+    manager = _manager()
+    raw_output = "# " + ("SFE Test 01 " * 30) + "\n\nREADME.md content."
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+        discovery_router=FakeDiscoveryRouter(("README.md",)),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Replace README.md with short content",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    rendered = render_run_result(result)
+
+    assert "patch proposal output length:" in rendered
+    assert "patch proposal empty: no" in rendered
+    assert "patch proposal first line: # SFE Test 01" in rendered
+    assert "patch proposal looks like plain text: yes" in rendered
+    assert "patch proposal mentions selected paths: README.md" in rendered
+    assert raw_output not in rendered
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_returns_compact_summary_with_changed_files(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
@@ -892,6 +1067,12 @@ def _init_repo(path: Path) -> Path:
     _git(path, "add", "context.txt")
     _git(path, "commit", "-m", "initial")
     return path
+
+
+def _add_readme(repo: Path) -> None:
+    (repo / "README.md").write_text("old readme\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "add readme")
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

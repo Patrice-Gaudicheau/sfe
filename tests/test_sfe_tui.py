@@ -29,6 +29,10 @@ from sfe.contracts import (
     resolve_workspace,
 )
 from sfe.discovery_router import DiscoveryRouterSelection
+from sfe.execution_mode_router import (
+    EXECUTION_MODE_WORKSPACE_WRITE,
+    ExecutionModeDecision,
+)
 from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairResult,
@@ -169,6 +173,26 @@ class FakeDiscoveryRouter:
         return DiscoveryRouterSelection(
             files_to_inspect=files,
             reason="fake semantic file selection",
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
+        )
+
+
+class FakeExecutionModeRouter:
+    provider_name = "fake-execution-mode-router"
+    model = "fake-execution-mode-model"
+
+    def __init__(self, execution_mode: str = EXECUTION_MODE_WORKSPACE_WRITE) -> None:
+        self.execution_mode = execution_mode
+        self.calls: list[dict[str, object]] = []
+
+    def decide(self, *, task: str) -> ExecutionModeDecision:
+        self.calls.append({"task": task})
+        return ExecutionModeDecision(
+            execution_mode=self.execution_mode,
+            reason=f"fake selected {self.execution_mode}",
+            confidence=0.88,
             provider_name=self.provider_name,
             model=self.model,
             provider_calls_made=1,
@@ -3601,6 +3625,54 @@ def test_patch_apply_after_isolate_writes_only_to_worktree(tmp_path) -> None:
     assert "router decision: OK_APPLY" in rendered
 
     cleanup = app.workspace_manager.cleanup(session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("old readme\n", encoding="utf-8")
+    run_git(repo, "add", "README.md")
+    run_git(repo, "commit", "-m", "add readme")
+    raw_output = (
+        "# SFE Test 01\n\n"
+        "Short README sentence.\n\n"
+        "## Checks\n\n"
+        "- README.md selected.\n"
+    )
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw_output,
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Replace README.md with short content", "/run", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("README.md",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE run" in rendered
+    assert "status: failed" in rendered
+    assert "issue category: invalid_patch_proposal" in rendered
+    assert "issue reason: missing_diff_header" in rendered
+    assert "patch proposal output length:" in rendered
+    assert "patch proposal first line: # SFE Test 01" in rendered
+    assert "patch proposal looks like plain text: yes" in rendered
+    assert "patch proposal mentions selected paths: README.md" in rendered
+    assert raw_output not in rendered
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True
 
 
