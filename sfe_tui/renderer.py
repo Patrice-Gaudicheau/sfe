@@ -54,7 +54,7 @@ def render_advanced_help() -> str:
     return "\n".join(
         [
             "SFE TUI advanced/debug commands:",
-            "  /run_debug         Run task and show full diagnostic report",
+            "  /run-debug         Run task and show full diagnostic report",
             "  /discover          Discover workspace context for the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /patch             Propose a patch without applying it",

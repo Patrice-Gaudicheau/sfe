@@ -260,7 +260,7 @@ class SfeTuiApp:
         if name == "/run":
             self._handle_run(debug=False)
             return False
-        if name == "/run_debug":
+        if name in {"/run-debug", "/run_debug"}:
             self._handle_run(debug=True)
             return False
         if name == "/apply-patch":

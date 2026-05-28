@@ -1271,6 +1271,7 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/status" in rendered
     assert "/context" in rendered
     assert "/run" in rendered
+    assert "/run-debug" not in rendered
     assert "/run_debug" not in rendered
     assert "Resolve the task and show concise output" in rendered
     assert not any(line.strip().startswith("/discover") for line in help_lines)
@@ -1296,7 +1297,8 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert rendered.index("/context") < rendered.index("/ask")
 
     assert "SFE TUI advanced/debug commands:" in advanced
-    assert "/run_debug" in advanced
+    assert "/run-debug" in advanced
+    assert "/run_debug" not in advanced
     assert "Run task and show full diagnostic report" in advanced
     assert "/discover" in advanced
     assert "/dry-run" in advanced
@@ -3683,7 +3685,7 @@ def test_tui_run_debug_console_output_renders_full_report(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(
-            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run_debug", "/quit"]
+            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run-debug", "/quit"]
         ),
         output=output.append,
         cwd=workspace,
@@ -3696,6 +3698,38 @@ def test_tui_run_debug_console_output_renders_full_report(tmp_path) -> None:
     assert "SFE run" in run_output
     assert "execution mode: console_output" in run_output
     assert "execution-mode router provider: fake-execution-mode-router" in run_output
+    assert "SFE console output" in run_output
+    assert "Symfony is a PHP framework." in run_output
+    assert len(executor.console_calls) == 1
+    assert executor.patch_calls == []
+
+
+def test_tui_run_debug_underscore_alias_renders_full_report(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run_debug", "/quit"]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "execution mode: console_output" in run_output
     assert "SFE console output" in run_output
     assert "Symfony is a PHP framework." in run_output
     assert len(executor.console_calls) == 1
@@ -3740,7 +3774,7 @@ def test_tui_run_debug_workspace_write_renders_full_report(tmp_path) -> None:
     executor = FakeExecutor()
     output: list[str] = []
     app = SfeTuiApp(
-        input_provider=FakeInput(["", "/task Patch old context", "/run_debug", "/quit"]),
+        input_provider=FakeInput(["", "/task Patch old context", "/run-debug", "/quit"]),
         output=output.append,
         cwd=repo,
         backend=DirectBackend(executor=executor),
@@ -3859,7 +3893,7 @@ def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> N
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(
-            ["", "/task Replace README.md with short content", "/run_debug", "/quit"]
+            ["", "/task Replace README.md with short content", "/run-debug", "/quit"]
         ),
         output=output.append,
         cwd=repo,
