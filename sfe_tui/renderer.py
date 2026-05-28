@@ -8,7 +8,7 @@ from sfe.contracts import ContextLoadResult, SFEContract
 from sfe.discovery import DiscoveryResult
 from sfe.execution_backend import ExecutionResult
 from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
-from sfe.run_pipeline import RunResult
+from sfe.run_pipeline import RunIssue, RunResult
 from sfe.router_review import JsonReviewDecision
 from sfe.workspace_isolation import (
     WorkspaceCleanupResult,
@@ -40,7 +40,7 @@ def render_help() -> str:
             "  /directory         Show selected workspace directory",
             "  /status            Show current TUI state",
             "  /task <text>       Set the current task",
-            "  /run               Resolve the task via console answer or workspace write",
+            "  /run               Resolve the task and show concise output",
             "  /context           Show selected context metadata",
             "  /ask               Ask a read-only question using selected context",
             "  /workspace-status  Show original/isolated workspace state",
@@ -54,6 +54,7 @@ def render_advanced_help() -> str:
     return "\n".join(
         [
             "SFE TUI advanced/debug commands:",
+            "  /run_debug         Run task and show full diagnostic report",
             "  /discover          Discover workspace context for the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /patch             Propose a patch without applying it",
@@ -294,7 +295,41 @@ def render_worktree_diff(status_result: WorkspaceStatusResult) -> str:
     return "\n".join(lines)
 
 
+def render_run_result_normal(result: RunResult) -> str:
+    if result.console_output:
+        return result.console_output
+
+    execution_mode = _run_execution_mode(result)
+    if execution_mode == "external_action":
+        lines = [
+            "SFE run",
+            f"  status: {result.status}",
+            "  execution mode: external_action",
+            "  external action: not implemented",
+        ]
+        if result.issue is not None:
+            lines.extend(_run_issue_lines(result.issue))
+        return "\n".join(lines)
+
+    summary = result.patch_summary
+    lines = [
+        "SFE run",
+        f"  status: {result.status}",
+        f"  execution mode: {_display_value(execution_mode)}",
+        f"  promoted files: {_format_string_list(list(result.promoted_files))}",
+        f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
+        f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
+    ]
+    if result.issue is not None:
+        lines.extend(_run_issue_lines(result.issue))
+    return "\n".join(lines)
+
+
 def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> str:
+    return render_run_result_debug(result, launch_cwd=launch_cwd)
+
+
+def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None) -> str:
     discovery = result.discovery_result
     dry_run = result.dry_run_result
     summary = result.patch_summary
@@ -395,6 +430,22 @@ def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> s
         ]
     )
     return "\n".join(lines)
+
+
+def _run_execution_mode(result: RunResult) -> str | None:
+    if result.execution_mode_decision is None:
+        return None
+    return result.execution_mode_decision.execution_mode
+
+
+def _run_issue_lines(issue: RunIssue) -> list[str]:
+    lines = [
+        f"  issue category: {issue.category}",
+        f"  issue reason: {issue.reason}",
+    ]
+    if issue.path is not None:
+        lines.append(f"  issue path: {issue.path}")
+    return lines
 
 
 def render_worktree_review_success(decision: JsonReviewDecision) -> str:

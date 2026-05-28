@@ -258,7 +258,10 @@ class SfeTuiApp:
             self._handle_patch()
             return False
         if name == "/run":
-            self._handle_run()
+            self._handle_run(debug=False)
+            return False
+        if name == "/run_debug":
+            self._handle_run(debug=True)
             return False
         if name == "/apply-patch":
             self._handle_apply_patch()
@@ -659,7 +662,7 @@ class SfeTuiApp:
         )
         return pending_patch is not None
 
-    def _handle_run(self) -> bool:
+    def _handle_run(self, *, debug: bool = False) -> bool:
         if self.workspace_root is None:
             self.output(renderer.render_error("workspace_not_selected"))
             return False
@@ -687,7 +690,10 @@ class SfeTuiApp:
         self.discovery_result = result.discovery_result
         self.latest_result = result.patch_result or result.dry_run_result
         self._clear_pending_patch()
-        self.output(renderer.render_run_result(result, launch_cwd=self.cwd))
+        if debug:
+            self.output(renderer.render_run_result_debug(result, launch_cwd=self.cwd))
+        else:
+            self.output(renderer.render_run_result_normal(result))
         return result.status == "completed"
 
     def _handle_apply_patch(self) -> bool:

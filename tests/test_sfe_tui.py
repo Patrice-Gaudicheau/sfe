@@ -30,6 +30,8 @@ from sfe.contracts import (
 )
 from sfe.discovery_router import DiscoveryRouterSelection
 from sfe.execution_mode_router import (
+    EXECUTION_MODE_CONSOLE_OUTPUT,
+    EXECUTION_MODE_EXTERNAL_ACTION,
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
 )
@@ -110,6 +112,11 @@ class FakeExecutor:
         )
         self.calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
+        self.console_calls: list[dict[str, object]] = []
+
+    def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        self.console_calls.append(executor_payload)
+        return self.response
 
     def execute(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.calls.append(executor_payload)
@@ -1264,7 +1271,8 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/status" in rendered
     assert "/context" in rendered
     assert "/run" in rendered
-    assert "Resolve the task via console answer or workspace write" in rendered
+    assert "/run_debug" not in rendered
+    assert "Resolve the task and show concise output" in rendered
     assert not any(line.strip().startswith("/discover") for line in help_lines)
     assert not any(line.strip().startswith("/dry-run") for line in help_lines)
     assert not any(line.strip().startswith("/patch") for line in help_lines)
@@ -1288,6 +1296,8 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert rendered.index("/context") < rendered.index("/ask")
 
     assert "SFE TUI advanced/debug commands:" in advanced
+    assert "/run_debug" in advanced
+    assert "Run task and show full diagnostic report" in advanced
     assert "/discover" in advanced
     assert "/dry-run" in advanced
     assert "/patch" in advanced
@@ -3628,7 +3638,159 @@ def test_patch_apply_after_isolate_writes_only_to_worktree(tmp_path) -> None:
     assert cleanup.cleaned is True
 
 
-def test_tui_run_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
+def test_tui_run_console_output_renders_only_answer(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run", "/quit"]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert run_output == "Symfony is a PHP framework."
+    assert "SFE run" not in run_output
+    assert "SFE console output" not in run_output
+    assert len(executor.console_calls) == 1
+    assert executor.patch_calls == []
+
+
+def test_tui_run_debug_console_output_renders_full_report(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Connais le Framework PHP intitulé Symfony ?", "/run_debug", "/quit"]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "execution mode: console_output" in run_output
+    assert "execution-mode router provider: fake-execution-mode-router" in run_output
+    assert "SFE console output" in run_output
+    assert "Symfony is a PHP framework." in run_output
+    assert len(executor.console_calls) == 1
+    assert executor.patch_calls == []
+
+
+def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/run", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: completed" in run_output
+    assert "execution mode: workspace_write" in run_output
+    assert "promoted files: context.txt" in run_output
+    assert "modified relative paths: context.txt" in run_output
+    assert "created relative paths: none" in run_output
+    assert "execution-mode router provider:" not in run_output
+    assert "worktree path:" not in run_output
+    assert "discovery candidates:" not in run_output
+    assert "warnings:" not in run_output
+    assert "router review: not run" not in run_output
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
+    assert executor.patch_calls
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_debug_workspace_write_renders_full_report(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/run_debug", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: completed" in run_output
+    assert "execution mode: workspace_write" in run_output
+    assert "execution-mode router provider: fake-execution-mode-router" in run_output
+    assert "worktree path:" in run_output
+    assert "discovery candidates:" in run_output
+    assert "patch generated: yes" in run_output
+    assert "promotion: applied" in run_output
+    assert "router review: not run" in run_output
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
+    assert executor.patch_calls
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_external_action_renders_compact_message(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Create a calendar event", "/run", "/quit"]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=FakeExecutor()),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_EXTERNAL_ACTION),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: failed" in run_output
+    assert "execution mode: external_action" in run_output
+    assert "external action: not implemented" in run_output
+    assert "issue category: unsupported_execution_mode" in run_output
+    assert "issue reason: external_action_not_implemented" in run_output
+    assert "execution-mode router provider:" not in run_output
+    assert "worktree path:" not in run_output
+
+
+def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
     run_git(repo, "add", "README.md")
@@ -3661,16 +3823,63 @@ def test_tui_run_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
     )
 
     assert app.run() == 0
-    rendered = "\n".join(output)
-    assert "SFE run" in rendered
-    assert "status: failed" in rendered
-    assert "issue category: invalid_patch_proposal" in rendered
-    assert "issue reason: missing_diff_header" in rendered
-    assert "patch proposal output length:" in rendered
-    assert "patch proposal first line: # SFE Test 01" in rendered
-    assert "patch proposal looks like plain text: yes" in rendered
-    assert "patch proposal mentions selected paths: README.md" in rendered
-    assert raw_output not in rendered
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: failed" in run_output
+    assert "issue category: invalid_patch_proposal" in run_output
+    assert "issue reason: missing_diff_header" in run_output
+    assert "patch proposal output length:" not in run_output
+    assert "patch proposal first line:" not in run_output
+    assert "patch proposal looks like plain text:" not in run_output
+    assert raw_output not in run_output
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("old readme\n", encoding="utf-8")
+    run_git(repo, "add", "README.md")
+    run_git(repo, "commit", "-m", "add readme")
+    raw_output = (
+        "# SFE Test 01\n\n"
+        "Short README sentence.\n\n"
+        "## Checks\n\n"
+        "- README.md selected.\n"
+    )
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw_output,
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Replace README.md with short content", "/run_debug", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("README.md",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        patch_reviewer=FakePatchReviewer(),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: failed" in run_output
+    assert "issue category: invalid_patch_proposal" in run_output
+    assert "issue reason: missing_diff_header" in run_output
+    assert "patch proposal output length:" in run_output
+    assert "patch proposal first line: # SFE Test 01" in run_output
+    assert "patch proposal looks like plain text: yes" in run_output
+    assert "patch proposal mentions selected paths: README.md" in run_output
+    assert raw_output not in run_output
     assert app.workspace_session is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True

@@ -897,7 +897,7 @@ def test_tui_run_is_in_help() -> None:
     rendered = render_help()
 
     assert "/run" in rendered
-    assert "Resolve the task via console answer or workspace write" in rendered
+    assert "Resolve the task and show concise output" in rendered
 
 
 def test_tui_run_uses_pipeline_without_patch_reviewer(tmp_path: Path) -> None:
@@ -917,11 +917,13 @@ def test_tui_run_uses_pipeline_without_patch_reviewer(tmp_path: Path) -> None:
     rendered = "\n".join(output)
     assert "SFE run" in rendered
     assert "status: completed" in rendered
-    assert "patch applied: yes" in rendered
-    assert "promotion: applied" in rendered
     assert "promoted files: context.txt" in rendered
-    assert "router review: not run" in rendered
-    assert "diff: not shown" in rendered
+    assert "modified relative paths: context.txt" in rendered
+    assert "created relative paths: none" in rendered
+    assert "patch applied: yes" not in rendered
+    assert "promotion: applied" not in rendered
+    assert "router review: not run" not in rendered
+    assert "diff: not shown" not in rendered
     assert "diff --git" not in rendered
     assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
     assert app.workspace_session is not None
@@ -953,17 +955,13 @@ def test_tui_run_renders_console_output_without_worktree(
     )
 
     assert app.run() == 0
-    rendered = "\n".join(output)
-    assert "SFE run" in rendered
-    assert "status: completed" in rendered
-    assert "execution mode: console_output" in rendered
-    assert "worktree created: no" in rendered
-    assert "patch generated: no" in rendered
-    assert "patch applied: no" in rendered
-    assert "SFE console output" in rendered
-    assert "Symfony is a PHP framework." in rendered
-    assert "answer generation is not implemented" not in rendered
-    assert "missing_diff_header" not in rendered
+    run_output = output[-1]
+    assert run_output == "Symfony is a PHP framework."
+    assert "SFE run" not in run_output
+    assert "execution mode: console_output" not in run_output
+    assert "SFE console output" not in run_output
+    assert "answer generation is not implemented" not in run_output
+    assert "missing_diff_header" not in run_output
     assert len(executor.console_calls) == 1
     assert executor.patch_calls == []
     assert app.workspace_session is None
@@ -997,11 +995,12 @@ def test_tui_run_renders_external_action_without_worktree(
     assert "SFE run" in rendered
     assert "status: failed" in rendered
     assert "execution mode: external_action" in rendered
+    assert "external action: not implemented" in rendered
     assert "issue category: unsupported_execution_mode" in rendered
     assert "issue reason: external_action_not_implemented" in rendered
-    assert "worktree created: no" in rendered
-    assert "patch generated: no" in rendered
-    assert "patch applied: no" in rendered
+    assert "worktree created: no" not in rendered
+    assert "patch generated: no" not in rendered
+    assert "patch applied: no" not in rendered
     assert executor.patch_calls == []
     assert app.workspace_session is None
     assert not (workspace / ".git").exists()
