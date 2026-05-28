@@ -1574,10 +1574,16 @@ def test_discover_then_dry_run_reloads_full_text_for_routing(tmp_path) -> None:
     assert str(tmp_path.resolve()) not in dry_run_block
 
 
-def test_discover_with_no_candidates_allows_dry_run_but_not_provider_call(
+def test_discover_with_no_candidates_allows_dry_run_and_patch_provider_call(
     tmp_path,
 ) -> None:
-    executor = FakeExecutor()
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=create_file_proposal("README.md"),
+            error_category=None,
+            provider_calls_made=1,
+        )
+    )
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(
@@ -1602,10 +1608,18 @@ def test_discover_with_no_candidates_allows_dry_run_but_not_provider_call(
     assert "SFE dry-run summary" in rendered
     assert "context loaded: no" in rendered
     assert f"fallback reason: {NO_REDUCIBLE_CONTEXT_SEGMENTS}" in rendered
-    assert rendered.count("Error: no_context_loaded") == 2
-    assert "calling provider" not in rendered
+    assert rendered.count("Error: no_context_loaded") == 1
+    assert "calling provider" in rendered
+    assert "pending patch created files: 1" in rendered
+    assert "diff --git a/README.md b/README.md" in rendered
+    assert (
+        "note: empty workspace is valid in DEV patch mode; no existing context to inspect"
+        in rendered
+    )
     assert executor.calls == []
-    assert executor.patch_calls == []
+    assert len(executor.patch_calls) == 1
+    assert executor.patch_calls[0]["selected_context_segments"] == []
+    assert not (tmp_path / "README.md").exists()
 
 
 def test_discover_then_ask_can_call_executor_when_context_is_selected(

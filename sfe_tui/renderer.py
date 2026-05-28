@@ -681,28 +681,31 @@ def render_discovery_summary(discovery_result: DiscoveryResult | None) -> str:
             ]
         )
     top_refs = [candidate.source_ref for candidate in discovery_result.candidates[:5]]
-    return "\n".join(
-        [
-            "SFE discovery",
-            "  discovery ran: yes",
-            f"  workspace selected: {_yes_no(discovery_result.workspace_root_present)}",
-            f"  task present: {_yes_no(discovery_result.task_present)}",
-            f"  discovery mode: {_display_value(discovery_result.discovery_mode)}",
-            f"  scanned files: {discovery_result.scanned_file_count}",
-            f"  workspace map entries: {discovery_result.workspace_map_count}",
-            f"  candidates: {discovery_result.candidate_count}",
-            f"  loaded candidate count: {discovery_result.loaded_candidate_count}",
-            f"  skipped candidate count: {discovery_result.skipped_candidate_count}",
-            f"  stop reason: {_display_value(discovery_result.stop_reason)}",
-            f"  router provider: {_display_value(discovery_result.router_provider_name)}",
-            f"  router model: {_display_value(discovery_result.router_model)}",
-            f"  router calls made: {discovery_result.router_provider_calls_made}",
-            f"  router reason: {_display_value(discovery_result.router_reason)}",
-            f"  top candidate source refs: {_format_string_list(top_refs)}",
-            f"  skipped reasons: {_format_reason_counts(discovery_result.skipped_reason_counts)}",
-            f"  warning reasons: {_format_reason_counts(discovery_result.warning_reason_counts)}",
-        ]
-    )
+    lines = [
+        "SFE discovery",
+        "  discovery ran: yes",
+        f"  workspace selected: {_yes_no(discovery_result.workspace_root_present)}",
+        f"  task present: {_yes_no(discovery_result.task_present)}",
+        f"  discovery mode: {_display_value(discovery_result.discovery_mode)}",
+        f"  scanned files: {discovery_result.scanned_file_count}",
+        f"  workspace map entries: {discovery_result.workspace_map_count}",
+        f"  candidates: {discovery_result.candidate_count}",
+        f"  loaded candidate count: {discovery_result.loaded_candidate_count}",
+        f"  skipped candidate count: {discovery_result.skipped_candidate_count}",
+        f"  stop reason: {_display_value(discovery_result.stop_reason)}",
+        f"  router provider: {_display_value(discovery_result.router_provider_name)}",
+        f"  router model: {_display_value(discovery_result.router_model)}",
+        f"  router calls made: {discovery_result.router_provider_calls_made}",
+        f"  router reason: {_display_value(discovery_result.router_reason)}",
+        f"  top candidate source refs: {_format_string_list(top_refs)}",
+        f"  skipped reasons: {_format_reason_counts(discovery_result.skipped_reason_counts)}",
+        f"  warning reasons: {_format_reason_counts(discovery_result.warning_reason_counts)}",
+    ]
+    if discovery_result.stop_reason == "empty_workspace":
+        lines.append(
+            "  note: empty workspace is valid in DEV patch mode; no existing context to inspect"
+        )
+    return "\n".join(lines)
 
 
 def render_dry_run_summary(contract: SFEContract, result: ExecutionResult) -> str:

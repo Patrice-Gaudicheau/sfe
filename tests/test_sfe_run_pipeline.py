@@ -477,6 +477,43 @@ def test_run_pipeline_promotes_created_files_to_source_workspace(tmp_path: Path)
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_creates_first_file_in_empty_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "empty-workspace"
+    workspace.mkdir()
+    manager = _manager()
+    executor = FakeExecutor(_create_file_proposal("README.md"))
+    discovery_router = FakeDiscoveryRouter(("README.md",))
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+        discovery_router=discovery_router,
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Create a minimal README for this empty workspace",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.discovery_result is not None
+    assert result.discovery_result.stop_reason == "empty_workspace"
+    assert result.discovery_result.candidate_count == 0
+    assert discovery_router.calls == []
+    assert result.selected_source_refs == ()
+    assert len(executor.patch_calls) == 1
+    assert executor.patch_calls[0]["selected_context_segments"] == []
+    assert result.patch_applied is True
+    assert result.promotion_status == "applied"
+    assert result.promoted_files == ("README.md",)
+    assert (workspace / "README.md").read_text(encoding="utf-8") == "escaped\n"
+    assert not (tmp_path / "README.md").exists()
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_discover_does_not_auto_initialize_non_git_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

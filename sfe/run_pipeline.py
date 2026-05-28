@@ -328,7 +328,7 @@ class RunPipeline:
         dry_run_result = self.backend.dry_run(contract)
         selected_ids = list(dry_run_result.contract.audit.get("selected_segment_ids") or [])
         selected_source_refs = _selected_source_refs(dry_run_result, selected_ids)
-        if not selected_ids:
+        if dry_run_result.contract.context_segments and not selected_ids:
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=RunIssue("routing", "no_selected_context"),

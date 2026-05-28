@@ -392,6 +392,20 @@ def test_successful_apply_creates_one_text_file(tmp_path) -> None:
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello\n"
 
 
+def test_apply_new_file_patch_in_empty_workspace_succeeds(tmp_path) -> None:
+    patch = _parse_ok(_create_diff("README.md", "# Empty workspace test"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is True
+    assert result.issue is None
+    assert result.summary is not None
+    assert result.summary.created_paths == ("README.md",)
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == (
+        "# Empty workspace test\n"
+    )
+
+
 def test_successful_apply_creates_multiple_text_files(tmp_path) -> None:
     patch = _parse_ok(_create_diff("first.txt", "one") + "\n" + _create_diff("second.txt", "two"))
 
@@ -529,6 +543,16 @@ def test_creation_with_parent_traversal_is_refused_by_parser() -> None:
     assert parsed.issue is not None
     assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
     assert parsed.issue.reason == "path_outside_workspace"
+
+
+def test_apply_new_file_patch_with_parent_traversal_is_rejected(tmp_path) -> None:
+    parsed = parse_unified_diff(_create_diff("../evil.txt", "nope"))
+
+    assert parsed.patch is None
+    assert parsed.issue is not None
+    assert parsed.issue.category == MECHANICAL_GUARD_REJECTED
+    assert parsed.issue.reason == "path_outside_workspace"
+    assert not (tmp_path.parent / "evil.txt").exists()
 
 
 def test_creation_in_git_directory_is_refused() -> None:

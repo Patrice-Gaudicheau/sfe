@@ -630,12 +630,12 @@ class SfeTuiApp:
         if contract.task is None:
             self.output(renderer.render_error("missing_task"))
             return False
-        if not contract.context_segments:
-            self.output(renderer.render_error("no_context_loaded"))
-            return False
         self.output("routing context")
         routed = self.backend.dry_run(contract)
-        if not routed.contract.audit.get("selected_segment_ids"):
+        if (
+            routed.contract.context_segments
+            and not routed.contract.audit.get("selected_segment_ids")
+        ):
             self.latest_result = patch_error_result(routed, "no_selected_context")
             self._clear_pending_patch()
             self.output(renderer.render_patch_result(self.latest_result))

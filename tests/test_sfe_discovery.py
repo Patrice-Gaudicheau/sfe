@@ -93,6 +93,27 @@ def test_discovery_rejects_missing_workspace_or_missing_task_safely(tmp_path) ->
     assert no_task.scanned_file_count == 0
 
 
+def test_discovery_empty_workspace_returns_valid_empty_context(tmp_path) -> None:
+    router = FakeDiscoveryRouter(("README.md",))
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="Create a README for this empty project",
+        router=router,
+    )
+
+    assert result.workspace_root_present is True
+    assert result.task_present is True
+    assert result.stop_reason == "empty_workspace"
+    assert result.workspace_map_count == 0
+    assert result.candidate_count == 0
+    assert result.loaded_candidate_count == 0
+    assert result.candidates == ()
+    assert result.load_results == ()
+    assert result.router_provider_calls_made == 0
+    assert router.calls == []
+
+
 def test_discovery_router_output_parser_requires_strict_json_shape() -> None:
     parsed = parse_discovery_router_output(
         '{"files_to_inspect":["templates/home/index.html.twig"],"reason":"homepage"}'

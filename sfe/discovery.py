@@ -44,6 +44,7 @@ _DIRECTORY_EXCLUSIONS = {
 _FILE_NAME_EXCLUSIONS = {
     ".coverage",
     ".ds_store",
+    ".git",
     "coverage.xml",
     "thumbs.db",
 }
@@ -161,6 +162,22 @@ def discover_workspace_context(
     )
     workspace_map = _build_workspace_map(scanned)
     stop_reason = scan_stop_reason
+    if not workspace_map:
+        return DiscoveryResult(
+            workspace_root_present=True,
+            task_present=True,
+            scanned_file_count=scanned_file_count,
+            candidate_count=0,
+            loaded_candidate_count=0,
+            skipped_candidate_count=0,
+            stop_reason=stop_reason or "empty_workspace",
+            candidates=(),
+            load_results=(),
+            skipped_reason_counts=dict(sorted(skipped_reason_counts.items())),
+            warning_reason_counts={},
+            router_reason="empty workspace; no existing context to inspect",
+            workspace_map_count=0,
+        )
     discovery_router = router or create_configured_discovery_router()
     try:
         router_selection = discovery_router.select_files(
