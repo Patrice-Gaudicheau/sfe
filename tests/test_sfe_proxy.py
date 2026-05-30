@@ -24,6 +24,7 @@ import sfe_proxy.server as proxy_server
 import sfe_proxy.shadow_router as shadow_router_module
 from sfe_proxy.config import (
     DEFAULT_ALIBABA_UPSTREAM_BASE_URL,
+    DEFAULT_ANTHROPIC_TIMEOUT_SECONDS,
     DEFAULT_HOST,
     DEFAULT_LEMONADE_UPSTREAM_BASE_URL,
     DEFAULT_MODE,
@@ -175,7 +176,6 @@ def test_proxy_config_defaults_and_required_key(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_SHADOW_SELECTION_DRY_RUN", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_DRY_RUN", raising=False)
     monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", raising=False)
-    monkeypatch.delenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", raising=False)
     monkeypatch.delenv("SFE_PROXY_ENABLED_STREAMING_REPLACEMENT", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -590,7 +590,6 @@ def test_proxy_config_accepts_anthropic_provider_from_env(monkeypatch) -> None:
     monkeypatch.setenv("SFE_ANTHROPIC_BASE_URL", "http://127.0.0.1:12345")
     monkeypatch.setenv("SFE_ANTHROPIC_VERSION", "2023-06-01")
     monkeypatch.setenv("SFE_ANTHROPIC_MODEL", "claude-test")
-    monkeypatch.setenv("SFE_ANTHROPIC_API_TIMEOUT", "17")
     monkeypatch.setenv("SFE_ANTHROPIC_MAX_TOKENS", "256")
     monkeypatch.setenv("SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS", "2.5")
     monkeypatch.setenv("SFE_ANTHROPIC_MAX_INPUT_CHARS", "12345")
@@ -604,7 +603,7 @@ def test_proxy_config_accepts_anthropic_provider_from_env(monkeypatch) -> None:
     assert config.anthropic_base_url == "http://127.0.0.1:12345"
     assert config.anthropic_version == "2023-06-01"
     assert config.anthropic_model == "claude-test"
-    assert config.anthropic_timeout_seconds == 17
+    assert config.anthropic_timeout_seconds == DEFAULT_ANTHROPIC_TIMEOUT_SECONDS
     assert config.anthropic_max_tokens == 256
     assert config.anthropic_min_request_interval_seconds == 2.5
     assert config.anthropic_max_input_chars == 12345
@@ -649,40 +648,6 @@ def test_proxy_config_rejects_anthropic_provider_without_api_key(monkeypatch) ->
         assert "ANTHROPIC_API_KEY or SFE_ANTHROPIC_API_KEY" in str(exc)
     else:
         raise AssertionError("anthropic proxy provider should require an API key")
-
-
-def test_proxy_config_parses_shadow_router_timeout(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", "75")
-
-    config = ProxyConfig.from_env()
-
-    assert config.shadow_router_timeout_seconds == 75
-
-
-def test_proxy_config_rejects_invalid_shadow_router_timeout(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", "not-an-int")
-
-    try:
-        ProxyConfig.from_env()
-    except ValueError as exc:
-        assert "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS must be an integer" in str(exc)
-    else:
-        raise AssertionError("invalid shadow router timeout should fail")
-
-
-def test_proxy_config_rejects_non_positive_shadow_router_timeout(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_PROXY_UPSTREAM_API_KEY", "placeholder")
-    for value in ("0", "-1"):
-        monkeypatch.setenv("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS", value)
-        try:
-            ProxyConfig.from_env()
-        except ValueError as exc:
-            assert "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS must be positive" in str(exc)
-        else:
-            raise AssertionError("non-positive shadow router timeout should fail")
-
 
 
 def test_proxy_config_rejects_invalid_shadow_threshold(monkeypatch) -> None:

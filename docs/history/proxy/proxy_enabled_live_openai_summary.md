@@ -38,7 +38,6 @@ The runner uses existing environment variables:
 
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
-- `SFE_OPENAI_API_TIMEOUT`
 - `SFE_OPENAI_ROUTER_MODEL`
 - `SFE_OPENAI_EXECUTOR_MODEL`
 

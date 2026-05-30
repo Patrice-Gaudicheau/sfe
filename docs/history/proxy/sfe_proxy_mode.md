@@ -62,7 +62,6 @@ Environment variables:
 - `SFE_ANTHROPIC_BASE_URL`, default `https://api.anthropic.com`
 - `SFE_ANTHROPIC_VERSION`, default `2023-06-01`
 - `SFE_ANTHROPIC_MODEL`, Anthropic Messages API model for proxy execution
-- `SFE_ANTHROPIC_API_TIMEOUT`, default `60`
 - `SFE_ANTHROPIC_MAX_TOKENS`, default `1024`
 - `SFE_ANTHROPIC_MIN_REQUEST_INTERVAL_SECONDS`, default `0`
 - `SFE_ANTHROPIC_MAX_INPUT_CHARS`, default `0`
@@ -339,7 +338,6 @@ enabled only when all of these are set:
 SFE_PROXY_MODE=shadow
 SFE_PROXY_SHADOW_ROUTER_DRY_RUN=true
 SFE_PROXY_SHADOW_ROUTER_PROVIDER=lemonade
-SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS=30
 ```
 
 Provider details come from the existing project-level Lemonade configuration,
@@ -357,11 +355,8 @@ router dry-run records a safe provider error and pass-through behavior remains
 unchanged. The recommended fix is to set the standard project-level Lemonade
 model variable, not a proxy-specific model variable.
 
-`SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS` is a generic shadow-router timeout,
-not a Lemonade-specific provider setting. The default is 30 seconds. Larger
-local router models may need a higher value. This timeout applies only to
-shadow router dry-run calls and does not change the upstream pass-through
-request timeout.
+Shadow-router transport safeguards are internal defaults. Shadow router dry-run
+calls do not change the upstream pass-through request timeout.
 
 The Lemonade router dry-run is local-provider oriented. When explicitly
 enabled, it may send extracted text segments to the configured local Lemonade

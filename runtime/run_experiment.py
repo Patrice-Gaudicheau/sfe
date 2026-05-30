@@ -197,8 +197,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--timeout-seconds",
         type=float,
-        default=float(os.getenv("SFE_CODEXCLI_TIMEOUT") or 300),
-        help="Timeout for CodexCLI calls.",
+        default=300,
+        help="Transport safeguard for direct API provider calls.",
     )
     parser.add_argument("--task")
     parser.add_argument("--task-set", choices=("basic", "mixed"), default="basic")

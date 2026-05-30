@@ -22,15 +22,15 @@ class EnvConfigTests(unittest.TestCase):
     def test_env_loader_loads_simple_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env_path = Path(tmpdir) / ".env"
-            env_path.write_text("OPENAI_API_KEY=test-key\nSFE_OPENAI_API_TIMEOUT=60\n", encoding="utf-8")
+            env_path.write_text("OPENAI_API_KEY=test-key\nSFE_PROVIDER=openai\n", encoding="utf-8")
             with patch.dict(os.environ, {}, clear=True):
                 loaded = load_repo_env(env_path)
                 self.assertEqual(os.environ["OPENAI_API_KEY"], "test-key")
-                self.assertEqual(os.environ["SFE_OPENAI_API_TIMEOUT"], "60")
+                self.assertEqual(os.environ["SFE_PROVIDER"], "openai")
 
         self.assertEqual(
             loaded,
-            {"OPENAI_API_KEY": "test-key", "SFE_OPENAI_API_TIMEOUT": "60"},
+            {"OPENAI_API_KEY": "test-key", "SFE_PROVIDER": "openai"},
         )
 
     def test_env_loader_does_not_overwrite_existing_environment(self) -> None:

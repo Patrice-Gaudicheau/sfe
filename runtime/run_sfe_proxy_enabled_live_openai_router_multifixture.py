@@ -87,13 +87,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _openai_config() -> dict[str, Any]:
     base_url = os.getenv("OPENAI_BASE_URL") or OPENAI_DEFAULT_BASE_URL
-    timeout_raw = os.getenv("SFE_OPENAI_API_TIMEOUT") or "60"
-    try:
-        timeout_seconds = float(timeout_raw)
-    except ValueError as exc:
-        raise SystemExit("SFE_OPENAI_API_TIMEOUT must be a number.") from exc
-    if timeout_seconds <= 0:
-        raise SystemExit("SFE_OPENAI_API_TIMEOUT must be positive.")
+    timeout_seconds = 60.0
     return {
         "api_key_set": bool(os.getenv("OPENAI_API_KEY")),
         "openai_base_url": base_url.rstrip("/"),

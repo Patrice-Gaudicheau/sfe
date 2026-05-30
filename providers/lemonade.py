@@ -237,11 +237,7 @@ def _is_qwen_model(model: str) -> bool:
 
 
 def _resolve_timeout(timeout: float | None) -> float:
-    timeout_value = (
-        timeout
-        if timeout is not None
-        else os.getenv("SFE_LEMONADE_TIMEOUT_SECONDS") or DEFAULT_TIMEOUT
-    )
+    timeout_value = timeout if timeout is not None else DEFAULT_TIMEOUT
     parsed_timeout = float(timeout_value)
     if parsed_timeout <= 0:
         raise ValueError("Lemonade timeout must be greater than 0.")

@@ -69,8 +69,6 @@ def main() -> None:
     load_repo_env()
     model = args.model or os.getenv("SFE_OPENAI_ROUTER_MODEL") or DEFAULT_ROUTER_MODEL
     timeout = args.timeout
-    if timeout is None and os.getenv("SFE_OPENAI_API_TIMEOUT"):
-        timeout = float(os.environ["SFE_OPENAI_API_TIMEOUT"])
     provider = OpenAIAPIProvider(timeout=timeout)
     if not provider.health()["ok"]:
         raise MissingOpenAIAPIKeyError(provider.health()["error"])

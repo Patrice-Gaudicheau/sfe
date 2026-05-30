@@ -89,8 +89,6 @@ def main() -> None:
     load_repo_env()
     model = args.model or os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_EXECUTOR_MODEL
     timeout = args.timeout
-    if timeout is None and os.getenv("SFE_OPENAI_API_TIMEOUT"):
-        timeout = float(os.environ["SFE_OPENAI_API_TIMEOUT"])
     provider = OpenAIAPIProvider(timeout=timeout)
     health = provider.health()
     if not health["ok"]:

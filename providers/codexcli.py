@@ -36,11 +36,7 @@ class CodexCLIProvider:
         sandbox: str | None = None,
     ) -> None:
         self.cwd = Path(cwd or os.getcwd())
-        timeout_value = (
-            timeout
-            if timeout is not None
-            else os.getenv("SFE_CODEXCLI_TIMEOUT") or DEFAULT_TIMEOUT
-        )
+        timeout_value = timeout if timeout is not None else DEFAULT_TIMEOUT
         self.timeout = float(timeout_value)
         if self.timeout <= 0:
             raise ValueError("CodexCLI timeout must be greater than 0.")

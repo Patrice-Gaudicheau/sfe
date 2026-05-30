@@ -52,11 +52,7 @@ class OpenAIAPIProvider:
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-        timeout_value = (
-            timeout
-            if timeout is not None
-            else os.getenv("SFE_OPENAI_API_TIMEOUT") or DEFAULT_TIMEOUT
-        )
+        timeout_value = timeout if timeout is not None else DEFAULT_TIMEOUT
         self.timeout = float(timeout_value)
         if self.timeout <= 0:
             raise ValueError("OpenAI API timeout must be greater than 0.")

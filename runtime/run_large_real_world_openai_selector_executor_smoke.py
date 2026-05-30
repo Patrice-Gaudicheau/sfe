@@ -99,8 +99,6 @@ def main() -> None:
         or DEFAULT_EXECUTOR_MODEL
     )
     timeout = args.timeout
-    if timeout is None and os.getenv("SFE_OPENAI_API_TIMEOUT"):
-        timeout = float(os.environ["SFE_OPENAI_API_TIMEOUT"])
     provider = OpenAIAPIProvider(timeout=timeout)
     health = provider.health()
     if not health["ok"]:

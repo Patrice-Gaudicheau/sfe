@@ -54,11 +54,7 @@ class AnthropicProvider:
         self.base_url = (base_url or os.getenv("ANTHROPIC_BASE_URL") or DEFAULT_BASE_URL).rstrip(
             "/"
         )
-        timeout_value = (
-            timeout
-            if timeout is not None
-            else os.getenv("SFE_ANTHROPIC_API_TIMEOUT") or DEFAULT_TIMEOUT
-        )
+        timeout_value = timeout if timeout is not None else DEFAULT_TIMEOUT
         self.timeout = float(timeout_value)
         if self.timeout <= 0:
             raise ValueError("Anthropic API timeout must be greater than 0.")

@@ -6405,12 +6405,10 @@ def test_lemonade_provider_invalid_json_raises_safe_category(monkeypatch) -> Non
     assert "not json" not in str(exc_info.value)
 
 
-def test_lemonade_provider_uses_timeout_env(monkeypatch) -> None:
-    monkeypatch.setenv("SFE_LEMONADE_TIMEOUT_SECONDS", "45")
-
+def test_lemonade_provider_uses_default_transport_timeout() -> None:
     provider = LemonadeProvider(base_url="redacted")
 
-    assert provider.timeout == 45
+    assert provider.timeout == 30
 
 
 def test_tui_executor_factory_selects_openai_compatible_from_sfe_provider() -> None:

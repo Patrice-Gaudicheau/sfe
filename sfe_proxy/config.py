@@ -128,13 +128,6 @@ class ProxyConfig:
         shadow_router_provider = os.getenv(
             "SFE_PROXY_SHADOW_ROUTER_PROVIDER", DEFAULT_SHADOW_ROUTER_PROVIDER
         )
-        shadow_router_timeout_seconds = _parse_int(
-            os.getenv(
-                "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS",
-                str(DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS),
-            ),
-            "SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS",
-        )
         return cls(
             host=os.getenv("SFE_PROXY_HOST", DEFAULT_HOST),
             port=port,
@@ -152,13 +145,7 @@ class ProxyConfig:
                 "SFE_ANTHROPIC_VERSION", DEFAULT_ANTHROPIC_VERSION
             ),
             anthropic_model=os.getenv("SFE_ANTHROPIC_MODEL", ""),
-            anthropic_timeout_seconds=_parse_float(
-                os.getenv(
-                    "SFE_ANTHROPIC_API_TIMEOUT",
-                    str(DEFAULT_ANTHROPIC_TIMEOUT_SECONDS),
-                ),
-                "SFE_ANTHROPIC_API_TIMEOUT",
-            ),
+            anthropic_timeout_seconds=DEFAULT_ANTHROPIC_TIMEOUT_SECONDS,
             anthropic_max_tokens=_parse_int(
                 os.getenv(
                     "SFE_ANTHROPIC_MAX_TOKENS",
@@ -207,7 +194,7 @@ class ProxyConfig:
             ),
             shadow_router_dry_run=shadow_router_dry_run,
             shadow_router_provider=shadow_router_provider,
-            shadow_router_timeout_seconds=shadow_router_timeout_seconds,
+            shadow_router_timeout_seconds=DEFAULT_SHADOW_ROUTER_TIMEOUT_SECONDS,
             enabled_fallback_to_original=_parse_bool(
                 os.getenv("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL", "false"),
                 "SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL",
@@ -255,7 +242,7 @@ class ProxyConfig:
             if not self.anthropic_version:
                 raise ValueError("SFE_ANTHROPIC_VERSION must not be empty.")
             if self.anthropic_timeout_seconds <= 0:
-                raise ValueError("SFE_ANTHROPIC_API_TIMEOUT must be positive.")
+                raise ValueError("Anthropic transport timeout must be positive.")
             if self.anthropic_max_tokens <= 0:
                 raise ValueError("SFE_ANTHROPIC_MAX_TOKENS must be positive.")
             if self.anthropic_min_request_interval_seconds < 0:
@@ -273,7 +260,7 @@ class ProxyConfig:
         if not self.shadow_log_dir:
             raise ValueError("SFE_PROXY_SHADOW_LOG_DIR must not be empty.")
         if self.shadow_router_timeout_seconds <= 0:
-            raise ValueError("SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS must be positive.")
+            raise ValueError("Shadow router transport timeout must be positive.")
         if self.shadow_router_provider not in SUPPORTED_SHADOW_ROUTER_PROVIDERS:
             raise ValueError(
                 "Unsupported SFE_PROXY_SHADOW_ROUTER_PROVIDER "
