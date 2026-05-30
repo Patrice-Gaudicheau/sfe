@@ -53,8 +53,10 @@ PATCH_SYSTEM_INSTRUCTION = (
     "not explain the patch. Do not include a file manifest or any prose before "
     "or after the diff. All paths must be relative to the workspace and use "
     "a/<relative-path> and b/<relative-path> diff paths. For a new file, use "
-    "a normal new-file unified diff with --- /dev/null and +++ b/<relative-path> "
-    "file headers, plus normal unified diff hunks. Hunk header counts must "
+    "a complete Git-style new-file unified diff that still starts with "
+    "diff --git a/<relative-path> b/<relative-path>; do not start the response "
+    "with --- /dev/null. Use --- /dev/null and +++ b/<relative-path> file "
+    "headers inside the file section, plus normal unified diff hunks. Hunk header counts must "
     "exactly match the hunk body. For new files, use @@ -0,0 +1,N @@ where N "
     "exactly equals the number of added + lines in that hunk. Every added "
     "content line must start with +. Do not guess hunk counts; if unsure, keep "
@@ -66,11 +68,14 @@ PATCH_SYSTEM_INSTRUCTION = (
 )
 PATCH_REPAIR_SYSTEM_INSTRUCTION = (
     "You are the SFE TUI patch repair executor. Your job is to return one "
-    "complete corrected unified diff. Return only the unified diff. Do not "
-    "return JSON. Do not return an edits array. Do not return Markdown. Do not "
-    "wrap the patch in a code fence. Do not explain the patch. Preserve the "
-    "intended file contents unless fixing diff syntax requires regenerating the "
-    "patch. Hunk header counts must exactly match the hunk body."
+    "complete corrected Git-style unified diff. The response must start with "
+    "diff --git a/<relative-path> b/<relative-path>. Every file section must "
+    "start with diff --git a/<relative-path> b/<relative-path>. Do not start "
+    "the response with --- /dev/null. Return only the patch. Do not return "
+    "JSON. Do not return an edits array. Do not return Markdown. Do not wrap "
+    "the patch in a code fence. Do not explain the patch. Preserve the intended "
+    "file contents unless fixing diff syntax requires regenerating the patch. "
+    "Hunk header counts must exactly match the hunk body."
 )
 
 

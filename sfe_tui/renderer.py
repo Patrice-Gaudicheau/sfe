@@ -456,6 +456,9 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
                 f"{_yes_no(diagnostics.looks_like_plain_text_or_markdown)}",
             ]
         )
+        repair_hint = _patch_repair_proposal_hint(result, diagnostics)
+        if repair_hint is not None:
+            lines.append(f"  patch proposal repair hint: {repair_hint}")
     response_diagnostics = _executor_response_diagnostics(result)
     if response_diagnostics is not None:
         lines.extend(_render_executor_response_diagnostics(response_diagnostics))
@@ -505,6 +508,22 @@ def _render_hunk_accounting_diagnostics(diagnostics: object) -> list[str]:
         "  LLM-correctable in principle: "
         f"{_yes_no(bool(getattr(diagnostics, 'llm_correctable_in_principle', False)))}",
     ]
+
+
+def _patch_repair_proposal_hint(
+    result: RunResult,
+    diagnostics: object,
+) -> str | None:
+    repair = result.patch_repair
+    final_issue = getattr(repair, "final_issue", None) if repair is not None else None
+    if (
+        final_issue is not None
+        and getattr(final_issue, "category", None) == "invalid_patch_proposal"
+        and getattr(final_issue, "reason", None) == "missing_diff_header"
+        and getattr(diagnostics, "first_non_empty_line", None) == "--- /dev/null"
+    ):
+        return "repaired patch omitted required `diff --git` header"
+    return None
 
 
 def _render_patch_repair_diagnostics(repair: object) -> list[str]:

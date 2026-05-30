@@ -532,6 +532,19 @@ def invalid_new_file_hunk_count_diff(path: str = "index.html") -> str:
     )
 
 
+def new_file_diff_without_git_header(path: str = "index.html") -> str:
+    return "\n".join(
+        [
+            "--- /dev/null",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,3 @@",
+            "+one",
+            "+two",
+            "+three",
+        ]
+    )
+
+
 def valid_implicit_create_diff(path: str = "README.md", content: str = "# Demo") -> str:
     return "\n".join(
         [
@@ -4669,6 +4682,53 @@ def test_tui_run_reports_llm_patch_repair_and_run_report_details(tmp_path) -> No
     assert cleanup.cleaned is True
 
 
+def test_tui_run_report_hints_when_repaired_patch_omits_git_header(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=invalid_new_file_hunk_count_diff(),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+        patch_repair_response=ExecutorResponse(
+            answer=new_file_diff_without_git_header(),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch context and create index", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    run_output = output[-2]
+    report_output = output[-1]
+    assert "status: failed" in run_output
+    assert "issue reason: missing_diff_header" in run_output
+    assert "repairs: LLM patch repair attempted: 1, applied: no" in run_output
+    assert "repair final issue reason: missing_diff_header" in report_output
+    assert "patch proposal first line: --- /dev/null" in report_output
+    assert (
+        "patch proposal repair hint: "
+        "repaired patch omitted required `diff --git` header"
+        in report_output
+    )
+    assert len(executor.patch_calls) == 1
+    assert len(executor.patch_repair_calls) == 1
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
 def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
@@ -6071,6 +6131,8 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "Do not explain the patch" in instruction
     assert "Do not include a file manifest" in instruction
     assert "All paths must be relative to the workspace" in instruction
+    assert "complete Git-style new-file unified diff" in instruction
+    assert "do not start the response with --- /dev/null" in instruction
     assert "--- /dev/null" in instruction
     assert "+++ b/<relative-path>" in instruction
     assert "normal unified diff hunks" in instruction
@@ -6091,8 +6153,17 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert '"edits"' not in instruction
 
     repair_instruction = PATCH_REPAIR_SYSTEM_INSTRUCTION
-    assert "complete corrected unified diff" in repair_instruction
-    assert "Return only the unified diff" in repair_instruction
+    assert "complete corrected Git-style unified diff" in repair_instruction
+    assert (
+        "The response must start with diff --git a/<relative-path> b/<relative-path>"
+        in repair_instruction
+    )
+    assert (
+        "Every file section must start with diff --git a/<relative-path> b/<relative-path>"
+        in repair_instruction
+    )
+    assert "Do not start the response with --- /dev/null" in repair_instruction
+    assert "Return only the patch" in repair_instruction
     assert "Do not return JSON" in repair_instruction
     assert "Do not return an edits array" in repair_instruction
     assert "Do not return Markdown" in repair_instruction

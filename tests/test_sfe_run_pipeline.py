@@ -977,6 +977,42 @@ def test_run_pipeline_failed_llm_patch_repair_reports_final_failure(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_failed_llm_patch_repair_rejects_dev_null_first_line(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor(
+        _invalid_new_file_hunk_count_diff(),
+        repair_answer=_new_file_diff_without_git_header(),
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    assert len(executor.patch_repair_calls) == 1
+    assert result.patch_repair is not None
+    assert result.patch_repair.success is False
+    assert result.patch_repair.final_issue is not None
+    assert result.patch_repair.final_issue.reason == "missing_diff_header"
+    assert result.patch_proposal_diagnostics is not None
+    assert result.patch_proposal_diagnostics.first_non_empty_line == "--- /dev/null"
+    assert not (repo / "index.html").exists()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_does_not_repair_json_or_path_validation_failures(
     tmp_path: Path,
 ) -> None:
@@ -1047,7 +1083,23 @@ def test_run_pipeline_llm_patch_repair_prompt_uses_bounded_diagnostics(
     assert "- declared new count: 5" in instruction
     assert "- actual new-side count: 1" in instruction
     assert "- actual added line count: 1" in instruction
-    assert "Return a complete corrected unified diff." in instruction
+    assert "Return a complete corrected Git-style unified diff." in instruction
+    assert (
+        "The response must start with diff --git a/<relative-path> b/<relative-path>."
+        in instruction
+    )
+    assert (
+        "Every file section must start with diff --git a/<relative-path> b/<relative-path>."
+        in instruction
+    )
+    assert "Do not start the response with --- /dev/null." in instruction
+    assert "new file mode 100644" in instruction
+    assert "index 0000000..0000000" in instruction
+    assert "+++ b/<relative-path>" in instruction
+    assert "@@ -0,0 +1,N @@" in instruction
+    assert "N must exactly equal the number of added + lines" in instruction
+    assert "Return the complete corrected patch, not only the failing hunk." in instruction
+    assert "Return only the patch." in instruction
     assert "No JSON. No Markdown. No prose. No code fence." in instruction
     assert "SECRET_TOKEN" not in instruction
     assert "raw_provider_response" not in instruction
@@ -1322,6 +1374,19 @@ def _valid_new_file_diff(path: str = "index.html") -> str:
         [
             f"diff --git a/{path} b/{path}",
             "new file mode 100644",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,3 @@",
+            "+one",
+            "+two",
+            "+three",
+        ]
+    )
+
+
+def _new_file_diff_without_git_header(path: str = "index.html") -> str:
+    return "\n".join(
+        [
             "--- /dev/null",
             f"+++ b/{path}",
             "@@ -0,0 +1,3 @@",
