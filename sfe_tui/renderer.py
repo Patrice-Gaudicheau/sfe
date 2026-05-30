@@ -541,6 +541,9 @@ def _render_patch_repair_diagnostics(repair: object) -> list[str]:
         "  repaired patch validated: "
         f"{_yes_no(bool(getattr(repair, 'repaired_patch_validated', False)))}",
     ]
+    skipped_reason = getattr(repair, "skipped_reason", None)
+    if skipped_reason is not None:
+        lines.append(f"  repair skipped reason: {skipped_reason}")
     final_issue = getattr(repair, "final_issue", None)
     if final_issue is not None:
         lines.extend(

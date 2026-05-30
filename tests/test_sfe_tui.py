@@ -41,6 +41,7 @@ from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairResult,
 )
+from sfe.run_pipeline import LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
     DirectBackend,
@@ -542,6 +543,13 @@ def new_file_diff_without_git_header(path: str = "index.html") -> str:
             "+two",
             "+three",
         ]
+    )
+
+
+def oversized_invalid_new_file_hunk_count_diff(path: str = "index.html") -> str:
+    return invalid_new_file_hunk_count_diff(path).replace(
+        "+one",
+        "+" + ("x" * (LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS + 1)),
     )
 
 
@@ -4729,6 +4737,52 @@ def test_tui_run_report_hints_when_repaired_patch_omits_git_header(tmp_path) -> 
     assert cleanup.cleaned is True
 
 
+def test_tui_run_report_shows_skipped_repair_for_oversized_rejected_patch(
+    tmp_path,
+) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=oversized_invalid_new_file_hunk_count_diff(),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+        patch_repair_response=ExecutorResponse(
+            answer=valid_create_diff("index.html", "one"),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch context and create index", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    report_output = output[-1]
+    assert "SFE patch repair diagnostics" in report_output
+    assert "repair attempted: no" in report_output
+    assert "repair attempts count: 0" in report_output
+    assert "repair success: no" in report_output
+    assert (
+        "repair skipped reason: rejected_patch_too_large_for_repair_prompt"
+        in report_output
+    )
+    assert "repair final issue reason: impossible_hunk_accounting" in report_output
+    assert executor.patch_repair_calls == []
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
 def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
@@ -6075,9 +6129,15 @@ def test_openai_executor_patch_repair_uses_repair_instruction_and_diagnostics() 
 
     result = executor.propose_patch_repair(
         {
-            "instructions": [],
-            "task": None,
-            "selected_context_segments": [],
+            "instructions": [ProtectedText("inst", "keep output safe")],
+            "task": ProtectedText("task", "repair patch"),
+            "selected_context_segments": [
+                ContextSegment(
+                    id="ctx_secret",
+                    source_ref="context.txt",
+                    text="SECRET_TOKEN=abc123",
+                )
+            ],
         },
         repair_instruction="reason: impossible_hunk_accounting",
     )
@@ -6089,6 +6149,10 @@ def test_openai_executor_patch_repair_uses_repair_instruction_and_diagnostics() 
     messages = provider.calls[0]["messages"]
     assert isinstance(messages, list)
     assert "reason: impossible_hunk_accounting" in messages[0]["content"]
+    assert "keep output safe" in messages[0]["content"]
+    assert "repair patch" in messages[0]["content"]
+    assert "SECRET_TOKEN" not in messages[0]["content"]
+    assert "Selected context" not in messages[0]["content"]
 
 
 def test_openai_executor_console_uses_console_instruction_and_output_budget() -> None:

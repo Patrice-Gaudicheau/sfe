@@ -517,11 +517,17 @@ def _build_patch_repair_user_prompt(
     *,
     repair_instruction: str,
 ) -> str:
-    base_prompt = _build_user_prompt(executor_payload)
+    instructions = executor_payload.get("instructions") or []
+    task = executor_payload.get("task")
+    instruction_text = "\n".join(
+        str(item.text) for item in instructions if getattr(item, "text", "")
+    )
+    task_text = str(getattr(task, "text", "") or "")
     return "\n\n".join(
         part
         for part in (
-            base_prompt,
+            "Protected instructions:\n" + instruction_text,
+            "User task:\n" + task_text,
             "Patch repair instruction:\n" + repair_instruction,
         )
         if part.strip()

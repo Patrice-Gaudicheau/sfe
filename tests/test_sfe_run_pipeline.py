@@ -23,6 +23,7 @@ from sfe.execution_mode_router import (
 )
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.run_pipeline import (
+    LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS,
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
     GitPreparationResult,
@@ -1059,7 +1060,13 @@ def test_run_pipeline_llm_patch_repair_prompt_uses_bounded_diagnostics(
     tmp_path: Path,
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
-    raw_patch = _invalid_new_file_hunk_count_diff(content=("SECRET_TOKEN=abc123",))
+    (repo / "context.txt").write_text(
+        "old context\nSECRET_TOKEN=abc123\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "context.txt")
+    _git(repo, "commit", "-m", "add secret-like context")
+    raw_patch = _invalid_new_file_hunk_count_diff(content=("visible patch line",))
     executor = FakeExecutor(raw_patch, repair_answer=_valid_new_file_diff())
 
     result = _pipeline(
@@ -1101,9 +1108,49 @@ def test_run_pipeline_llm_patch_repair_prompt_uses_bounded_diagnostics(
     assert "Return the complete corrected patch, not only the failing hunk." in instruction
     assert "Return only the patch." in instruction
     assert "No JSON. No Markdown. No prose. No code fence." in instruction
+    assert "Here is the rejected unified diff to repair:" in instruction
+    assert "BEGIN REJECTED UNIFIED DIFF" in instruction
+    assert raw_patch in instruction
+    assert "END REJECTED UNIFIED DIFF" in instruction
+    assert "Repair this existing diff" in instruction
+    assert "do not redesign the application" in instruction
+    assert "do not regenerate a new application from scratch" in instruction
+    assert "Do not change file contents unless required" in instruction
     assert "SECRET_TOKEN" not in instruction
     assert "raw_provider_response" not in instruction
     assert "headers" not in instruction.lower()
+
+
+def test_run_pipeline_skips_llm_patch_repair_when_rejected_patch_is_too_large(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    oversized_line = "x" * (LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS + 1)
+    raw_patch = _invalid_new_file_hunk_count_diff(content=(oversized_line,))
+    executor = FakeExecutor(raw_patch, repair_answer=_valid_new_file_diff())
+
+    result = _pipeline(
+        workspace_manager=_manager(),
+        executor=executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "impossible_hunk_accounting"
+    assert executor.patch_repair_calls == []
+    repair = result.patch_repair
+    assert repair is not None
+    assert repair.attempted is False
+    assert repair.attempts_count == 0
+    assert repair.success is False
+    assert repair.skipped_reason == "rejected_patch_too_large_for_repair_prompt"
+    assert repair.final_issue is result.issue
 
 
 def test_run_pipeline_valid_unified_diff_does_not_trigger_llm_patch_repair(
