@@ -24,19 +24,28 @@ from sfe.provider_progress import collect_progress_events
 class FakeStdin:
     def __init__(self) -> None:
         self.written = ""
+        self.closed = False
 
     def write(self, text: str) -> None:
         self.written += text
 
     def close(self) -> None:
-        return None
+        self.closed = True
+
+
+class BrokenPipeStdin(FakeStdin):
+    def write(self, text: str) -> None:
+        del text
+        raise BrokenPipeError("stdin closed")
 
 
 class FakeStderr:
     def __init__(self, text: str) -> None:
         self.text = text
+        self.read_called = False
 
     def read(self) -> str:
+        self.read_called = True
         return self.text
 
 
@@ -47,17 +56,20 @@ class FakeProcess:
         stdout_lines: list[str],
         stderr_text: str = "",
         returncode: int = 0,
+        stdin: FakeStdin | None = None,
     ) -> None:
-        self.stdin = FakeStdin()
+        self.stdin = stdin or FakeStdin()
         self.stdout = iter(stdout_lines)
         self.stderr = FakeStderr(stderr_text)
         self.returncode = returncode
         self.killed = False
+        self.wait_called = False
 
     def poll(self) -> int:
         return self.returncode
 
     def wait(self) -> int:
+        self.wait_called = True
         return self.returncode
 
     def kill(self) -> None:
@@ -114,6 +126,29 @@ class CodexCLIProviderTests(unittest.TestCase):
                     [{"role": "user", "content": "hello"}],
                     model="gpt-5.5",
                 )
+
+    def test_chat_preserves_stderr_when_stdin_pipe_is_closed_early(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)
+        fake_process = FakeProcess(
+            stdout_lines=[],
+            stderr_text="missing credentials",
+            returncode=2,
+            stdin=BrokenPipeStdin(),
+        )
+        events, sink = collect_progress_events()
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+            with self.assertRaisesRegex(RuntimeError, "missing credentials"):
+                provider.chat(
+                    [{"role": "user", "content": "hello"}],
+                    model="gpt-5.5",
+                    progress_sink=sink,
+                )
+
+        self.assertTrue(fake_process.stderr.read_called)
+        self.assertTrue(fake_process.wait_called)
+        self.assertIn("call_failed", [event.kind for event in events])
+        self.assertNotIn("provider_chunk", [event.kind for event in events])
 
     def test_chat_emits_progress_for_codex_jsonl_stdout(self) -> None:
         provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)

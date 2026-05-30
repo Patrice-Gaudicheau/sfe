@@ -141,10 +141,6 @@ def _run_codex_process(
         stderr=subprocess.PIPE,
         text=True,
     )
-    if process.stdin is not None:
-        process.stdin.write(prompt)
-        process.stdin.close()
-
     output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
@@ -164,6 +160,15 @@ def _run_codex_process(
 
     threading.Thread(target=read_stdout, daemon=True).start()
     threading.Thread(target=read_stderr, daemon=True).start()
+    if process.stdin is not None:
+        try:
+            process.stdin.write(prompt)
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        try:
+            process.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
 
     stdout_done = False
     stderr_done = False
