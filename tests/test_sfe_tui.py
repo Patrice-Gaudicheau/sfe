@@ -113,6 +113,7 @@ def test_slash_command_completer_matches_command_prefixes() -> None:
     assert slash_command_completions("/he") == ["/help", "/help-advanced"]
     assert slash_command_completions("/help-a") == ["/help-advanced"]
     assert slash_command_completions("/run-d") == ["/run-debug"]
+    assert slash_command_completions("/run-r") == ["/run-report"]
     assert slash_command_completions("/worktree-d") == ["/worktree-diff"]
     assert slash_command_completions("/workspace-s") == ["/workspace-status"]
 
@@ -122,6 +123,7 @@ def test_slash_command_completer_prefers_hyphenated_run_debug() -> None:
 
     assert "/run" in completions
     assert "/run-debug" in completions
+    assert "/run-report" in completions
     assert "/run_debug" not in completions
     assert "/run_debug" not in SLASH_COMMANDS
 
@@ -1388,8 +1390,10 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/context" in rendered
     assert "/run" in rendered
     assert "/run-debug" not in rendered
+    assert "/run-report" in rendered
     assert "/run_debug" not in rendered
     assert "Resolve the task and show concise output" in rendered
+    assert "Show diagnostics for the previous run without re-running" in rendered
     assert not any(line.strip().startswith("/discover") for line in help_lines)
     assert not any(line.strip().startswith("/dry-run") for line in help_lines)
     assert not any(line.strip().startswith("/patch") for line in help_lines)
@@ -1414,8 +1418,10 @@ def test_help_does_not_advertise_backend_switching() -> None:
 
     assert "SFE TUI advanced/debug commands:" in advanced
     assert "/run-debug" in advanced
+    assert "/run-report" in advanced
     assert "/run_debug" not in advanced
-    assert "Run task and show full diagnostic report" in advanced
+    assert "Run the task and show full diagnostics" in advanced
+    assert "Show diagnostics for the previous run without re-running" in advanced
     assert "/discover" in advanced
     assert "/dry-run" in advanced
     assert "/patch" in advanced
@@ -4014,6 +4020,145 @@ def test_tui_run_debug_underscore_alias_renders_full_report(tmp_path) -> None:
     assert executor.patch_calls == []
 
 
+def test_tui_run_report_before_any_run_renders_clear_message(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor()
+    router = FakeExecutionModeRouter()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/run-report", "/quit"]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert output[-1] == "No previous run result available."
+    assert app.last_run_result is None
+    assert router.calls == []
+    assert executor.console_calls == []
+    assert executor.patch_calls == []
+
+
+def test_tui_run_report_after_console_run_does_not_execute_again(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    router = FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Connais le Framework PHP intitulé Symfony ?",
+                "/run",
+                "/run-report",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert app.last_run_result is not None
+    assert app.last_run_result.status == "completed"
+    assert len(router.calls) == 1
+    assert len(executor.console_calls) == 1
+    report_output = output[-1]
+    assert "SFE run" in report_output
+    assert "execution mode: console_output" in report_output
+    assert "SFE console output" in report_output
+    assert "Symfony is a PHP framework." in report_output
+
+
+def test_tui_run_debug_still_executes_fresh_after_run(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    router = FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Connais le Framework PHP intitulé Symfony ?",
+                "/run",
+                "/run-debug",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert len(router.calls) == 2
+    assert len(executor.console_calls) == 2
+    assert app.last_run_result is not None
+    assert app.last_run_result.status == "completed"
+    assert "SFE run" in output[-1]
+    assert "execution mode: console_output" in output[-1]
+
+
+def test_tui_run_report_after_run_debug_reports_debug_run_result(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = FakeExecutor(
+        response=ExecutorResponse(
+            answer="Symfony is a PHP framework.",
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    router = FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/task Connais le Framework PHP intitulé Symfony ?",
+                "/run-debug",
+                "/run-report",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert len(router.calls) == 1
+    assert len(executor.console_calls) == 1
+    debug_output = output[-2]
+    report_output = output[-1]
+    assert "SFE run" in debug_output
+    assert report_output == debug_output
+
+
 def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor()
@@ -4042,6 +4187,39 @@ def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
     assert "router review: not run" not in run_output
     assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
     assert executor.patch_calls
+    assert app.last_run_result is not None
+    assert app.last_run_result.status == "completed"
+    assert app.last_run_result.patch_generated is True
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_report_after_workspace_write_run_does_not_execute_again(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor()
+    router = FakeExecutionModeRouter()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch old context", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert len(router.calls) == 1
+    assert len(executor.patch_calls) == 1
+    report_output = output[-1]
+    assert "SFE run" in report_output
+    assert "status: completed" in report_output
+    assert "execution-mode router provider: fake-execution-mode-router" in report_output
+    assert "patch generated: yes" in report_output
+    assert "promotion: applied" in report_output
     assert app.workspace_session is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True
@@ -4100,6 +4278,86 @@ def test_tui_run_external_action_renders_compact_message(tmp_path) -> None:
     assert "issue reason: external_action_not_implemented" in run_output
     assert "execution-mode router provider:" not in run_output
     assert "worktree path:" not in run_output
+
+
+def test_tui_run_invalid_response_failure_stores_last_result_and_hints(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=None,
+            error_category="invalid_response",
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/run", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: failed" in run_output
+    assert "issue category: patch_generation" in run_output
+    assert "issue reason: invalid_response" in run_output
+    assert (
+        "hint: executor returned an invalid or empty response; "
+        "use /run-report for diagnostics or retry /run"
+    ) in run_output
+    assert app.last_run_result is not None
+    assert app.last_run_result.status == "failed"
+    assert app.last_run_result.issue is not None
+    assert app.last_run_result.issue.category == "patch_generation"
+    assert app.last_run_result.issue.reason == "invalid_response"
+    assert len(executor.patch_calls) == 1
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_report_after_failed_run_does_not_execute_again(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=None,
+            error_category="invalid_response",
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    router = FakeExecutionModeRouter()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch old context", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert len(router.calls) == 1
+    assert len(executor.patch_calls) == 1
+    report_output = output[-1]
+    assert "SFE run" in report_output
+    assert "status: failed" in report_output
+    assert "issue category: patch_generation" in report_output
+    assert "issue reason: invalid_response" in report_output
+    assert "executor provider: fake-executor" in report_output
+    assert "patch generated: no" in report_output
+    assert "patch proposal output length: 0" in report_output
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
 
 
 def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> None:

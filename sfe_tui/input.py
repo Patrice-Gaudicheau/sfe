@@ -23,6 +23,7 @@ SLASH_COMMANDS = (
     "/task",
     "/run",
     "/run-debug",
+    "/run-report",
     "/context",
     "/ask",
     "/workspace-status",

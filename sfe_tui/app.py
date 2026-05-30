@@ -28,7 +28,7 @@ from sfe.patching import (
     validate_patch_paths,
     validate_patch_targets,
 )
-from sfe.run_pipeline import RunPipeline, RunRequest
+from sfe.run_pipeline import RunPipeline, RunRequest, RunResult
 from sfe.env import load_repo_env
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.workspace_isolation import (
@@ -151,6 +151,7 @@ class SfeTuiApp:
         self.discovery_result: DiscoveryResult | None = None
         self.task = ""
         self.latest_result: ExecutionResult | None = None
+        self.last_run_result: RunResult | None = None
         self.pending_patch: PendingPatchProposal | None = None
 
     def run(self) -> int:
@@ -270,6 +271,9 @@ class SfeTuiApp:
             return False
         if name in {"/run-debug", "/run_debug"}:
             self._handle_run(debug=True)
+            return False
+        if name == "/run-report":
+            self._handle_run_report()
             return False
         if name == "/apply-patch":
             self._handle_apply_patch()
@@ -696,6 +700,7 @@ class SfeTuiApp:
             )
         finally:
             activity.stop()
+        self.last_run_result = result
         if result.workspace_session is not None:
             self.workspace_session = result.workspace_session
         if result.active_workspace is not None:
@@ -708,6 +713,18 @@ class SfeTuiApp:
         else:
             self.output(renderer.render_run_result_normal(result))
         return result.status == "completed"
+
+    def _handle_run_report(self) -> bool:
+        if self.last_run_result is None:
+            self.output("No previous run result available.")
+            return False
+        self.output(
+            renderer.render_run_result_debug(
+                self.last_run_result,
+                launch_cwd=self.cwd,
+            )
+        )
+        return True
 
     def _handle_apply_patch(self) -> bool:
         if self.workspace_root is None:

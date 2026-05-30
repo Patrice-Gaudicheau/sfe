@@ -41,6 +41,7 @@ def render_help() -> str:
             "  /status            Show current TUI state",
             "  /task <text>       Set the current task",
             "  /run               Resolve the task and show concise output",
+            "  /run-report        Show diagnostics for the previous run without re-running",
             "  /context           Show selected context metadata",
             "  /ask               Ask a read-only question using selected context",
             "  /workspace-status  Show original/isolated workspace state",
@@ -54,7 +55,8 @@ def render_advanced_help() -> str:
     return "\n".join(
         [
             "SFE TUI advanced/debug commands:",
-            "  /run-debug         Run task and show full diagnostic report",
+            "  /run-debug         Run the task and show full diagnostics",
+            "  /run-report        Show diagnostics for the previous run without re-running",
             "  /discover          Discover workspace context for the current task",
             "  /dry-run           Build the SFE contract and show safe counts",
             "  /patch             Propose a patch without applying it",
@@ -322,7 +324,19 @@ def render_run_result_normal(result: RunResult) -> str:
     ]
     if result.issue is not None:
         lines.extend(_run_issue_lines(result.issue))
+        hint = _run_issue_hint(result.issue)
+        if hint is not None:
+            lines.append(f"  hint: {hint}")
     return "\n".join(lines)
+
+
+def _run_issue_hint(issue: RunIssue) -> str | None:
+    if issue.category == "patch_generation" and issue.reason == "invalid_response":
+        return (
+            "executor returned an invalid or empty response; use /run-report "
+            "for diagnostics or retry /run"
+        )
+    return None
 
 
 def render_run_result(result: RunResult, *, launch_cwd: Path | None = None) -> str:
