@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from copy import deepcopy
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,6 +62,8 @@ SAFE_RESPONSES_CONTENT_PART_TYPES = {
     "tool_call",
     "tool_result",
 }
+PROXY_PROGRESS_EVENTS_KEEP_FIRST = 100
+PROXY_PROGRESS_EVENTS_KEEP_LAST = 100
 
 
 class AnthropicRequestError(Exception):
@@ -86,6 +89,66 @@ class SFEProxyServer(ThreadingHTTPServer):
         self.anthropic_last_request_at: float | None = None
 
 
+class ProxyProgressEventBuffer:
+    """Bounded per-call proxy progress event buffer.
+
+    Keeps the first N and last N events for shadow/debug observability while
+    counting dropped middle events.
+    """
+
+    def __init__(
+        self,
+        *,
+        keep_first: int = PROXY_PROGRESS_EVENTS_KEEP_FIRST,
+        keep_last: int = PROXY_PROGRESS_EVENTS_KEEP_LAST,
+    ) -> None:
+        if keep_first < 0 or keep_last < 0:
+            raise ValueError("Proxy progress event retention limits must be non-negative.")
+        self.keep_first = keep_first
+        self.keep_last = keep_last
+        self._first: list[Any] = []
+        self._last: deque[Any] = deque(maxlen=keep_last)
+        self.total_count = 0
+        self.dropped_count = 0
+        self.event_kinds: set[str] = set()
+
+    def append(self, event: Any) -> None:
+        self.total_count += 1
+        kind = getattr(event, "kind", None)
+        if kind is not None:
+            self.event_kinds.add(str(kind))
+        if len(self._first) < self.keep_first:
+            self._first.append(event)
+            return
+        if self.keep_last <= 0:
+            self.dropped_count += 1
+            return
+        if len(self._last) == self.keep_last:
+            self.dropped_count += 1
+        self._last.append(event)
+
+    def __iter__(self):
+        yield from self._first
+        yield from self._last
+
+    def __len__(self) -> int:
+        return len(self._first) + len(self._last)
+
+    @property
+    def truncated(self) -> bool:
+        return self.dropped_count > 0
+
+    def metadata(self) -> dict[str, int | bool]:
+        return {
+            "progress_events_truncated": self.truncated,
+            "dropped_progress_events_count": self.dropped_count,
+            "progress_events_total_count": self.total_count,
+            "progress_events_stored_count": len(self),
+            "progress_events_kept_first": min(self.keep_first, len(self._first)),
+            "progress_events_kept_last": min(self.keep_last, len(self._last)),
+        }
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     server: SFEProxyServer
     protocol_version = "HTTP/1.1"
@@ -106,7 +169,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         model, stream = _request_metadata(body)
         upstream_url = _request_upstream_url(self.server.config, self.path)
-        provider_progress_events = []
+        provider_progress_events = ProxyProgressEventBuffer()
         progress_sink = provider_progress_events.append
         supervisor = ProviderCallSupervisor(
             provider=self.server.config.provider,
@@ -280,6 +343,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 shadow_event["upstream_status_code"] = status_code
                 shadow_event["upstream_latency_ms"] = latency_ms
                 shadow_event["provider_progress_events"] = event_dicts(provider_progress_events)
+                shadow_event.update(provider_progress_events.metadata())
                 self._write_shadow_event(shadow_event)
             self._log_request(
                 upstream_url=upstream_url,
@@ -529,8 +593,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         sfe_mode: str,
         shadow_event: dict[str, Any] | None,
         fallback_used: bool,
-        provider_progress_events: list[Any],
+        provider_progress_events: ProxyProgressEventBuffer,
     ) -> None:
+        progress_metadata = provider_progress_events.metadata()
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "method": self.command,
@@ -552,11 +617,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             ),
             "selected_zones_count": None,
             "selected_blocks_count": _log_selected_blocks_count(shadow_event),
-            "provider_progress_event_count": len(provider_progress_events),
-            "provider_progress_event_kinds": sorted(
-                {event.kind for event in provider_progress_events}
-            ),
+            "provider_progress_event_count": provider_progress_events.total_count,
+            "provider_progress_event_kinds": sorted(provider_progress_events.event_kinds),
         }
+        event.update(progress_metadata)
         event.update(_enabled_compact_log_fields(shadow_event))
         self.server.log_sink(json.dumps(event, sort_keys=True))
 

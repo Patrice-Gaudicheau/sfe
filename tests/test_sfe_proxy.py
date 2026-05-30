@@ -37,6 +37,8 @@ from sfe_proxy.config import (
 from sfe_proxy.provider_limits import ProviderLimitRegistry, ProviderRateLimiter
 from sfe_proxy.server import (
     ENABLED_MIN_REDUCTION_PCT,
+    PROXY_PROGRESS_EVENTS_KEEP_FIRST,
+    PROXY_PROGRESS_EVENTS_KEEP_LAST,
     _is_sse_response,
     _request_upstream_url,
     create_server,
@@ -5445,6 +5447,78 @@ def test_proxy_records_sse_progress_as_real_provider_signal(tmp_path) -> None:
     assert sse_events
     assert all(progress["real_provider_signal"] is True for progress in sse_events)
     assert "provider_sse_event" in _last_proxy_log(logs)["provider_progress_event_kinds"]
+
+
+def test_proxy_bounds_shadow_progress_events_for_long_sse_stream(tmp_path) -> None:
+    logs: list[str] = []
+    total_sse_lines = PROXY_PROGRESS_EVENTS_KEEP_FIRST + PROXY_PROGRESS_EVENTS_KEEP_LAST + 25
+    secret_marker = "secret-stream-token"
+
+    def sse_line(index: int) -> bytes:
+        return f"data: {secret_marker}-{index}-{'x' * (index + 1)}\n".encode("utf-8")
+
+    body = b"".join(sse_line(index) for index in range(total_sse_lines))
+    upstream = _start_upstream(
+        body=body,
+        headers={"Content-Type": "text/event-stream"},
+    )
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+    )
+    try:
+        host, port = proxy.server_address
+        response = _request_raw(
+            f"http://{host}:{port}/v1/responses",
+            method="POST",
+            payload={"model": "test-model", "input": "hello", "stream": True},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["content_type"] == "text/event-stream"
+    event = _read_shadow_event(tmp_path)
+    progress_events = event["provider_progress_events"]
+    expected_total = total_sse_lines + 4
+    expected_stored = PROXY_PROGRESS_EVENTS_KEEP_FIRST + PROXY_PROGRESS_EVENTS_KEEP_LAST
+    expected_dropped = expected_total - expected_stored
+
+    assert len(progress_events) == expected_stored
+    assert event["progress_events_truncated"] is True
+    assert event["dropped_progress_events_count"] == expected_dropped
+    assert event["progress_events_total_count"] == expected_total
+    assert event["progress_events_stored_count"] == expected_stored
+    assert event["progress_events_kept_first"] == PROXY_PROGRESS_EVENTS_KEEP_FIRST
+    assert event["progress_events_kept_last"] == PROXY_PROGRESS_EVENTS_KEEP_LAST
+    assert [progress["kind"] for progress in progress_events[:3]] == [
+        "call_started",
+        "request_sent",
+        "response_headers",
+    ]
+    assert progress_events[-1]["kind"] == "call_completed"
+
+    kept_sse_bytes = [
+        progress["metadata"]["bytes"]
+        for progress in progress_events
+        if progress["kind"] == "provider_sse_event"
+    ]
+    assert kept_sse_bytes[0] == len(sse_line(0))
+    assert kept_sse_bytes[96] == len(sse_line(96))
+    assert len(sse_line(120)) not in kept_sse_bytes
+    assert kept_sse_bytes[-2] == len(sse_line(total_sse_lines - 2))
+    assert kept_sse_bytes[-1] == len(sse_line(total_sse_lines - 1))
+    assert secret_marker not in json.dumps(progress_events)
+
+    log_event = _last_proxy_log(logs)
+    assert log_event["provider_progress_event_count"] == expected_total
+    assert log_event["progress_events_stored_count"] == expected_stored
+    assert log_event["progress_events_truncated"] is True
+    assert log_event["dropped_progress_events_count"] == expected_dropped
 
 
 def _start_upstream(
