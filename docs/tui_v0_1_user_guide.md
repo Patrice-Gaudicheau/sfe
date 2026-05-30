@@ -364,6 +364,43 @@ The current TUI behavior intentionally keeps these boundaries:
 - diagnostics do not display raw file contents, request bodies, provider
   payloads, API keys, or authorization headers.
 
+## DEV Patch Provider Limits
+
+Empty-workspace file creation through the DEV `/run` workspace-write path works
+in principle, but it depends on the configured executor model producing a
+strict Git-style unified diff. SFE treats that diff as a contract: file sections
+must start with `diff --git a/<relative-path> b/<relative-path>`, new files must
+use normal `/dev/null` file headers inside that section, and hunk line counts
+must exactly match the hunk body.
+
+Some local or mid-sized models can understand the task and still produce an
+invalid unified diff. The most common observed failure in empty-workspace
+creation tasks is hunk accounting mismatch for new-file patches, for example a
+header such as `@@ -0,0 +1,87 @@` where the declared new-line count does not
+match the actual number of added `+` lines. SFE correctly rejects these patches
+instead of accepting, rewriting, or silently repairing malformed output.
+
+`/run-report` can show bounded hunk accounting diagnostics for these failures,
+including the failing path, hunk header, declared counts, actual counts, and
+whether the hunk looks like a new-file hunk. The pipeline may make one LLM patch
+repair attempt for `impossible_hunk_accounting`, but smaller or local models can
+still fail if they cannot reproduce exact hunk counts.
+
+A controlled comparison of the same empty-workspace ToDo web app task completed
+with OpenAI as the router and executor provider. That run generated and applied
+a patch successfully, promoted `index.html`, `styles.css`, `app.js`, and
+`README.md`, and did not require repair. This supports treating the strict
+unified diff protocol as viable with a stronger provider. The current
+Lemonade/Qwen3.5-35B-A3B-GGUF failures are best understood as a provider/model
+capability boundary for strict patch generation, not as evidence that the SFE
+workflow is invalid.
+
+For local providers, prefer smaller and simpler workspace-write tasks, or expect
+occasional patch-generation failures until a more robust workflow is
+implemented. A future branch may investigate whether provider timeouts should
+be complemented by heartbeat or progress mechanisms. This note does not change
+provider timeout behavior or add heartbeat logic.
+
 ## Current Limitations
 
 - `/dry-run` context preview routing is a local lexical preview, not an LLM
