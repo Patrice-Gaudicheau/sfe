@@ -27,6 +27,7 @@ from providers.openai_api import (
 )
 from router import llm_router
 from runtime import run_effectiveness_benchmark, run_experiment
+from sfe.provider_progress import collect_progress_events
 
 
 class OpenAIAPIProviderTests(unittest.TestCase):
@@ -104,6 +105,26 @@ class OpenAIAPIProviderTests(unittest.TestCase):
         )
         self.assertEqual(response["openai_api"]["provider"], PROVIDER_NAME)
         self.assertNotIn("codexcli", response)
+
+    def test_chat_emits_core_provider_progress_events(self) -> None:
+        class FakeProvider(OpenAIAPIProvider):
+            def _responses_create(self, **_: object) -> dict[str, object]:
+                return {
+                    "output_text": "Clean answer.",
+                    "usage": {"input_tokens": 9, "output_tokens": 4},
+                }
+
+        events, sink = collect_progress_events()
+        provider = FakeProvider(api_key="test-key", timeout=1)
+        response = provider.chat(
+            [{"role": "user", "content": "hello"}],
+            model="gpt-5.5",
+            progress_sink=sink,
+        )
+
+        self.assertEqual(response["choices"][0]["message"]["content"], "Clean answer.")
+        self.assertEqual([event.kind for event in events], ["call_started", "call_completed"])
+        self.assertTrue(all(event.provider == PROVIDER_NAME for event in events))
 
     def test_gpt_5_5_payload_omits_temperature(self) -> None:
         payload = _responses_payload(

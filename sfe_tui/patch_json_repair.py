@@ -13,6 +13,7 @@ from sfe.patch_json_repair import (
     PatchJsonRepairer as _PatchJsonRepairer,
     PatchJsonRepairResult as _PatchJsonRepairResult,
 )
+from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.router_review import (
     DEFAULT_LEMONADE_ROUTER_MODEL,
     call_provider_chat,
@@ -89,6 +90,13 @@ class ConfiguredPatchJsonRepairer:
                 model=self.model,
                 max_tokens=PATCH_JSON_REPAIR_MAX_OUTPUT_TOKENS,
                 system_instruction=PATCH_JSON_REPAIR_SYSTEM_INSTRUCTION,
+            )
+        except ProviderCallIdleTimeoutError:
+            return _PatchJsonRepairResult(
+                None,
+                error_category="repairer_provider_idle_timeout",
+                provider_name=self.provider_name,
+                model=self.model,
             )
         except TimeoutError:
             return _PatchJsonRepairResult(

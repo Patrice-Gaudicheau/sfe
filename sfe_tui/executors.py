@@ -25,6 +25,7 @@ from providers.openai_api import (
     OpenAIAPIError,
     OpenAIAPIProvider,
 )
+from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.provider_config import resolve_sfe_provider
 
 
@@ -202,6 +203,13 @@ class DirectProviderReadOnlyExecutor:
                 answer=None,
                 error_category="provider_not_configured",
                 provider_calls_made=0,
+                provider_name=self.provider_name,
+            )
+        except ProviderCallIdleTimeoutError:
+            return ExecutorResponse(
+                answer=None,
+                error_category="provider_idle_timeout",
+                provider_calls_made=1,
                 provider_name=self.provider_name,
             )
         except TimeoutError:

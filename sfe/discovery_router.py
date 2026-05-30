@@ -26,6 +26,7 @@ from providers.openai_api import (
     OpenAIAPIError,
     OpenAIAPIProvider,
 )
+from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.provider_config import resolve_sfe_provider
 
 
@@ -121,6 +122,11 @@ class ConfiguredLLMDiscoveryRouter:
             raise DiscoveryRouterError(
                 "discovery_router_not_configured",
                 "configured discovery router is not available",
+            ) from exc
+        except ProviderCallIdleTimeoutError as exc:
+            raise DiscoveryRouterError(
+                "discovery_router_provider_idle_timeout",
+                "configured discovery router provider stopped producing progress",
             ) from exc
         except TimeoutError as exc:
             raise DiscoveryRouterError(

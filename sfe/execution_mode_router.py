@@ -26,6 +26,7 @@ from providers.openai_api import (
     OpenAIAPIError,
     OpenAIAPIProvider,
 )
+from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.provider_config import resolve_sfe_provider
 
 
@@ -120,6 +121,11 @@ class ConfiguredLLMExecutionModeRouter:
             raise ExecutionModeRouterError(
                 "execution_mode_router_not_configured",
                 "configured execution-mode router is not available",
+            ) from exc
+        except ProviderCallIdleTimeoutError as exc:
+            raise ExecutionModeRouterError(
+                "execution_mode_router_provider_idle_timeout",
+                "configured execution-mode router provider stopped producing progress",
             ) from exc
         except TimeoutError as exc:
             raise ExecutionModeRouterError(

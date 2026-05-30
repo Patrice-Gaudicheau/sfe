@@ -1309,6 +1309,7 @@ def _failure_guidance(error_category: str | None) -> str:
             "this command needs a configured executor/provider"
         ),
         "timeout": "provider call timed out; retry later or check provider settings",
+        "provider_idle_timeout": "provider call stalled after progress stopped; retry later or check provider health",
         "http_error": "provider returned an HTTP error; check provider settings",
         "network_error": "provider could not be reached; check local provider status",
         "invalid_json": "provider returned non-JSON data",

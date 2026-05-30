@@ -26,6 +26,7 @@ from providers.openai_api import (
     OpenAIAPIError,
     OpenAIAPIProvider,
 )
+from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.provider_config import resolve_sfe_provider
 
 
@@ -105,6 +106,11 @@ class DirectProviderJsonReviewer:
             )
         except self.missing_key_errors as exc:
             raise RouterReviewError("router_not_configured", "configured router is not available") from exc
+        except ProviderCallIdleTimeoutError as exc:
+            raise RouterReviewError(
+                "router_provider_idle_timeout",
+                "configured router provider stopped producing progress",
+            ) from exc
         except TimeoutError as exc:
             raise RouterReviewError("router_timeout", "configured router timed out") from exc
         except self.provider_error_types as exc:

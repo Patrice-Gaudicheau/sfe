@@ -18,6 +18,50 @@ from providers.codexcli import (
     build_codex_exec_command,
     parse_codex_jsonl,
 )
+from sfe.provider_progress import collect_progress_events
+
+
+class FakeStdin:
+    def __init__(self) -> None:
+        self.written = ""
+
+    def write(self, text: str) -> None:
+        self.written += text
+
+    def close(self) -> None:
+        return None
+
+
+class FakeStderr:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def read(self) -> str:
+        return self.text
+
+
+class FakeProcess:
+    def __init__(
+        self,
+        *,
+        stdout_lines: list[str],
+        stderr_text: str = "",
+        returncode: int = 0,
+    ) -> None:
+        self.stdin = FakeStdin()
+        self.stdout = iter(stdout_lines)
+        self.stderr = FakeStderr(stderr_text)
+        self.returncode = returncode
+        self.killed = False
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def wait(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
 
 
 class CodexCLIProviderTests(unittest.TestCase):
@@ -58,19 +102,41 @@ class CodexCLIProviderTests(unittest.TestCase):
 
     def test_chat_raises_runtime_error_on_failed_command(self) -> None:
         provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)
-        completed = subprocess.CompletedProcess(
-            args=["codex"],
+        fake_process = FakeProcess(
+            stdout_lines=[],
+            stderr_text="missing credentials",
             returncode=2,
-            stdout="",
-            stderr="missing credentials",
         )
 
-        with patch("providers.codexcli.subprocess.run", return_value=completed):
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
             with self.assertRaisesRegex(RuntimeError, "missing credentials"):
                 provider.chat(
                     [{"role": "user", "content": "hello"}],
                     model="gpt-5.5",
                 )
+
+    def test_chat_emits_progress_for_codex_jsonl_stdout(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)
+        fake_process = FakeProcess(
+            stdout_lines=[
+                '{"type":"thread.started","thread_id":"thread-1"}\n',
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n',
+                '{"type":"turn.completed","usage":{"input_tokens":7,"output_tokens":3}}\n',
+            ],
+        )
+        events, sink = collect_progress_events()
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+            response = provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+                progress_sink=sink,
+            )
+
+        self.assertEqual(response["choices"][0]["message"]["content"], "Done.")
+        self.assertIn("provider_chunk", [event.kind for event in events])
+        chunk_events = [event for event in events if event.kind == "provider_chunk"]
+        self.assertTrue(all(event.real_provider_signal for event in chunk_events))
 
 
 if __name__ == "__main__":

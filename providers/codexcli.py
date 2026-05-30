@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from sfe.provider_progress import ProviderCallSupervisor, ProviderProgressSink
 
 
 PROVIDER_NAME = "openai-codexcli"
@@ -59,35 +63,47 @@ class CodexCLIProvider:
         model: str,
         max_tokens: int = 512,
         temperature: float = 0.2,
+        progress_sink: ProviderProgressSink | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """Run Codex CLI and normalize JSONL events to a chat-completion shape."""
         prompt = _messages_to_prompt(messages)
         started = time.perf_counter()
         command = build_codex_exec_command(model=model, sandbox=self.sandbox)
+        supervisor = ProviderCallSupervisor(
+            provider=PROVIDER_NAME,
+            model=model,
+            progress_sink=progress_sink,
+        )
+        supervisor.start(
+            {
+                "command": command,
+                "cwd": str(self.cwd),
+                "max_tokens_requested": max_tokens,
+            }
+        )
 
         try:
-            result = subprocess.run(
-                command,
-                cwd=str(self.cwd),
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
+            stdout, stderr, returncode = _run_codex_process(
+                command=command,
+                cwd=self.cwd,
+                prompt=prompt,
+                supervisor=supervisor,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"CodexCLI timed out after {self.timeout:g} seconds"
-            ) from exc
+        except Exception as exc:
+            supervisor.fail({"error_type": type(exc).__name__})
+            raise
 
         latency_ms = int((time.perf_counter() - started) * 1000)
-        if result.returncode != 0:
-            details = result.stderr.strip() or result.stdout.strip()
-            raise RuntimeError(f"CodexCLI failed with exit {result.returncode}: {details}")
+        if returncode != 0:
+            supervisor.fail({"returncode": returncode})
+            details = stderr.strip() or stdout.strip()
+            raise RuntimeError(f"CodexCLI failed with exit {returncode}: {details}")
 
-        parsed = parse_codex_jsonl(result.stdout)
+        parsed = parse_codex_jsonl(stdout)
         content = parsed["content"]
         usage = parsed["usage"]
+        supervisor.complete({"latency_ms": latency_ms, "returncode": returncode})
         return {
             "choices": [{"message": {"content": content}}],
             "usage": usage,
@@ -101,6 +117,90 @@ class CodexCLIProvider:
                 "temperature_requested": temperature,
             },
         }
+
+
+def _run_codex_process(
+    *,
+    command: list[str],
+    cwd: Path,
+    prompt: str,
+    supervisor: ProviderCallSupervisor,
+) -> tuple[str, str, int]:
+    supervisor.emit(
+        "request_sent",
+        source="codexcli",
+        real_provider_signal=False,
+        resets_idle_timer=False,
+        metadata={"command": command},
+    )
+    process = subprocess.Popen(
+        command,
+        cwd=str(cwd),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if process.stdin is not None:
+        process.stdin.write(prompt)
+        process.stdin.close()
+
+    output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+
+    def read_stdout() -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            output_queue.put(("stdout", line))
+        output_queue.put(("stdout_done", None))
+
+    def read_stderr() -> None:
+        assert process.stderr is not None
+        stderr = process.stderr.read()
+        if stderr:
+            output_queue.put(("stderr", stderr))
+        output_queue.put(("stderr_done", None))
+
+    threading.Thread(target=read_stdout, daemon=True).start()
+    threading.Thread(target=read_stderr, daemon=True).start()
+
+    stdout_done = False
+    stderr_done = False
+    while not (stdout_done and stderr_done and process.poll() is not None):
+        try:
+            stream, value = output_queue.get(timeout=supervisor.internal_heartbeat_seconds)
+        except queue.Empty:
+            supervisor.emit(
+                "internal_wait",
+                source="sfe_core",
+                real_provider_signal=False,
+                resets_idle_timer=False,
+                metadata={"provider_call": "codexcli_process"},
+            )
+            try:
+                supervisor.check_idle()
+            except Exception:
+                process.kill()
+                raise
+            continue
+        if stream == "stdout" and value is not None:
+            stdout_parts.append(value)
+            supervisor.emit(
+                "provider_chunk",
+                source="codexcli_jsonl",
+                real_provider_signal=True,
+                metadata={"bytes": len(value.encode("utf-8"))},
+            )
+        elif stream == "stderr" and value is not None:
+            stderr_parts.append(value)
+        elif stream == "stdout_done":
+            stdout_done = True
+        elif stream == "stderr_done":
+            stderr_done = True
+
+    returncode = process.wait()
+    return "".join(stdout_parts), "".join(stderr_parts), returncode
 
 
 def build_codex_exec_command(model: str, sandbox: str = DEFAULT_SANDBOX) -> list[str]:

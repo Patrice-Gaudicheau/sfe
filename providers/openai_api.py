@@ -10,6 +10,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from sfe.provider_progress import (
+    ProviderCallIdleTimeoutError,
+    ProviderCallSupervisor,
+    ProviderProgressSink,
+)
+
 
 PROVIDER_NAME = "openai-api"
 # Environment-dependent example defaults retained for compatibility with
@@ -70,6 +76,7 @@ class OpenAIAPIProvider:
         max_tokens: int = 512,
         temperature: float | None = None,
         system_instruction: str | None = None,
+        progress_sink: ProviderProgressSink | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """Send a minimal direct OpenAI request and normalize the response."""
@@ -78,6 +85,18 @@ class OpenAIAPIProvider:
 
         started = time.perf_counter()
         retry_diagnostics: list[dict[str, Any]] = []
+        supervisor = ProviderCallSupervisor(
+            provider=PROVIDER_NAME,
+            model=model,
+            progress_sink=progress_sink,
+        )
+        supervisor.start(
+            {
+                "base_url": self.base_url,
+                "api_style": "openai_responses",
+                "max_tokens_requested": max_tokens,
+            }
+        )
         try:
             raw_response = self._responses_create_with_retries(
                 model=model,
@@ -86,10 +105,13 @@ class OpenAIAPIProvider:
                 temperature=temperature,
                 system_instruction=system_instruction,
                 retry_diagnostics=retry_diagnostics,
+                supervisor=supervisor,
             )
-        except OpenAIAPIError:
+        except (OpenAIAPIError, ProviderCallIdleTimeoutError) as exc:
+            supervisor.fail({"error_type": type(exc).__name__})
             raise
         except Exception as exc:
+            supervisor.fail({"error_type": type(exc).__name__})
             diagnostics = _classify_api_error(exc)
             diagnostics["api_error_retry_count"] = len(retry_diagnostics)
             diagnostics["api_error_attempts"] = retry_diagnostics
@@ -97,6 +119,7 @@ class OpenAIAPIProvider:
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         normalized = normalize_openai_response(raw_response)
+        supervisor.complete({"latency_ms": latency_ms})
         retry_count = len(retry_diagnostics)
         last_retry_error = retry_diagnostics[-1] if retry_diagnostics else {}
         return {
@@ -128,6 +151,7 @@ class OpenAIAPIProvider:
         temperature: float | None,
         system_instruction: str | None,
         retry_diagnostics: list[dict[str, Any]],
+        supervisor: ProviderCallSupervisor,
     ) -> Any:
         retry_count = 0
         while True:
@@ -138,6 +162,7 @@ class OpenAIAPIProvider:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     system_instruction=system_instruction,
+                    supervisor=supervisor,
                 )
             except Exception as exc:
                 diagnostics = _classify_api_error(exc)
@@ -147,7 +172,19 @@ class OpenAIAPIProvider:
                     diagnostics["api_error_retry_count"] = retry_count
                     diagnostics["api_error_attempts"] = retry_diagnostics
                     raise OpenAIAPIError(diagnostics) from exc
-                time.sleep(_retry_backoff_seconds(diagnostics, retry_count))
+                backoff = _retry_backoff_seconds(diagnostics, retry_count)
+                supervisor.emit(
+                    "retry_scheduled",
+                    source="sfe_core",
+                    real_provider_signal=False,
+                    resets_idle_timer=False,
+                    metadata={
+                        "retry_count": retry_count + 1,
+                        "sleep_seconds": backoff,
+                        "api_error_type": diagnostics.get("api_error_type"),
+                    },
+                )
+                time.sleep(backoff)
                 retry_count += 1
 
     def _responses_create(
@@ -157,6 +194,7 @@ class OpenAIAPIProvider:
         max_tokens: int,
         temperature: float | None,
         system_instruction: str | None,
+        supervisor: ProviderCallSupervisor,
     ) -> Any:
         try:
             from openai import OpenAI  # type: ignore
@@ -167,11 +205,12 @@ class OpenAIAPIProvider:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system_instruction=system_instruction,
+                supervisor=supervisor,
             )
 
         client_kwargs: dict[str, Any] = {
             "api_key": self.api_key,
-            "timeout": self.timeout,
+            "timeout": max(self.timeout, supervisor.idle_timeout_seconds),
         }
         if self.base_url != DEFAULT_BASE_URL:
             client_kwargs["base_url"] = self.base_url
@@ -183,7 +222,17 @@ class OpenAIAPIProvider:
             temperature=temperature,
             system_instruction=system_instruction,
         )
-        return client.responses.create(**request_payload)
+        supervisor.emit(
+            "request_sent",
+            source="openai_sdk",
+            real_provider_signal=False,
+            resets_idle_timer=False,
+            metadata={"endpoint": "responses"},
+        )
+        return supervisor.run_blocking(
+            lambda: client.responses.create(**request_payload),
+            wait_metadata={"provider_call": "openai_responses_sdk"},
+        )
 
     def _responses_create_http(
         self,
@@ -192,6 +241,7 @@ class OpenAIAPIProvider:
         max_tokens: int,
         temperature: float | None,
         system_instruction: str | None,
+        supervisor: ProviderCallSupervisor,
     ) -> dict[str, Any]:
         payload = _responses_payload(
             model=model,
@@ -210,8 +260,31 @@ class OpenAIAPIProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+            supervisor.emit(
+                "request_sent",
+                source="http_client",
+                real_provider_signal=False,
+                resets_idle_timer=False,
+                metadata={"endpoint": "/responses"},
+            )
+
+            def read_response() -> dict[str, Any]:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=max(self.timeout, supervisor.idle_timeout_seconds),
+                ) as response:
+                    supervisor.emit(
+                        "response_headers",
+                        source="http_client",
+                        real_provider_signal=True,
+                        metadata={"status": getattr(response, "status", None)},
+                    )
+                    return json.loads(response.read().decode("utf-8"))
+
+            return supervisor.run_blocking(
+                read_response,
+                wait_metadata={"provider_call": "openai_responses_http"},
+            )
         except urllib.error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
             raise OpenAIAPIError(_classify_http_error(exc.code, details)) from exc

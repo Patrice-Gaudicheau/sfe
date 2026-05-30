@@ -1316,7 +1316,9 @@ def test_anthropic_provider_reports_non_rate_limit_http_error_safely() -> None:
     }
 
 
-def test_anthropic_provider_reports_timeout_safely() -> None:
+def test_anthropic_provider_reports_timeout_safely(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROVIDER_IDLE_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("SFE_PROVIDER_INTERNAL_HEARTBEAT_SECONDS", "0.1")
     anthropic = _start_anthropic_provider(response_delay_seconds=2.0)
     upstream = _start_upstream()
     proxy = _start_proxy(
@@ -1326,7 +1328,7 @@ def test_anthropic_provider_reports_timeout_safely() -> None:
         anthropic_base_url=f"http://{anthropic.server_address[0]}:{anthropic.server_address[1]}",
         anthropic_api_key="anthropic-secret",
         anthropic_model="claude-test",
-        anthropic_timeout_seconds=1,
+        anthropic_timeout_seconds=5,
     )
     try:
         try:
@@ -5374,6 +5376,75 @@ def test_sse_content_type_detection_allows_parameters() -> None:
     assert _is_sse_response("text/event-stream")
     assert _is_sse_response("text/event-stream; charset=utf-8")
     assert not _is_sse_response("application/json")
+
+
+def test_proxy_records_provider_chunk_progress_events(tmp_path) -> None:
+    logs: list[str] = []
+    upstream = _start_upstream(body=b'{"ok":true}')
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+    )
+    try:
+        host, port = proxy.server_address
+        response = _request_raw(
+            f"http://{host}:{port}/v1/chat/completions",
+            method="POST",
+            payload={"model": "test-model", "messages": [], "stream": False},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["status"] == 200
+    event = _read_shadow_event(tmp_path)
+    progress_kinds = [
+        progress["kind"] for progress in event["provider_progress_events"]
+    ]
+    assert "response_headers" in progress_kinds
+    assert "provider_chunk" in progress_kinds
+    assert _last_proxy_log(logs)["provider_progress_event_count"] >= 1
+
+
+def test_proxy_records_sse_progress_as_real_provider_signal(tmp_path) -> None:
+    logs: list[str] = []
+    upstream = _start_upstream(
+        body=b"data: first\n\ndata: [DONE]\n\n",
+        headers={"Content-Type": "text/event-stream"},
+    )
+    proxy = _start_proxy(
+        upstream,
+        logs,
+        mode="shadow",
+        shadow_log_dir=str(tmp_path),
+    )
+    try:
+        host, port = proxy.server_address
+        response = _request_raw(
+            f"http://{host}:{port}/v1/responses",
+            method="POST",
+            payload={"model": "test-model", "input": "hello", "stream": True},
+        )
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert response["content_type"] == "text/event-stream"
+    event = _read_shadow_event(tmp_path)
+    sse_events = [
+        progress
+        for progress in event["provider_progress_events"]
+        if progress["kind"] == "provider_sse_event"
+    ]
+    assert sse_events
+    assert all(progress["real_provider_signal"] is True for progress in sse_events)
+    assert "provider_sse_event" in _last_proxy_log(logs)["provider_progress_event_kinds"]
 
 
 def _start_upstream(

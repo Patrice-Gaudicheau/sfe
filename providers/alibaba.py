@@ -10,6 +10,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from sfe.provider_progress import (
+    ProviderCallIdleTimeoutError,
+    ProviderCallSupervisor,
+    ProviderProgressSink,
+)
+
 
 PROVIDER_NAME = "alibaba-api"
 DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -70,6 +76,7 @@ class AlibabaAPIProvider:
         max_tokens: int = 512,
         temperature: float | None = None,
         system_instruction: str | None = None,
+        progress_sink: ProviderProgressSink | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """Send one OpenAI-compatible Chat Completions request."""
@@ -77,6 +84,18 @@ class AlibabaAPIProvider:
             raise MissingAlibabaAPIKeyError(_missing_api_key_message())
 
         started = time.perf_counter()
+        supervisor = ProviderCallSupervisor(
+            provider=PROVIDER_NAME,
+            model=model,
+            progress_sink=progress_sink,
+        )
+        supervisor.start(
+            {
+                "base_url": self.base_url,
+                "api_style": "openai_compatible_chat",
+                "max_tokens_requested": max_tokens,
+            }
+        )
         try:
             raw_response = self._chat_completions_create(
                 model=model,
@@ -84,14 +103,18 @@ class AlibabaAPIProvider:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system_instruction=system_instruction,
+                supervisor=supervisor,
             )
-        except AlibabaAPIError:
+        except (AlibabaAPIError, ProviderCallIdleTimeoutError) as exc:
+            supervisor.fail({"error_type": type(exc).__name__})
             raise
         except Exception as exc:
+            supervisor.fail({"error_type": type(exc).__name__})
             raise AlibabaAPIError(_classify_api_error(exc)) from exc
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         normalized = normalize_alibaba_response(raw_response)
+        supervisor.complete({"latency_ms": latency_ms})
         return {
             "choices": [{"message": {"content": normalized["content"]}}],
             "usage": normalized["usage"],
@@ -119,6 +142,7 @@ class AlibabaAPIProvider:
         max_tokens: int,
         temperature: float | None,
         system_instruction: str | None,
+        supervisor: ProviderCallSupervisor,
     ) -> dict[str, Any]:
         payload = _chat_completions_payload(
             model=model,
@@ -138,8 +162,31 @@ class AlibabaAPIProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+            supervisor.emit(
+                "request_sent",
+                source="http_client",
+                real_provider_signal=False,
+                resets_idle_timer=False,
+                metadata={"endpoint": "/chat/completions"},
+            )
+
+            def read_response() -> dict[str, Any]:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=max(self.timeout, supervisor.idle_timeout_seconds),
+                ) as response:
+                    supervisor.emit(
+                        "response_headers",
+                        source="http_client",
+                        real_provider_signal=True,
+                        metadata={"status": getattr(response, "status", None)},
+                    )
+                    return json.loads(response.read().decode("utf-8"))
+
+            return supervisor.run_blocking(
+                read_response,
+                wait_metadata={"provider_call": "alibaba_chat_completions_http"},
+            )
         except urllib.error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
             raise AlibabaAPIError(_classify_http_error(exc.code, details)) from exc

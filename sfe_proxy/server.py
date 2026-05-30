@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import socket
@@ -16,6 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
+
+from sfe.provider_progress import ProviderCallSupervisor, event_dicts
 
 from .config import (
     ANTHROPIC_PROXY_PROVIDER,
@@ -103,6 +106,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         model, stream = _request_metadata(body)
         upstream_url = _request_upstream_url(self.server.config, self.path)
+        provider_progress_events = []
+        progress_sink = provider_progress_events.append
+        supervisor = ProviderCallSupervisor(
+            provider=self.server.config.provider,
+            model=model,
+            progress_sink=progress_sink,
+        )
+        supervisor.start(
+            {
+                "method": self.command,
+                "path": path,
+                "stream": stream,
+            }
+        )
         status_code = 502
         sfe_mode = _initial_sfe_mode(self.server.config, self.command, path)
         fallback_used = False
@@ -212,6 +229,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 anthropic_result = self._send_anthropic_provider_response(
                     path,
                     upstream_body,
+                    supervisor,
                 )
                 status_code = int(anthropic_result["status_code"])
                 if shadow_event is not None:
@@ -219,14 +237,39 @@ class ProxyHandler(BaseHTTPRequestHandler):
             else:
                 request = self._build_upstream_request(upstream_url, upstream_body)
                 try:
+                    supervisor.emit(
+                        "request_sent",
+                        source="proxy_upstream",
+                        real_provider_signal=False,
+                        resets_idle_timer=False,
+                        metadata={"upstream_url": upstream_url},
+                    )
                     with urllib.request.urlopen(request, timeout=300) as upstream:
                         status_code = int(upstream.status)
-                        self._send_upstream_response(upstream)
+                        supervisor.emit(
+                            "response_headers",
+                            source="proxy_upstream",
+                            real_provider_signal=True,
+                            metadata={
+                                "status_code": status_code,
+                                "content_type": upstream.headers.get("Content-Type"),
+                            },
+                        )
+                        self._send_upstream_response(upstream, supervisor)
+                        supervisor.complete({"status_code": status_code})
                 except urllib.error.HTTPError as exc:
                     status_code = int(exc.code)
-                    self._send_upstream_response(exc)
+                    supervisor.emit(
+                        "response_headers",
+                        source="proxy_upstream",
+                        real_provider_signal=True,
+                        metadata={"status_code": status_code},
+                    )
+                    self._send_upstream_response(exc, supervisor)
+                    supervisor.fail({"status_code": status_code, "error_type": "HTTPError"})
                 except urllib.error.URLError:
                     status_code = 502
+                    supervisor.fail({"status_code": status_code, "error_type": "URLError"})
                     self._send_json(
                         502,
                         {"error": {"message": "Upstream request failed", "type": "upstream_error"}},
@@ -236,6 +279,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if shadow_event is not None:
                 shadow_event["upstream_status_code"] = status_code
                 shadow_event["upstream_latency_ms"] = latency_ms
+                shadow_event["provider_progress_events"] = event_dicts(provider_progress_events)
                 self._write_shadow_event(shadow_event)
             self._log_request(
                 upstream_url=upstream_url,
@@ -246,6 +290,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 sfe_mode=sfe_mode,
                 shadow_event=shadow_event,
                 fallback_used=fallback_used,
+                provider_progress_events=provider_progress_events,
             )
 
     def _read_body(self) -> bytes:
@@ -270,6 +315,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self,
         path: str,
         body: bytes,
+        supervisor: ProviderCallSupervisor,
     ) -> dict[str, Any]:
         try:
             request_body = _anthropic_request_body(self.server.config, path, body)
@@ -277,12 +323,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             provider_response, retry_count = _call_anthropic_with_optional_retry(
                 self.server,
                 request_body,
+                supervisor,
             )
             response_payload = _openai_compatible_response_from_anthropic(
                 path,
                 provider_response,
             )
             self._send_json(200, response_payload)
+            supervisor.complete({"status_code": 200})
             event_fields = _anthropic_usage_event_fields(provider_response)
             event_fields["provider_retry_count"] = retry_count
             return {
@@ -290,6 +338,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "event_fields": event_fields,
             }
         except AnthropicRequestError as exc:
+            supervisor.fail({"status_code": exc.status_code, "error_type": exc.error_type})
             self._send_json(
                 exc.status_code,
                 {
@@ -308,6 +357,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 },
             }
         except urllib.error.HTTPError as exc:
+            supervisor.fail({"status_code": int(exc.code), "error_type": "HTTPError"})
             self._send_json(
                 int(exc.code),
                 {
@@ -327,6 +377,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 },
             }
         except (TimeoutError, socket.timeout):
+            supervisor.fail({"status_code": 504, "error_type": "TimeoutError"})
             self._send_json(
                 504,
                 {
@@ -346,6 +397,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }
         except urllib.error.URLError as exc:
             if _is_timeout_error(exc):
+                supervisor.fail({"status_code": 504, "error_type": "TimeoutError"})
                 self._send_json(
                     504,
                     {
@@ -363,6 +415,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         "provider_error_type": "anthropic_provider_timeout",
                     },
                 }
+            supervisor.fail({"status_code": 502, "error_type": "URLError"})
             self._send_json(
                 502,
                 {
@@ -381,6 +434,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 },
             }
         except OSError:
+            supervisor.fail({"status_code": 502, "error_type": "OSError"})
             self._send_json(
                 502,
                 {
@@ -399,7 +453,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 },
             }
 
-    def _send_upstream_response(self, upstream: Any) -> None:
+    def _send_upstream_response(
+        self,
+        upstream: Any,
+        supervisor: ProviderCallSupervisor,
+    ) -> None:
         self.close_connection = True
         self.send_response(int(upstream.status if hasattr(upstream, "status") else upstream.code))
         content_type = ""
@@ -412,23 +470,43 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         if _is_sse_response(content_type):
-            self._stream_sse_response(upstream)
+            self._stream_sse_response(upstream, supervisor)
         else:
-            self._stream_chunked_response(upstream)
+            self._stream_chunked_response(upstream, supervisor)
 
-    def _stream_chunked_response(self, upstream: Any) -> None:
+    def _stream_chunked_response(
+        self,
+        upstream: Any,
+        supervisor: ProviderCallSupervisor,
+    ) -> None:
         while True:
             chunk = upstream.read(65536)
             if not chunk:
                 break
+            supervisor.emit(
+                "provider_chunk",
+                source="proxy_upstream",
+                real_provider_signal=True,
+                metadata={"bytes": len(chunk)},
+            )
             self.wfile.write(chunk)
             self.wfile.flush()
 
-    def _stream_sse_response(self, upstream: Any) -> None:
+    def _stream_sse_response(
+        self,
+        upstream: Any,
+        supervisor: ProviderCallSupervisor,
+    ) -> None:
         while True:
             line = upstream.readline()
             if not line:
                 break
+            supervisor.emit(
+                "provider_sse_event",
+                source="proxy_upstream",
+                real_provider_signal=True,
+                metadata={"bytes": len(line)},
+            )
             self.wfile.write(line)
             self.wfile.flush()
 
@@ -451,6 +529,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         sfe_mode: str,
         shadow_event: dict[str, Any] | None,
         fallback_used: bool,
+        provider_progress_events: list[Any],
     ) -> None:
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -473,6 +552,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             ),
             "selected_zones_count": None,
             "selected_blocks_count": _log_selected_blocks_count(shadow_event),
+            "provider_progress_event_count": len(provider_progress_events),
+            "provider_progress_event_kinds": sorted(
+                {event.kind for event in provider_progress_events}
+            ),
         }
         event.update(_enabled_compact_log_fields(shadow_event))
         self.server.log_sink(json.dumps(event, sort_keys=True))
@@ -1946,11 +2029,16 @@ def _anthropic_headers(config: ProxyConfig) -> dict[str, str]:
 def _call_anthropic_with_optional_retry(
     server: SFEProxyServer,
     request_body: dict[str, Any],
+    supervisor: ProviderCallSupervisor,
 ) -> tuple[dict[str, Any], int]:
     retry_count = 0
     while True:
         try:
-            return _call_anthropic_once(server, request_body), retry_count
+            return _call_anthropic_once_with_progress(
+                server,
+                request_body,
+                supervisor,
+            ), retry_count
         except urllib.error.HTTPError as exc:
             if int(exc.code) != 429:
                 raise
@@ -1966,13 +2054,22 @@ def _call_anthropic_with_optional_retry(
                     "anthropic_rate_limit_retry_exhausted",
                     "Anthropic provider rate limit retry exhausted",
                 ) from exc
-            time.sleep(_anthropic_retry_sleep_seconds(server.config, exc))
+            sleep_seconds = _anthropic_retry_sleep_seconds(server.config, exc)
+            supervisor.emit(
+                "retry_scheduled",
+                source="sfe_core",
+                real_provider_signal=False,
+                resets_idle_timer=False,
+                metadata={"retry_count": retry_count + 1, "sleep_seconds": sleep_seconds},
+            )
+            time.sleep(sleep_seconds)
             retry_count += 1
 
 
 def _call_anthropic_once(
     server: SFEProxyServer,
     request_body: dict[str, Any],
+    supervisor: ProviderCallSupervisor,
 ) -> dict[str, Any]:
     _wait_for_anthropic_request_interval(server)
     request = urllib.request.Request(
@@ -1981,11 +2078,43 @@ def _call_anthropic_once(
         headers=_anthropic_headers(server.config),
         method="POST",
     )
-    with urllib.request.urlopen(
-        request,
-        timeout=server.config.anthropic_timeout_seconds,
-    ) as upstream:
-        return _decode_provider_json(upstream.read())
+    supervisor.emit(
+        "request_sent",
+        source="proxy_anthropic_adapter",
+        real_provider_signal=False,
+        resets_idle_timer=False,
+        metadata={"endpoint": "/v1/messages"},
+    )
+    def read_response() -> dict[str, Any]:
+        with urllib.request.urlopen(
+            request,
+            timeout=max(
+                server.config.anthropic_timeout_seconds,
+                supervisor.idle_timeout_seconds,
+            ),
+        ) as upstream:
+            supervisor.emit(
+                "response_headers",
+                source="proxy_anthropic_adapter",
+                real_provider_signal=True,
+                metadata={"status_code": getattr(upstream, "status", None)},
+            )
+            return _decode_provider_json(upstream.read())
+
+    return supervisor.run_blocking(
+        read_response,
+        wait_metadata={"provider_call": "proxy_anthropic_messages"},
+    )
+
+
+def _call_anthropic_once_with_progress(
+    server: SFEProxyServer,
+    request_body: dict[str, Any],
+    supervisor: ProviderCallSupervisor,
+) -> dict[str, Any]:
+    if len(inspect.signature(_call_anthropic_once).parameters) < 3:
+        return _call_anthropic_once(server, request_body)  # type: ignore[call-arg]
+    return _call_anthropic_once(server, request_body, supervisor)
 
 
 def _wait_for_anthropic_request_interval(server: SFEProxyServer) -> None:

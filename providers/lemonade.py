@@ -7,6 +7,12 @@ import os
 import urllib.error
 import urllib.request
 
+from sfe.provider_progress import (
+    ProviderCallIdleTimeoutError,
+    ProviderCallSupervisor,
+    ProviderProgressSink,
+)
+
 
 DEFAULT_BASE_URL = "http://127.0.0.1:13305"
 DEFAULT_TIMEOUT = 30
@@ -73,8 +79,21 @@ class LemonadeProvider:
         max_tokens: int = 512,
         temperature: float = 0.2,
         chat_template_kwargs: dict | None = None,
+        progress_sink: ProviderProgressSink | None = None,
     ) -> dict:
         """Send a chat completion request to POST /v1/chat/completions."""
+        supervisor = ProviderCallSupervisor(
+            provider="lemonade",
+            model=model,
+            progress_sink=progress_sink,
+        )
+        supervisor.start(
+            {
+                "base_url": self.base_url,
+                "api_style": "openai_compatible_chat",
+                "max_tokens_requested": max_tokens,
+            }
+        )
         payload = {
             "model": model,
             "messages": messages,
@@ -90,20 +109,55 @@ class LemonadeProvider:
             payload["chat_template_kwargs"] = template_kwargs
 
         try:
-            response = self._request("POST", "/v1/chat/completions", payload)
+            response = self._request("POST", "/v1/chat/completions", payload, supervisor)
         except LemonadeProviderError as exc:
             if uses_template_kwargs and exc.parameter_rejection:
                 payload.pop("chat_template_kwargs", None)
-                return self._request("POST", "/v1/chat/completions", payload)
+                supervisor.emit(
+                    "retry_scheduled",
+                    source="sfe_core",
+                    real_provider_signal=False,
+                    resets_idle_timer=False,
+                    metadata={"reason": "template_kwargs_parameter_rejection"},
+                )
+                try:
+                    response = self._request("POST", "/v1/chat/completions", payload, supervisor)
+                except Exception as retry_exc:
+                    supervisor.fail({"error_type": type(retry_exc).__name__})
+                    raise
+                supervisor.complete()
+                return response
+            supervisor.fail({"error_type": type(exc).__name__, "error_category": exc.error_category})
+            raise
+        except ProviderCallIdleTimeoutError as exc:
+            supervisor.fail({"error_type": type(exc).__name__})
             raise
 
         if uses_template_kwargs and _is_parameter_rejection(response):
             payload.pop("chat_template_kwargs", None)
-            return self._request("POST", "/v1/chat/completions", payload)
+            supervisor.emit(
+                "retry_scheduled",
+                source="sfe_core",
+                real_provider_signal=False,
+                resets_idle_timer=False,
+                metadata={"reason": "template_kwargs_parameter_rejection_response"},
+            )
+            try:
+                response = self._request("POST", "/v1/chat/completions", payload, supervisor)
+            except Exception as retry_exc:
+                supervisor.fail({"error_type": type(retry_exc).__name__})
+                raise
 
+        supervisor.complete()
         return response
 
-    def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        supervisor: ProviderCallSupervisor | None = None,
+    ) -> dict:
         url = _join_openai_compatible_url(self.base_url, path)
         headers = {"Content-Type": "application/json"}
 
@@ -117,8 +171,35 @@ class LemonadeProvider:
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
 
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read().decode("utf-8")
+            local_supervisor = supervisor or ProviderCallSupervisor(
+                provider="lemonade",
+                model=None,
+            )
+            local_supervisor.emit(
+                "request_sent",
+                source="http_client",
+                real_provider_signal=False,
+                resets_idle_timer=False,
+                metadata={"method": method, "path": path},
+            )
+
+            def read_response() -> str:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=max(self.timeout, local_supervisor.idle_timeout_seconds),
+                ) as response:
+                    local_supervisor.emit(
+                        "response_headers",
+                        source="http_client",
+                        real_provider_signal=True,
+                        metadata={"status": getattr(response, "status", None)},
+                    )
+                    return response.read().decode("utf-8")
+
+            body = local_supervisor.run_blocking(
+                read_response,
+                wait_metadata={"provider_call": "lemonade_http", "path": path},
+            )
         except urllib.error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
             raise LemonadeProviderError(
@@ -129,6 +210,8 @@ class LemonadeProvider:
             if _is_timeout_reason(exc.reason):
                 raise LemonadeProviderError("timeout") from exc
             raise LemonadeProviderError("network_error") from exc
+        except ProviderCallIdleTimeoutError:
+            raise
         except TimeoutError as exc:
             raise LemonadeProviderError("timeout") from exc
 
