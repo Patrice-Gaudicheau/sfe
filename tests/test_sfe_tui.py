@@ -4360,6 +4360,78 @@ def test_tui_run_report_after_failed_run_does_not_execute_again(tmp_path) -> Non
     assert cleanup.cleaned is True
 
 
+def test_tui_run_report_displays_safe_invalid_response_shape_diagnostics(
+    tmp_path,
+) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    provider = FakeProvider(
+        response={
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": ""},
+                }
+            ],
+            "error": {
+                "message": "sk-SECRET_SHOULD_NOT_RENDER_123456",
+                "type": "empty_content",
+            },
+            "output_text": "",
+            "status": "failed",
+        }
+    )
+    executor = OpenAIReadOnlyExecutor(
+        provider=provider,
+        model="test-model",
+        provider_name="fake-provider",
+    )
+    router = FakeExecutionModeRouter()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch old context", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=router,
+    )
+
+    assert app.run() == 0
+    assert len(router.calls) == 1
+    assert len(provider.calls) == 1
+    report_output = output[-1]
+    assert "SFE executor response diagnostics" in report_output
+    assert "executor response provider: fake-provider" in report_output
+    assert "executor response object type: dict" in report_output
+    assert "executor response top-level keys: choices, error, output_text, status" in report_output
+    assert "executor response choices exists: yes" in report_output
+    assert "executor response choices count: 1" in report_output
+    assert "executor response first choice keys: finish_reason, message" in report_output
+    assert "executor response finish reason: stop" in report_output
+    assert "executor response message keys: content" in report_output
+    assert "executor response message content exists: yes" in report_output
+    assert "executor response message content type: str" in report_output
+    assert "executor response message content length: 0" in report_output
+    assert "executor response output_text exists: yes" in report_output
+    assert "executor response output_text type: str" in report_output
+    assert "executor response output_text length: 0" in report_output
+    assert "executor response error exists: yes" in report_output
+    assert "executor response error type: dict" in report_output
+    assert "executor response error keys: message, type" in report_output
+    assert "executor response status exists: yes" in report_output
+    assert "executor response status type: str" in report_output
+    assert "sk-SECRET" not in report_output
+    assert "empty_content" not in report_output
+    assert "Protected instructions:" not in report_output
+    assert "User task:" not in report_output
+    assert "Selected context:" not in report_output
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
 def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
@@ -5592,6 +5664,123 @@ def test_openai_executor_returns_invalid_response_category() -> None:
     assert result.answer is None
     assert result.error_category == "invalid_response"
     assert result.provider_calls_made == 1
+    assert result.response_diagnostics is not None
+    assert result.response_diagnostics["message_content_length"] == 0
+
+
+def test_openai_executor_records_empty_choices_response_shape_diagnostics() -> None:
+    provider = FakeProvider(
+        response={
+            "sk-SECRET_KEY_SHOULD_NOT_RENDER": "value",
+            "choices": [],
+            "error": {
+                "message": "sk-SECRET_SHOULD_NOT_RENDER_123456",
+                "type": "empty_choices",
+            },
+            "status": "failed",
+        }
+    )
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.execute(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    assert result.answer is None
+    assert result.error_category == "invalid_response"
+    assert result.response_diagnostics == {
+        "provider_name": "openai",
+        "response_object_type": "dict",
+        "top_level_keys": ("[redacted]", "choices", "error", "status"),
+        "choices_exists": True,
+        "choices_count": 0,
+        "first_choice_keys": (),
+        "finish_reason": None,
+        "message_keys": (),
+        "message_content_exists": False,
+        "message_content_type": None,
+        "message_content_length": None,
+        "output_text_exists": False,
+        "output_text_type": None,
+        "output_text_length": None,
+        "error_exists": True,
+        "error_type": "dict",
+        "error_keys": ("message", "type"),
+        "status_exists": True,
+        "status_type": "str",
+    }
+    assert "sk-SECRET" not in str(result.response_diagnostics)
+
+
+def test_openai_executor_records_missing_content_response_shape_diagnostics() -> None:
+    provider = FakeProvider(
+        response={
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant"},
+                }
+            ],
+            "output_text": None,
+        }
+    )
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.execute(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    diagnostics = result.response_diagnostics
+    assert result.answer is None
+    assert result.error_category == "invalid_response"
+    assert diagnostics is not None
+    assert diagnostics["choices_count"] == 1
+    assert diagnostics["first_choice_keys"] == ("finish_reason", "message")
+    assert diagnostics["finish_reason"] == "stop"
+    assert diagnostics["message_keys"] == ("role",)
+    assert diagnostics["message_content_exists"] is False
+    assert diagnostics["message_content_type"] is None
+    assert diagnostics["message_content_length"] is None
+    assert diagnostics["output_text_exists"] is True
+    assert diagnostics["output_text_type"] == "NoneType"
+    assert diagnostics["output_text_length"] is None
+
+
+def test_openai_executor_records_output_text_shape_diagnostics() -> None:
+    provider = FakeProvider(
+        response={
+            "choices": [{"message": {"content": ""}}],
+            "output_text": "",
+        }
+    )
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.execute(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        }
+    )
+
+    diagnostics = result.response_diagnostics
+    assert result.answer is None
+    assert result.error_category == "invalid_response"
+    assert diagnostics is not None
+    assert diagnostics["message_content_exists"] is True
+    assert diagnostics["message_content_type"] == "str"
+    assert diagnostics["message_content_length"] == 0
+    assert diagnostics["output_text_exists"] is True
+    assert diagnostics["output_text_type"] == "str"
+    assert diagnostics["output_text_length"] == 0
 
 
 def test_openai_executor_uses_tui_default_output_token_budget() -> None:

@@ -432,6 +432,9 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
                 f"{_yes_no(diagnostics.looks_like_plain_text_or_markdown)}",
             ]
         )
+    response_diagnostics = _executor_response_diagnostics(result)
+    if response_diagnostics is not None:
+        lines.extend(_render_executor_response_diagnostics(response_diagnostics))
     if result.console_output:
         lines.extend(["SFE console output", result.console_output])
     lines.extend(
@@ -444,6 +447,66 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         ]
     )
     return "\n".join(lines)
+
+
+def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | None:
+    patch_result = result.patch_result
+    if patch_result is None:
+        return None
+    diagnostics = patch_result.summary.get("executor_response_diagnostics")
+    return diagnostics if isinstance(diagnostics, dict) else None
+
+
+def _render_executor_response_diagnostics(
+    diagnostics: dict[str, object],
+) -> list[str]:
+    return [
+        "SFE executor response diagnostics",
+        f"  executor response provider: {_display_value(diagnostics.get('provider_name'))}",
+        "  executor response object type: "
+        f"{_display_value(diagnostics.get('response_object_type'))}",
+        "  executor response top-level keys: "
+        f"{_format_diagnostic_list(diagnostics.get('top_level_keys'))}",
+        "  executor response choices exists: "
+        f"{_display_bool(diagnostics.get('choices_exists'))}",
+        "  executor response choices count: "
+        f"{_display_value(diagnostics.get('choices_count'))}",
+        "  executor response first choice keys: "
+        f"{_format_diagnostic_list(diagnostics.get('first_choice_keys'))}",
+        f"  executor response finish reason: {_display_value(diagnostics.get('finish_reason'))}",
+        "  executor response message keys: "
+        f"{_format_diagnostic_list(diagnostics.get('message_keys'))}",
+        "  executor response message content exists: "
+        f"{_display_bool(diagnostics.get('message_content_exists'))}",
+        "  executor response message content type: "
+        f"{_display_value(diagnostics.get('message_content_type'))}",
+        "  executor response message content length: "
+        f"{_display_value(diagnostics.get('message_content_length'))}",
+        "  executor response output_text exists: "
+        f"{_display_bool(diagnostics.get('output_text_exists'))}",
+        "  executor response output_text type: "
+        f"{_display_value(diagnostics.get('output_text_type'))}",
+        "  executor response output_text length: "
+        f"{_display_value(diagnostics.get('output_text_length'))}",
+        "  executor response error exists: "
+        f"{_display_bool(diagnostics.get('error_exists'))}",
+        f"  executor response error type: {_display_value(diagnostics.get('error_type'))}",
+        "  executor response error keys: "
+        f"{_format_diagnostic_list(diagnostics.get('error_keys'))}",
+        "  executor response status exists: "
+        f"{_display_bool(diagnostics.get('status_exists'))}",
+        f"  executor response status type: {_display_value(diagnostics.get('status_type'))}",
+    ]
+
+
+def _format_diagnostic_list(value: object) -> str:
+    if isinstance(value, tuple | list):
+        return _format_string_list([str(item) for item in value])
+    return _format_string_list([])
+
+
+def _display_bool(value: object) -> str:
+    return _yes_no(value) if isinstance(value, bool) else _display_value(None)
 
 
 def _run_execution_mode(result: RunResult) -> str | None:

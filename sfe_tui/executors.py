@@ -70,6 +70,7 @@ class ExecutorResponse:
     error_category: str | None
     provider_calls_made: int
     provider_name: str | None = None
+    response_diagnostics: dict[str, object] | None = None
 
 
 class ReadOnlyExecutor(Protocol):
@@ -196,6 +197,10 @@ class DirectProviderReadOnlyExecutor:
                 error_category="invalid_response",
                 provider_calls_made=1,
                 provider_name=self.provider_name,
+                response_diagnostics=build_response_shape_diagnostics(
+                    response,
+                    provider_name=self.provider_name,
+                ),
             )
         return ExecutorResponse(
             answer=answer,
@@ -449,7 +454,9 @@ def _build_user_prompt(executor_payload: dict[str, Any]) -> str:
     )
 
 
-def _extract_answer(response: dict[str, Any]) -> str:
+def _extract_answer(response: object) -> str:
+    if not isinstance(response, dict):
+        return ""
     choices = response.get("choices")
     if isinstance(choices, list) and choices:
         first = choices[0]
@@ -460,3 +467,97 @@ def _extract_answer(response: dict[str, Any]) -> str:
                 if content is not None:
                     return str(content).strip()
     return ""
+
+
+def build_response_shape_diagnostics(
+    response: object,
+    *,
+    provider_name: str | None,
+) -> dict[str, object]:
+    """Return bounded structural metadata for an invalid provider response."""
+
+    diagnostics: dict[str, object] = {
+        "provider_name": provider_name,
+        "response_object_type": type(response).__name__,
+    }
+    if isinstance(response, dict):
+        diagnostics["top_level_keys"] = _safe_keys(response)
+        diagnostics["choices_exists"] = "choices" in response
+        choices = response.get("choices")
+        diagnostics["choices_count"] = len(choices) if isinstance(choices, list) else None
+        first_choice = choices[0] if isinstance(choices, list) and choices else None
+        if isinstance(first_choice, dict):
+            diagnostics["first_choice_keys"] = _safe_keys(first_choice)
+            finish_reason = first_choice.get("finish_reason")
+            diagnostics["finish_reason"] = (
+                _safe_scalar(finish_reason) if finish_reason is not None else None
+            )
+            message = first_choice.get("message")
+            if isinstance(message, dict):
+                diagnostics["message_keys"] = _safe_keys(message)
+                content_exists = "content" in message
+                diagnostics["message_content_exists"] = content_exists
+                content = message.get("content") if content_exists else None
+                diagnostics["message_content_type"] = (
+                    type(content).__name__ if content_exists else None
+                )
+                diagnostics["message_content_length"] = (
+                    _safe_length(content) if content_exists else None
+                )
+            else:
+                diagnostics["message_keys"] = ()
+                diagnostics["message_content_exists"] = False
+                diagnostics["message_content_type"] = None
+                diagnostics["message_content_length"] = None
+        else:
+            diagnostics["first_choice_keys"] = ()
+            diagnostics["finish_reason"] = None
+            diagnostics["message_keys"] = ()
+            diagnostics["message_content_exists"] = False
+            diagnostics["message_content_type"] = None
+            diagnostics["message_content_length"] = None
+
+        output_text_exists = "output_text" in response
+        diagnostics["output_text_exists"] = output_text_exists
+        output_text = response.get("output_text") if output_text_exists else None
+        diagnostics["output_text_type"] = (
+            type(output_text).__name__ if output_text_exists else None
+        )
+        diagnostics["output_text_length"] = (
+            _safe_length(output_text) if output_text_exists else None
+        )
+        error = response.get("error")
+        diagnostics["error_exists"] = error is not None
+        diagnostics["error_type"] = type(error).__name__ if error is not None else None
+        diagnostics["error_keys"] = _safe_keys(error) if isinstance(error, dict) else ()
+        status = response.get("status")
+        diagnostics["status_exists"] = status is not None
+        diagnostics["status_type"] = type(status).__name__ if status is not None else None
+    return diagnostics
+
+
+def _safe_keys(value: Mapping[object, object]) -> tuple[str, ...]:
+    return tuple(sorted(_safe_key(key) for key in value.keys()))[:40]
+
+
+def _safe_key(key: object) -> str:
+    text = _redact_secret_like(str(key))
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+def _safe_scalar(value: object) -> str:
+    text = _redact_secret_like(str(value))
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+def _safe_length(value: object) -> int | None:
+    if isinstance(value, str | bytes | list | tuple | dict):
+        return len(value)
+    return None
+
+
+def _redact_secret_like(text: str) -> str:
+    lowered = text.lower()
+    if "sk-" in lowered or "api_key" in lowered or "authorization" in lowered:
+        return "[redacted]"
+    return text

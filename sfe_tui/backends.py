@@ -168,6 +168,7 @@ def _console_result_from_executor_response(
             "provider_calls_made": executor_response.provider_calls_made,
             "console_error_category": executor_response.error_category,
             "executor_provider": executor_response.provider_name,
+            **_executor_response_diagnostics_summary(executor_response),
         },
         contract=routed.contract,
         execution_preview=routed.execution_preview,
@@ -191,6 +192,7 @@ def _ask_result_from_executor_response(
             "provider_calls_made": executor_response.provider_calls_made,
             "ask_error_category": executor_response.error_category,
             "executor_provider": executor_response.provider_name,
+            **_executor_response_diagnostics_summary(executor_response),
         },
         contract=routed.contract,
         execution_preview=routed.execution_preview,
@@ -215,6 +217,7 @@ def _patch_result_from_executor_response(
             "patch_error_category": executor_response.error_category,
             "patch_applied": False,
             "executor_provider": executor_response.provider_name,
+            **_executor_response_diagnostics_summary(executor_response),
         },
         contract=routed.contract,
         execution_preview=routed.execution_preview,
@@ -222,6 +225,14 @@ def _patch_result_from_executor_response(
         answer=executor_response.answer,
         error_category=executor_response.error_category,
     )
+
+
+def _executor_response_diagnostics_summary(
+    executor_response: ExecutorResponse,
+) -> dict[str, object]:
+    if executor_response.response_diagnostics is None:
+        return {}
+    return {"executor_response_diagnostics": executor_response.response_diagnostics}
 
 
 def _local_router_preview_result(name: str, contract: SFEContract) -> ExecutionResult:
