@@ -30,6 +30,7 @@ from sfe.execution_mode_router import (
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.patching import (
+    HunkAccountingDiagnostics,
     MECHANICAL_GUARD_REJECTED,
     ParsedPatch,
     PatchApplyResult,
@@ -71,6 +72,7 @@ class RunIssue:
     category: str
     reason: str
     path: str | None = None
+    hunk_accounting: HunkAccountingDiagnostics | None = None
 
 
 @dataclass(frozen=True)
@@ -765,7 +767,7 @@ def _run_issue_from_patch(
     if issue is None:
         return RunIssue("patch", default_reason)
     category = issue.category or MECHANICAL_GUARD_REJECTED
-    return RunIssue(category, issue.reason, issue.path)
+    return RunIssue(category, issue.reason, issue.path, issue.hunk_accounting)
 
 
 def _active_path_for_session(session: WorkspaceSession) -> Path:

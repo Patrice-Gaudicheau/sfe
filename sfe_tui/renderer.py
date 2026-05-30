@@ -417,6 +417,8 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         )
         if issue.path is not None:
             lines.append(f"  issue path: {issue.path}")
+    if issue is not None and issue.hunk_accounting is not None:
+        lines.extend(_render_hunk_accounting_diagnostics(issue.hunk_accounting))
     if result.patch_proposal_diagnostics is not None:
         diagnostics = result.patch_proposal_diagnostics
         file_headers = (
@@ -461,6 +463,40 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         ]
     )
     return "\n".join(lines)
+
+
+def _render_hunk_accounting_diagnostics(diagnostics: object) -> list[str]:
+    return [
+        "SFE hunk accounting diagnostics",
+        f"  hunk path: {_display_value(getattr(diagnostics, 'path', None))}",
+        f"  hunk header: {_display_value(getattr(diagnostics, 'hunk_header', None))}",
+        "  declared old start: "
+        f"{_display_value(getattr(diagnostics, 'declared_old_start', None))}",
+        "  declared old count: "
+        f"{_display_value(getattr(diagnostics, 'declared_old_count', None))}",
+        "  declared new start: "
+        f"{_display_value(getattr(diagnostics, 'declared_new_start', None))}",
+        "  declared new count: "
+        f"{_display_value(getattr(diagnostics, 'declared_new_count', None))}",
+        "  actual old-side count: "
+        f"{_display_value(getattr(diagnostics, 'actual_old_side_count', None))}",
+        "  actual new-side count: "
+        f"{_display_value(getattr(diagnostics, 'actual_new_side_count', None))}",
+        "  actual context line count: "
+        f"{_display_value(getattr(diagnostics, 'actual_context_line_count', None))}",
+        "  actual removed line count: "
+        f"{_display_value(getattr(diagnostics, 'actual_removed_line_count', None))}",
+        "  actual added line count: "
+        f"{_display_value(getattr(diagnostics, 'actual_added_line_count', None))}",
+        "  looks like new-file hunk: "
+        f"{_yes_no(bool(getattr(diagnostics, 'looks_like_new_file', False)))}",
+        "  old file header is /dev/null: "
+        f"{_yes_no(bool(getattr(diagnostics, 'old_file_header_is_dev_null', False)))}",
+        "  hunk body only added lines: "
+        f"{_yes_no(bool(getattr(diagnostics, 'hunk_body_only_added_lines', False)))}",
+        "  LLM-correctable in principle: "
+        f"{_yes_no(bool(getattr(diagnostics, 'llm_correctable_in_principle', False)))}",
+    ]
 
 
 def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | None:

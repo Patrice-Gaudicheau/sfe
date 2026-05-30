@@ -134,6 +134,74 @@ def test_parse_valid_single_file_creation_diff() -> None:
     assert parsed.summary.lines_removed == 0
 
 
+def test_parse_new_file_hunk_accounting_diagnostics_for_short_body() -> None:
+    parsed = parse_unified_diff(
+        "\n".join(
+            [
+                "diff --git a/index.html b/index.html",
+                "new file mode 100644",
+                "--- /dev/null",
+                "+++ b/index.html",
+                "@@ -0,0 +1,5 @@",
+                "+one",
+                "+two",
+                "+three",
+            ]
+        )
+    )
+
+    assert parsed.patch is None
+    assert parsed.issue is not None
+    assert parsed.issue.category == INVALID_PATCH_PROPOSAL
+    assert parsed.issue.reason == "impossible_hunk_accounting"
+    assert parsed.issue.path == "index.html"
+    diagnostics = parsed.issue.hunk_accounting
+    assert diagnostics is not None
+    assert diagnostics.path == "index.html"
+    assert diagnostics.hunk_header == "@@ -0,0 +1,5 @@"
+    assert diagnostics.declared_old_start == 0
+    assert diagnostics.declared_old_count == 0
+    assert diagnostics.declared_new_start == 1
+    assert diagnostics.declared_new_count == 5
+    assert diagnostics.actual_old_side_count == 0
+    assert diagnostics.actual_new_side_count == 3
+    assert diagnostics.actual_context_line_count == 0
+    assert diagnostics.actual_removed_line_count == 0
+    assert diagnostics.actual_added_line_count == 3
+    assert diagnostics.looks_like_new_file is True
+    assert diagnostics.old_file_header_is_dev_null is True
+    assert diagnostics.hunk_body_only_added_lines is True
+    assert diagnostics.llm_correctable_in_principle is True
+
+
+def test_parse_mixed_invalid_hunk_accounting_remains_rejected() -> None:
+    parsed = parse_unified_diff(
+        "\n".join(
+            [
+                "diff --git a/index.html b/index.html",
+                "new file mode 100644",
+                "--- /dev/null",
+                "+++ b/index.html",
+                "@@ -0,0 +1,2 @@",
+                "+one",
+                " context should not appear in a new file hunk",
+            ]
+        )
+    )
+
+    assert parsed.patch is None
+    assert parsed.issue is not None
+    assert parsed.issue.category == INVALID_PATCH_PROPOSAL
+    assert parsed.issue.reason == "impossible_hunk_accounting"
+    diagnostics = parsed.issue.hunk_accounting
+    assert diagnostics is not None
+    assert diagnostics.looks_like_new_file is True
+    assert diagnostics.old_file_header_is_dev_null is True
+    assert diagnostics.hunk_body_only_added_lines is False
+    assert diagnostics.actual_context_line_count == 1
+    assert diagnostics.actual_added_line_count == 1
+
+
 def test_parser_accepts_metadata_without_policy_rejection() -> None:
     parsed = parse_unified_diff(
         "\n".join(

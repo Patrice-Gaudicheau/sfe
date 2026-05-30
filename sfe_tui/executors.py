@@ -54,11 +54,15 @@ PATCH_SYSTEM_INSTRUCTION = (
     "or after the diff. All paths must be relative to the workspace and use "
     "a/<relative-path> and b/<relative-path> diff paths. For a new file, use "
     "a normal new-file unified diff with --- /dev/null and +++ b/<relative-path> "
-    "file headers, plus normal unified diff hunks. Include normal unified diff "
-    "hunks for every changed file. Do not create files under .git, vendor, var, "
-    "cache, node_modules, or generated/sensitive directories. Do not propose "
-    "deletes, renames, mode-only changes, binary patches, or symlink changes. "
-    "If no safe unified diff can be proposed, return no text."
+    "file headers, plus normal unified diff hunks. Hunk header counts must "
+    "exactly match the hunk body. For new files, use @@ -0,0 +1,N @@ where N "
+    "exactly equals the number of added + lines in that hunk. Every added "
+    "content line must start with +. Do not guess hunk counts; if unsure, keep "
+    "files smaller and hunks simpler. Include normal unified diff hunks for "
+    "every changed file. Do not create files under .git, vendor, var, cache, "
+    "node_modules, or generated/sensitive directories. Do not propose deletes, "
+    "renames, mode-only changes, binary patches, or symlink changes. If no safe "
+    "unified diff can be proposed, return no text."
 )
 
 

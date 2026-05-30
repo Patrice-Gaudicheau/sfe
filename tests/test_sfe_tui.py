@@ -4526,6 +4526,66 @@ def test_tui_run_json_patch_proposal_missing_diff_header_hints_unified_diff(
     assert cleanup.cleaned is True
 
 
+def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    raw_output = "\n".join(
+        [
+            "diff --git a/index.html b/index.html",
+            "new file mode 100644",
+            "--- /dev/null",
+            "+++ b/index.html",
+            "@@ -0,0 +1,5 @@",
+            "+one",
+            "+two",
+            "+three",
+        ]
+    )
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw_output,
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch old context", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    report_output = output[-1]
+    assert "SFE hunk accounting diagnostics" in report_output
+    assert "hunk path: index.html" in report_output
+    assert "hunk header: @@ -0,0 +1,5 @@" in report_output
+    assert "declared old start: 0" in report_output
+    assert "declared old count: 0" in report_output
+    assert "declared new start: 1" in report_output
+    assert "declared new count: 5" in report_output
+    assert "actual old-side count: 0" in report_output
+    assert "actual new-side count: 3" in report_output
+    assert "actual context line count: 0" in report_output
+    assert "actual removed line count: 0" in report_output
+    assert "actual added line count: 3" in report_output
+    assert "looks like new-file hunk: yes" in report_output
+    assert "old file header is /dev/null: yes" in report_output
+    assert "hunk body only added lines: yes" in report_output
+    assert "LLM-correctable in principle: yes" in report_output
+    assert "+one" not in report_output
+    assert "+two" not in report_output
+    assert "+three" not in report_output
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
 def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
@@ -5909,6 +5969,12 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "--- /dev/null" in instruction
     assert "+++ b/<relative-path>" in instruction
     assert "normal unified diff hunks" in instruction
+    assert "Hunk header counts must exactly match the hunk body" in instruction
+    assert "@@ -0,0 +1,N @@" in instruction
+    assert "N exactly equals the number of added + lines" in instruction
+    assert "Every added content line must start with +" in instruction
+    assert "Do not guess hunk counts" in instruction
+    assert "keep files smaller and hunks simpler" in instruction
     assert ".git, vendor, var, cache" in instruction
     assert "deletes" in instruction
     assert "renames" in instruction

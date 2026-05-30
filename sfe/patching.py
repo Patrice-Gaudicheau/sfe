@@ -101,6 +101,26 @@ class PatchIssue:
     category: str
     reason: str
     path: str | None = None
+    hunk_accounting: "HunkAccountingDiagnostics | None" = None
+
+
+@dataclass(frozen=True)
+class HunkAccountingDiagnostics:
+    path: str | None
+    hunk_header: str
+    declared_old_start: int
+    declared_old_count: int
+    declared_new_start: int
+    declared_new_count: int
+    actual_old_side_count: int
+    actual_new_side_count: int
+    actual_context_line_count: int
+    actual_removed_line_count: int
+    actual_added_line_count: int
+    looks_like_new_file: bool
+    old_file_header_is_dev_null: bool
+    hunk_body_only_added_lines: bool
+    llm_correctable_in_principle: bool
 
 
 @dataclass(frozen=True)
@@ -224,7 +244,8 @@ def parse_unified_diff(text: str) -> PatchParseResult:
             if _is_metadata(lines[index]):
                 index += 1
                 continue
-            hunk_header = _HUNK_HEADER_RE.match(lines[index])
+            hunk_header_text = lines[index]
+            hunk_header = _HUNK_HEADER_RE.match(hunk_header_text)
             if hunk_header is None:
                 return _parse_error("malformed_hunk_header", _strip_diff_prefix(new_path))
             old_start = int(hunk_header.group("old_start"))
@@ -257,10 +278,30 @@ def parse_unified_diff(text: str) -> PatchParseResult:
                 if marker in {" ", "+"}:
                     new_seen += 1
                 if old_seen > old_count or new_seen > new_count:
-                    return _parse_error("impossible_hunk_accounting", _strip_diff_prefix(new_path))
+                    return _hunk_accounting_error(
+                        path=_strip_diff_prefix(new_path),
+                        hunk_header_text=hunk_header_text,
+                        old_start=old_start,
+                        old_count=old_count,
+                        new_start=new_start,
+                        new_count=new_count,
+                        hunk_lines=hunk_lines,
+                        old_file_path=old_file_path,
+                        operation=operation,
+                    )
                 index += 1
             if old_seen != old_count or new_seen != new_count:
-                return _parse_error("impossible_hunk_accounting", _strip_diff_prefix(new_path))
+                return _hunk_accounting_error(
+                    path=_strip_diff_prefix(new_path),
+                    hunk_header_text=hunk_header_text,
+                    old_start=old_start,
+                    old_count=old_count,
+                    new_start=new_start,
+                    new_count=new_count,
+                    hunk_lines=hunk_lines,
+                    old_file_path=old_file_path,
+                    operation=operation,
+                )
             if not hunk_lines:
                 return _parse_error("empty_hunk", _strip_diff_prefix(new_path))
             hunks.append(
@@ -774,6 +815,58 @@ def _parse_error(reason: str, path: str | None = None) -> PatchParseResult:
         issue=PatchIssue(INVALID_PATCH_PROPOSAL, reason, path),
         summary=None,
     )
+
+
+def _hunk_accounting_error(
+    *,
+    path: str,
+    hunk_header_text: str,
+    old_start: int,
+    old_count: int,
+    new_start: int,
+    new_count: int,
+    hunk_lines: list[PatchLine],
+    old_file_path: str,
+    operation: str,
+) -> PatchParseResult:
+    context_count = sum(1 for line in hunk_lines if line.kind == " ")
+    removed_count = sum(1 for line in hunk_lines if line.kind == "-")
+    added_count = sum(1 for line in hunk_lines if line.kind == "+")
+    diagnostics = HunkAccountingDiagnostics(
+        path=path,
+        hunk_header=_truncate_diagnostic_text(hunk_header_text),
+        declared_old_start=old_start,
+        declared_old_count=old_count,
+        declared_new_start=new_start,
+        declared_new_count=new_count,
+        actual_old_side_count=context_count + removed_count,
+        actual_new_side_count=context_count + added_count,
+        actual_context_line_count=context_count,
+        actual_removed_line_count=removed_count,
+        actual_added_line_count=added_count,
+        looks_like_new_file=operation == PATCH_OPERATION_CREATE,
+        old_file_header_is_dev_null=old_file_path == "/dev/null",
+        hunk_body_only_added_lines=bool(hunk_lines)
+        and all(line.kind == "+" for line in hunk_lines),
+        llm_correctable_in_principle=bool(hunk_lines),
+    )
+    return PatchParseResult(
+        patch=None,
+        issue=PatchIssue(
+            INVALID_PATCH_PROPOSAL,
+            "impossible_hunk_accounting",
+            path,
+            diagnostics,
+        ),
+        summary=None,
+    )
+
+
+def _truncate_diagnostic_text(text: str, limit: int = 160) -> str:
+    stripped = text.strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[: limit - 3].rstrip() + "..."
 
 
 def _structured_parse_error(reason: str) -> StructuredFilePatchParseResult:
