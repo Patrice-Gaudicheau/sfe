@@ -64,6 +64,14 @@ PATCH_SYSTEM_INSTRUCTION = (
     "renames, mode-only changes, binary patches, or symlink changes. If no safe "
     "unified diff can be proposed, return no text."
 )
+PATCH_REPAIR_SYSTEM_INSTRUCTION = (
+    "You are the SFE TUI patch repair executor. Your job is to return one "
+    "complete corrected unified diff. Return only the unified diff. Do not "
+    "return JSON. Do not return an edits array. Do not return Markdown. Do not "
+    "wrap the patch in a code fence. Do not explain the patch. Preserve the "
+    "intended file contents unless fixing diff syntax requires regenerating the "
+    "patch. Hunk header counts must exactly match the hunk body."
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +93,14 @@ class ReadOnlyExecutor(Protocol):
         ...
 
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        ...
+
+    def propose_patch_repair(
+        self,
+        executor_payload: dict[str, Any],
+        *,
+        repair_instruction: str,
+    ) -> ExecutorResponse:
         ...
 
 
@@ -135,12 +151,29 @@ class DirectProviderReadOnlyExecutor:
             max_tokens=self.max_patch_output_tokens,
         )
 
+    def propose_patch_repair(
+        self,
+        executor_payload: dict[str, Any],
+        *,
+        repair_instruction: str,
+    ) -> ExecutorResponse:
+        return self._execute_with_instruction(
+            executor_payload,
+            system_instruction=PATCH_REPAIR_SYSTEM_INSTRUCTION,
+            max_tokens=self.max_patch_output_tokens,
+            user_prompt=_build_patch_repair_user_prompt(
+                executor_payload,
+                repair_instruction=repair_instruction,
+            ),
+        )
+
     def _execute_with_instruction(
         self,
         executor_payload: dict[str, Any],
         *,
         system_instruction: str,
         max_tokens: int,
+        user_prompt: str | None = None,
     ) -> ExecutorResponse:
         health = self.provider.health()
         if not health.get("ok"):
@@ -154,7 +187,7 @@ class DirectProviderReadOnlyExecutor:
             response = _call_provider_chat(
                 provider=self.provider,
                 call_style=self.call_style,
-                user_prompt=_build_user_prompt(executor_payload),
+                user_prompt=user_prompt or _build_user_prompt(executor_payload),
                 model=self.model,
                 max_tokens=max_tokens,
                 system_instruction=system_instruction,
@@ -255,6 +288,15 @@ class ProviderConfigurationErrorExecutor:
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _configuration_error_response(self.provider_name)
 
+    def propose_patch_repair(
+        self,
+        executor_payload: dict[str, Any],
+        *,
+        repair_instruction: str,
+    ) -> ExecutorResponse:
+        del executor_payload, repair_instruction
+        return _configuration_error_response(self.provider_name)
+
 
 class UnsupportedProviderExecutor:
     """Executor that reports a valid provider not yet supported by the TUI."""
@@ -269,6 +311,15 @@ class UnsupportedProviderExecutor:
         return _unsupported_provider_response(self.provider_name)
 
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return _unsupported_provider_response(self.provider_name)
+
+    def propose_patch_repair(
+        self,
+        executor_payload: dict[str, Any],
+        *,
+        repair_instruction: str,
+    ) -> ExecutorResponse:
+        del executor_payload, repair_instruction
         return _unsupported_provider_response(self.provider_name)
 
 
@@ -451,6 +502,22 @@ def _build_user_prompt(executor_payload: dict[str, Any]) -> str:
             "Protected instructions:\n" + instruction_text,
             "User task:\n" + task_text,
             "Selected context:\n" + "\n\n".join(context_parts),
+        )
+        if part.strip()
+    )
+
+
+def _build_patch_repair_user_prompt(
+    executor_payload: dict[str, Any],
+    *,
+    repair_instruction: str,
+) -> str:
+    base_prompt = _build_user_prompt(executor_payload)
+    return "\n\n".join(
+        part
+        for part in (
+            base_prompt,
+            "Patch repair instruction:\n" + repair_instruction,
         )
         if part.strip()
     )

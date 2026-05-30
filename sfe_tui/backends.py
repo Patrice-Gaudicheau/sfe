@@ -86,6 +86,31 @@ class DirectBackend:
         )
         return _patch_result_from_executor_response(routed, executor_response)
 
+    def patch_repair(
+        self,
+        contract: SFEContract,
+        *,
+        repair_instruction: str,
+    ) -> ExecutionResult:
+        routed = self.dry_run(contract)
+        if contract.task is None:
+            return patch_error_result(routed, "missing_task")
+        if (
+            contract.context_segments
+            and (
+                routed.execution_preview is None
+                or not routed.execution_preview.selected_segment_ids
+            )
+        ):
+            return patch_error_result(routed, "no_selected_context")
+        if routed.execution_preview is None:
+            return patch_error_result(routed, "invalid_execution_preview")
+        executor_response = self.executor.propose_patch_repair(
+            routed.execution_preview.executor_payload,
+            repair_instruction=repair_instruction,
+        )
+        return _patch_result_from_executor_response(routed, executor_response)
+
 
 class ProxyBackend:
     name = "proxy"
@@ -101,6 +126,15 @@ class ProxyBackend:
 
     def patch(self, contract: SFEContract) -> ExecutionResult:
         raise NotImplementedError("Proxy backend patching is not implemented yet.")
+
+    def patch_repair(
+        self,
+        contract: SFEContract,
+        *,
+        repair_instruction: str,
+    ) -> ExecutionResult:
+        del contract, repair_instruction
+        raise NotImplementedError("Proxy backend patch repair is not implemented yet.")
 
 
 def backend_by_name(name: str) -> BackendAdapter:

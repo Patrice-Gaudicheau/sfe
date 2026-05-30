@@ -54,6 +54,7 @@ from sfe_tui.executors import (
     DEFAULT_PATCH_OUTPUT_TOKENS,
     ExecutorResponse,
     OpenAIReadOnlyExecutor,
+    PATCH_REPAIR_SYSTEM_INSTRUCTION,
     PATCH_SYSTEM_INSTRUCTION,
     READ_ONLY_SYSTEM_INSTRUCTION,
     create_tui_executor,
@@ -176,6 +177,7 @@ class FakeExecutor:
         self,
         response: ExecutorResponse | None = None,
         patch_response: ExecutorResponse | None = None,
+        patch_repair_response: ExecutorResponse | None = None,
     ) -> None:
         self.response = response or ExecutorResponse(
             answer="mock answer",
@@ -187,8 +189,14 @@ class FakeExecutor:
             error_category=None,
             provider_calls_made=1,
         )
+        self.patch_repair_response = patch_repair_response or ExecutorResponse(
+            answer=None,
+            error_category="invalid_response",
+            provider_calls_made=1,
+        )
         self.calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
+        self.patch_repair_calls: list[dict[str, object]] = []
         self.console_calls: list[dict[str, object]] = []
 
     def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
@@ -202,6 +210,20 @@ class FakeExecutor:
     def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.patch_calls.append(executor_payload)
         return self.patch_response
+
+    def propose_patch_repair(
+        self,
+        executor_payload: dict[str, object],
+        *,
+        repair_instruction: str,
+    ) -> ExecutorResponse:
+        self.patch_repair_calls.append(
+            {
+                "executor_payload": executor_payload,
+                "repair_instruction": repair_instruction,
+            }
+        )
+        return self.patch_repair_response
 
 
 class RecordingActivityIndicator:
@@ -491,6 +513,21 @@ def valid_create_diff(path: str = "composer.json", content: str = "{}") -> str:
             f"+++ b/{path}",
             "@@ -0,0 +1,1 @@",
             f"+{content}",
+        ]
+    )
+
+
+def invalid_new_file_hunk_count_diff(path: str = "index.html") -> str:
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "new file mode 100644",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,5 @@",
+            "+one",
+            "+two",
+            "+three",
         ]
     )
 
@@ -4528,20 +4565,15 @@ def test_tui_run_json_patch_proposal_missing_diff_header_hints_unified_diff(
 
 def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
-    raw_output = "\n".join(
-        [
-            "diff --git a/index.html b/index.html",
-            "new file mode 100644",
-            "--- /dev/null",
-            "+++ b/index.html",
-            "@@ -0,0 +1,5 @@",
-            "+one",
-            "+two",
-            "+three",
-        ]
-    )
+    raw_output = invalid_new_file_hunk_count_diff()
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
+            answer=raw_output,
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+        patch_repair_response=ExecutorResponse(
             answer=raw_output,
             error_category=None,
             provider_calls_made=1,
@@ -4582,6 +4614,57 @@ def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path) -> None:
     assert "+two" not in report_output
     assert "+three" not in report_output
     assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_reports_llm_patch_repair_and_run_report_details(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=invalid_new_file_hunk_count_diff(),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+        patch_repair_response=ExecutorResponse(
+            answer=valid_create_diff("index.html", "one"),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch context and create index", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    run_output = output[-2]
+    report_output = output[-1]
+    assert "status: completed" in run_output
+    assert "repairs: LLM patch repair attempted: 1, applied: yes" in run_output
+    assert "SFE patch repair diagnostics" in report_output
+    assert "repair attempted: yes" in report_output
+    assert "repair type: llm_patch_repair" in report_output
+    assert "repair reason: impossible_hunk_accounting" in report_output
+    assert "repair provider: fake-executor" in report_output
+    assert "repair attempts count: 1" in report_output
+    assert "repair success: yes" in report_output
+    assert "repaired patch parsed: yes" in report_output
+    assert "repaired patch validated: yes" in report_output
+    assert "repair final issue" not in report_output
+    assert len(executor.patch_calls) == 1
+    assert len(executor.patch_repair_calls) == 1
+    assert app.last_run_result is not None
+    assert app.last_run_result.patch_repair is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True
 
@@ -5926,6 +6009,28 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     assert provider.calls[0]["max_tokens"] == 12000
 
 
+def test_openai_executor_patch_repair_uses_repair_instruction_and_diagnostics() -> None:
+    provider = FakeProvider()
+    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
+
+    result = executor.propose_patch_repair(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+        },
+        repair_instruction="reason: impossible_hunk_accounting",
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["system_instruction"] == PATCH_REPAIR_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["system_instruction"] != PATCH_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["max_tokens"] == 12000
+    messages = provider.calls[0]["messages"]
+    assert isinstance(messages, list)
+    assert "reason: impossible_hunk_accounting" in messages[0]["content"]
+
+
 def test_openai_executor_console_uses_console_instruction_and_output_budget() -> None:
     provider = FakeProvider()
     executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
@@ -5984,6 +6089,16 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "If no safe unified diff can be proposed, return no text" in instruction
     assert "Return only one strict JSON object" not in instruction
     assert '"edits"' not in instruction
+
+    repair_instruction = PATCH_REPAIR_SYSTEM_INSTRUCTION
+    assert "complete corrected unified diff" in repair_instruction
+    assert "Return only the unified diff" in repair_instruction
+    assert "Do not return JSON" in repair_instruction
+    assert "Do not return an edits array" in repair_instruction
+    assert "Do not return Markdown" in repair_instruction
+    assert "Do not wrap the patch in a code fence" in repair_instruction
+    assert "Do not explain the patch" in repair_instruction
+    assert "Hunk header counts must exactly match" in repair_instruction
 
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:

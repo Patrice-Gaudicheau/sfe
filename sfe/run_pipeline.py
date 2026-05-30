@@ -16,7 +16,7 @@ from sfe.discovery import (
     discover_workspace_context,
     load_discovered_context,
 )
-from sfe.contracts import build_contract
+from sfe.contracts import SFEContract, build_contract
 from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
@@ -73,6 +73,19 @@ class RunIssue:
     reason: str
     path: str | None = None
     hunk_accounting: HunkAccountingDiagnostics | None = None
+
+
+@dataclass(frozen=True)
+class RunPatchRepair:
+    attempted: bool
+    repair_type: str
+    reason: str
+    provider: str | None = None
+    attempts_count: int = 0
+    success: bool = False
+    repaired_patch_parsed: bool = False
+    repaired_patch_validated: bool = False
+    final_issue: RunIssue | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +167,8 @@ class RunResult:
     promoted_files: tuple[str, ...] = ()
     promotion_issue: RunIssue | None = None
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
+    patch_repair: RunPatchRepair | None = None
+    patch_repair_result: ExecutionResult | None = None
 
 
 class GitWorkspacePreparer:
@@ -375,6 +390,9 @@ class RunPipeline:
             )
 
         proposal = self._parse_patch_response(active_workspace, patch_result)
+        patch_result_for_application = patch_result
+        patch_repair: RunPatchRepair | None = None
+        patch_repair_result: ExecutionResult | None = None
         if isinstance(proposal, RunIssue):
             diagnostics = None
             if proposal.category == "invalid_patch_proposal":
@@ -382,24 +400,68 @@ class RunPipeline:
                     patch_result.answer or "",
                     selected_source_refs=selected_source_refs,
                 )
-            return RunResult(
-                status=RUN_STATUS_FAILED,
+            repair_attempt = self._attempt_llm_patch_repair(
+                contract=contract,
+                workspace_root=active_workspace,
                 issue=proposal,
-                execution_mode_decision=execution_mode_decision,
-                workspace_session=session,
-                active_workspace=active_workspace,
-                worktree_created=created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=patch_result,
-                selected_source_refs=selected_source_refs,
-                executor_provider=_executor_provider(patch_result),
-                warnings=_base_warnings(),
-                git_auto_init=git_preparation.auto_initialized,
-                git_initial_commit_hash=git_preparation.initial_commit_hash,
-                git_init_warning=git_preparation.warning,
-                patch_proposal_diagnostics=diagnostics,
             )
+            if repair_attempt is not None:
+                repair_result, repair_metadata, repaired_proposal = repair_attempt
+                if repaired_proposal is not None:
+                    proposal = repaired_proposal
+                    patch_result_for_application = repair_result
+                    patch_repair = repair_metadata
+                    patch_repair_result = repair_result
+                else:
+                    final_issue = repair_metadata.final_issue or proposal
+                    final_diagnostics = diagnostics
+                    if (
+                        repair_result.answer is not None
+                        and final_issue.category == "invalid_patch_proposal"
+                    ):
+                        final_diagnostics = build_patch_proposal_diagnostics(
+                            repair_result.answer,
+                            selected_source_refs=selected_source_refs,
+                        )
+                    return RunResult(
+                        status=RUN_STATUS_FAILED,
+                        issue=final_issue,
+                        execution_mode_decision=execution_mode_decision,
+                        workspace_session=session,
+                        active_workspace=active_workspace,
+                        worktree_created=created,
+                        discovery_result=discovery_result,
+                        dry_run_result=dry_run_result,
+                        patch_result=patch_result,
+                        selected_source_refs=selected_source_refs,
+                        executor_provider=_executor_provider(patch_result),
+                        warnings=_base_warnings(),
+                        git_auto_init=git_preparation.auto_initialized,
+                        git_initial_commit_hash=git_preparation.initial_commit_hash,
+                        git_init_warning=git_preparation.warning,
+                        patch_proposal_diagnostics=final_diagnostics,
+                        patch_repair=repair_metadata,
+                        patch_repair_result=repair_result,
+                    )
+            if isinstance(proposal, RunIssue):
+                return RunResult(
+                    status=RUN_STATUS_FAILED,
+                    issue=proposal,
+                    execution_mode_decision=execution_mode_decision,
+                    workspace_session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    executor_provider=_executor_provider(patch_result),
+                    warnings=_base_warnings(),
+                    git_auto_init=git_preparation.auto_initialized,
+                    git_initial_commit_hash=git_preparation.initial_commit_hash,
+                    git_init_warning=git_preparation.warning,
+                    patch_proposal_diagnostics=diagnostics,
+                )
 
         guard_issue = validate_patch_paths(active_workspace, proposal.paths)
         if guard_issue is not None:
@@ -410,11 +472,14 @@ class RunPipeline:
                 worktree_created=created,
                 discovery_result=discovery_result,
                 dry_run_result=dry_run_result,
-                patch_result=patch_result,
+                patch_result=patch_result_for_application,
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
                 execution_mode_decision=execution_mode_decision,
+                initial_patch_result=patch_result,
+                patch_repair=patch_repair,
+                patch_repair_result=patch_repair_result,
             )
 
         promotion_baseline = _capture_promotion_baseline(
@@ -430,12 +495,15 @@ class RunPipeline:
                 worktree_created=created,
                 discovery_result=discovery_result,
                 dry_run_result=dry_run_result,
-                patch_result=patch_result,
+                patch_result=patch_result_for_application,
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
                 execution_mode_decision=execution_mode_decision,
                 patch_applied=False,
+                initial_patch_result=patch_result,
+                patch_repair=patch_repair,
+                patch_repair_result=patch_repair_result,
             )
 
         apply_result = _apply_run_patch(active_workspace, proposal.proposal)
@@ -447,11 +515,14 @@ class RunPipeline:
                 worktree_created=created,
                 discovery_result=discovery_result,
                 dry_run_result=dry_run_result,
-                patch_result=patch_result,
+                patch_result=patch_result_for_application,
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
                 execution_mode_decision=execution_mode_decision,
+                initial_patch_result=patch_result,
+                patch_repair=patch_repair,
+                patch_repair_result=patch_repair_result,
             )
 
         status_result = self.workspace_manager.status(session)
@@ -467,7 +538,7 @@ class RunPipeline:
                 worktree_created=created,
                 discovery_result=discovery_result,
                 dry_run_result=dry_run_result,
-                patch_result=patch_result,
+                patch_result=patch_result_for_application,
                 proposal=proposal,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
@@ -476,6 +547,9 @@ class RunPipeline:
                 patch_summary=patch_summary,
                 changed_files=changed_files,
                 promotion_result=promotion_result,
+                initial_patch_result=patch_result,
+                patch_repair=patch_repair,
+                patch_repair_result=patch_repair_result,
             )
         return RunResult(
             status=RUN_STATUS_COMPLETED,
@@ -486,6 +560,7 @@ class RunPipeline:
             discovery_result=discovery_result,
             dry_run_result=dry_run_result,
             patch_result=patch_result,
+            patch_repair_result=patch_repair_result,
             patch_generated=True,
             patch_applied=True,
             patch_summary=patch_summary,
@@ -499,6 +574,7 @@ class RunPipeline:
             promotion_status=promotion_result.status,
             promotion_applied=True,
             promoted_files=promotion_result.promoted_files,
+            patch_repair=patch_repair,
         )
 
     def _prepare_git_workspace(self, request: RunRequest) -> GitPreparationResult:
@@ -615,10 +691,20 @@ class RunPipeline:
                         parse_status="structured_replacements_repaired",
                     )
 
+        return self._parse_unified_diff_response(workspace_root, result)
+
+    def _parse_unified_diff_response(
+        self,
+        workspace_root: Path,
+        result: ExecutionResult,
+    ) -> RunPatchProposal | RunIssue:
+        raw_answer = result.answer or ""
         diff_parsed = parse_unified_diff(raw_answer)
         if diff_parsed.patch is None or diff_parsed.summary is None:
-            issue = diff_parsed.issue or structured.issue
-            return _run_issue_from_patch(issue, default_reason="patch_not_parseable")
+            return _run_issue_from_patch(
+                diff_parsed.issue,
+                default_reason="patch_not_parseable",
+            )
         validation = validate_patch_targets(workspace_root, diff_parsed.patch)
         if not validation.ok:
             return _run_issue_from_patch(validation.issue, default_reason="patch_not_applicable")
@@ -628,6 +714,52 @@ class RunPipeline:
             preview=raw_answer,
             parse_status="unified_diff",
         )
+
+    def _attempt_llm_patch_repair(
+        self,
+        *,
+        contract: SFEContract,
+        workspace_root: Path,
+        issue: RunIssue,
+    ) -> tuple[ExecutionResult, RunPatchRepair, RunPatchProposal | None] | None:
+        if not _should_attempt_llm_patch_repair(issue):
+            return None
+        patch_repair = getattr(self.backend, "patch_repair", None)
+        if not callable(patch_repair):
+            return None
+        repair_result = patch_repair(
+            contract,
+            repair_instruction=_build_hunk_accounting_repair_instruction(issue),
+        )
+        final_issue: RunIssue | None = None
+        repaired_patch_parsed = False
+        repaired_patch_validated = False
+        repaired_proposal: RunPatchProposal | None = None
+        if not repair_result.answer:
+            final_issue = RunIssue(
+                "patch_generation",
+                repair_result.error_category or "invalid_response",
+            )
+        else:
+            parsed = self._parse_unified_diff_response(workspace_root, repair_result)
+            if isinstance(parsed, RunIssue):
+                final_issue = parsed
+            else:
+                repaired_proposal = parsed
+                repaired_patch_parsed = True
+                repaired_patch_validated = True
+        metadata = RunPatchRepair(
+            attempted=True,
+            repair_type="llm_patch_repair",
+            reason=issue.reason,
+            provider=_executor_provider(repair_result),
+            attempts_count=1,
+            success=repaired_proposal is not None,
+            repaired_patch_parsed=repaired_patch_parsed,
+            repaired_patch_validated=repaired_patch_validated,
+            final_issue=final_issue,
+        )
+        return repair_result, metadata, repaired_proposal
 
     def _repair_patch_json(
         self,
@@ -665,7 +797,11 @@ def _patch_failed_result(
     selected_source_refs: tuple[str, ...],
     git_preparation: GitPreparationResult,
     execution_mode_decision: ExecutionModeDecision,
+    initial_patch_result: ExecutionResult | None = None,
+    patch_repair: RunPatchRepair | None = None,
+    patch_repair_result: ExecutionResult | None = None,
 ) -> RunResult:
+    stored_patch_result = initial_patch_result or patch_result
     return RunResult(
         status=RUN_STATUS_FAILED,
         issue=_run_issue_from_patch(issue, default_reason="patch_not_applicable"),
@@ -675,16 +811,18 @@ def _patch_failed_result(
         worktree_created=worktree_created,
         discovery_result=discovery_result,
         dry_run_result=dry_run_result,
-        patch_result=patch_result,
+        patch_result=stored_patch_result,
+        patch_repair_result=patch_repair_result,
         patch_generated=True,
         patch_applied=False,
         patch_summary=proposal.summary,
         selected_source_refs=selected_source_refs,
-        executor_provider=_executor_provider(patch_result),
+        executor_provider=_executor_provider(stored_patch_result),
         warnings=_warnings_for_summary(proposal.summary),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
+        patch_repair=patch_repair,
     )
 
 
@@ -705,7 +843,11 @@ def _promotion_failed_result(
     patch_summary: PatchSummary | None = None,
     changed_files: tuple[str, ...] = (),
     promotion_result: PromotionResult | None = None,
+    initial_patch_result: ExecutionResult | None = None,
+    patch_repair: RunPatchRepair | None = None,
+    patch_repair_result: ExecutionResult | None = None,
 ) -> RunResult:
+    stored_patch_result = initial_patch_result or patch_result
     return RunResult(
         status=RUN_STATUS_FAILED,
         issue=issue,
@@ -715,13 +857,14 @@ def _promotion_failed_result(
         worktree_created=worktree_created,
         discovery_result=discovery_result,
         dry_run_result=dry_run_result,
-        patch_result=patch_result,
+        patch_result=stored_patch_result,
+        patch_repair_result=patch_repair_result,
         patch_generated=True,
         patch_applied=patch_applied,
         patch_summary=patch_summary or proposal.summary,
         changed_files=changed_files,
         selected_source_refs=selected_source_refs,
-        executor_provider=_executor_provider(patch_result),
+        executor_provider=_executor_provider(stored_patch_result),
         warnings=_warnings_for_summary(patch_summary or proposal.summary),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
@@ -730,6 +873,7 @@ def _promotion_failed_result(
         promotion_applied=False,
         promoted_files=promotion_result.promoted_files if promotion_result else (),
         promotion_issue=promotion_result.issue if promotion_result else issue,
+        patch_repair=patch_repair,
     )
 
 
@@ -970,6 +1114,58 @@ def _should_attempt_repair(raw_response: str, issue: PatchIssue | None) -> bool:
         and len(raw_response) <= PATCH_JSON_REPAIR_MAX_INPUT_CHARS
         and _looks_like_structured_patch_response(raw_response)
     )
+
+
+def _should_attempt_llm_patch_repair(issue: RunIssue) -> bool:
+    diagnostics = issue.hunk_accounting
+    return (
+        issue.category == "invalid_patch_proposal"
+        and issue.reason == "impossible_hunk_accounting"
+        and diagnostics is not None
+        and diagnostics.llm_correctable_in_principle
+    )
+
+
+def _build_hunk_accounting_repair_instruction(issue: RunIssue) -> str:
+    diagnostics = issue.hunk_accounting
+    if diagnostics is None:
+        return ""
+    return "\n".join(
+        [
+            "Your previous unified diff was rejected.",
+            "The reason was impossible_hunk_accounting.",
+            "The hunk header counts do not match the hunk body.",
+            "Bounded hunk accounting diagnostics:",
+            f"- path: {_diagnostic_value(diagnostics.path)}",
+            f"- original hunk header: {_diagnostic_value(diagnostics.hunk_header)}",
+            f"- declared old start: {diagnostics.declared_old_start}",
+            f"- declared old count: {diagnostics.declared_old_count}",
+            f"- declared new start: {diagnostics.declared_new_start}",
+            f"- declared new count: {diagnostics.declared_new_count}",
+            f"- actual old-side count: {diagnostics.actual_old_side_count}",
+            f"- actual new-side count: {diagnostics.actual_new_side_count}",
+            f"- actual context line count: {diagnostics.actual_context_line_count}",
+            f"- actual removed line count: {diagnostics.actual_removed_line_count}",
+            f"- actual added line count: {diagnostics.actual_added_line_count}",
+            f"- looks like new-file hunk: {_yes_no(diagnostics.looks_like_new_file)}",
+            f"- old file header is /dev/null: {_yes_no(diagnostics.old_file_header_is_dev_null)}",
+            f"- hunk body only added lines: {_yes_no(diagnostics.hunk_body_only_added_lines)}",
+            "Return a complete corrected unified diff.",
+            "Return only the unified diff.",
+            "No JSON. No Markdown. No prose. No code fence.",
+            "Preserve the intended file contents unless fixing the diff syntax "
+            "requires regenerating the patch.",
+            "Hunk header counts must exactly match the hunk body.",
+        ]
+    )
+
+
+def _diagnostic_value(value: object) -> str:
+    return str(value) if value is not None else "unknown"
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
 
 
 def _looks_like_structured_patch_response(raw_response: str) -> bool:
