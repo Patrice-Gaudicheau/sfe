@@ -4479,6 +4479,53 @@ def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> Non
     assert cleanup.cleaned is True
 
 
+def test_tui_run_json_patch_proposal_missing_diff_header_hints_unified_diff(
+    tmp_path,
+) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    raw_output = (
+        '{"edits":[{"path":"index.html","action":"create_file",'
+        '"content":"<!doctype html>"}'
+    )
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=raw_output,
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/task Patch old context", "/run", "/quit"]),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        patch_json_repairer=FakePatchJsonRepairer(None),
+    )
+
+    assert app.run() == 0
+    run_output = output[-1]
+    assert "SFE run" in run_output
+    assert "status: failed" in run_output
+    assert "issue category: invalid_patch_proposal" in run_output
+    assert "issue reason: missing_diff_header" in run_output
+    assert (
+        "hint: executor returned JSON edit instructions instead of a unified diff; "
+        "use /run-report for details or retry /run"
+    ) in run_output
+    assert "patch proposal looks like JSON:" not in run_output
+    assert raw_output not in run_output
+    assert app.last_run_result is not None
+    assert app.last_run_result.patch_proposal_diagnostics is not None
+    assert app.last_run_result.patch_proposal_diagnostics.looks_like_json is True
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
 def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
@@ -5846,31 +5893,31 @@ def test_console_system_instruction_forbids_diffs_and_file_edits() -> None:
     assert "Do not produce a patch, diff, or file replacement JSON" in instruction
 
 
-def test_patch_system_instruction_allows_safe_core_validated_creations() -> None:
+def test_patch_system_instruction_requires_unified_diff_only() -> None:
     instruction = PATCH_SYSTEM_INSTRUCTION
 
-    assert "Return only one strict JSON object" in instruction
-    assert '"edits"' in instruction
-    assert '"path":"relative/path"' in instruction
-    assert '"action":"replace_existing_file|create_file"' in instruction
-    assert '"content":"full file content"' in instruction
-    assert '"diff_preview":"optional untrusted diagnostic diff"' in instruction
-    assert "full replacement content as the source of truth" in instruction
-    assert "SFE computes the trusted preview diff locally" in instruction
-    assert "Do not return markdown fences or prose" in instruction
-    assert "replace_existing_file only for files that already exist" in instruction
-    assert "Use create_file for new files" in instruction
-    assert "Never use replace_existing_file for an absent file" in instruction
-    assert "plain unified diff/git diff" in instruction
+    assert "Return only a strict unified diff/git diff" in instruction
+    assert "diff --git a/<relative-path> b/<relative-path>" in instruction
+    assert "The response must start with a diff header" in instruction
+    assert "Do not return JSON" in instruction
+    assert "Do not return an edits array" in instruction
+    assert "Do not return Markdown" in instruction
+    assert "Do not wrap the patch in a code fence" in instruction
+    assert "Do not explain the patch" in instruction
+    assert "Do not include a file manifest" in instruction
+    assert "All paths must be relative to the workspace" in instruction
     assert "--- /dev/null" in instruction
-    assert "+++ b/relative/path" in instruction
+    assert "+++ b/<relative-path>" in instruction
+    assert "normal unified diff hunks" in instruction
     assert ".git, vendor, var, cache" in instruction
     assert "deletes" in instruction
     assert "renames" in instruction
     assert "mode-only changes" in instruction
     assert "binary patches" in instruction
     assert "symlink changes" in instruction
-    assert "one short non-JSON refusal sentence" in instruction
+    assert "If no safe unified diff can be proposed, return no text" in instruction
+    assert "Return only one strict JSON object" not in instruction
+    assert '"edits"' not in instruction
 
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:

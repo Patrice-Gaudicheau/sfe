@@ -324,17 +324,31 @@ def render_run_result_normal(result: RunResult) -> str:
     ]
     if result.issue is not None:
         lines.extend(_run_issue_lines(result.issue))
-        hint = _run_issue_hint(result.issue)
+        hint = _run_issue_hint(result)
         if hint is not None:
             lines.append(f"  hint: {hint}")
     return "\n".join(lines)
 
 
-def _run_issue_hint(issue: RunIssue) -> str | None:
+def _run_issue_hint(result: RunResult) -> str | None:
+    issue = result.issue
+    if issue is None:
+        return None
     if issue.category == "patch_generation" and issue.reason == "invalid_response":
         return (
             "executor returned an invalid or empty response; use /run-report "
             "for diagnostics or retry /run"
+        )
+    diagnostics = result.patch_proposal_diagnostics
+    if (
+        issue.category == "invalid_patch_proposal"
+        and issue.reason == "missing_diff_header"
+        and diagnostics is not None
+        and diagnostics.looks_like_json
+    ):
+        return (
+            "executor returned JSON edit instructions instead of a unified diff; "
+            "use /run-report for details or retry /run"
         )
     return None
 
