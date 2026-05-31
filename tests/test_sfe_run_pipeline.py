@@ -23,7 +23,6 @@ from sfe.execution_mode_router import (
 )
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.run_pipeline import (
-    LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS,
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
     GitPreparationResult,
@@ -45,19 +44,16 @@ class FakeExecutor:
     def __init__(
         self,
         patch_answer: str | None = None,
-        repair_answer: str | None = None,
         console_answer: str | None = None,
         console_error_category: str | None = None,
     ) -> None:
         self.patch_answer = _replacement_proposal() if patch_answer is None else patch_answer
-        self.repair_answer = repair_answer
         self.console_answer = (
             "Symfony is a PHP framework." if console_answer is None else console_answer
         )
         self.console_error_category = console_error_category
         self.console_calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
-        self.patch_repair_calls: list[dict[str, object]] = []
 
     def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.console_calls.append(executor_payload)
@@ -81,25 +77,6 @@ class FakeExecutor:
     def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.patch_calls.append(executor_payload)
         return ExecutorResponse(self.patch_answer, None, 1, provider_name=self.provider_name)
-
-    def propose_patch_repair(
-        self,
-        executor_payload: dict[str, object],
-        *,
-        repair_instruction: str,
-    ) -> ExecutorResponse:
-        self.patch_repair_calls.append(
-            {
-                "executor_payload": executor_payload,
-                "repair_instruction": repair_instruction,
-            }
-        )
-        return ExecutorResponse(
-            self.repair_answer,
-            None,
-            1,
-            provider_name=self.provider_name,
-        )
 
 
 class FakeDiscoveryRouter:
@@ -998,15 +975,98 @@ def test_run_pipeline_reports_json_looking_patch_proposal_diagnostics(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_repairs_hunk_accounting_with_llm_patch_repair(
+def test_run_pipeline_rejects_hunk_accounting_without_second_pass(
     tmp_path: Path,
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
-    executor = FakeExecutor(
-        _invalid_new_file_hunk_count_diff(),
-        repair_answer=_valid_new_file_diff(),
+    executor = FakeExecutor(_invalid_new_file_hunk_count_diff())
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
     )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "impossible_hunk_accounting"
+    assert result.issue.path == "index.html"
+    diagnostics = result.issue.hunk_accounting
+    assert diagnostics is not None
+    assert diagnostics.hunk_header == "@@ -0,0 +1,5 @@"
+    assert diagnostics.declared_old_count == 0
+    assert diagnostics.declared_new_count == 5
+    assert diagnostics.actual_old_side_count == 0
+    assert diagnostics.actual_new_side_count == 3
+    assert diagnostics.actual_added_line_count == 3
+    assert diagnostics.looks_like_new_file is True
+    assert diagnostics.old_file_header_is_dev_null is True
+    assert diagnostics.hunk_body_only_added_lines is True
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert result.promoted_files == ()
+    assert not (repo / "index.html").exists()
+    assert len(executor.patch_calls) == 1
+    proposal_diagnostics = result.patch_proposal_diagnostics
+    assert proposal_diagnostics is not None
+    assert proposal_diagnostics.contains_diff_git_header is True
+    assert proposal_diagnostics.contains_hunk_header is True
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_does_not_repair_json_or_path_validation_failures(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    json_executor = FakeExecutor('{"edits": []}')
+    json_result = _pipeline(
+        executor=json_executor,
+        workspace_manager=_manager(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "json-worktrees"),
+        )
+    )
+
+    assert json_result.status == RUN_STATUS_FAILED
+    assert json_result.issue is not None
+    assert json_result.issue.category == "invalid_patch_proposal"
+    assert json_result.issue.reason == "missing_diff_header"
+    assert json_result.patch_proposal_diagnostics is not None
+    assert json_result.patch_proposal_diagnostics.looks_like_json is True
+
+    path_executor = FakeExecutor(_valid_new_file_diff(path="../outside.txt"))
+    path_result = _pipeline(
+        executor=path_executor,
+        workspace_manager=_manager(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "path-worktrees"),
+        )
+    )
+
+    assert path_result.status == RUN_STATUS_FAILED
+    assert path_result.issue is not None
+    assert path_result.issue.reason == "path_outside_workspace"
+
+
+def test_run_pipeline_valid_unified_diff_applies_without_repair_metadata(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor(_valid_new_file_diff())
 
     result = _pipeline(
         workspace_manager=manager,
@@ -1024,259 +1084,6 @@ def test_run_pipeline_repairs_hunk_accounting_with_llm_patch_repair(
     assert result.patch_applied is True
     assert result.promoted_files == ("index.html",)
     assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
-    assert len(executor.patch_calls) == 1
-    assert len(executor.patch_repair_calls) == 1
-    repair = result.patch_repair
-    assert repair is not None
-    assert repair.attempted is True
-    assert repair.repair_type == "llm_patch_repair"
-    assert repair.reason == "impossible_hunk_accounting"
-    assert repair.provider == "fake-executor"
-    assert repair.attempts_count == 1
-    assert repair.success is True
-    assert repair.repaired_patch_parsed is True
-    assert repair.repaired_patch_validated is True
-    assert repair.final_issue is None
-    assert result.patch_repair_result is not None
-    assert manager.cleanup(result.workspace_session).cleaned is True
-
-
-def test_run_pipeline_failed_llm_patch_repair_reports_final_failure(
-    tmp_path: Path,
-) -> None:
-    repo = _init_repo(tmp_path / "repo")
-    manager = _manager()
-    executor = FakeExecutor(
-        _invalid_new_file_hunk_count_diff(),
-        repair_answer=_invalid_new_file_hunk_count_diff(path="fixed.html"),
-    )
-
-    result = _pipeline(
-        workspace_manager=manager,
-        executor=executor,
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-        )
-    )
-
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "impossible_hunk_accounting"
-    assert result.issue.path == "fixed.html"
-    assert len(executor.patch_repair_calls) == 1
-    repair = result.patch_repair
-    assert repair is not None
-    assert repair.attempted is True
-    assert repair.success is False
-    assert repair.repaired_patch_parsed is False
-    assert repair.repaired_patch_validated is False
-    assert repair.final_issue is not None
-    assert repair.final_issue.reason == "impossible_hunk_accounting"
-    assert result.patch_repair_result is not None
-    assert not (repo / "fixed.html").exists()
-    assert manager.cleanup(result.workspace_session).cleaned is True
-
-
-def test_run_pipeline_failed_llm_patch_repair_rejects_dev_null_first_line(
-    tmp_path: Path,
-) -> None:
-    repo = _init_repo(tmp_path / "repo")
-    manager = _manager()
-    executor = FakeExecutor(
-        _invalid_new_file_hunk_count_diff(),
-        repair_answer=_new_file_diff_without_git_header(),
-    )
-
-    result = _pipeline(
-        workspace_manager=manager,
-        executor=executor,
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-        )
-    )
-
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
-    assert len(executor.patch_repair_calls) == 1
-    assert result.patch_repair is not None
-    assert result.patch_repair.success is False
-    assert result.patch_repair.final_issue is not None
-    assert result.patch_repair.final_issue.reason == "missing_diff_header"
-    assert result.patch_proposal_diagnostics is not None
-    assert result.patch_proposal_diagnostics.first_non_empty_line == "--- /dev/null"
-    assert not (repo / "index.html").exists()
-    assert manager.cleanup(result.workspace_session).cleaned is True
-
-
-def test_run_pipeline_does_not_repair_json_or_path_validation_failures(
-    tmp_path: Path,
-) -> None:
-    repo = _init_repo(tmp_path / "repo")
-    json_executor = FakeExecutor('{"edits": []}', repair_answer=_valid_new_file_diff())
-    json_result = _pipeline(
-        executor=json_executor,
-        workspace_manager=_manager(),
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "json-worktrees"),
-        )
-    )
-
-    assert json_result.status == RUN_STATUS_FAILED
-    assert json_result.issue is not None
-    assert json_result.issue.reason != "impossible_hunk_accounting"
-    assert json_executor.patch_repair_calls == []
-
-    path_executor = FakeExecutor(
-        _valid_new_file_diff(path="../outside.txt"),
-        repair_answer=_valid_new_file_diff(),
-    )
-    path_result = _pipeline(
-        executor=path_executor,
-        workspace_manager=_manager(),
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "path-worktrees"),
-        )
-    )
-
-    assert path_result.status == RUN_STATUS_FAILED
-    assert path_result.issue is not None
-    assert path_result.issue.reason == "path_outside_workspace"
-    assert path_executor.patch_repair_calls == []
-
-
-def test_run_pipeline_llm_patch_repair_prompt_uses_bounded_diagnostics(
-    tmp_path: Path,
-) -> None:
-    repo = _init_repo(tmp_path / "repo")
-    (repo / "context.txt").write_text(
-        "old context\nSECRET_TOKEN=abc123\n",
-        encoding="utf-8",
-    )
-    _git(repo, "add", "context.txt")
-    _git(repo, "commit", "-m", "add secret-like context")
-    raw_patch = _invalid_new_file_hunk_count_diff(content=("visible patch line",))
-    executor = FakeExecutor(raw_patch, repair_answer=_valid_new_file_diff())
-
-    result = _pipeline(
-        workspace_manager=_manager(),
-        executor=executor,
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-        )
-    )
-
-    assert result.status == RUN_STATUS_COMPLETED
-    assert len(executor.patch_repair_calls) == 1
-    instruction = str(executor.patch_repair_calls[0]["repair_instruction"])
-    assert "Your previous unified diff was rejected." in instruction
-    assert "impossible_hunk_accounting" in instruction
-    assert "- path: index.html" in instruction
-    assert "- original hunk header: @@ -0,0 +1,5 @@" in instruction
-    assert "- declared new count: 5" in instruction
-    assert "- actual new-side count: 1" in instruction
-    assert "- actual added line count: 1" in instruction
-    assert "Return a complete corrected Git-style unified diff." in instruction
-    assert (
-        "The response must start with diff --git a/<relative-path> b/<relative-path>."
-        in instruction
-    )
-    assert (
-        "Every file section must start with diff --git a/<relative-path> b/<relative-path>."
-        in instruction
-    )
-    assert "Do not start the response with --- /dev/null." in instruction
-    assert "new file mode 100644" in instruction
-    assert "index 0000000..0000000" in instruction
-    assert "+++ b/<relative-path>" in instruction
-    assert "@@ -0,0 +1,N @@" in instruction
-    assert "N must exactly equal the number of added + lines" in instruction
-    assert "Return the complete corrected patch, not only the failing hunk." in instruction
-    assert "Return only the patch." in instruction
-    assert "No JSON. No Markdown. No prose. No code fence." in instruction
-    assert "Here is the rejected unified diff to repair:" in instruction
-    assert "BEGIN REJECTED UNIFIED DIFF" in instruction
-    assert raw_patch in instruction
-    assert "END REJECTED UNIFIED DIFF" in instruction
-    assert "Repair this existing diff" in instruction
-    assert "do not redesign the application" in instruction
-    assert "do not regenerate a new application from scratch" in instruction
-    assert "Do not change file contents unless required" in instruction
-    assert "SECRET_TOKEN" not in instruction
-    assert "raw_provider_response" not in instruction
-    assert "headers" not in instruction.lower()
-
-
-def test_run_pipeline_skips_llm_patch_repair_when_rejected_patch_is_too_large(
-    tmp_path: Path,
-) -> None:
-    repo = _init_repo(tmp_path / "repo")
-    oversized_line = "x" * (LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS + 1)
-    raw_patch = _invalid_new_file_hunk_count_diff(content=(oversized_line,))
-    executor = FakeExecutor(raw_patch, repair_answer=_valid_new_file_diff())
-
-    result = _pipeline(
-        workspace_manager=_manager(),
-        executor=executor,
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-        )
-    )
-
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.reason == "impossible_hunk_accounting"
-    assert executor.patch_repair_calls == []
-    repair = result.patch_repair
-    assert repair is not None
-    assert repair.attempted is False
-    assert repair.attempts_count == 0
-    assert repair.success is False
-    assert repair.skipped_reason == "rejected_patch_too_large_for_repair_prompt"
-    assert repair.final_issue is result.issue
-
-
-def test_run_pipeline_valid_unified_diff_does_not_trigger_llm_patch_repair(
-    tmp_path: Path,
-) -> None:
-    repo = _init_repo(tmp_path / "repo")
-    manager = _manager()
-    executor = FakeExecutor(_valid_new_file_diff(), repair_answer=_valid_new_file_diff())
-
-    result = _pipeline(
-        workspace_manager=manager,
-        executor=executor,
-    ).run(
-        RunRequest(
-            workspace_root=repo,
-            task="Patch context and create index file",
-            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
-        )
-    )
-
-    assert result.status == RUN_STATUS_COMPLETED
-    assert executor.patch_repair_calls == []
-    assert result.patch_repair is None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -1526,19 +1333,6 @@ def _valid_new_file_diff(path: str = "index.html") -> str:
         [
             f"diff --git a/{path} b/{path}",
             "new file mode 100644",
-            "--- /dev/null",
-            f"+++ b/{path}",
-            "@@ -0,0 +1,3 @@",
-            "+one",
-            "+two",
-            "+three",
-        ]
-    )
-
-
-def _new_file_diff_without_git_header(path: str = "index.html") -> str:
-    return "\n".join(
-        [
             "--- /dev/null",
             f"+++ b/{path}",
             "@@ -0,0 +1,3 @@",

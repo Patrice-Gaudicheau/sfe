@@ -41,7 +41,6 @@ from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairResult,
 )
-from sfe.run_pipeline import LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
     DirectBackend,
@@ -55,7 +54,6 @@ from sfe_tui.executors import (
     DEFAULT_PATCH_OUTPUT_TOKENS,
     ExecutorResponse,
     OpenAIReadOnlyExecutor,
-    PATCH_REPAIR_SYSTEM_INSTRUCTION,
     PATCH_SYSTEM_INSTRUCTION,
     READ_ONLY_SYSTEM_INSTRUCTION,
     create_tui_executor,
@@ -178,7 +176,6 @@ class FakeExecutor:
         self,
         response: ExecutorResponse | None = None,
         patch_response: ExecutorResponse | None = None,
-        patch_repair_response: ExecutorResponse | None = None,
     ) -> None:
         self.response = response or ExecutorResponse(
             answer="mock answer",
@@ -190,14 +187,8 @@ class FakeExecutor:
             error_category=None,
             provider_calls_made=1,
         )
-        self.patch_repair_response = patch_repair_response or ExecutorResponse(
-            answer=None,
-            error_category="invalid_response",
-            provider_calls_made=1,
-        )
         self.calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
-        self.patch_repair_calls: list[dict[str, object]] = []
         self.console_calls: list[dict[str, object]] = []
 
     def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
@@ -211,20 +202,6 @@ class FakeExecutor:
     def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.patch_calls.append(executor_payload)
         return self.patch_response
-
-    def propose_patch_repair(
-        self,
-        executor_payload: dict[str, object],
-        *,
-        repair_instruction: str,
-    ) -> ExecutorResponse:
-        self.patch_repair_calls.append(
-            {
-                "executor_payload": executor_payload,
-                "repair_instruction": repair_instruction,
-            }
-        )
-        return self.patch_repair_response
 
 
 class RecordingActivityIndicator:
@@ -530,26 +507,6 @@ def invalid_new_file_hunk_count_diff(path: str = "index.html") -> str:
             "+two",
             "+three",
         ]
-    )
-
-
-def new_file_diff_without_git_header(path: str = "index.html") -> str:
-    return "\n".join(
-        [
-            "--- /dev/null",
-            f"+++ b/{path}",
-            "@@ -0,0 +1,3 @@",
-            "+one",
-            "+two",
-            "+three",
-        ]
-    )
-
-
-def oversized_invalid_new_file_hunk_count_diff(path: str = "index.html") -> str:
-    return invalid_new_file_hunk_count_diff(path).replace(
-        "+one",
-        "+" + ("x" * (LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS + 1)),
     )
 
 
@@ -4667,12 +4624,6 @@ def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path) -> None:
             error_category=None,
             provider_calls_made=1,
             provider_name="fake-executor",
-        ),
-        patch_repair_response=ExecutorResponse(
-            answer=raw_output,
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
         )
     )
     output: list[str] = []
@@ -4705,154 +4656,11 @@ def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path) -> None:
     assert "old file header is /dev/null: yes" in report_output
     assert "hunk body only added lines: yes" in report_output
     assert "LLM-correctable in principle: yes" in report_output
+    assert "SFE patch repair diagnostics" not in report_output
     assert "+one" not in report_output
     assert "+two" not in report_output
     assert "+three" not in report_output
     assert app.workspace_session is not None
-    cleanup = app.workspace_manager.cleanup(app.workspace_session)
-    assert cleanup.cleaned is True
-
-
-def test_tui_run_reports_llm_patch_repair_and_run_report_details(tmp_path) -> None:
-    repo = init_git_repo(tmp_path / "repo")
-    executor = FakeExecutor(
-        patch_response=ExecutorResponse(
-            answer=invalid_new_file_hunk_count_diff(),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
-        patch_repair_response=ExecutorResponse(
-            answer=valid_create_diff("index.html", "one"),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
-    )
-    output: list[str] = []
-    app = SfeTuiApp(
-        input_provider=FakeInput(
-            ["", "/task Patch context and create index", "/run", "/run-report", "/quit"]
-        ),
-        output=output.append,
-        cwd=repo,
-        backend=DirectBackend(executor=executor),
-        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
-        execution_mode_router=FakeExecutionModeRouter(),
-    )
-
-    assert app.run() == 0
-    run_output = output[-2]
-    report_output = output[-1]
-    assert "status: completed" in run_output
-    assert "repairs: LLM patch repair attempted: 1, applied: yes" in run_output
-    assert "SFE patch repair diagnostics" in report_output
-    assert "repair attempted: yes" in report_output
-    assert "repair type: llm_patch_repair" in report_output
-    assert "repair reason: impossible_hunk_accounting" in report_output
-    assert "repair provider: fake-executor" in report_output
-    assert "repair attempts count: 1" in report_output
-    assert "repair success: yes" in report_output
-    assert "repaired patch parsed: yes" in report_output
-    assert "repaired patch validated: yes" in report_output
-    assert "repair final issue" not in report_output
-    assert len(executor.patch_calls) == 1
-    assert len(executor.patch_repair_calls) == 1
-    assert app.last_run_result is not None
-    assert app.last_run_result.patch_repair is not None
-    cleanup = app.workspace_manager.cleanup(app.workspace_session)
-    assert cleanup.cleaned is True
-
-
-def test_tui_run_report_hints_when_repaired_patch_omits_git_header(tmp_path) -> None:
-    repo = init_git_repo(tmp_path / "repo")
-    executor = FakeExecutor(
-        patch_response=ExecutorResponse(
-            answer=invalid_new_file_hunk_count_diff(),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
-        patch_repair_response=ExecutorResponse(
-            answer=new_file_diff_without_git_header(),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
-    )
-    output: list[str] = []
-    app = SfeTuiApp(
-        input_provider=FakeInput(
-            ["", "/task Patch context and create index", "/run", "/run-report", "/quit"]
-        ),
-        output=output.append,
-        cwd=repo,
-        backend=DirectBackend(executor=executor),
-        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
-        execution_mode_router=FakeExecutionModeRouter(),
-    )
-
-    assert app.run() == 0
-    run_output = output[-2]
-    report_output = output[-1]
-    assert "status: failed" in run_output
-    assert "issue reason: missing_diff_header" in run_output
-    assert "repairs: LLM patch repair attempted: 1, applied: no" in run_output
-    assert "repair final issue reason: missing_diff_header" in report_output
-    assert "patch proposal first line: --- /dev/null" in report_output
-    assert (
-        "patch proposal repair hint: "
-        "repaired patch omitted required `diff --git` header"
-        in report_output
-    )
-    assert len(executor.patch_calls) == 1
-    assert len(executor.patch_repair_calls) == 1
-    cleanup = app.workspace_manager.cleanup(app.workspace_session)
-    assert cleanup.cleaned is True
-
-
-def test_tui_run_report_shows_skipped_repair_for_oversized_rejected_patch(
-    tmp_path,
-) -> None:
-    repo = init_git_repo(tmp_path / "repo")
-    executor = FakeExecutor(
-        patch_response=ExecutorResponse(
-            answer=oversized_invalid_new_file_hunk_count_diff(),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
-        patch_repair_response=ExecutorResponse(
-            answer=valid_create_diff("index.html", "one"),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
-    )
-    output: list[str] = []
-    app = SfeTuiApp(
-        input_provider=FakeInput(
-            ["", "/task Patch context and create index", "/run", "/run-report", "/quit"]
-        ),
-        output=output.append,
-        cwd=repo,
-        backend=DirectBackend(executor=executor),
-        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
-        execution_mode_router=FakeExecutionModeRouter(),
-    )
-
-    assert app.run() == 0
-    report_output = output[-1]
-    assert "SFE patch repair diagnostics" in report_output
-    assert "repair attempted: no" in report_output
-    assert "repair attempts count: 0" in report_output
-    assert "repair success: no" in report_output
-    assert (
-        "repair skipped reason: rejected_patch_too_large_for_repair_prompt"
-        in report_output
-    )
-    assert "repair final issue reason: impossible_hunk_accounting" in report_output
-    assert executor.patch_repair_calls == []
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True
 
@@ -6197,38 +6005,6 @@ def test_openai_executor_patch_uses_patch_instruction_and_output_budget() -> Non
     assert provider.calls[0]["max_tokens"] == 12000
 
 
-def test_openai_executor_patch_repair_uses_repair_instruction_and_diagnostics() -> None:
-    provider = FakeProvider()
-    executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
-
-    result = executor.propose_patch_repair(
-        {
-            "instructions": [ProtectedText("inst", "keep output safe")],
-            "task": ProtectedText("task", "repair patch"),
-            "selected_context_segments": [
-                ContextSegment(
-                    id="ctx_secret",
-                    source_ref="context.txt",
-                    text="SECRET_TOKEN=abc123",
-                )
-            ],
-        },
-        repair_instruction="reason: impossible_hunk_accounting",
-    )
-
-    assert result.answer == "provider answer"
-    assert provider.calls[0]["system_instruction"] == PATCH_REPAIR_SYSTEM_INSTRUCTION
-    assert provider.calls[0]["system_instruction"] != PATCH_SYSTEM_INSTRUCTION
-    assert provider.calls[0]["max_tokens"] == 12000
-    messages = provider.calls[0]["messages"]
-    assert isinstance(messages, list)
-    assert "reason: impossible_hunk_accounting" in messages[0]["content"]
-    assert "keep output safe" in messages[0]["content"]
-    assert "repair patch" in messages[0]["content"]
-    assert "SECRET_TOKEN" not in messages[0]["content"]
-    assert "Selected context" not in messages[0]["content"]
-
-
 def test_openai_executor_console_uses_console_instruction_and_output_budget() -> None:
     provider = FakeProvider()
     executor = OpenAIReadOnlyExecutor(provider=provider, model="test-model")
@@ -6289,26 +6065,6 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "If no safe unified diff can be proposed, return no text" in instruction
     assert "Return only one strict JSON object" not in instruction
     assert '"edits"' not in instruction
-
-    repair_instruction = PATCH_REPAIR_SYSTEM_INSTRUCTION
-    assert "complete corrected Git-style unified diff" in repair_instruction
-    assert (
-        "The response must start with diff --git a/<relative-path> b/<relative-path>"
-        in repair_instruction
-    )
-    assert (
-        "Every file section must start with diff --git a/<relative-path> b/<relative-path>"
-        in repair_instruction
-    )
-    assert "Do not start the response with --- /dev/null" in repair_instruction
-    assert "Return only the patch" in repair_instruction
-    assert "Do not return JSON" in repair_instruction
-    assert "Do not return an edits array" in repair_instruction
-    assert "Do not return Markdown" in repair_instruction
-    assert "Do not wrap the patch in a code fence" in repair_instruction
-    assert "Do not explain the patch" in repair_instruction
-    assert "Hunk header counts must exactly match" in repair_instruction
-
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
     provider = FakeProvider()
@@ -7331,9 +7087,9 @@ def test_proxy_backend_dry_run_remains_safe_and_does_not_call_proxy(tmp_path) ->
 
 
 def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
-    note = (PROJECT_ROOT / "docs" / "tui_direct_backend_strategy.md").read_text(
-        encoding="utf-8"
-    )
+    note = (
+        PROJECT_ROOT / "docs" / "history" / "tui" / "tui_direct_backend_strategy.md"
+    ).read_text(encoding="utf-8")
     normalized_note = " ".join(note.split())
     index = (PROJECT_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
 
@@ -7350,7 +7106,7 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     assert "dry-run" in normalized_note
     assert "tui_direct_backend_strategy.md" in index
     milestone = (
-        PROJECT_ROOT / "docs" / "tui_readonly_ask_milestone.md"
+        PROJECT_ROOT / "docs" / "history" / "tui" / "tui_readonly_ask_milestone.md"
     ).read_text(encoding="utf-8")
     normalized_milestone = " ".join(milestone.split())
     assert "selected 3 of 7 context segments" in milestone

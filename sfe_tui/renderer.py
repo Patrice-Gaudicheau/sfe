@@ -334,12 +334,6 @@ def render_run_result_normal(result: RunResult) -> str:
         hint = _run_issue_hint(result)
         if hint is not None:
             lines.append(f"  hint: {hint}")
-    if result.patch_repair is not None and result.patch_repair.attempted:
-        lines.append(
-            "  repairs: LLM patch repair attempted: "
-            f"{result.patch_repair.attempts_count}, "
-            f"applied: {_yes_no(result.patch_repair.success)}"
-        )
     return "\n".join(lines)
 
 
@@ -432,8 +426,6 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
             lines.append(f"  issue path: {issue.path}")
     if issue is not None and issue.hunk_accounting is not None:
         lines.extend(_render_hunk_accounting_diagnostics(issue.hunk_accounting))
-    if result.patch_repair is not None:
-        lines.extend(_render_patch_repair_diagnostics(result.patch_repair))
     if result.patch_proposal_diagnostics is not None:
         diagnostics = result.patch_proposal_diagnostics
         file_headers = (
@@ -463,9 +455,6 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
                 f"{_yes_no(diagnostics.looks_like_plain_text_or_markdown)}",
             ]
         )
-        repair_hint = _patch_repair_proposal_hint(result, diagnostics)
-        if repair_hint is not None:
-            lines.append(f"  patch proposal repair hint: {repair_hint}")
     response_diagnostics = _executor_response_diagnostics(result)
     if response_diagnostics is not None:
         lines.extend(_render_executor_response_diagnostics(response_diagnostics))
@@ -515,56 +504,6 @@ def _render_hunk_accounting_diagnostics(diagnostics: object) -> list[str]:
         "  LLM-correctable in principle: "
         f"{_yes_no(bool(getattr(diagnostics, 'llm_correctable_in_principle', False)))}",
     ]
-
-
-def _patch_repair_proposal_hint(
-    result: RunResult,
-    diagnostics: object,
-) -> str | None:
-    repair = result.patch_repair
-    final_issue = getattr(repair, "final_issue", None) if repair is not None else None
-    if (
-        final_issue is not None
-        and getattr(final_issue, "category", None) == "invalid_patch_proposal"
-        and getattr(final_issue, "reason", None) == "missing_diff_header"
-        and getattr(diagnostics, "first_non_empty_line", None) == "--- /dev/null"
-    ):
-        return "repaired patch omitted required `diff --git` header"
-    return None
-
-
-def _render_patch_repair_diagnostics(repair: object) -> list[str]:
-    lines = [
-        "SFE patch repair diagnostics",
-        f"  repair attempted: {_yes_no(bool(getattr(repair, 'attempted', False)))}",
-        f"  repair type: {_display_value(getattr(repair, 'repair_type', None))}",
-        f"  repair reason: {_display_value(getattr(repair, 'reason', None))}",
-        f"  repair provider: {_display_value(getattr(repair, 'provider', None))}",
-        "  repair attempts count: "
-        f"{_display_value(getattr(repair, 'attempts_count', None))}",
-        f"  repair success: {_yes_no(bool(getattr(repair, 'success', False)))}",
-        "  repaired patch parsed: "
-        f"{_yes_no(bool(getattr(repair, 'repaired_patch_parsed', False)))}",
-        "  repaired patch validated: "
-        f"{_yes_no(bool(getattr(repair, 'repaired_patch_validated', False)))}",
-    ]
-    skipped_reason = getattr(repair, "skipped_reason", None)
-    if skipped_reason is not None:
-        lines.append(f"  repair skipped reason: {skipped_reason}")
-    final_issue = getattr(repair, "final_issue", None)
-    if final_issue is not None:
-        lines.extend(
-            [
-                "  repair final issue category: "
-                f"{_display_value(getattr(final_issue, 'category', None))}",
-                "  repair final issue reason: "
-                f"{_display_value(getattr(final_issue, 'reason', None))}",
-            ]
-        )
-        final_path = getattr(final_issue, "path", None)
-        if final_path is not None:
-            lines.append(f"  repair final issue path: {final_path}")
-    return lines
 
 
 def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | None:

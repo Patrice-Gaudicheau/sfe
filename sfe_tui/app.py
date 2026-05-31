@@ -686,7 +686,6 @@ class SfeTuiApp:
             workspace_manager=self.workspace_manager,
             discovery_router=self.discovery_router,
             execution_mode_router=self.execution_mode_router,
-            patch_json_repairer=self.patch_json_repairer,
             progress_callback=lambda event: self.output(
                 renderer.render_run_progress_event(event)
             ),

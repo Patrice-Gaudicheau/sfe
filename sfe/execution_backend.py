@@ -71,11 +71,3 @@ class ExecutionBackend(Protocol):
 
     def patch(self, contract: SFEContract) -> ExecutionResult:
         ...
-
-    def patch_repair(
-        self,
-        contract: SFEContract,
-        *,
-        repair_instruction: str,
-    ) -> ExecutionResult:
-        ...
