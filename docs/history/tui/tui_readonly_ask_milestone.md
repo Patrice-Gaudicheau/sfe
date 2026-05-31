@@ -1,7 +1,7 @@
 # TUI Read-Only Ask Milestone
 
-This note records the first useful end-to-end first-party SFE TUI milestone.
-It is historical: the current canonical task workflow is `/task <request>`
+Status: historical. This note records the first useful end-to-end first-party
+SFE TUI milestone. The current primary task workflow is `/task <request>`
 followed by `/run`. The `/ask`, `/patch`, and `/apply-patch` details below are
 kept as milestone context and advanced/debug compatibility history.
 
@@ -45,7 +45,8 @@ defaults for this interactive read-only path.
 Historical note: `/patch` is the next proposal-only phase and later became a
 core-validated patch flow for structured full-file replacements and safe
 new-file unified diffs, with `/apply-patch` as the explicit router-reviewed
-write boundary. See `tui_v0_1_user_guide.md` and `tui_apply_patch_design.md`
+write boundary. See `../../tui_v0_1_user_guide.md` and
+`../../tui_apply_patch_design.md`
 for current behavior. The TUI renders this as "Patch proposal only, not
 applied". At the time of this milestone, the important boundary was that
 `/patch` does not write files, apply patches, execute shell commands, call the

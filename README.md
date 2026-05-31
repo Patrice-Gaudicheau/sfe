@@ -27,6 +27,13 @@ The evidence in this repository is early, mostly synthetic, and
 benchmark-specific. Treat the results as a research signal from a technical
 prototype, not as proof of general model capability or production readiness.
 
+For the current product doctrine, start with
+`docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context
+engine; the TUI is the current local user-facing control surface; patch/worktree
+is the developer execution mode inside `workspace_write`; benchmarks are the
+experimental evidence and architectural feedback loop; the Proxy is standby
+compatibility infrastructure, not the current local access path.
+
 ## Core Engineering Signal
 
 Across protocol-aligned OpenAI and Anthropic campaigns, selected-context
@@ -160,12 +167,13 @@ New technical reviewers should start with `docs/INDEX.md`. It gives a compact
 map of the benchmark families, runner categories, current high-overlap status,
 and the recommended reading path.
 
-For the current canonical user-facing workflow, read
-`docs/tui_v0_1_user_guide.md` and `docs/current_architecture_status.md`.
+For the current local user-facing workflow, read
+`docs/sfe_product_doctrine.md`, `docs/tui_v0_1_user_guide.md`, and
+`docs/current_architecture_status.md`.
 
 For the current high-overlap methodology, read
-`docs/high_overlap_fixture_expansion_phase_close.md` and
-`docs/high_overlap_diagnostic_bucketing_notes.md`.
+`docs/high_overlap_diagnostic_bucketing_notes.md` and
+`docs/high_overlap_history.md`.
 
 ## High-Overlap Fixture Status
 
@@ -198,19 +206,20 @@ The tradeoff is that routing and orchestration have fixed costs. SFE only looks 
 
 At a high level, the current repository has these layers:
 
-- `sfe/`: core SFE helpers, including provider selection, LLM-driven workspace
-  discovery, shared router-review plumbing, and Git Worktree workspace
-  isolation.
+- `sfe/`: core SFE routing/context engine helpers, including provider
+  selection, execution-mode routing, LLM-driven workspace discovery, bounded
+  execution plumbing, validation support, and Git Worktree workspace isolation.
 - `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
 - `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
 - `providers/`: minimal benchmark provider adapters, including Lemonade,
   OpenAI API, Alibaba/Qwen, and native Anthropic Messages API paths.
 - `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
-- `sfe_tui/`: current canonical user-facing TUI path using `DirectBackend`.
+- `sfe_tui/`: current local user-facing TUI surface using `DirectBackend`.
 - `sfe_proxy/`: standby experimental OpenAI-compatible local proxy retained for
   compatibility research, observability, and historical stress tests.
 
-The current canonical TUI path uses `DirectBackend` and follows:
+SFE is not primarily a Git patch assistant. The current local TUI surface uses
+`DirectBackend` and follows:
 
 ```text
 /task <question>
@@ -256,7 +265,8 @@ Separate router-review calls are used by the advanced `/apply-patch` and
 proofs and are not mandatory for `/run`. `/discover` does not write files, run
 shell commands, initialize Git, or expose raw file contents in diagnostics.
 `/dry-run` still makes zero provider calls. `/ask` calls the configured executor
-only after routing selected context. No proxy is used in the canonical TUI path.
+only after routing selected context. No proxy is used in the current local TUI
+path.
 
 Manual `/files` context loading remains available for debug/design work, but it
 is not the normal human-facing TUI workflow.
@@ -557,13 +567,14 @@ model intelligence.
 
 ## Documentation
 
-- `docs/INDEX.md`: recommended starting point and runner-category map for technical reviewers.
-- `docs/tui_v0_1_user_guide.md`: current canonical SFE-aware TUI workflow.
+- `docs/INDEX.md`: recommended starting point and documentation map for technical reviewers.
+- `docs/sfe_product_doctrine.md`: current product doctrine and terminology.
+- `docs/tui_v0_1_user_guide.md`: current local SFE-aware TUI workflow.
 - `docs/tui_apply_patch_design.md`: advanced/debug `/patch` -> `/apply-patch`
   write boundary and router-reviewed full-file replacement design, retained for
   compatibility rather than the primary `/run` workflow.
-- `docs/current_architecture_status.md`: current boundary between the TUI
-  canonical path and standby/experimental proxy infrastructure.
+- `docs/current_architecture_status.md`: current boundary between the SFE core,
+  local TUI surface, patch/worktree mode, and standby Proxy infrastructure.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
 - `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
 - `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.
@@ -577,7 +588,8 @@ model intelligence.
 - `docs/token_cost_metrics.md`: fresh OpenAI all-tier token accounting and router-inclusive reduction summary.
 - `docs/structural_benchmark_note.md`: exploratory structural 50k+ stress-test notes.
 - `docs/openai_api_benchmark.md`: optional OpenAI API benchmark path.
-- `docs/router_contract.md`: router JSON contract.
+- `docs/execution_mode_router_contract.md`: current `/run` execution-mode
+  router contract.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.
 - `sfe_white_paper.md`: original architecture proposal; more speculative than the current public README.
 

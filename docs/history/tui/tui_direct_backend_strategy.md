@@ -1,12 +1,15 @@
 # SFE TUI DirectBackend Strategy
 
-This note records the current first-party interface direction for SFE.
+Status: historical. The current doctrine is summarized in
+`../../sfe_product_doctrine.md`; the current architecture status is in
+`../../current_architecture_status.md`. This note preserves the earlier
+DirectBackend strategy decision.
 
 ## Decision
 
-The SFE-aware TUI is the canonical user-facing path for new SFE workflow
-development. The DirectBackend is the default and only exposed backend for the
-TUI for now.
+The SFE-aware TUI was selected as the first local user-facing path for SFE
+workflow development. The DirectBackend is the default and only exposed backend
+for the TUI for now.
 
 The existing SFE Proxy and CodexCLI path are standby compatibility and
 stress-test infrastructure. They should stay safe, observable, and

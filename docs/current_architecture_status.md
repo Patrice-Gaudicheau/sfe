@@ -6,25 +6,31 @@ TUI work. It is a status boundary, not a production-readiness claim.
 For the current user-facing TUI workflow and command reference, see
 [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md).
 
-## Canonical User Path
+For the current product doctrine, see
+[sfe_product_doctrine.md](sfe_product_doctrine.md).
 
-The SFE-aware TUI is the canonical user-facing path for current SFE workflow
-development. It should remain CLI/TUI-first for now.
+## Current Local User Path
 
-The canonical TUI backend is `DirectBackend`. It works from an explicit SFE
+SFE core is the routing/context engine: routing, context selection, bounded
+execution, validation, and observability. The SFE-aware TUI is the current local
+user-facing surface for that engine. It should remain CLI/TUI-first for now,
+but it is not the conceptual source of truth for SFE.
+
+The current TUI backend is `DirectBackend`. It works from an explicit SFE
 contract: selected workspace, protected task, protected instructions, explicit
 context segments, reducibility metadata, local routing diagnostics, an executor
 boundary, console answers, and mechanically bounded writes in an isolated
 worktree when workspace file changes are selected.
 
-The current canonical TUI workflow is:
+The current primary TUI workflow is:
 
 ```text
 /task <question>
 /run
 ```
 
-`/run` is the simple user path. It first asks the core execution-mode router
+`/run` is the current primary TUI action. It first asks the core
+execution-mode router
 whether the task should produce a console answer, write workspace files, or be
 treated as an outside-workspace action. `console_output` returns a
 natural-language answer with no worktree or patch. `workspace_write` discovers
@@ -35,6 +41,10 @@ compact safe metadata. It does not require human approval, diff inspection,
 router review, syntax checks, tests, or lint before applying inside the
 worktree. `external_action` is recognized but not implemented yet and fails
 cleanly before workspace work starts.
+
+`workspace_write` is the developer patch/worktree execution mode. The fact that
+it becomes Git/worktree/patch/promotion oriented after routing is intentional
+and accepted; it is not conceptual drift from SFE.
 
 The worktree is the main operational guard for `workspace_write`. If the
 selected workspace is already inside a Git repository, `/run` uses that
@@ -61,11 +71,11 @@ Advanced/debug commands remain available for compatibility and inspection:
 /files
 ```
 
-The underlying discovery and execution layers still follow the intended
-architecture boundary:
+The underlying routing/context flow still follows the intended architecture
+boundary:
 
 ```text
-Discoverer -> Router -> Executor
+Route task -> select bounded context -> execute -> validate -> observe
 ```
 
 The Discoverer is the reusable core discovery layer in `sfe/discovery.py`. It
@@ -83,6 +93,11 @@ robust general retrieval. The Executor remains the configured executor behind
 advanced `/apply-patch` and `/review-worktree` flows; those reviews are
 semantic checks, not formal security proofs. They are not part of the canonical
 `/run` path.
+
+During `/run`, the TUI renders compact `SFE:` progress lines for routing,
+context, prompt preparation, workspace-write execution, validation, promotion,
+or console answer generation. These lines are lightweight observability. They
+are not benchmark output and do not run baseline-versus-spatial comparisons.
 
 The currently validated TUI commands are:
 
@@ -163,8 +178,8 @@ state while preserving the selected workspace.
 
 ## Standby Experimental And Compatibility Path
 
-The SFE proxy and Dockerized proxy path are in standby for the current TUI V0.1
-user-facing work. They remain useful infrastructure for:
+The SFE proxy and Dockerized proxy path are in standby for current local TUI
+work. They remain useful infrastructure for:
 
 - OpenAI-compatible traffic compatibility;
 - safe observability in `shadow` mode;
@@ -173,8 +188,8 @@ user-facing work. They remain useful infrastructure for:
 - `/v1/responses` request-shape and streaming experiments;
 - provider integration probes.
 
-The proxy is not the canonical SFE user interface. CodexCLI through the proxy is
-useful for compatibility and stress testing, but realistic CodexCLI traffic can
+The proxy is not the canonical current SFE user interface. CodexCLI through the
+proxy is useful for compatibility and stress testing, but realistic CodexCLI traffic can
 embed large or protected context inside client-specific request envelopes. SFE
 should not depend on reverse-engineering that traffic shape as its primary
 interface.
@@ -198,7 +213,7 @@ general token savings, or broad provider behavior.
 ## What Remains Unproven
 
 Before making practical value claims, SFE still needs evidence that the
-canonical `/run` path can repeatedly choose the right execution mode, produce
+primary `/run` path can repeatedly choose the right execution mode, produce
 useful console answers, and deliver useful context reduction for workspace
 writes without hurting task correctness.
 
@@ -219,7 +234,8 @@ The minimum proof still missing includes:
 - clearer operational guidance for secrets, logs, provider limits, and local
   proxy exposure.
 
-The current status is therefore: TUI plus `DirectBackend` is the primary
-architecture direction; proxy work is standby experimental compatibility and
+The current status is therefore: SFE core plus the local TUI `DirectBackend`
+surface is the primary current direction; `workspace_write` is the accepted
+developer execution mode; proxy work is standby experimental compatibility and
 research infrastructure; practical value remains to be demonstrated with
 controlled, repeatable workflows.

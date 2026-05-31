@@ -1,5 +1,11 @@
 # Router Contract
 
+Status: historical. This document preserves the older broad SFE routing
+contract with task type, role, memory zones, and direct/tool-assisted/multi-step
+execution patterns. It is not the current `/run` execution-mode contract. For
+the current TUI `/run` router contract, see
+`../../execution_mode_router_contract.md`.
+
 This document defines the first routing decision interface for `sfe`.
 
 The router receives a user task and returns a routing decision. It does not execute the task, retrieve memory, call providers, or update memory. Its responsibility is to describe how the rest of the system should bound context and select execution.

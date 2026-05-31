@@ -1,11 +1,12 @@
 # TUI V0.1 User Guide
 
-This guide documents the current canonical first-party SFE-aware TUI behavior.
+This guide documents the current local first-party SFE-aware TUI behavior.
 It is a prototype workflow guide, not a production-readiness claim.
 
-The canonical user-facing path is the TUI with `DirectBackend`. The proxy and
-proxy-backed experiments are not the primary user path and are not required for
-this guide.
+The current local user-facing path is the TUI with `DirectBackend`. The proxy
+and proxy-backed experiments are not the primary user path and are not required
+for this guide. For product-level terminology, see
+`sfe_product_doctrine.md`.
 
 ## What The TUI Is
 
@@ -49,43 +50,28 @@ workspace paths using safe relative labels where possible.
 
 ## Canonical Workflow
 
-1. Check the selected workspace:
+The normal first path is short:
 
-   ```text
-   /directory
-   ```
+```text
+/task <question>
+/run
+```
 
-2. Set the task:
+Useful optional follow-ups:
 
-   ```text
-   /task <question>
-   ```
+```text
+/run-report
+/context
+/discover
+/dry-run
+```
 
-3. Resolve the task:
+`/run-report` inspects the last run without running it again. `/context`,
+`/discover`, and `/dry-run` are inspection and diagnostic tools; they are not
+required for the normal `/task` -> `/run` path.
 
-   ```text
-   /run
-   ```
-
-4. Inspect selected context metadata if needed:
-
-   ```text
-   /context
-   ```
-
-5. Ask a read-only question using selected context if needed:
-
-   ```text
-   /ask
-   ```
-
-6. Clear the session state while preserving the workspace:
-
-   ```text
-   /reset
-   ```
-
-For debug and compatibility commands, use:
+Advanced patch, worktree, cleanup, and maintenance commands remain available
+but are not the normal first path:
 
 ```text
 /help-advanced
@@ -93,19 +79,29 @@ For debug and compatibility commands, use:
 
 ## Command Reference
 
+### Primary Path
+
 - `/help`: show concise command help.
-- `/help-advanced`: show advanced/debug commands retained for compatibility.
 - `/directory`: show the selected workspace using safe display conventions.
 - `/status`: show current TUI state, latest result metadata, and write/shell
   boundaries.
 - `/task <text>`: store the current task. Empty tasks are rejected.
 - `/run`: resolve the current task through the core execution-mode router. It
   may answer directly in the TUI console or create workspace file changes
-  through the isolated worktree pipeline. If a workspace write is selected and
-  the workspace is not yet a Git repository, `/run` can initialize a local
-  repository snapshot first; it does not create a remote, push, run syntax
-  checks, run tests or lint, require diff inspection, require human approval, or
-  require router review.
+  through the isolated worktree pipeline. During execution, it prints compact
+  `SFE:` progress lines for routing/context observability. If a workspace write
+  is selected and the workspace is not yet a Git repository, `/run` can
+  initialize a local repository snapshot first; it does not create a remote,
+  push, run syntax checks, run tests or lint, require diff inspection, require
+  human approval, or require router review.
+- `/run-report`: show diagnostics for the previous `/run` or `/run-debug`
+  result without relaunching execution and without replaying progress events.
+- `/reset`: clear task, context, latest routing/result, and skipped/rejected
+  context and discovery state; preserve the selected workspace.
+- `/quit` and `/exit`: exit the TUI.
+
+### Optional Inspection
+
 - `/context`: show loaded context segment count, opaque ids, safe source refs,
   approximate sizes/tokens, latest selected ids, and skipped/rejected metadata.
 - `/ask`: send selected context plus protected task/instructions to the
@@ -113,9 +109,34 @@ For debug and compatibility commands, use:
 - `/workspace-status`: show whether the active workspace is the original
   workspace or an isolated worktree, plus worktree metadata and git status when
   available.
-- `/reset`: clear task, context, latest routing/result, and skipped/rejected
-  context and discovery state; preserve the selected workspace.
-- `/quit` and `/exit`: exit the TUI.
+- `/help-advanced`: show advanced/debug and maintenance commands retained for
+  compatibility.
+
+### Advanced And Maintenance
+
+These commands are useful for debugging, compatibility, manual patch flows, and
+worktree maintenance. They are not the normal first path.
+
+- `/discover`: scan the selected workspace and build a controlled candidate
+  pool for the current task.
+- `/dry-run`: build the SFE contract and run a local routing preview.
+- `/patch`: ask for a patch proposal only; it is not applied.
+- `/apply-patch`: ask the configured router reviewer to approve or block the
+  latest pending structured patch proposal.
+- `/isolate`: create an SFE-owned Git Worktree from the selected Git workspace.
+- `/worktree-diff`: show the active isolated worktree's git status and diff
+  summary.
+- `/review-worktree`: ask the configured router reviewer for `OK_PROMOTE` or
+  `KO_BLOCK` over the actual worktree status, changed files, diff, and task.
+- `/cleanup-worktree`: remove only the active SFE-created worktree.
+- `/gc-worktrees`: dry-run report of SFE-created worktrees.
+- `/gc-worktrees --clean`: remove only clean SFE-created orphan worktrees.
+- `/auto-patch`: legacy macro over discover, dry-run, patch, and
+  router-reviewed apply.
+- `/auto-worktree`: legacy macro over isolation, patch, apply, worktree diff,
+  and router-reviewed worktree review.
+- `/files <paths...>`: replace context manually with provided text files for
+  debug/design work.
 
 ## Execution Modes
 
@@ -130,48 +151,42 @@ task needs:
   or opening a PR. This mode is recognized but not implemented yet, so it fails
   cleanly before workspace work starts.
 
-Advanced/debug commands remain available through `/help-advanced`:
+## Run Progress Lines
 
-- `/discover`: scan the selected workspace and build a controlled candidate
-  pool for the current task. Empty tasks are rejected. This command remains
-  read-only and does not initialize Git.
-- `/dry-run`: build the SFE contract and run a local routing preview. After a
-  task is set, this requires `/discover` unless manual `/files` context exists.
-- `/patch`: ask for a patch proposal only. The proposal is not applied. After a
-  task is set, this requires `/discover` unless manual `/files` context exists.
-- `/apply-patch`: ask the configured router reviewer to approve or block the
-  latest pending structured patch proposal. If approved, write the proposed
-  full file replacements inside the selected workspace.
-- `/isolate`: create an SFE-owned Git Worktree from the selected Git workspace
-  and switch the active TUI workspace to that worktree. Dirty source
-  workspaces are refused by default.
-- `/worktree-diff`: show the active isolated worktree's git status and diff
-  summary.
-- `/review-worktree`: ask the configured router reviewer for `OK_PROMOTE` or
-  `KO_BLOCK` over the actual worktree status, changed files, diff, and task.
-  `OK_PROMOTE` does not merge, push, commit, create a PR, or mutate the source
-  branch.
-- `/cleanup-worktree`: remove only the active SFE-created worktree and restore
-  the original source workspace as the active workspace.
-- `/gc-worktrees`: dry-run report of SFE-created worktrees found from the
-  selected source workspace. It does not remove anything.
-- `/gc-worktrees --clean`: remove only clean SFE-created orphan worktrees and
-  protect the active TUI worktree session. Dirty worktrees are reported and
-  skipped.
-- `/auto-patch`: legacy macro command that runs the existing discover, dry-run,
-  patch, and router-reviewed apply flow. It stops on failure or router
-  `KO_BLOCK`.
-- `/auto-worktree`: legacy macro command that creates isolation if needed, then
-  runs the existing patch, apply, worktree-diff, and router-reviewed worktree
-  review flow. It stops on failure or `KO_BLOCK` and leaves the worktree
-  available for inspection.
-- `/files <paths...>`: replace context manually with the provided text files
-  for debug/design work. Directory inputs and unsupported files are rejected or
-  skipped with a reason. This remains available but is not the normal
-  human-facing workflow.
-Setting a new `/task` invalidates any previous discovery result. Run
-`/discover` again before `/dry-run`, `/ask`, or `/patch` unless you are using
-manual `/files` context.
+`/run` displays compact `SFE:` lines while the core pipeline advances. They make
+the routing/context layer visible without turning the TUI into a benchmark
+dashboard.
+
+Typical `workspace_write` progress looks like:
+
+```text
+SFE: run started
+SFE: execution mode routing
+SFE: execution mode selected: workspace_write
+SFE: workspace preparation started
+SFE: context discovery started
+SFE: context candidates inspected: 12
+SFE: relevant context selected: 3 files
+SFE: estimated token reduction: 71.4%
+SFE: executor prompt prepared
+SFE: patch/worktree execution started
+SFE: patch validation completed
+SFE: promotion completed
+```
+
+For `console_output`, `/run` shows the routing and prompt-preparation steps,
+then `SFE: console answer generated` when the answer is available.
+
+These lines are safe progress messages only. They do not display full prompts,
+file contents, raw provider payloads, or benchmark results. They do not run a
+live baseline-versus-spatial comparison. `/run-report` displays the latest
+stored run diagnostics and does not relaunch `/run` or duplicate progress
+events.
+
+Advanced and maintenance commands remain available through `/help-advanced` and
+are summarized in the command reference above. Setting a new `/task` invalidates
+any previous discovery result. Run `/discover` again before `/dry-run`, `/ask`,
+or `/patch` unless you are using manual `/files` context.
 
 ## Discovery
 
@@ -334,7 +349,7 @@ The current TUI behavior intentionally keeps these boundaries:
 - no shell execution;
 - no tool execution;
 - no backend switching;
-- no proxy in the canonical TUI path;
+- no proxy in the current local TUI path;
 - discovery does not call providers, write files, or expose raw contents in
   diagnostics;
 - `/run` answers directly for `console_output` without Git preparation,
@@ -397,9 +412,8 @@ workflow is invalid.
 
 For local providers, prefer smaller and simpler workspace-write tasks, or expect
 occasional patch-generation failures until a more robust workflow is
-implemented. A future branch may investigate whether provider timeouts should
-be complemented by heartbeat or progress mechanisms. This note does not change
-provider timeout behavior or add heartbeat logic.
+implemented. The lightweight `SFE:` progress lines report pipeline boundaries;
+they do not change provider timeout behavior or add heartbeat logic.
 
 ## Current Limitations
 

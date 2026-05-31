@@ -4,8 +4,8 @@ Status note: This is a historical roadmap from an earlier structural benchmark
 phase, preserved for audit/research continuity. Some items below have since
 been implemented or superseded by later provider, benchmark, and standby Proxy
 work. Current terminology treats the SFE Proxy as historical/standby
-infrastructure. Start with `README.md`, `docs/INDEX.md`, and the current
-TUI/architecture docs for the latest project state.
+infrastructure. Start with `../../../README.md`, `../../INDEX.md`, and the
+current TUI/architecture docs for the latest project state.
 
 ## Current Status
 

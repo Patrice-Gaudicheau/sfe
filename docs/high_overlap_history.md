@@ -15,7 +15,7 @@ describe methodology, fixture design, or phase-level interpretation:
   diagnostic failure buckets and strict validation interpretation.
 - [high_overlap_authority_gap_fixture_expansion_design.md](high_overlap_authority_gap_fixture_expansion_design.md):
   fixture expansion design for authority-gap scenarios.
-- [high_overlap_fixture_expansion_phase_close.md](high_overlap_fixture_expansion_phase_close.md):
+- [high_overlap_fixture_expansion_phase_close.md](history/high_overlap/high_overlap_fixture_expansion_phase_close.md):
   phase closeout for newer authority-gap fixtures, with a current status note.
 
 ## Historical Progression

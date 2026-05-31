@@ -6,7 +6,7 @@ importing TPCE into SFE.
 
 Current status note: this document predates the `/run`-first TUI workflow and
 should be read as orientation vocabulary, not as current user guidance. The
-current canonical editing path is `/task <request>` followed by `/run`;
+current primary editing path is `/task <request>` followed by `/run`;
 discovery, patch, apply, review, and manual file commands remain available as
 advanced/debug primitives.
 

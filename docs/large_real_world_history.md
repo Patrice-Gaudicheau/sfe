@@ -38,6 +38,7 @@ headline benchmark documentation.
 
 - These are historical progression notes over controlled fixtures.
 - Local observations are not statistical proof or production validation.
-- Some Gateway/Proxy language reflects the project state at the time the notes
-  were written; current terminology uses Proxy.
+- Some historical integration terminology reflects the project state at the
+  time the notes were written; current terminology uses Proxy for the standby
+  compatibility path.
 - These notes should not be read as current provider or Proxy documentation.

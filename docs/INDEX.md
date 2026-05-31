@@ -1,57 +1,75 @@
 # Documentation Index
 
 This repository is a technical prototype for Spatial Field Engine for Cognition
-(`SFE`), an experimental architecture that separates context selection from
-task execution in long-context LLM workflows. The documentation records
-controlled benchmark methodology, provider-specific observations, and the
-standby historical SFE Proxy path. It does not claim production readiness,
-statistical reliability, or general model-safety guarantees.
+(`SFE`). SFE is a routing/context engine for LLM workflows: it separates context
+selection from execution, bounds execution modes, validates results where
+possible, and records safe observability.
+
+The documentation is organized so current architecture, TUI usage, benchmark
+evidence, Proxy compatibility material, and historical notes are not confused.
+The repository does not claim production readiness, statistical reliability, or
+general model-safety guarantees.
 
 ## Start Here
 
-1. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): concise guide for the
-   current canonical SFE-aware TUI workflow, commands, safety boundaries, and
-   limitations.
-2. [current_architecture_status.md](current_architecture_status.md): compact
-   current-status note freezing the TUI + DirectBackend path as canonical and
-   the Proxy/CodexCLI path as standby experimental compatibility
-   infrastructure.
-3. [README.md](../README.md): project purpose, architecture, setup, current
-   provider support, benchmark snapshot, and limitations.
-4. [public_release_technical_report.md](public_release_technical_report.md):
-   public-facing technical report for the current release-readiness snapshot.
-5. [router_contract.md](router_contract.md): router JSON contract and strict
-   output expectations.
+1. [sfe_product_doctrine.md](sfe_product_doctrine.md): current doctrine and
+   terminology. Read this first when interpreting the TUI, benchmarks,
+   patch/worktree mode, or Proxy material.
+2. [README.md](../README.md): project purpose, benchmark snapshot, setup,
+   provider support, and limitations.
+3. [current_architecture_status.md](current_architecture_status.md): current
+   non-proxy architecture status for the SFE core, TUI, `/run`, and
+   `workspace_write`.
+4. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): local TUI workflow and
+   command reference.
+5. [execution_mode_router_contract.md](execution_mode_router_contract.md):
+   current `/run` execution-mode router contract.
 
-## Current Primary Docs
+## Current Architecture And Doctrine
+
+- [sfe_product_doctrine.md](sfe_product_doctrine.md): SFE core, TUI,
+  patch/worktree, benchmarks, future API, and Proxy boundaries.
+- [current_architecture_status.md](current_architecture_status.md): current
+  architecture boundary and what remains unproven.
+- [execution_mode_router_contract.md](execution_mode_router_contract.md):
+  current `console_output`, `workspace_write`, and `external_action` contract.
+- [sfe_continuity_orientation_layer.md](sfe_continuity_orientation_layer.md):
+  orientation vocabulary for tasks, workspaces, evidence, and continuity. It is
+  not current user guidance.
+- [decisions.md](decisions.md): project decision notes and historical context.
+
+## TUI Usage
+
+- [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current local user-facing
+  TUI guide. `/run` is the current primary action.
+- [tui_apply_patch_design.md](tui_apply_patch_design.md): advanced/debug
+  `/patch` -> `/apply-patch` write boundary. The primary write path is
+  `/run` when the execution-mode router selects `workspace_write`.
+
+Historical TUI milestone and backend-strategy notes are under
+[`history/tui/`](history/tui/).
+
+## Benchmark Evidence
+
+Benchmarks are the practical exploratory implementation of the white paper
+hypothesis. They are evidence and architectural feedback, not secondary
+artifacts and not normal TUI output.
 
 - [provider_comparison_summary.md](provider_comparison_summary.md): main
-  cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic
+  cross-provider OpenAI/Anthropic summary for protocol-aligned large/contextual
   campaigns.
-- [current_architecture_status.md](current_architecture_status.md): short
-  current-status boundary for the canonical TUI + DirectBackend path, the
-  standby experimental proxy path, and what remains unproven.
-- [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current user-facing TUI
-  workflow and command reference for the canonical DirectBackend path.
-- [tui_apply_patch_design.md](tui_apply_patch_design.md): advanced/debug
-  router-reviewed `/patch` -> `/apply-patch` write boundary, including
-  full-file replacement proposals and SFE-computed effective diff previews.
-  This is retained for compatibility; the primary user workflow is `/task`
-  followed by `/run`.
-- [tui_direct_backend_strategy.md](tui_direct_backend_strategy.md): current
-  first-party TUI direction, with DirectBackend as the canonical exposed path
-  and the Proxy/CodexCLI path frozen as standby compatibility infrastructure.
-- [tui_readonly_ask_milestone.md](tui_readonly_ask_milestone.md): first
-  read-only `/ask` milestone for the first-party SFE-aware TUI.
-- [token_cost_metrics.md](token_cost_metrics.md): OpenAI token accounting and
-  router-inclusive reduction details.
 - [large_contextual_benchmark_report.md](large_contextual_benchmark_report.md):
   large/contextual benchmark methodology and report notes.
-- [large_real_world_history.md](large_real_world_history.md): rollup for
-  historical large real-world-style benchmark progression notes.
+- [results_structural_50k_openai.md](results_structural_50k_openai.md):
+  OpenAI structural 50k+ result note.
+- [token_cost_metrics.md](token_cost_metrics.md): OpenAI token accounting and
+  router-inclusive reduction details.
+- [public_release_technical_report.md](public_release_technical_report.md):
+  conservative public-release technical snapshot.
 - [effectiveness.md](effectiveness.md): preserved strict Lemonade
   effectiveness result.
-- [decisions.md](decisions.md): project decision notes where applicable.
+- [structural_benchmark_note.md](structural_benchmark_note.md): exploratory
+  structural 50k+ stress-test notes.
 
 ## Provider Docs
 
@@ -63,11 +81,8 @@ statistical reliability, or general model-safety guarantees.
   OpenAI paced-equivalent campaign summary.
 - [anthropic_benchmark_paced_summary.md](anthropic_benchmark_paced_summary.md):
   Anthropic paced campaign summary, including structural provider-call pacing.
-- [alibaba_provider_history.md](alibaba_provider_history.md): preferred
-  starting point for Alibaba/Qwen historical provider integration and related
-  Alibaba-hosted model exploration notes.
-- [alibaba_progressive_benchmark_note.md](history/providers/alibaba/alibaba_progressive_benchmark_note.md):
-  progressive Alibaba/Qwen benchmark note.
+- [alibaba_provider_history.md](alibaba_provider_history.md): starting point
+  for Alibaba/Qwen historical provider integration notes.
 - [alibaba_comparable_benchmark_runs.md](alibaba_comparable_benchmark_runs.md):
   limited Alibaba/Qwen replay across selected benchmark families.
 - [alibaba_large_contextual_missing_tiers.md](alibaba_large_contextual_missing_tiers.md):
@@ -76,42 +91,24 @@ statistical reliability, or general model-safety guarantees.
 - [alibaba_structural_50k_comparison_note.md](alibaba_structural_50k_comparison_note.md):
   Alibaba/Qwen single-run structural baseline-vs-spatial comparison.
 
-## Benchmark Methodology
-
-- [high_overlap_diagnostic_bucketing_notes.md](high_overlap_diagnostic_bucketing_notes.md):
-  strict validation, honest pass/fail criteria, and diagnostic failure buckets.
-- [high_overlap_authority_gap_fixture_expansion_design.md](high_overlap_authority_gap_fixture_expansion_design.md):
-  design intent behind the Aurelia, Borealis, and Cassini authority-gap
-  fixtures.
-- [high_overlap_fixture_expansion_phase_close.md](high_overlap_fixture_expansion_phase_close.md):
-  phase closeout for the high-overlap fixture expansion.
-- [high_overlap_history.md](high_overlap_history.md): preferred starting point
-  for historical High-Overlap experiment notes before reading individual smoke
-  and progression records.
-- [large_real_world_history.md](large_real_world_history.md): preferred
-  starting point for historical large real-world-style benchmark notes.
-- [structural_benchmark_note.md](structural_benchmark_note.md): exploratory
-  structural 50k+ stress-test notes.
-- [results_structural_50k_openai.md](results_structural_50k_openai.md):
-  OpenAI structural 50k+ result note.
-
 ## Benchmark Families
 
 - Core deterministic benchmark: small local checks for the base SFE execution
   flow.
 - Large/contextual benchmark: synthetic context-reduction tasks with fixture
   and router selection modes.
-- High-overlap authority-gap benchmarks: controlled fixtures where multiple
-  documents share similar vocabulary and differ by authority, scope, freshness,
-  or evidence.
-- Large real-world-style benchmark notes: early OpenAI selector/executor smoke
+- High-overlap authority-gap benchmarks: controlled fixtures where similar
+  documents differ by authority, scope, freshness, or evidence.
+- Large real-world-style notes: historical OpenAI selector/executor smoke
   observations over curated material.
-- Structural 50k+ stress tests: exploratory large-context stress material
-  intended to expose routing and answer-completeness limits.
+- Structural 50k+ stress tests: large-context stress material for routing,
+  answer-completeness, and amortization behavior.
 
 High-overlap remains an important benchmark family, but it should be read as
 methodology and controlled fixture coverage rather than the whole-project
-status.
+status. Start with [high_overlap_history.md](high_overlap_history.md),
+[high_overlap_diagnostic_bucketing_notes.md](high_overlap_diagnostic_bucketing_notes.md),
+and [high_overlap_authority_gap_fixture_expansion_design.md](high_overlap_authority_gap_fixture_expansion_design.md).
 
 ## Runner Map
 
@@ -126,64 +123,40 @@ include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
 | Selected-context OpenAI executor smokes | `runtime/run_high_overlap_*_openai_executor_smoke.py` | Yes for live run | Executor receives deterministic authoritative context only. |
 | Selected-vs-full OpenAI comparisons | `runtime/run_high_overlap_*_contamination_comparison.py` | Yes for live run | Compare selected authoritative context with full fixture context. |
 | Alibaba/Qwen smoke | `runtime/run_alibaba_smoke.py` | Yes for live run | Tiny provider smoke path; not a benchmark campaign. |
-| Standby proxy history | See `docs/history/proxy/` | Depends on historical scenario | Not the current user-facing path. Retained for compatibility research and audit trail. |
 
 Generated local reports should stay outside tracked files, preferably under
 `/tmp`, unless a summarized documentation note is intentionally added.
 
-## Historical And Phase-Specific Notes
+## Proxy And Compatibility Material
 
-These notes preserve narrower experiments, smoke tests, and phase closeouts.
-They are useful for audit trail and context, but they should not be read as the
-current top-level project status.
+The Docker Proxy and `sfe_proxy/` are standby compatibility and historical
+integration infrastructure. They are not the canonical current user path. For
+historical Proxy mode and milestone notes, start with:
 
-- [proxy_milestone_history.md](history/proxy/proxy_milestone_history.md):
-  rollup for the historical Proxy shadow, dry-run-enabled, enabled-mode, and
-  live-provider milestone notes below.
-- [sfe_proxy_mode.md](history/proxy/sfe_proxy_mode.md): standby historical
-  proxy mode reference. It is not current user-facing setup guidance.
-- [high_overlap_history.md](high_overlap_history.md): rollup for the
-  historical High-Overlap experiment notes below.
-- [high_overlap_poison_pill_progression_summary.md](history/high_overlap/high_overlap_poison_pill_progression_summary.md)
-- [high_overlap_subtle_poison_progression_summary.md](history/high_overlap/high_overlap_subtle_poison_progression_summary.md)
-- [high_overlap_new_fixtures_openai_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_openai_smoke_notes.md)
-- [high_overlap_new_fixtures_selector_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_smoke_notes.md)
-- [high_overlap_new_fixtures_selector_repeat3_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_repeat3_notes.md)
-- [high_overlap_new_fixtures_comparison_notes.md](history/high_overlap/high_overlap_new_fixtures_comparison_notes.md)
-- [large_real_world_benchmark_progression_summary.md](history/large_real_world/large_real_world_benchmark_progression_summary.md)
-- [large_real_world_openai_selector_smoke.md](history/large_real_world/large_real_world_openai_selector_smoke.md)
-- [large_real_world_openai_selector_executor_smoke.md](history/large_real_world/large_real_world_openai_selector_executor_smoke.md)
-- [large_real_world_openai_selector_deterministic_executor.md](history/large_real_world/large_real_world_openai_selector_deterministic_executor.md)
-- [openai_smoke_reports/](history/openai_smoke_reports/README.md): historical
-  generated Markdown report snapshots moved out of tracked `logs/`.
-- [proxy_shadow_local_smoke_summary.md](history/proxy/proxy_shadow_local_smoke_summary.md)
-- [proxy_shadow_candidate_context_summary.md](history/proxy/proxy_shadow_candidate_context_summary.md)
-- [proxy_shadow_dry_run_enabled_comparison_summary.md](history/proxy/proxy_shadow_dry_run_enabled_comparison_summary.md)
-- [proxy_shadow_live_lemonade_runner_summary.md](history/proxy/proxy_shadow_live_lemonade_runner_summary.md)
-- [proxy_shadow_live_qwen_multifixture_summary.md](history/proxy/proxy_shadow_live_qwen_multifixture_summary.md)
-- [proxy_dry_run_enabled_mode_summary.md](history/proxy/proxy_dry_run_enabled_mode_summary.md)
-- [proxy_enabled_mode_smoke_summary.md](history/proxy/proxy_enabled_mode_smoke_summary.md)
-- [proxy_enabled_mode_controlled_summary.md](history/proxy/proxy_enabled_mode_controlled_summary.md)
-- [proxy_enabled_mode_milestone_summary.md](history/proxy/proxy_enabled_mode_milestone_summary.md)
-- [proxy_structured_responses_builder_diagnostics_note.md](history/proxy/proxy_structured_responses_builder_diagnostics_note.md)
-- [codex_shadow_routing_milestone.md](history/proxy/codex_shadow_routing_milestone.md)
-- [enabled_mode_smoke_milestone.md](history/proxy/enabled_mode_smoke_milestone.md)
-- [codex_enabled_streaming_guard_milestone.md](history/proxy/codex_enabled_streaming_guard_milestone.md)
-- [codex_enabled_streaming_replacement_smoke.md](history/proxy/codex_enabled_streaming_replacement_smoke.md)
-- [proxy_enabled_live_lemonade_summary.md](history/proxy/proxy_enabled_live_lemonade_summary.md)
-- [proxy_enabled_live_lemonade_multifixture_summary.md](history/proxy/proxy_enabled_live_lemonade_multifixture_summary.md)
-- [proxy_enabled_live_openai_summary.md](history/proxy/proxy_enabled_live_openai_summary.md)
-- [proxy_enabled_live_openai_router_summary.md](history/proxy/proxy_enabled_live_openai_router_summary.md)
-- [proxy_enabled_live_openai_router_multifixture_summary.md](history/proxy/proxy_enabled_live_openai_router_multifixture_summary.md)
-- [alibaba_provider_history.md](alibaba_provider_history.md): rollup for the
-  Alibaba/Qwen historical integration notes and Alibaba-hosted DeepSeek
-  exploration records below.
-- [alibaba_router_smoke_note.md](history/providers/alibaba/alibaba_router_smoke_note.md)
-- [alibaba_structural_50k_spatial_smoke_note.md](history/providers/alibaba/alibaba_structural_50k_spatial_smoke_note.md)
-- [alibaba_deepseek_smoke_note.md](history/providers/alibaba/alibaba_deepseek_smoke_note.md)
-- [alibaba_deepseek_structural_spatial_smoke_note.md](history/providers/alibaba/alibaba_deepseek_structural_spatial_smoke_note.md)
-- [alibaba_deepseek_structural_50k_comparison_note.md](history/providers/alibaba/alibaba_deepseek_structural_50k_comparison_note.md)
-- [roadmap_after_structural_50k.md](roadmap_after_structural_50k.md)
+- [history/proxy/proxy_milestone_history.md](history/proxy/proxy_milestone_history.md)
+- [history/proxy/sfe_proxy_mode.md](history/proxy/sfe_proxy_mode.md)
+
+## History
+
+Historical notes preserve experiments, smoke tests, milestones, and superseded
+roadmaps. They are useful for audit trail and context, but they should not be
+read as current top-level project status.
+
+- [history/router/router_contract_legacy.md](history/router/router_contract_legacy.md):
+  older broad router contract with task type, role, memory zones, and
+  older direct/tool-assisted/multi-step execution patterns.
+- [history/tui/tui_readonly_ask_milestone.md](history/tui/tui_readonly_ask_milestone.md)
+- [history/tui/tui_direct_backend_strategy.md](history/tui/tui_direct_backend_strategy.md)
+- [history/high_overlap/high_overlap_fixture_expansion_phase_close.md](history/high_overlap/high_overlap_fixture_expansion_phase_close.md)
+- [history/roadmaps/roadmap_after_structural_50k.md](history/roadmaps/roadmap_after_structural_50k.md)
+- [high_overlap_history.md](high_overlap_history.md): rollup for historical
+  high-overlap experiment notes.
+- [large_real_world_history.md](large_real_world_history.md): rollup for
+  historical large real-world-style benchmark notes.
+- [history/openai_smoke_reports/](history/openai_smoke_reports/README.md):
+  historical generated Markdown report snapshots moved out of tracked `logs/`.
+- [alibaba_provider_history.md](alibaba_provider_history.md): rollup for
+  Alibaba/Qwen historical integration notes.
 
 ## Terms And Caveats
 
