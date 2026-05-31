@@ -8,7 +8,7 @@ from sfe.contracts import ContextLoadResult, SFEContract
 from sfe.discovery import DiscoveryResult
 from sfe.execution_backend import ExecutionResult
 from sfe.patching import PatchApplyResult, PatchIssue, PatchSummary
-from sfe.run_pipeline import RunIssue, RunResult
+from sfe.run_pipeline import RunIssue, RunProgressEvent, RunResult
 from sfe.router_review import JsonReviewDecision
 from sfe.workspace_isolation import (
     WorkspaceCleanupResult,
@@ -29,6 +29,13 @@ def color_sfe_output(text: str, *, enabled: bool) -> str:
     if not enabled or not text:
         return text
     return f"{SFE_OUTPUT_COLOR}{text}{ANSI_RESET}"
+
+
+def render_run_progress_event(event: RunProgressEvent) -> str:
+    message = " ".join(str(event.message or "").split())
+    if not message.startswith("SFE:"):
+        return f"SFE: {event.name.replace('_', ' ')}"
+    return message
 
 
 def render_help() -> str:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Callable
 
 from sfe.discovery import (
     DiscoveryResult,
@@ -66,6 +67,16 @@ from sfe.workspace_isolation import (
 RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED = "failed"
 LLM_PATCH_REPAIR_MAX_REJECTED_PATCH_CHARS = 120_000
+
+
+@dataclass(frozen=True)
+class RunProgressEvent:
+    name: str
+    message: str
+    metadata: dict[str, object]
+
+
+RunProgressCallback = Callable[[RunProgressEvent], None]
 
 
 @dataclass(frozen=True)
@@ -251,6 +262,7 @@ class RunPipeline:
         execution_mode_router: ExecutionModeRouter | None = None,
         patch_json_repairer: PatchJsonRepairer | None = None,
         git_preparer: GitWorkspacePreparer | None = None,
+        progress_callback: RunProgressCallback | None = None,
     ) -> None:
         self.backend = backend
         self.workspace_manager = workspace_manager or WorkspaceManager(
@@ -262,14 +274,17 @@ class RunPipeline:
         )
         self.patch_json_repairer = patch_json_repairer
         self.git_preparer = git_preparer or GitWorkspacePreparer()
+        self.progress_callback = progress_callback
 
     def run(self, request: RunRequest) -> RunResult:
+        self._emit_progress("run_started", "SFE: run started")
         if request.workspace_root is None:
             return _failed("workspace", "workspace_not_selected")
         if not request.task.strip():
             return _failed("task", "missing_task")
 
         try:
+            self._emit_progress("execution_mode_routing", "SFE: execution mode routing")
             execution_mode_decision = self.execution_mode_router.decide(
                 task=request.task,
             )
@@ -279,6 +294,13 @@ class RunPipeline:
                 issue=RunIssue("execution_mode_routing", exc.category),
                 warnings=_base_warnings(),
             )
+        self._emit_progress(
+            "execution_mode_selected",
+            f"SFE: execution mode selected: {execution_mode_decision.execution_mode}",
+            execution_mode=execution_mode_decision.execution_mode,
+            provider_name=execution_mode_decision.provider_name,
+            model=execution_mode_decision.model,
+        )
 
         if execution_mode_decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT:
             return self._run_console_output(request, execution_mode_decision)
@@ -303,6 +325,10 @@ class RunPipeline:
                 warnings=_base_warnings(),
             )
 
+        self._emit_progress(
+            "workspace_preparation_started",
+            "SFE: workspace preparation started",
+        )
         git_preparation = self._prepare_git_workspace(request)
         if not git_preparation.ok:
             return RunResult(
@@ -327,10 +353,20 @@ class RunPipeline:
             )
         session, active_workspace, created = session_result
 
+        self._emit_progress(
+            "context_discovery_started",
+            "SFE: context discovery started",
+        )
         discovery_result = discover_workspace_context(
             workspace_root=active_workspace,
             task=request.task,
             router=self.discovery_router,
+        )
+        self._emit_progress(
+            "context_candidates_inspected",
+            f"SFE: context candidates inspected: {discovery_result.candidate_count}",
+            candidate_count=discovery_result.candidate_count,
+            workspace_map_count=discovery_result.workspace_map_count,
         )
         context_files = list(
             load_discovered_context(
@@ -347,6 +383,18 @@ class RunPipeline:
         dry_run_result = self.backend.dry_run(contract)
         selected_ids = list(dry_run_result.contract.audit.get("selected_segment_ids") or [])
         selected_source_refs = _selected_source_refs(dry_run_result, selected_ids)
+        self._emit_progress(
+            "relevant_context_selected",
+            f"SFE: relevant context selected: {len(selected_source_refs)} files",
+            selected_context_count=len(selected_source_refs),
+            selected_segment_count=len(selected_ids),
+        )
+        estimated_reduction = _estimated_reduction_label(dry_run_result)
+        self._emit_progress(
+            "estimated_token_reduction",
+            f"SFE: estimated token reduction: {estimated_reduction}",
+            estimated_token_reduction=estimated_reduction,
+        )
         if dry_run_result.contract.context_segments and not selected_ids:
             return RunResult(
                 status=RUN_STATUS_FAILED,
@@ -364,6 +412,11 @@ class RunPipeline:
                 git_init_warning=git_preparation.warning,
             )
 
+        self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
+        self._emit_progress(
+            "patch_worktree_execution_started",
+            "SFE: patch/worktree execution started",
+        )
         patch_result = self.backend.patch(contract)
         if not patch_result.answer:
             return RunResult(
@@ -525,6 +578,12 @@ class RunPipeline:
                 patch_repair_result=patch_repair_result,
             )
 
+        self._emit_progress(
+            "patch_validation_completed",
+            "SFE: patch validation completed",
+            patch_file_count=proposal.summary.file_count,
+            patch_hunk_count=proposal.summary.hunk_count,
+        )
         promotion_baseline = _capture_promotion_baseline(
             session,
             active_workspace,
@@ -594,6 +653,11 @@ class RunPipeline:
                 patch_repair=patch_repair,
                 patch_repair_result=patch_repair_result,
             )
+        self._emit_progress(
+            "promotion_completed",
+            "SFE: promotion completed",
+            promoted_file_count=len(promotion_result.promoted_files),
+        )
         return RunResult(
             status=RUN_STATUS_COMPLETED,
             execution_mode_decision=execution_mode_decision,
@@ -620,6 +684,25 @@ class RunPipeline:
             patch_repair=patch_repair,
         )
 
+    def _emit_progress(
+        self,
+        name: str,
+        message: str,
+        **metadata: object,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        try:
+            self.progress_callback(
+                RunProgressEvent(
+                    name=name,
+                    message=message,
+                    metadata=dict(metadata),
+                )
+            )
+        except Exception:
+            return
+
     def _prepare_git_workspace(self, request: RunRequest) -> GitPreparationResult:
         if request.workspace_session is not None:
             return GitPreparationResult(ok=True)
@@ -636,6 +719,7 @@ class RunPipeline:
             file_paths=[],
             context_files=[],
         )
+        self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
         try:
             console_result = self.backend.console(contract)
         except NotImplementedError:
@@ -656,6 +740,11 @@ class RunPipeline:
                 executor_provider=_executor_provider(console_result),
                 warnings=("console_output_failed",),
             )
+        self._emit_progress(
+            "console_answer_generated",
+            "SFE: console answer generated",
+            provider_name=_executor_provider(console_result),
+        )
         return RunResult(
             status=RUN_STATUS_COMPLETED,
             execution_mode_decision=execution_mode_decision,
@@ -997,6 +1086,17 @@ def _executor_provider(result: ExecutionResult | None) -> str | None:
         return None
     provider = result.summary.get("executor_provider")
     return str(provider) if provider is not None else None
+
+
+def _estimated_reduction_label(result: ExecutionResult) -> str:
+    value = result.contract.audit.get("estimated_reduction_pct")
+    if value is None:
+        return "unknown"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    return f"{numeric:.1f}%"
 
 
 def _changed_files(

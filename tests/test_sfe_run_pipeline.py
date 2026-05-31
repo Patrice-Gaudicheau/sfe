@@ -29,6 +29,7 @@ from sfe.run_pipeline import (
     GitPreparationResult,
     RunIssue,
     RunPipeline,
+    RunProgressEvent,
     RunRequest,
 )
 from sfe.workspace_isolation import WorkspaceIsolationPolicy, WorkspaceManager
@@ -259,6 +260,36 @@ def test_run_pipeline_console_output_generates_answer_before_worktree_or_patch(
     assert (workspace / "context.txt").read_text(encoding="utf-8") == "old context\n"
 
 
+def test_run_pipeline_console_output_emits_minimal_progress_events(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[RunProgressEvent] = []
+
+    result = _pipeline(
+        executor=FakeExecutor(console_answer="Symfony is a PHP framework."),
+        execution_mode_router=FakeExecutionModeRouter(EXECUTION_MODE_CONSOLE_OUTPUT),
+        git_preparer=FailingGitPreparer(),
+        progress_callback=events.append,
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Connais le Framework PHP intitulé Symfony ?",
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert [event.name for event in events] == [
+        "run_started",
+        "execution_mode_routing",
+        "execution_mode_selected",
+        "executor_prompt_prepared",
+        "console_answer_generated",
+    ]
+    assert events[2].message == "SFE: execution mode selected: console_output"
+
+
 def test_run_pipeline_console_output_failure_returns_before_worktree_or_patch(
     tmp_path: Path,
 ) -> None:
@@ -434,6 +465,45 @@ def test_run_pipeline_creates_worktree_applies_patch_and_promotes(tmp_path: Path
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_workspace_write_emits_minimal_progress_events(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    events: list[RunProgressEvent] = []
+
+    result = _pipeline(
+        workspace_manager=manager,
+        progress_callback=events.append,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert [event.name for event in events] == [
+        "run_started",
+        "execution_mode_routing",
+        "execution_mode_selected",
+        "workspace_preparation_started",
+        "context_discovery_started",
+        "context_candidates_inspected",
+        "relevant_context_selected",
+        "estimated_token_reduction",
+        "executor_prompt_prepared",
+        "patch_worktree_execution_started",
+        "patch_validation_completed",
+        "promotion_completed",
+    ]
+    assert events[2].message == "SFE: execution mode selected: workspace_write"
+    assert events[5].metadata["candidate_count"] == 1
+    assert events[6].metadata["selected_context_count"] == 1
+    assert events[7].message.startswith("SFE: estimated token reduction: ")
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
     tmp_path: Path,
 ) -> None:
@@ -532,6 +602,39 @@ def test_run_pipeline_creates_first_file_in_empty_workspace(tmp_path: Path) -> N
     assert result.promoted_files == ("README.md",)
     assert (workspace / "README.md").read_text(encoding="utf-8") == "escaped\n"
     assert not (tmp_path / "README.md").exists()
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_unknown_token_reduction_progress_uses_unknown_label(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "empty-workspace"
+    workspace.mkdir()
+    manager = _manager()
+    events: list[RunProgressEvent] = []
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(_create_file_proposal("README.md")),
+        discovery_router=FakeDiscoveryRouter(("README.md",)),
+        progress_callback=events.append,
+    ).run(
+        RunRequest(
+            workspace_root=workspace,
+            task="Create a minimal README for this empty workspace",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    reduction_event = next(
+        event for event in events if event.name == "estimated_token_reduction"
+    )
+    assert reduction_event.message == "SFE: estimated token reduction: unknown"
+    assert reduction_event.metadata["estimated_token_reduction"] == "unknown"
+    assert "0%" not in reduction_event.message
 
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
@@ -1357,6 +1460,7 @@ def _pipeline(
     discovery_router: FakeDiscoveryRouter | None = None,
     execution_mode_router: object | None = None,
     git_preparer: object | None = None,
+    progress_callback: object | None = None,
 ) -> RunPipeline:
     return RunPipeline(
         backend=DirectBackend(executor=executor or FakeExecutor()),
@@ -1364,6 +1468,7 @@ def _pipeline(
         discovery_router=discovery_router or FakeDiscoveryRouter(),
         execution_mode_router=execution_mode_router or FakeExecutionModeRouter(),
         git_preparer=git_preparer,
+        progress_callback=progress_callback,
     )
 
 

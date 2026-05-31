@@ -4006,6 +4006,14 @@ def test_tui_run_console_output_renders_only_answer(tmp_path) -> None:
 
     assert app.run() == 0
     run_output = output[-1]
+    progress_lines = [line for line in output if line.startswith("SFE:")]
+    assert progress_lines == [
+        "SFE: run started",
+        "SFE: execution mode routing",
+        "SFE: execution mode selected: console_output",
+        "SFE: executor prompt prepared",
+        "SFE: console answer generated",
+    ]
     assert run_output == "Symfony is a PHP framework."
     assert "SFE run" not in run_output
     assert "SFE console output" not in run_output
@@ -4232,6 +4240,25 @@ def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
 
     assert app.run() == 0
     run_output = output[-1]
+    progress_lines = [line for line in output if line.startswith("SFE:")]
+    assert progress_lines[:7] == [
+        "SFE: run started",
+        "SFE: execution mode routing",
+        "SFE: execution mode selected: workspace_write",
+        "SFE: workspace preparation started",
+        "SFE: context discovery started",
+        "SFE: context candidates inspected: 1",
+        "SFE: relevant context selected: 1 files",
+    ]
+    assert any(
+        line.startswith("SFE: estimated token reduction: ")
+        for line in progress_lines
+    )
+    assert "SFE: executor prompt prepared" in progress_lines
+    assert "SFE: patch/worktree execution started" in progress_lines
+    assert "SFE: patch validation completed" in progress_lines
+    assert progress_lines[-1] == "SFE: promotion completed"
+    assert output.index(progress_lines[0]) < output.index(run_output)
     assert "SFE run" in run_output
     assert "status: completed" in run_output
     assert "execution mode: workspace_write" in run_output
@@ -4248,6 +4275,50 @@ def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
     assert app.last_run_result is not None
     assert app.last_run_result.status == "completed"
     assert app.last_run_result.patch_generated is True
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_progress_lines_omit_sensitive_material(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "context.txt").write_text(
+        "old context SECRET_FILE_CONTENT\n",
+        encoding="utf-8",
+    )
+    run_git(repo, "add", "context.txt")
+    run_git(repo, "commit", "-m", "add secret fixture")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=replacement_proposal(
+                old="old context SECRET_FILE_CONTENT",
+                new="new context SECRET_FILE_CONTENT\n",
+            ),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch old context SECRET_TASK_TEXT", "/run", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    progress_text = "\n".join(line for line in output if line.startswith("SFE:"))
+    assert "SECRET_FILE_CONTENT" not in progress_text
+    assert "SECRET_TASK_TEXT" not in progress_text
+    assert "old context" not in progress_text
+    assert "new context" not in progress_text
+    assert "SFE: patch validation completed" in progress_text
+
     assert app.workspace_session is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True
@@ -4273,6 +4344,9 @@ def test_tui_run_report_after_workspace_write_run_does_not_execute_again(tmp_pat
     assert len(router.calls) == 1
     assert len(executor.patch_calls) == 1
     report_output = output[-1]
+    assert "SFE:" not in report_output
+    assert sum(1 for line in output if line == "SFE: run started") == 1
+    assert sum(1 for line in output if line == "SFE: promotion completed") == 1
     assert "SFE run" in report_output
     assert "status: completed" in report_output
     assert "execution-mode router provider: fake-execution-mode-router" in report_output
