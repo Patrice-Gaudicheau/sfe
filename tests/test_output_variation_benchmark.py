@@ -18,10 +18,15 @@ from runtime.run_output_variation_benchmark import (
     BENCHMARK_TYPE,
     DRY_RUN_NOTE,
     EXECUTOR_FIXTURE,
+    ROUTER_SELECTION_NOTE,
     FixtureOutputVariationExecutor,
+    ProxyShadowRouterOutputVariationSelector,
+    SELECTION_SOURCE_FIXTURE,
+    SELECTION_SOURCE_ROUTER,
     _parse_args,
     block_ids_for_mode,
     build_prompt,
+    build_shadow_router_input,
     compare_pair,
     get_output_variation_tasks,
     output_unchanged_or_near_equal,
@@ -30,6 +35,7 @@ from runtime.run_output_variation_benchmark import (
     validate_output,
     write_markdown,
 )
+from sfe_proxy.shadow_router import ShadowRouterResult
 
 
 class OutputVariationBenchmarkTests(unittest.TestCase):
@@ -84,6 +90,7 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["metadata"]["dry_run_note"], DRY_RUN_NOTE)
         self.assertIn(DRY_RUN_NOTE, report["summary"]["notes"])
         self.assertFalse(report["metadata"]["router_used"])
+        self.assertEqual(report["metadata"]["selection_source"], SELECTION_SOURCE_FIXTURE)
         self.assertEqual(report["metadata"]["comparison_count"], 5)
         self.assertEqual(len(report["runs"]), 10)
         self.assertEqual(len(report["comparisons"]), 5)
@@ -182,6 +189,8 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertIn("## Dry-Run Note", markdown)
         self.assertIn(DRY_RUN_NOTE, markdown)
         self.assertIn("## Summary By Task Family", markdown)
+        self.assertIn("Selection source: `fixture`", markdown)
+        self.assertIn("Router used: `False`", markdown)
         self.assertIn("Base in", markdown)
         self.assertIn("Selected out", markdown)
         self.assertIn("Output delta", markdown)
@@ -199,6 +208,8 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
                 "--dry-run",
                 "--executor",
                 "openai-api",
+                "--selection-source",
+                "fixture",
                 "--task-family",
                 "patch_planning",
                 "--limit",
@@ -213,6 +224,7 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(args.executor, EXECUTOR_FIXTURE)
         self.assertTrue(args.dry_run)
+        self.assertEqual(args.selection_source, SELECTION_SOURCE_FIXTURE)
         self.assertEqual(args.task_family, "patch_planning")
         self.assertEqual(args.limit, 1)
         self.assertEqual(args.json, Path("/tmp/out.json"))
@@ -231,6 +243,137 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         comparison = report["comparisons"][0]
         self.assertTrue(comparison["output_unchanged_or_near_equal"])
 
+    def test_cli_rejects_dry_run_with_router_selection_source(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--dry-run",
+                "--selection-source",
+                "router",
+            ],
+        ):
+            with self.assertRaises(SystemExit):
+                _parse_args()
+
+    def test_cli_rejects_router_selection_with_fixture_executor(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--selection-source",
+                "router",
+            ],
+        ):
+            with self.assertRaises(SystemExit):
+                _parse_args()
+
+    def test_shadow_router_input_uses_block_ids_as_candidate_segment_ids(self) -> None:
+        task = self.tasks[0]
+        router_input = build_shadow_router_input(
+            task,
+            repeat_index=1,
+            router_model="router-model",
+        )
+
+        self.assertEqual(router_input.endpoint, "output_variation_benchmark")
+        self.assertEqual(router_input.model, "router-model")
+        self.assertTrue(router_input.eligibility_metadata["sfe_routing_eligible"])
+        self.assertEqual(
+            [segment["segment_id"] for segment in router_input.candidate_text_segments],
+            [block.block_id for block in task.context_blocks],
+        )
+        self.assertIn("BLOCK payments-cache", router_input.candidate_text_segments[0]["text"])
+
+    def test_router_selection_source_uses_shadow_router_selected_block_ids(self) -> None:
+        task = self.tasks[0]
+        selector = ProxyShadowRouterOutputVariationSelector(
+            provider="openai",
+            router_factory=lambda provider, config: FakeShadowRouter(
+                selected_ids=["payments-cache"],
+                provider=provider,
+            ),
+        )
+        report = run_benchmark(
+            tasks=[task],
+            repeat=1,
+            executor=FixtureOutputVariationExecutor(),
+            selector=selector,
+        )
+
+        self.assertTrue(report["metadata"]["router_used"])
+        self.assertEqual(report["metadata"]["selection_source"], SELECTION_SOURCE_ROUTER)
+        self.assertIn(ROUTER_SELECTION_NOTE, report["summary"]["notes"])
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(selected_run["execution_status"], "completed")
+        self.assertEqual(selected_run["used_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_selected_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_status"], "candidate_selected")
+        comparison = report["comparisons"][0]
+        self.assertTrue(comparison["comparison_valid"])
+        self.assertTrue(comparison["router_selection_usable"])
+        self.assertEqual(comparison["router_provider"], "openai")
+
+    def test_router_selection_failure_skips_selected_executor_and_invalidates_comparison(self) -> None:
+        task = self.tasks[0]
+        selector = ProxyShadowRouterOutputVariationSelector(
+            provider="openai",
+            router_factory=lambda provider, config: FakeShadowRouter(
+                selected_ids=[],
+                provider=provider,
+                status="no_selection",
+                reason="router_selection_empty",
+            ),
+        )
+        report = run_benchmark(
+            tasks=[task],
+            repeat=1,
+            executor=FixtureOutputVariationExecutor(),
+            selector=selector,
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertIsNone(selected_run["input_tokens"])
+        self.assertFalse(selected_run["router_selection_usable"])
+        comparison = report["comparisons"][0]
+        self.assertFalse(comparison["comparison_valid"])
+        self.assertEqual(comparison["comparison_invalid_reason"], "router_selection_empty")
+        self.assertIsNone(comparison["output_delta"])
+        self.assertEqual(report["summary"]["overall"]["invalid_comparison_count"], 1)
+        self.assertEqual(report["summary"]["overall"]["valid_comparison_count"], 0)
+
+    def test_markdown_report_includes_router_selection_note_and_router_summary(self) -> None:
+        selector = ProxyShadowRouterOutputVariationSelector(
+            provider="openai",
+            router_factory=lambda provider, config: FakeShadowRouter(
+                selected_ids=["payments-cache"],
+                provider=provider,
+            ),
+        )
+        report = run_benchmark(
+            tasks=[self.tasks[0]],
+            repeat=1,
+            executor=FixtureOutputVariationExecutor(),
+            selector=selector,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "output_variation_router.md"
+            write_markdown(path, report)
+            markdown = path.read_text(encoding="utf-8")
+
+        self.assertIn("Selection source: `router`", markdown)
+        self.assertIn("Router used: `True`", markdown)
+        self.assertIn("## Router Selection Note", markdown)
+        self.assertIn(ROUTER_SELECTION_NOTE, markdown)
+        self.assertIn("candidate_selected; usable=True; selected=payments-cache", markdown)
+
 
 def _run_tokens(
     *,
@@ -248,6 +391,42 @@ def _run_tokens(
         "success": True,
         "compactness_score": 0.1,
     }
+
+
+class FakeShadowRouter:
+    name = "fake-shadow-router"
+
+    def __init__(
+        self,
+        *,
+        selected_ids: list[str],
+        provider: str,
+        status: str = "candidate_selected",
+        reason: str = "fake_selected_context",
+        error_type: str | None = None,
+    ) -> None:
+        self.selected_ids = selected_ids
+        self.provider = provider
+        self.status = status
+        self.reason = reason
+        self.error_type = error_type
+        self.calls: list[object] = []
+
+    def analyze(self, router_input: object) -> ShadowRouterResult:
+        self.calls.append(router_input)
+        return ShadowRouterResult(
+            router_enabled=True,
+            router_name=self.provider,
+            router_status=self.status,
+            router_reason=self.reason,
+            router_latency_ms=7,
+            candidate_selected_segment_ids=self.selected_ids,
+            estimated_router_selected_input_tokens=12 if self.selected_ids else None,
+            estimated_router_token_reduction_pct=75.0 if self.selected_ids else None,
+            confidence=0.91,
+            error_type=self.error_type,
+            dry_run_only=True,
+        )
 
 
 if __name__ == "__main__":
