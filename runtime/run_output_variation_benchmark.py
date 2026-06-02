@@ -57,6 +57,7 @@ SELECTION_SOURCE_FIXTURE = "fixture"
 SELECTION_SOURCE_ROUTER = "router"
 SELECTION_SOURCES = (SELECTION_SOURCE_FIXTURE, SELECTION_SOURCE_ROUTER)
 DEFAULT_ROUTER_SELECTION_PROVIDER = OPENAI_ROUTER_PROVIDER
+USABLE_ROUTER_SELECTION_STATUSES = {"candidate_selected", "selected"}
 DRY_RUN_NOTE = (
     "Fixture outputs are deterministic synthetic outputs used to validate the "
     "benchmark pipeline and token-accounting logic. They are not evidence that "
@@ -196,15 +197,21 @@ class ProxyShadowRouterOutputVariationSelector:
             )
 
         known_block_ids = {block.block_id for block in task.context_blocks}
+        unknown_selected_block_ids = tuple(
+            block_id
+            for block_id in result.candidate_selected_segment_ids
+            if block_id not in known_block_ids
+        )
         selected = tuple(
             block_id
             for block_id in result.candidate_selected_segment_ids
             if block_id in known_block_ids
         )
         usable = (
-            result.router_status == "candidate_selected"
+            result.router_status in USABLE_ROUTER_SELECTION_STATUSES
             and result.error_type is None
             and bool(selected)
+            and not unknown_selected_block_ids
         )
         return OutputVariationSelection(
             selection_source=self.selection_source,

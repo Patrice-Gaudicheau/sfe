@@ -288,19 +288,10 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertIn("BLOCK payments-cache", router_input.candidate_text_segments[0]["text"])
 
     def test_router_selection_source_uses_shadow_router_selected_block_ids(self) -> None:
-        task = self.tasks[0]
-        selector = ProxyShadowRouterOutputVariationSelector(
-            provider="openai",
-            router_factory=lambda provider, config: FakeShadowRouter(
-                selected_ids=["payments-cache"],
-                provider=provider,
-            ),
-        )
-        report = run_benchmark(
-            tasks=[task],
-            repeat=1,
-            executor=FixtureOutputVariationExecutor(),
-            selector=selector,
+        report = self._router_report(
+            selected_ids=["payments-cache"],
+            status="candidate_selected",
+            reason="fake_selected_context",
         )
 
         self.assertTrue(report["metadata"]["router_used"])
@@ -316,22 +307,78 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertTrue(comparison["router_selection_usable"])
         self.assertEqual(comparison["router_provider"], "openai")
 
-    def test_router_selection_failure_skips_selected_executor_and_invalidates_comparison(self) -> None:
-        task = self.tasks[0]
-        selector = ProxyShadowRouterOutputVariationSelector(
-            provider="openai",
-            router_factory=lambda provider, config: FakeShadowRouter(
-                selected_ids=[],
-                provider=provider,
-                status="no_selection",
-                reason="router_selection_empty",
-            ),
+    def test_router_status_selected_with_valid_ids_is_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["payments-cache"],
+            status="selected",
+            reason="live_router_selected_context",
         )
-        report = run_benchmark(
-            tasks=[task],
-            repeat=1,
-            executor=FixtureOutputVariationExecutor(),
-            selector=selector,
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(selected_run["execution_status"], "completed")
+        self.assertEqual(selected_run["used_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_selected_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_status"], "selected")
+        self.assertTrue(selected_run["router_selection_usable"])
+        comparison = report["comparisons"][0]
+        self.assertTrue(comparison["comparison_valid"])
+        self.assertTrue(comparison["router_selection_usable"])
+
+    def test_router_status_selected_with_unknown_ids_is_not_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["unknown-block"],
+            status="selected",
+            reason="live_router_selected_unknown_context",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertEqual(selected_run["router_selected_block_ids"], ["unknown-block"])
+        self.assertFalse(selected_run["router_selection_usable"])
+        self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
+    def test_router_error_with_selected_ids_is_not_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["payments-cache"],
+            status="selected",
+            reason="router_provider_error",
+            error_type="ProviderError",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertEqual(selected_run["router_selected_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_error_type"], "ProviderError")
+        self.assertFalse(selected_run["router_selection_usable"])
+        self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
+    def test_empty_router_selected_ids_are_not_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=[],
+            status="selected",
+            reason="router_selection_empty",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertEqual(selected_run["router_selected_block_ids"], [])
+        self.assertFalse(selected_run["router_selection_usable"])
+        self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
+    def test_router_selection_failure_skips_selected_executor_and_invalidates_comparison(self) -> None:
+        report = self._router_report(
+            selected_ids=[],
+            status="no_selection",
+            reason="router_selection_empty",
         )
 
         selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
@@ -373,6 +420,31 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertIn("## Router Selection Note", markdown)
         self.assertIn(ROUTER_SELECTION_NOTE, markdown)
         self.assertIn("candidate_selected; usable=True; selected=payments-cache", markdown)
+
+    def _router_report(
+        self,
+        *,
+        selected_ids: list[str],
+        status: str,
+        reason: str,
+        error_type: str | None = None,
+    ) -> dict[str, object]:
+        selector = ProxyShadowRouterOutputVariationSelector(
+            provider="openai",
+            router_factory=lambda provider, config: FakeShadowRouter(
+                selected_ids=selected_ids,
+                provider=provider,
+                status=status,
+                reason=reason,
+                error_type=error_type,
+            ),
+        )
+        return run_benchmark(
+            tasks=[self.tasks[0]],
+            repeat=1,
+            executor=FixtureOutputVariationExecutor(),
+            selector=selector,
+        )
 
 
 def _run_tokens(
