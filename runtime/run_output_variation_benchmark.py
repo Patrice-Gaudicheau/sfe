@@ -57,7 +57,12 @@ SELECTION_SOURCE_FIXTURE = "fixture"
 SELECTION_SOURCE_ROUTER = "router"
 SELECTION_SOURCES = (SELECTION_SOURCE_FIXTURE, SELECTION_SOURCE_ROUTER)
 DEFAULT_ROUTER_SELECTION_PROVIDER = OPENAI_ROUTER_PROVIDER
-USABLE_ROUTER_SELECTION_STATUSES = {"candidate_selected", "selected"}
+USABLE_ROUTER_SELECTION_STATUSES = {
+    "candidate_selected",
+    "eligible",
+    "selected",
+    "success",
+}
 DRY_RUN_NOTE = (
     "Fixture outputs are deterministic synthetic outputs used to validate the "
     "benchmark pipeline and token-accounting logic. They are not evidence that "

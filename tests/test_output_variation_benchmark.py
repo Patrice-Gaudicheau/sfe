@@ -324,11 +324,72 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertTrue(comparison["comparison_valid"])
         self.assertTrue(comparison["router_selection_usable"])
 
+    def test_router_status_success_with_valid_ids_is_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["payments-cache"],
+            status="success",
+            reason="live_router_success_context",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(selected_run["execution_status"], "completed")
+        self.assertEqual(selected_run["used_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_status"], "success")
+        self.assertTrue(selected_run["router_selection_usable"])
+        self.assertTrue(report["comparisons"][0]["comparison_valid"])
+
+    def test_router_status_eligible_with_valid_ids_is_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["payments-cache"],
+            status="eligible",
+            reason="live_router_eligible_context",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(selected_run["execution_status"], "completed")
+        self.assertEqual(selected_run["used_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_status"], "eligible")
+        self.assertTrue(selected_run["router_selection_usable"])
+        self.assertTrue(report["comparisons"][0]["comparison_valid"])
+
+    def test_unknown_router_status_with_valid_ids_is_not_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["payments-cache"],
+            status="accepted",
+            reason="unknown_live_router_status",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertEqual(selected_run["router_selected_block_ids"], ["payments-cache"])
+        self.assertEqual(selected_run["router_status"], "accepted")
+        self.assertFalse(selected_run["router_selection_usable"])
+        self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
     def test_router_status_selected_with_unknown_ids_is_not_usable(self) -> None:
         report = self._router_report(
             selected_ids=["unknown-block"],
             status="selected",
             reason="live_router_selected_unknown_context",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertEqual(selected_run["router_selected_block_ids"], ["unknown-block"])
+        self.assertFalse(selected_run["router_selection_usable"])
+        self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
+    def test_router_status_success_with_unknown_ids_is_not_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=["unknown-block"],
+            status="success",
+            reason="live_router_success_unknown_context",
         )
 
         selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
@@ -358,10 +419,52 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertFalse(selected_run["router_selection_usable"])
         self.assertFalse(report["comparisons"][0]["comparison_valid"])
 
+    def test_router_error_with_success_or_eligible_is_not_usable(self) -> None:
+        for status in ("success", "eligible"):
+            with self.subTest(status=status):
+                report = self._router_report(
+                    selected_ids=["payments-cache"],
+                    status=status,
+                    reason="router_provider_error",
+                    error_type="ProviderError",
+                )
+
+                selected_run = next(
+                    run for run in report["runs"] if run["mode"] == "selected"
+                )
+                self.assertEqual(
+                    selected_run["execution_status"],
+                    "skipped_router_selection_unusable",
+                )
+                self.assertEqual(
+                    selected_run["router_selected_block_ids"],
+                    ["payments-cache"],
+                )
+                self.assertEqual(selected_run["router_status"], status)
+                self.assertEqual(selected_run["router_error_type"], "ProviderError")
+                self.assertFalse(selected_run["router_selection_usable"])
+                self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
     def test_empty_router_selected_ids_are_not_usable(self) -> None:
         report = self._router_report(
             selected_ids=[],
             status="selected",
+            reason="router_selection_empty",
+        )
+
+        selected_run = next(run for run in report["runs"] if run["mode"] == "selected")
+        self.assertEqual(
+            selected_run["execution_status"],
+            "skipped_router_selection_unusable",
+        )
+        self.assertEqual(selected_run["router_selected_block_ids"], [])
+        self.assertFalse(selected_run["router_selection_usable"])
+        self.assertFalse(report["comparisons"][0]["comparison_valid"])
+
+    def test_router_status_eligible_with_empty_ids_is_not_usable(self) -> None:
+        report = self._router_report(
+            selected_ids=[],
+            status="eligible",
             reason="router_selection_empty",
         )
 
