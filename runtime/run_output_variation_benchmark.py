@@ -57,9 +57,11 @@ SELECTION_SOURCE_FIXTURE = "fixture"
 SELECTION_SOURCE_ROUTER = "router"
 SELECTION_SOURCES = (SELECTION_SOURCE_FIXTURE, SELECTION_SOURCE_ROUTER)
 DEFAULT_ROUTER_SELECTION_PROVIDER = OPENAI_ROUTER_PROVIDER
-USABLE_ROUTER_SELECTION_STATUSES = {
+KNOWN_ROUTER_SELECTION_STATUSES = {
+    "approved",
     "candidate_selected",
     "eligible",
+    "ok",
     "selected",
     "success",
 }
@@ -116,6 +118,7 @@ class OutputVariationSelection:
     router_used: bool = False
     router_provider: str | None = None
     router_status: str | None = None
+    router_status_known: bool | None = None
     router_reason: str | None = None
     router_error_type: str | None = None
     router_confidence: float | None = None
@@ -213,10 +216,14 @@ class ProxyShadowRouterOutputVariationSelector:
             if block_id in known_block_ids
         )
         usable = (
-            result.router_status in USABLE_ROUTER_SELECTION_STATUSES
-            and result.error_type is None
+            result.error_type is None
             and bool(selected)
             and not unknown_selected_block_ids
+        )
+        router_status_known = (
+            result.router_status in KNOWN_ROUTER_SELECTION_STATUSES
+            if result.router_status is not None
+            else None
         )
         return OutputVariationSelection(
             selection_source=self.selection_source,
@@ -224,6 +231,7 @@ class ProxyShadowRouterOutputVariationSelector:
             router_used=True,
             router_provider=self.router_provider,
             router_status=result.router_status,
+            router_status_known=router_status_known,
             router_reason=result.router_reason,
             router_error_type=result.error_type,
             router_confidence=result.confidence,
@@ -810,6 +818,7 @@ def selection_fields(selection: OutputVariationSelection) -> dict[str, Any]:
         "router_used": selection.router_used,
         "router_provider": selection.router_provider,
         "router_status": selection.router_status,
+        "router_status_known": selection.router_status_known,
         "router_reason": selection.router_reason,
         "router_error_type": selection.router_error_type,
         "router_confidence": selection.router_confidence,
@@ -1023,6 +1032,7 @@ def compare_pair(baseline: dict[str, Any], selected: dict[str, Any]) -> dict[str
         "router_used": bool(selected.get("router_used")),
         "router_provider": selected.get("router_provider"),
         "router_status": selected.get("router_status"),
+        "router_status_known": selected.get("router_status_known"),
         "router_reason": selected.get("router_reason"),
         "router_error_type": selected.get("router_error_type"),
         "router_confidence": selected.get("router_confidence"),
@@ -1352,10 +1362,11 @@ def router_comparison_summary(comparison: dict[str, Any]) -> str:
     if not comparison.get("router_used"):
         return "n/a"
     status = comparison.get("router_status") or "unknown"
+    known = comparison.get("router_status_known")
     selected = comparison.get("router_selected_block_ids") or []
     selected_text = ",".join(str(item) for item in selected) or "none"
     usable = bool(comparison.get("router_selection_usable"))
-    return f"{status}; usable={usable}; selected={selected_text}"
+    return f"{status}; known={known}; usable={usable}; selected={selected_text}"
 
 
 def print_report(report: dict[str, Any], json_path: Path, md_path: Path) -> None:
