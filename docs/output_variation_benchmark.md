@@ -38,10 +38,10 @@ respected.
 The default selection source is `fixture`. Fixture selection uses the
 task's deterministic `selected_block_ids` and keeps the dry-run tests stable.
 
-The optional `router` selection source uses the proxy shadow-router path:
-`ShadowRouterInput`, `create_shadow_router`, and
-`ShadowRouterResult.candidate_selected_segment_ids`. It does not use the SFE
-run pipeline and does not use workspace discovery. The benchmark still compares
+The optional `router` selection source uses the neutral SFE segment selector in
+`sfe.segment_selector`. The Proxy runtime is not required for this benchmark,
+and the benchmark does not depend on `sfe_proxy.shadow_router`. It also does not
+use the SFE run pipeline or workspace discovery. The benchmark still compares
 two executor modes only: full-context `baseline` and `selected` context from the
 chosen selection source.
 
@@ -51,26 +51,54 @@ comparison is marked invalid. Router status, reason, confidence, error type,
 selected IDs, latency, and estimated selected-input metadata are reported
 alongside the run.
 
-CLI router mode requires `--executor openai-api`. This avoids mixing live router
-selection with deterministic synthetic fixture outputs.
+CLI router mode supports OpenAI, Anthropic, and Alibaba/Qwen providers. Fixture
+mode remains deterministic and is still the default.
 
 Executor token totals remain baseline-vs-selected executor costs. Router
 selection overhead is reported separately when available and is not mixed into
 executor input, output, or total token comparisons.
 
-Actual router provider token usage is not currently included because the current
-shadow-router result does not expose provider-reported router token usage. The
-available router fields are selection metadata and router-estimated selected
-input values, not billable router input/output token accounting.
+Router provider token usage, when captured by the neutral selector, is selection
+metadata only. It is not included in baseline or selected executor totals unless
+the benchmark explicitly adds router-inclusive accounting in a future revision.
+
+Using a stronger or more expensive model for segment selection and a cheaper or
+faster model for execution is a deliberate supported strategy. Configure that
+with provider-specific router and executor model environment variables, or
+override with `--router-model` and `--model`.
 
 Example live OpenAI router/executor run:
 
 ```bash
-SFE_PROXY_SHADOW_ROUTER_PROVIDER=openai \
 OPENAI_API_KEY=... \
 SFE_OPENAI_ROUTER_MODEL=... \
 SFE_OPENAI_EXECUTOR_MODEL=... \
 python runtime/run_output_variation_benchmark.py \
   --executor openai-api \
+  --router-provider openai \
+  --selection-source router
+```
+
+Example live Anthropic router/executor run:
+
+```bash
+ANTHROPIC_API_KEY=... \
+SFE_ANTHROPIC_ROUTER_MODEL=... \
+SFE_ANTHROPIC_EXECUTOR_MODEL=... \
+python runtime/run_output_variation_benchmark.py \
+  --executor anthropic \
+  --router-provider anthropic \
+  --selection-source router
+```
+
+Example live Alibaba/Qwen router/executor run:
+
+```bash
+ALIBABA_API_KEY=... \
+SFE_ALIBABA_ROUTER_MODEL=... \
+SFE_ALIBABA_EXECUTOR_MODEL=... \
+python runtime/run_output_variation_benchmark.py \
+  --executor alibaba-api \
+  --router-provider alibaba \
   --selection-source router
 ```

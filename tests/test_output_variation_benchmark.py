@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -18,15 +19,17 @@ from runtime.run_output_variation_benchmark import (
     BENCHMARK_TYPE,
     DRY_RUN_NOTE,
     EXECUTOR_FIXTURE,
+    EXECUTOR_ANTHROPIC,
+    EXECUTOR_ALIBABA_API,
     ROUTER_SELECTION_NOTE,
     FixtureOutputVariationExecutor,
-    ProxyShadowRouterOutputVariationSelector,
+    SegmentSelectorOutputVariationSelector,
     SELECTION_SOURCE_FIXTURE,
     SELECTION_SOURCE_ROUTER,
     _parse_args,
     block_ids_for_mode,
     build_prompt,
-    build_shadow_router_input,
+    build_segment_selection_input,
     compare_pair,
     get_output_variation_tasks,
     output_unchanged_or_near_equal,
@@ -35,7 +38,7 @@ from runtime.run_output_variation_benchmark import (
     validate_output,
     write_markdown,
 )
-from sfe_proxy.shadow_router import ShadowRouterResult
+from sfe.segment_selector import SegmentSelectionResult
 
 
 class OutputVariationBenchmarkTests(unittest.TestCase):
@@ -230,6 +233,58 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.json, Path("/tmp/out.json"))
         self.assertEqual(args.md, Path("/tmp/out.md"))
 
+    def test_cli_parses_anthropic_router_and_executor_env_defaults(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_ANTHROPIC_EXECUTOR_MODEL": "env-anthropic-executor",
+                "SFE_ANTHROPIC_ROUTER_MODEL": "env-anthropic-router",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--executor",
+                "anthropic",
+                "--selection-source",
+                "router",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, EXECUTOR_ANTHROPIC)
+        self.assertEqual(args.router_provider, "anthropic")
+        self.assertEqual(args.model, "env-anthropic-executor")
+        self.assertEqual(args.router_model, "env-anthropic-router")
+
+    def test_cli_parses_alibaba_router_and_executor_env_defaults(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_ALIBABA_EXECUTOR_MODEL": "env-alibaba-executor",
+                "SFE_ALIBABA_ROUTER_MODEL": "env-alibaba-router",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--executor",
+                "alibaba-api",
+                "--selection-source",
+                "router",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, EXECUTOR_ALIBABA_API)
+        self.assertEqual(args.router_provider, "alibaba")
+        self.assertEqual(args.model, "env-alibaba-executor")
+        self.assertEqual(args.router_model, "env-alibaba-router")
+
     def test_task_family_filter_can_run_single_family(self) -> None:
         selected = [task for task in self.tasks if task.family == "bounded_output_control"]
         report = run_benchmark(
@@ -270,24 +325,24 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 _parse_args()
 
-    def test_shadow_router_input_uses_block_ids_as_candidate_segment_ids(self) -> None:
+    def test_segment_selection_input_uses_block_ids_as_candidate_segment_ids(self) -> None:
         task = self.tasks[0]
-        router_input = build_shadow_router_input(
+        selection_input = build_segment_selection_input(
             task,
             repeat_index=1,
             router_model="router-model",
         )
 
-        self.assertEqual(router_input.endpoint, "output_variation_benchmark")
-        self.assertEqual(router_input.model, "router-model")
-        self.assertTrue(router_input.eligibility_metadata["sfe_routing_eligible"])
+        self.assertEqual(selection_input.request_id, f"{task.task_label}:1")
+        self.assertEqual(selection_input.model, "router-model")
+        self.assertEqual(selection_input.metadata["benchmark_type"], BENCHMARK_TYPE)
         self.assertEqual(
-            [segment["segment_id"] for segment in router_input.candidate_text_segments],
+            [segment.id for segment in selection_input.candidate_segments],
             [block.block_id for block in task.context_blocks],
         )
-        self.assertIn("BLOCK payments-cache", router_input.candidate_text_segments[0]["text"])
+        self.assertIn("BLOCK payments-cache", selection_input.candidate_segments[0].text)
 
-    def test_router_selection_source_uses_shadow_router_selected_block_ids(self) -> None:
+    def test_router_selection_source_uses_neutral_selector_selected_block_ids(self) -> None:
         report = self._router_report(
             selected_ids=["payments-cache"],
             status="candidate_selected",
@@ -391,7 +446,7 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(selected_run["execution_status"], "completed")
         self.assertEqual(selected_run["used_block_ids"], ["payments-cache"])
         self.assertEqual(selected_run["router_status"], "ready")
-        self.assertFalse(selected_run["router_status_known"])
+        self.assertTrue(selected_run["router_status_known"])
         self.assertTrue(selected_run["router_selection_usable"])
         self.assertTrue(report["comparisons"][0]["comparison_valid"])
 
@@ -658,11 +713,11 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(report["summary"]["overall"]["valid_comparison_count"], 0)
 
     def test_markdown_report_includes_router_selection_note_and_router_summary(self) -> None:
-        selector = ProxyShadowRouterOutputVariationSelector(
+        selector = SegmentSelectorOutputVariationSelector(
             provider="openai",
-            router_factory=lambda provider, config: FakeShadowRouter(
+            selector=FakeSegmentSelector(
                 selected_ids=["payments-cache"],
-                provider=provider,
+                provider="openai",
             ),
         )
         report = run_benchmark(
@@ -681,6 +736,8 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertIn("Router used: `True`", markdown)
         self.assertIn("## Router Selection Note", markdown)
         self.assertIn(ROUTER_SELECTION_NOTE, markdown)
+        self.assertIn("neutral SFE segment selector", markdown)
+        self.assertNotIn("proxy shadow-router", markdown)
         self.assertIn(
             "candidate_selected; known=True; usable=True; selected=payments-cache",
             markdown,
@@ -694,11 +751,11 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         reason: str,
         error_type: str | None = None,
     ) -> dict[str, object]:
-        selector = ProxyShadowRouterOutputVariationSelector(
+        selector = SegmentSelectorOutputVariationSelector(
             provider="openai",
-            router_factory=lambda provider, config: FakeShadowRouter(
+            selector=FakeSegmentSelector(
                 selected_ids=selected_ids,
-                provider=provider,
+                provider="openai",
                 status=status,
                 reason=reason,
                 error_type=error_type,
@@ -730,8 +787,7 @@ def _run_tokens(
     }
 
 
-class FakeShadowRouter:
-    name = "fake-shadow-router"
+class FakeSegmentSelector:
 
     def __init__(
         self,
@@ -743,26 +799,39 @@ class FakeShadowRouter:
         error_type: str | None = None,
     ) -> None:
         self.selected_ids = selected_ids
-        self.provider = provider
+        self.provider_name = provider
+        self.model = "fake-router-model"
         self.status = status
         self.reason = reason
         self.error_type = error_type
         self.calls: list[object] = []
 
-    def analyze(self, router_input: object) -> ShadowRouterResult:
-        self.calls.append(router_input)
-        return ShadowRouterResult(
-            router_enabled=True,
-            router_name=self.provider,
+    def select(self, selection_input: object) -> SegmentSelectionResult:
+        self.calls.append(selection_input)
+        return SegmentSelectionResult(
+            selected_segment_ids=tuple(self.selected_ids),
             router_status=self.status,
-            router_reason=self.reason,
-            router_latency_ms=7,
-            candidate_selected_segment_ids=self.selected_ids,
-            estimated_router_selected_input_tokens=12 if self.selected_ids else None,
-            estimated_router_token_reduction_pct=75.0 if self.selected_ids else None,
+            router_status_known=(
+                self.status
+                in {
+                    "approved",
+                    "candidate_selected",
+                    "eligible",
+                    "ok",
+                    "ready",
+                    "selected",
+                    "select_segments",
+                    "success",
+                }
+            ),
+            reason=self.reason,
+            provider_name=self.provider_name,
+            model=self.model,
             confidence=0.91,
             error_type=self.error_type,
-            dry_run_only=True,
+            latency_ms=7,
+            estimated_selected_input_tokens=12 if self.selected_ids else None,
+            estimated_token_reduction_pct=75.0 if self.selected_ids else None,
         )
 
 

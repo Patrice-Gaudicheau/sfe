@@ -14,13 +14,21 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from providers.alibaba import (  # noqa: E402
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_ALIBABA_EXECUTOR_MODEL,
+    AlibabaAPIProvider,
+)
+from providers.anthropic import (  # noqa: E402
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_ANTHROPIC_EXECUTOR_MODEL,
+    AnthropicProvider,
+)
 from providers.openai_api import (  # noqa: E402
     DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_EXECUTOR_MODEL,
     OpenAIAPIProvider,
@@ -35,12 +43,12 @@ from runtime.metrics import (  # noqa: E402
 )
 from runtime.run_experiment import _extract_response_text, _extract_token_usage  # noqa: E402
 from sfe.env import load_repo_env  # noqa: E402
-from sfe_proxy.shadow_router import (  # noqa: E402
-    LEMONADE_ROUTER_PROVIDER,
-    OPENAI_ROUTER_PROVIDER,
-    ShadowRouter,
-    ShadowRouterInput,
-    create_shadow_router,
+from sfe.segment_selector import (  # noqa: E402
+    CandidateSegment,
+    KNOWN_SEGMENT_SELECTION_STATUSES,
+    SegmentSelectionInput,
+    SegmentSelector,
+    create_configured_segment_selector,
 )
 
 
@@ -52,30 +60,36 @@ MODE_SELECTED = "selected"
 MODES = (MODE_BASELINE, MODE_SELECTED)
 EXECUTOR_FIXTURE = "fixture"
 EXECUTOR_OPENAI_API = "openai-api"
-EXECUTORS = (EXECUTOR_FIXTURE, EXECUTOR_OPENAI_API)
+EXECUTOR_ANTHROPIC = "anthropic"
+EXECUTOR_ALIBABA_API = "alibaba-api"
+EXECUTORS = (
+    EXECUTOR_FIXTURE,
+    EXECUTOR_OPENAI_API,
+    EXECUTOR_ANTHROPIC,
+    EXECUTOR_ALIBABA_API,
+)
 SELECTION_SOURCE_FIXTURE = "fixture"
 SELECTION_SOURCE_ROUTER = "router"
 SELECTION_SOURCES = (SELECTION_SOURCE_FIXTURE, SELECTION_SOURCE_ROUTER)
-DEFAULT_ROUTER_SELECTION_PROVIDER = OPENAI_ROUTER_PROVIDER
-KNOWN_ROUTER_SELECTION_STATUSES = {
-    "approved",
-    "candidate_selected",
-    "eligible",
-    "ok",
-    "selected",
-    "success",
-}
+ROUTER_PROVIDER_OPENAI = "openai"
+ROUTER_PROVIDER_ANTHROPIC = "anthropic"
+ROUTER_PROVIDER_ALIBABA = "alibaba"
+ROUTER_PROVIDERS = (
+    ROUTER_PROVIDER_OPENAI,
+    ROUTER_PROVIDER_ANTHROPIC,
+    ROUTER_PROVIDER_ALIBABA,
+)
+DEFAULT_ROUTER_SELECTION_PROVIDER = ROUTER_PROVIDER_OPENAI
+KNOWN_ROUTER_SELECTION_STATUSES = KNOWN_SEGMENT_SELECTION_STATUSES
 DRY_RUN_NOTE = (
     "Fixture outputs are deterministic synthetic outputs used to validate the "
     "benchmark pipeline and token-accounting logic. They are not evidence that "
     "SFE reduces or increases output tokens in real LLM behavior."
 )
 ROUTER_SELECTION_NOTE = (
-    "Router selection uses the proxy shadow-router selection path. Executor token "
+    "Router selection uses the neutral SFE segment selector. Executor token "
     "comparisons remain baseline-vs-selected executor costs; router selection "
-    "metadata is reported separately and is not mixed into those totals. Actual "
-    "router provider token usage is not currently available from the shadow-router "
-    "result."
+    "metadata is reported separately and is not mixed into those totals."
 )
 
 
@@ -155,12 +169,7 @@ class FixtureOutputVariationSelector:
         )
 
 
-@dataclass(frozen=True)
-class _RouterSelectionConfig:
-    shadow_router_timeout_seconds: int
-
-
-class ProxyShadowRouterOutputVariationSelector:
+class SegmentSelectorOutputVariationSelector:
     selection_source = SELECTION_SOURCE_ROUTER
     router_used = True
 
@@ -168,31 +177,24 @@ class ProxyShadowRouterOutputVariationSelector:
         self,
         *,
         provider: str | None = None,
-        timeout_seconds: int = 30,
-        router_factory: Callable[[str, _RouterSelectionConfig], ShadowRouter] | None = None,
+        model: str | None = None,
+        selector: SegmentSelector | None = None,
     ) -> None:
         self.router_provider = _router_provider_from_env(provider)
-        self.router_model = _router_model_from_env(self.router_provider)
-        self.config = _RouterSelectionConfig(
-            shadow_router_timeout_seconds=max(1, int(timeout_seconds))
+        self.segment_selector = selector or create_configured_segment_selector(
+            provider_name=self.router_provider,
+            model=model,
         )
-        self.router_factory = router_factory or (
-            lambda router_provider, config: create_shadow_router(
-                router_provider,
-                config=config,
-            )
-        )
+        self.router_model = self.segment_selector.model
 
     def select(self, task: OutputVariationTask, repeat_index: int) -> OutputVariationSelection:
-        router_input = build_shadow_router_input(
+        selection_input = build_segment_selection_input(
             task,
             repeat_index=repeat_index,
             router_model=self.router_model,
         )
         try:
-            result = self.router_factory(self.router_provider, self.config).analyze(
-                router_input
-            )
+            result = self.segment_selector.select(selection_input)
         except Exception as exc:  # noqa: BLE001
             return OutputVariationSelection(
                 selection_source=self.selection_source,
@@ -207,12 +209,12 @@ class ProxyShadowRouterOutputVariationSelector:
         known_block_ids = {block.block_id for block in task.context_blocks}
         unknown_selected_block_ids = tuple(
             block_id
-            for block_id in result.candidate_selected_segment_ids
+            for block_id in result.selected_segment_ids
             if block_id not in known_block_ids
         )
         selected = tuple(
             block_id
-            for block_id in result.candidate_selected_segment_ids
+            for block_id in result.selected_segment_ids
             if block_id in known_block_ids
         )
         usable = (
@@ -220,29 +222,24 @@ class ProxyShadowRouterOutputVariationSelector:
             and bool(selected)
             and not unknown_selected_block_ids
         )
-        router_status_known = (
-            result.router_status in KNOWN_ROUTER_SELECTION_STATUSES
-            if result.router_status is not None
-            else None
-        )
         return OutputVariationSelection(
             selection_source=self.selection_source,
             selected_block_ids=selected if usable else (),
             router_used=True,
-            router_provider=self.router_provider,
+            router_provider=result.provider_name or self.router_provider,
             router_status=result.router_status,
-            router_status_known=router_status_known,
-            router_reason=result.router_reason,
+            router_status_known=result.router_status_known,
+            router_reason=result.reason,
             router_error_type=result.error_type,
             router_confidence=result.confidence,
             router_selection_usable=usable,
-            router_selected_block_ids=tuple(result.candidate_selected_segment_ids),
-            router_latency_ms=result.router_latency_ms,
+            router_selected_block_ids=tuple(result.selected_segment_ids),
+            router_latency_ms=result.latency_ms,
             router_estimated_selected_input_tokens=(
-                result.estimated_router_selected_input_tokens
+                result.estimated_selected_input_tokens
             ),
             router_estimated_token_reduction_pct=(
-                result.estimated_router_token_reduction_pct
+                result.estimated_token_reduction_pct
             ),
         )
 
@@ -261,23 +258,25 @@ class FixtureOutputVariationExecutor:
         }
 
 
-class OpenAIOutputVariationExecutor:
-    executor_name = EXECUTOR_OPENAI_API
-    provider = EXECUTOR_OPENAI_API
-
+class ProviderOutputVariationExecutor:
     def __init__(
         self,
+        *,
+        executor_name: str,
+        provider_name: str,
         model: str,
         max_tokens: int,
-        provider: OpenAIAPIProvider | None = None,
+        provider: Any,
     ) -> None:
         if not model:
-            raise ValueError("OpenAI executor model is required.")
+            raise ValueError(f"{executor_name} executor model is required.")
         if max_tokens < 1:
             raise ValueError("--max-tokens must be at least 1.")
+        self.executor_name = executor_name
+        self.provider = provider_name
         self.model = model
         self.max_tokens = max_tokens
-        self.provider_instance = provider or OpenAIAPIProvider()
+        self.provider_instance = provider
 
     def execute(self, task: OutputVariationTask, mode: str, prompt: str) -> dict[str, Any]:
         response = self.provider_instance.chat(
@@ -338,11 +337,23 @@ def _parse_args() -> argparse.Namespace:
         "--selection-source",
         choices=SELECTION_SOURCES,
         default=SELECTION_SOURCE_FIXTURE,
-        help="Use deterministic fixture selection or the proxy shadow-router path.",
+        help="Use deterministic fixture selection or the neutral SFE segment selector.",
+    )
+    parser.add_argument(
+        "--router-provider",
+        choices=ROUTER_PROVIDERS,
+        help=(
+            "Provider used by --selection-source router. Defaults to the executor "
+            "provider family, then OpenAI."
+        ),
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL,
+        help="Executor model id. Defaults to the provider-specific SFE executor env var.",
+    )
+    parser.add_argument(
+        "--router-model",
+        help="Router model id. Defaults to the provider-specific SFE router env var.",
     )
     parser.add_argument("--max-tokens", type=int, default=700)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON_PATH)
@@ -350,26 +361,79 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.dry_run:
         args.executor = EXECUTOR_FIXTURE
+    args.model = args.model or _default_executor_model(args.executor)
+    args.router_provider = args.router_provider or _default_router_provider(args.executor)
+    args.router_model = args.router_model or _default_router_model(args.router_provider)
     if args.dry_run and args.selection_source == SELECTION_SOURCE_ROUTER:
         parser.error("--selection-source router requires live router selection; omit --dry-run.")
     if (
         args.selection_source == SELECTION_SOURCE_ROUTER
         and args.executor == EXECUTOR_FIXTURE
     ):
-        parser.error("--selection-source router requires --executor openai-api.")
+        parser.error(
+            "--selection-source router requires --executor openai-api, anthropic, "
+            "or alibaba-api."
+        )
     return args
 
 
 def _build_executor(args: argparse.Namespace) -> OutputVariationExecutor:
     if args.executor == EXECUTOR_FIXTURE:
         return FixtureOutputVariationExecutor()
-    return OpenAIOutputVariationExecutor(model=args.model, max_tokens=args.max_tokens)
+    return ProviderOutputVariationExecutor(
+        executor_name=args.executor,
+        provider_name=args.executor,
+        model=args.model,
+        max_tokens=args.max_tokens,
+        provider=_make_executor_provider(args.executor),
+    )
 
 
 def _build_selector(args: argparse.Namespace) -> OutputVariationSelector:
     if args.selection_source == SELECTION_SOURCE_FIXTURE:
         return FixtureOutputVariationSelector()
-    return ProxyShadowRouterOutputVariationSelector()
+    return SegmentSelectorOutputVariationSelector(
+        provider=args.router_provider,
+        model=args.router_model,
+    )
+
+
+def _make_executor_provider(executor: str) -> Any:
+    if executor == EXECUTOR_OPENAI_API:
+        return OpenAIAPIProvider()
+    if executor == EXECUTOR_ANTHROPIC:
+        return AnthropicProvider()
+    if executor == EXECUTOR_ALIBABA_API:
+        return AlibabaAPIProvider()
+    raise ValueError(f"Unsupported executor {executor!r}.")
+
+
+def _default_executor_model(executor: str) -> str | None:
+    if executor == EXECUTOR_OPENAI_API:
+        return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL
+    if executor == EXECUTOR_ANTHROPIC:
+        return os.getenv("SFE_ANTHROPIC_EXECUTOR_MODEL") or DEFAULT_ANTHROPIC_EXECUTOR_MODEL
+    if executor == EXECUTOR_ALIBABA_API:
+        return os.getenv("SFE_ALIBABA_EXECUTOR_MODEL") or DEFAULT_ALIBABA_EXECUTOR_MODEL
+    return None
+
+
+def _default_router_provider(executor: str) -> str:
+    if executor == EXECUTOR_ANTHROPIC:
+        return ROUTER_PROVIDER_ANTHROPIC
+    if executor == EXECUTOR_ALIBABA_API:
+        return ROUTER_PROVIDER_ALIBABA
+    return DEFAULT_ROUTER_SELECTION_PROVIDER
+
+
+def _default_router_model(router_provider: str) -> str | None:
+    if router_provider == ROUTER_PROVIDER_OPENAI:
+        return os.getenv("SFE_OPENAI_ROUTER_MODEL") or None
+    if router_provider == ROUTER_PROVIDER_ANTHROPIC:
+        return os.getenv("SFE_ANTHROPIC_ROUTER_MODEL") or None
+    if router_provider == ROUTER_PROVIDER_ALIBABA:
+        return os.getenv("SFE_ALIBABA_ROUTER_MODEL") or None
+    return None
 
 
 def task_families() -> tuple[str, ...]:
@@ -709,7 +773,7 @@ def run_benchmark(
             "selection_strategy": (
                 "fixture_selected_context"
                 if selector.selection_source == SELECTION_SOURCE_FIXTURE
-                else "proxy_shadow_router_selected_context"
+                else "neutral_sfe_segment_selector_context"
             ),
             "router_used": selector.router_used,
             "router_provider": selector.router_provider,
@@ -890,80 +954,54 @@ def format_block(block: OutputVariationContextBlock) -> str:
     return f"BLOCK {block.block_id} - {block.title}\n{block.text}"
 
 
-def build_shadow_router_input(
+def build_segment_selection_input(
     task: OutputVariationTask,
     *,
     repeat_index: int,
     router_model: str | None,
-) -> ShadowRouterInput:
-    candidate_segments = [router_candidate_segment(block) for block in task.context_blocks]
-    rough_tokens = estimate_text_tokens(
-        "\n\n".join(
-            [
-                task.question,
-                task.output_contract,
-                *[format_block(block) for block in task.context_blocks],
-            ]
-        )
-    )
-    return ShadowRouterInput(
+) -> SegmentSelectionInput:
+    return SegmentSelectionInput(
         request_id=f"{task.task_label}:{repeat_index}",
-        endpoint="output_variation_benchmark",
-        model=router_model,
-        rough_estimated_input_tokens=rough_tokens,
-        candidate_segments_metadata=[
-            {key: value for key, value in segment.items() if key != "text"}
-            for segment in candidate_segments
-        ],
-        eligibility_metadata={
-            "sfe_routing_eligible": True,
-            "eligibility_reason": "output_variation_router_selection",
-            "eligibility_threshold_tokens": 0,
+        task=task.question,
+        output_contract=task.output_contract,
+        candidate_segments=tuple(router_candidate_segment(block) for block in task.context_blocks),
+        metadata={
             "benchmark_type": BENCHMARK_TYPE,
             "task_family": task.family,
-            "question": task.question,
-            "output_contract": task.output_contract,
+            "task_label": task.task_label,
         },
-        request_body_bytes=sum(len(block.text.encode("utf-8")) for block in task.context_blocks),
-        stream=False,
-        candidate_text_segments=candidate_segments,
+        model=router_model,
     )
 
 
-def router_candidate_segment(block: OutputVariationContextBlock) -> dict[str, Any]:
+def router_candidate_segment(block: OutputVariationContextBlock) -> CandidateSegment:
     text = format_block(block)
-    return {
-        "segment_id": block.block_id,
-        "source": block.title,
-        "text": text,
-        "text_chars": len(text),
-        "text_bytes": len(text.encode("utf-8")),
-        "estimated_tokens": estimate_text_tokens(text),
-        "distractor": block.distractor,
-        "fixture_selected": block.selected,
-    }
+    return CandidateSegment(
+        id=block.block_id,
+        source=block.title,
+        text=text,
+        metadata={
+            "text_chars": len(text),
+            "text_bytes": len(text.encode("utf-8")),
+            "estimated_tokens": estimate_text_tokens(text),
+            "distractor": block.distractor,
+            "fixture_selected": block.selected,
+        },
+    )
 
 
 def _router_provider_from_env(provider: str | None) -> str:
     selected = (
         provider
-        or os.getenv("SFE_PROXY_SHADOW_ROUTER_PROVIDER", "").strip()
+        or os.getenv("SFE_SEGMENT_SELECTOR_PROVIDER", "").strip()
         or DEFAULT_ROUTER_SELECTION_PROVIDER
     )
-    if selected not in {OPENAI_ROUTER_PROVIDER, LEMONADE_ROUTER_PROVIDER}:
+    if selected not in ROUTER_PROVIDERS:
         raise ValueError(
-            "Router selection source requires SFE_PROXY_SHADOW_ROUTER_PROVIDER "
-            "to be openai or lemonade."
+            "Router selection source requires --router-provider to be openai, "
+            "anthropic, or alibaba."
         )
     return selected
-
-
-def _router_model_from_env(provider: str) -> str | None:
-    if provider == OPENAI_ROUTER_PROVIDER:
-        return os.getenv("SFE_OPENAI_ROUTER_MODEL") or None
-    if provider == LEMONADE_ROUTER_PROVIDER:
-        return os.getenv("SFE_LEMONADE_MODEL") or os.getenv("SFE_ROUTER_MODEL") or None
-    return None
 
 
 def validate_output(task: OutputVariationTask, output: str) -> dict[str, Any]:
@@ -1299,8 +1337,8 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
                 "and the output contract."
             ),
             (
-                "When selection source is router, selected context comes from the proxy "
-                "shadow-router selection path. Router overhead is reported as selection "
+                "When selection source is router, selected context comes from the neutral "
+                "SFE segment selector. Router overhead is reported as selection "
                 "metadata when available and is not included in baseline or selected "
                 "executor token totals."
             ),
