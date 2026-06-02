@@ -908,6 +908,7 @@ def build_prompt(
         format_block(block)
         for block in blocks_for_mode(task, mode, selected_block_ids=selected_block_ids)
     )
+    required_labels = format_required_answer_labels(task.format_markers)
     return (
         "Answer using only the provided context. Do not use outside facts.\n\n"
         f"Benchmark: {BENCHMARK_TYPE}\n"
@@ -915,8 +916,18 @@ def build_prompt(
         f"Mode: {mode}\n"
         f"Question: {task.question}\n\n"
         f"Output contract:\n{task.output_contract}\n\n"
+        f"{required_labels}\n\n"
         f"Context:\n{context}\n\n"
         "Final answer:"
+    )
+
+
+def format_required_answer_labels(format_markers: tuple[str, ...]) -> str:
+    if not format_markers:
+        return "Required answer labels: none"
+    return (
+        "Required answer labels, copy exactly:\n"
+        + "\n".join(format_markers)
     )
 
 

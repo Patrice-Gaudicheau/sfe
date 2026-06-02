@@ -78,6 +78,23 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
                 self.assertNotIn(f"BLOCK {block.block_id}", selected_prompt)
         self.assertEqual(block_ids_for_mode(task, "selected"), list(task.selected_block_ids))
 
+    def test_prompt_includes_exact_required_labels_from_task_format_markers(self) -> None:
+        task = self.tasks[0]
+        prompt = build_prompt(task, "selected")
+
+        self.assertIn("Required answer labels, copy exactly:", prompt)
+        for marker in task.format_markers:
+            self.assertIn(f"\n{marker}\n", prompt)
+
+    def test_prompt_labels_are_derived_from_each_task_format_markers(self) -> None:
+        for task in self.tasks:
+            with self.subTest(family=task.family):
+                prompt = build_prompt(task, "selected")
+                marker_block = prompt.split("Required answer labels, copy exactly:\n", 1)[1]
+                marker_block = marker_block.split("\n\nContext:", 1)[0]
+
+                self.assertEqual(marker_block.splitlines(), list(task.format_markers))
+
     def test_dry_run_report_is_serializable_and_includes_metadata_caveat(self) -> None:
         report = run_benchmark(
             tasks=self.tasks,
@@ -175,6 +192,22 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertIn("Mason Vale", forbidden["present_forbidden_mentions"])
         self.assertFalse(bad_format["format_respected"])
         self.assertIn("Cause:", bad_format["missing_format_markers"])
+
+    def test_quality_check_remains_strict_for_equivalent_cause_prose(self) -> None:
+        task = self.tasks[0]
+        equivalent_prose = (
+            "Diagnostic Note: The checkout incident was caused by stale PSP routing "
+            "cache entries. Owner: Priya Nair. Next Action: Flush the PSP routing "
+            "cache and pin cache epoch pay-cache-17."
+        )
+
+        quality = validate_output(task, equivalent_prose)
+
+        self.assertTrue(quality["required_facts_present"])
+        self.assertTrue(quality["forbidden_mentions_absent"])
+        self.assertFalse(quality["format_respected"])
+        self.assertFalse(quality["success"])
+        self.assertEqual(quality["missing_format_markers"], ["Cause:"])
 
     def test_markdown_report_includes_summary_quality_flags_and_dry_run_caveat(self) -> None:
         report = run_benchmark(
