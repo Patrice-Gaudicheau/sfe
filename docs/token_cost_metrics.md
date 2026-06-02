@@ -68,6 +68,35 @@ difference as run-snapshot drift rather than a new headline claim.
 | high_context | 37,789 / 129 | 6,444 / 154 | 3,360 / 145 |
 | structural | 51,253 / 82 | 5,013 / 80 | 2,995 / 82 |
 
+## Input Versus Output Token Effects
+
+Input token reduction is the direct SFE effect measured by this benchmark
+family: the executor receives selected context instead of the full context.
+Router-inclusive total-token reduction is then computed by adding the selector
+call back into the selected-context executor path.
+
+Output token reduction is not guaranteed. Output token changes depend on the
+task, prompt, model behavior, and output contract. The current large/contextual
+tasks mostly measure input reduction because their executor prompts ask for a
+compact final answer, and the structural tier uses a stable field-line answer
+format. Those contracts are useful for reliability and selection validation,
+but they intentionally limit output-length variance.
+
+The benchmark runner now reports a `summary.token_accounting` block and
+per-task token comparison fields to make output behavior visible without
+changing SFE, routing, or provider behavior. The new fields include baseline,
+selected-executor, router, and router-inclusive input/output/total averages;
+input, output, and total deltas; output ratio; total reduction percent; and
+flags for output reduction, output increase, total reduction, and cases where
+input reduction is offset by output expansion.
+
+These fields are accounting aids, not a claim that SFE always reduces output
+tokens. In the cost-relevant breakdown above, router-inclusive output can
+increase because the router produces its own selector output even when executor
+input falls sharply. A benchmark can only make output reduction meaningful when
+the task and output contract allow output length to vary in a way that reflects
+the effect being studied.
+
 ## Interpretation
 
 The token-reduction signal grows with context size. The standard tier still

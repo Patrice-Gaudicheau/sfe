@@ -3044,6 +3044,7 @@ def summarize_runs(
         for mode, data in summary["modes"].items()
         if mode != "baseline"
     }
+    summary["token_accounting"] = summarize_token_accounting(runs)
     summary["latency_delta_ms"] = (
         spatial["average_latency_ms"] - baseline["average_latency_ms"]
     )
@@ -3074,6 +3075,7 @@ def summarize_per_task(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         baseline = [run for run in task_runs if run["mode"] == "baseline"]
         spatial = [run for run in task_runs if run["mode"] == comparison_mode]
         router = [run for run in task_runs if run["mode"] == "spatial_router"]
+        token_accounting = summarize_token_accounting(task_runs)
         rows.append(
             {
                 "task_label": label,
@@ -3130,9 +3132,128 @@ def summarize_per_task(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "success_after_output_repair": (
                     router[0].get("success_after_output_repair") if router else None
                 ),
+                "token_accounting": token_accounting,
+                "baseline_average_output_tokens": token_accounting[
+                    "baseline_average_output_tokens"
+                ],
+                "input_token_delta": token_accounting["input_token_delta"],
+                "input_token_reduction_percent": token_accounting[
+                    "input_token_reduction_percent"
+                ],
+                "spatial_average_output_tokens": token_accounting[
+                    "selected_executor_average_output_tokens"
+                ],
+                "router_inclusive_average_output_tokens": token_accounting[
+                    "router_inclusive_average_output_tokens"
+                ],
+                "output_token_delta": token_accounting["output_token_delta"],
+                "output_token_ratio": token_accounting["output_token_ratio"],
+                "total_token_delta": token_accounting["total_token_delta"],
+                "total_token_reduction_percent": token_accounting[
+                    "total_token_reduction_percent"
+                ],
+                "output_tokens_reduced": token_accounting["output_tokens_reduced"],
+                "output_tokens_increased": token_accounting["output_tokens_increased"],
+                "total_tokens_reduced": token_accounting["total_tokens_reduced"],
+                "output_expansion_offsets_input_reduction": token_accounting[
+                    "output_expansion_offsets_input_reduction"
+                ],
             }
         )
     return rows
+
+
+def summarize_token_accounting(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    modes = _modes_in_runs(runs)
+    baseline_runs = [run for run in runs if run["mode"] == "baseline"]
+    comparison_mode = "spatial_router" if "spatial_router" in modes else _primary_spatial_mode(modes)
+    selected_executor_runs = [
+        run for run in runs if run["mode"] == comparison_mode
+    ]
+    router_runs = [run for run in runs if run["mode"] == "spatial_router"]
+
+    baseline = _average_token_triplet(baseline_runs)
+    selected_executor = _average_token_triplet(selected_executor_runs)
+    router = _average_token_triplet(
+        router_runs,
+        input_key="router_input_tokens",
+        output_key="router_output_tokens",
+        total_key="router_total_tokens",
+    )
+    router_inclusive = _router_inclusive_average_token_triplet(
+        selected_executor_runs,
+        router_runs,
+    )
+
+    input_delta = _optional_difference(
+        router_inclusive["average_input_tokens"],
+        baseline["average_input_tokens"],
+    )
+    output_delta = _optional_difference(
+        router_inclusive["average_output_tokens"],
+        baseline["average_output_tokens"],
+    )
+    total_delta = _optional_difference(
+        router_inclusive["average_total_tokens"],
+        baseline["average_total_tokens"],
+    )
+    return {
+        "comparison_mode": comparison_mode,
+        "baseline_average_input_tokens": baseline["average_input_tokens"],
+        "baseline_average_output_tokens": baseline["average_output_tokens"],
+        "baseline_average_total_tokens": baseline["average_total_tokens"],
+        "selected_executor_average_input_tokens": selected_executor[
+            "average_input_tokens"
+        ],
+        "selected_executor_average_output_tokens": selected_executor[
+            "average_output_tokens"
+        ],
+        "selected_executor_average_total_tokens": selected_executor[
+            "average_total_tokens"
+        ],
+        "router_average_input_tokens": router["average_input_tokens"],
+        "router_average_output_tokens": router["average_output_tokens"],
+        "router_average_total_tokens": router["average_total_tokens"],
+        "router_inclusive_average_input_tokens": router_inclusive[
+            "average_input_tokens"
+        ],
+        "router_inclusive_average_output_tokens": router_inclusive[
+            "average_output_tokens"
+        ],
+        "router_inclusive_average_total_tokens": router_inclusive[
+            "average_total_tokens"
+        ],
+        "input_token_delta": input_delta,
+        "input_token_reduction_percent": _optional_percent_reduction(
+            baseline["average_input_tokens"],
+            router_inclusive["average_input_tokens"],
+        ),
+        "output_token_delta": output_delta,
+        "output_token_ratio": _optional_ratio(
+            router_inclusive["average_output_tokens"],
+            baseline["average_output_tokens"],
+        ),
+        "total_token_delta": total_delta,
+        "total_token_reduction_percent": _optional_percent_reduction(
+            baseline["average_total_tokens"],
+            router_inclusive["average_total_tokens"],
+        ),
+        "output_tokens_reduced": (
+            output_delta < 0 if output_delta is not None else None
+        ),
+        "output_tokens_increased": (
+            output_delta > 0 if output_delta is not None else None
+        ),
+        "total_tokens_reduced": (
+            total_delta < 0 if total_delta is not None else None
+        ),
+        "output_expansion_offsets_input_reduction": (
+            input_delta is not None
+            and output_delta is not None
+            and input_delta < 0
+            and output_delta > 0
+        ),
+    }
 
 
 def summarize_output_repair(runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -3497,6 +3618,51 @@ def _optional_ratio_percent(
     return (numerator / denominator) * 100.0
 
 
+def _optional_ratio(
+    numerator: float | None, denominator: float | None
+) -> float | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return numerator / denominator
+
+
+def _average_token_triplet(
+    runs: list[dict[str, Any]],
+    *,
+    input_key: str = "input_tokens",
+    output_key: str = "output_tokens",
+    total_key: str = "total_tokens",
+) -> dict[str, float | None]:
+    return {
+        "average_input_tokens": _optional_average(run.get(input_key) for run in runs),
+        "average_output_tokens": _optional_average(run.get(output_key) for run in runs),
+        "average_total_tokens": _optional_average(run.get(total_key) for run in runs),
+    }
+
+
+def _router_inclusive_average_token_triplet(
+    selected_executor_runs: list[dict[str, Any]],
+    router_runs: list[dict[str, Any]],
+) -> dict[str, float | None]:
+    if not router_runs:
+        return _average_token_triplet(selected_executor_runs)
+
+    return {
+        "average_input_tokens": _optional_average(
+            _optional_sum(run.get("input_tokens"), run.get("router_input_tokens"))
+            for run in router_runs
+        ),
+        "average_output_tokens": _optional_average(
+            _optional_sum(run.get("output_tokens"), run.get("router_output_tokens"))
+            for run in router_runs
+        ),
+        "average_total_tokens": _optional_average(
+            _optional_sum(run.get("total_tokens"), run.get("router_total_tokens"))
+            for run in router_runs
+        ),
+    }
+
+
 def deterministic_latency_ms(task_label: str, mode: str, input_tokens: int) -> int:
     mode_offset = 45 if mode == "spatial" else 90
     label_offset = sum(ord(char) for char in task_label) % 37
@@ -3538,14 +3704,15 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         "## Summary",
         "",
-        "| Mode | Runs | Avg input tokens | Avg total tokens | Avg latency ms | Success rate |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Mode | Runs | Avg input tokens | Avg output tokens | Avg total tokens | Avg latency ms | Success rate |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for mode in modes:
         mode_summary = report["summary"]["modes"][mode]
         lines.append(
             f"| `{mode}` | {mode_summary['run_count']} | "
             f"{mode_summary['average_input_tokens']:.2f} | "
+            f"{mode_summary['average_output_tokens']:.2f} | "
             f"{mode_summary['average_total_tokens']:.2f} | "
             f"{mode_summary['average_latency_ms']:.2f} | "
             f"{mode_summary['success_rate']:.2%} |"
@@ -3572,6 +3739,54 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             f"Output repair added latency ms: {report['summary']['output_repair']['added_latency_ms']}",
         ]
     )
+    token_accounting = report["summary"].get("token_accounting")
+    if token_accounting is not None:
+        lines.extend(
+            [
+                "",
+                "## Token Accounting",
+                "",
+                "| Scope | Avg input tokens | Avg output tokens | Avg total tokens |",
+                "| --- | ---: | ---: | ---: |",
+                (
+                    "| Baseline | "
+                    f"{_format_optional_number(token_accounting['baseline_average_input_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['baseline_average_output_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['baseline_average_total_tokens'])} |"
+                ),
+                (
+                    "| Selected executor | "
+                    f"{_format_optional_number(token_accounting['selected_executor_average_input_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['selected_executor_average_output_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['selected_executor_average_total_tokens'])} |"
+                ),
+                (
+                    "| Router | "
+                    f"{_format_optional_number(token_accounting['router_average_input_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['router_average_output_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['router_average_total_tokens'])} |"
+                ),
+                (
+                    "| Router-inclusive | "
+                    f"{_format_optional_number(token_accounting['router_inclusive_average_input_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['router_inclusive_average_output_tokens'])} | "
+                    f"{_format_optional_number(token_accounting['router_inclusive_average_total_tokens'])} |"
+                ),
+                "",
+                "| Metric | Value |",
+                "| --- | ---: |",
+                f"| Input token delta | {_format_optional_number(token_accounting['input_token_delta'])} |",
+                f"| Input token reduction | {_format_optional_percent_value(token_accounting['input_token_reduction_percent'])} |",
+                f"| Output token delta | {_format_optional_number(token_accounting['output_token_delta'])} |",
+                f"| Output token ratio | {_format_optional_number(token_accounting['output_token_ratio'])} |",
+                f"| Total token delta | {_format_optional_number(token_accounting['total_token_delta'])} |",
+                f"| Total token reduction | {_format_optional_percent_value(token_accounting['total_token_reduction_percent'])} |",
+                f"| Output tokens reduced | {_format_optional_bool(token_accounting['output_tokens_reduced'])} |",
+                f"| Output tokens increased | {_format_optional_bool(token_accounting['output_tokens_increased'])} |",
+                f"| Total tokens reduced | {_format_optional_bool(token_accounting['total_tokens_reduced'])} |",
+                f"| Output expansion offsets input reduction | {_format_optional_bool(token_accounting['output_expansion_offsets_input_reduction'])} |",
+            ]
+        )
     structural_cost = report["summary"].get("structural_reliability_cost")
     if structural_cost is not None:
         lines.extend(
@@ -3630,13 +3845,11 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
             "",
             "## Per Task",
             "",
-            "| Task | Baseline input | Spatial input | Reduction | Fixture block | Router block | Router valid | Router match | Fallback |",
-            "| --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: |",
+            "| Task | Baseline input | Spatial input | Input delta | Input reduction | Baseline output | Router-inclusive output | Output delta | Output ratio | Total delta | Total reduction | Output increased | Total reduced | Offset | Fixture block | Router block | Router valid | Router match | Fallback |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: |",
         ]
     )
     for row in report["per_task"]:
-        task_reduction = row["token_reduction_percent"]
-        task_reduction_text = "n/a" if task_reduction is None else f"{task_reduction:.2f}%"
         router_block = row["router_selected_block_id"] or "n/a"
         router_match = (
             "n/a"
@@ -3655,7 +3868,18 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         )
         lines.append(
             f"| `{row['task_label']}` | {row['baseline_average_input_tokens']:.2f} | "
-            f"{row['spatial_average_input_tokens']:.2f} | {task_reduction_text} | "
+            f"{row['spatial_average_input_tokens']:.2f} | "
+            f"{_format_optional_number(row['input_token_delta'])} | "
+            f"{_format_optional_percent_value(row['input_token_reduction_percent'])} | "
+            f"{_format_optional_number(row['baseline_average_output_tokens'])} | "
+            f"{_format_optional_number(row['router_inclusive_average_output_tokens'])} | "
+            f"{_format_optional_number(row['output_token_delta'])} | "
+            f"{_format_optional_number(row['output_token_ratio'])} | "
+            f"{_format_optional_number(row['total_token_delta'])} | "
+            f"{_format_optional_percent_value(row['total_token_reduction_percent'])} | "
+            f"{_format_optional_bool(row['output_tokens_increased'])} | "
+            f"{_format_optional_bool(row['total_tokens_reduced'])} | "
+            f"{_format_optional_bool(row['output_expansion_offsets_input_reduction'])} | "
             f"`{row['fixture_selected_block_id']}` | `{router_block}` | "
             f"{router_valid} | {router_match} | {fallback} |"
         )

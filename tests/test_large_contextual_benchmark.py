@@ -40,6 +40,7 @@ from runtime.run_large_contextual_benchmark import (
     parse_selector_output,
     run_benchmark,
     select_relevant_block,
+    summarize_token_accounting,
 )
 
 
@@ -1794,6 +1795,198 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertIn("| Honest structural pass after repair | False |", markdown)
         self.assertIn("| Publication gate | `honest_structural_pass` |", markdown)
         self.assertIn("| Success after output repair |", markdown)
+
+    def test_token_accounting_reports_output_delta_ratio_and_router_inclusive_totals(self) -> None:
+        accounting = summarize_token_accounting(
+            [
+                {
+                    "mode": "baseline",
+                    "input_tokens": 100,
+                    "output_tokens": 10,
+                    "total_tokens": 110,
+                },
+                {
+                    "mode": "spatial_router",
+                    "input_tokens": 20,
+                    "output_tokens": 30,
+                    "total_tokens": 50,
+                    "router_input_tokens": 5,
+                    "router_output_tokens": 6,
+                    "router_total_tokens": 11,
+                },
+            ]
+        )
+
+        self.assertEqual(accounting["baseline_average_input_tokens"], 100.0)
+        self.assertEqual(accounting["baseline_average_output_tokens"], 10.0)
+        self.assertEqual(accounting["baseline_average_total_tokens"], 110.0)
+        self.assertEqual(accounting["selected_executor_average_input_tokens"], 20.0)
+        self.assertEqual(accounting["selected_executor_average_output_tokens"], 30.0)
+        self.assertEqual(accounting["router_average_input_tokens"], 5.0)
+        self.assertEqual(accounting["router_average_output_tokens"], 6.0)
+        self.assertEqual(accounting["router_inclusive_average_input_tokens"], 25.0)
+        self.assertEqual(accounting["router_inclusive_average_output_tokens"], 36.0)
+        self.assertEqual(accounting["router_inclusive_average_total_tokens"], 61.0)
+        self.assertEqual(accounting["input_token_delta"], -75.0)
+        self.assertEqual(accounting["output_token_delta"], 26.0)
+        self.assertEqual(accounting["output_token_ratio"], 3.6)
+        self.assertEqual(accounting["total_token_delta"], -49.0)
+        self.assertAlmostEqual(accounting["input_token_reduction_percent"], 75.0)
+        self.assertAlmostEqual(accounting["total_token_reduction_percent"], 44.545454545)
+        self.assertFalse(accounting["output_tokens_reduced"])
+        self.assertTrue(accounting["output_tokens_increased"])
+        self.assertTrue(accounting["total_tokens_reduced"])
+        self.assertTrue(accounting["output_expansion_offsets_input_reduction"])
+
+    def test_token_accounting_flags_output_reduction(self) -> None:
+        accounting = summarize_token_accounting(
+            [
+                {
+                    "mode": "baseline",
+                    "input_tokens": 100,
+                    "output_tokens": 100,
+                    "total_tokens": 200,
+                },
+                {
+                    "mode": "spatial_router",
+                    "input_tokens": 20,
+                    "output_tokens": 10,
+                    "total_tokens": 30,
+                    "router_input_tokens": 5,
+                    "router_output_tokens": 5,
+                    "router_total_tokens": 10,
+                },
+            ]
+        )
+
+        self.assertEqual(accounting["output_token_delta"], -85.0)
+        self.assertEqual(accounting["output_token_ratio"], 0.15)
+        self.assertTrue(accounting["output_tokens_reduced"])
+        self.assertFalse(accounting["output_tokens_increased"])
+        self.assertTrue(accounting["total_tokens_reduced"])
+        self.assertFalse(accounting["output_expansion_offsets_input_reduction"])
+
+    def test_token_accounting_flags_output_expansion_that_offsets_input_reduction(self) -> None:
+        accounting = summarize_token_accounting(
+            [
+                {
+                    "mode": "baseline",
+                    "input_tokens": 100,
+                    "output_tokens": 10,
+                    "total_tokens": 110,
+                },
+                {
+                    "mode": "spatial_router",
+                    "input_tokens": 20,
+                    "output_tokens": 130,
+                    "total_tokens": 150,
+                    "router_input_tokens": 5,
+                    "router_output_tokens": 10,
+                    "router_total_tokens": 15,
+                },
+            ]
+        )
+
+        self.assertEqual(accounting["input_token_delta"], -75.0)
+        self.assertEqual(accounting["output_token_delta"], 130.0)
+        self.assertEqual(accounting["total_token_delta"], 55.0)
+        self.assertFalse(accounting["output_tokens_reduced"])
+        self.assertTrue(accounting["output_tokens_increased"])
+        self.assertFalse(accounting["total_tokens_reduced"])
+        self.assertTrue(accounting["output_expansion_offsets_input_reduction"])
+
+    def test_run_report_includes_token_accounting_and_per_task_output_comparison(self) -> None:
+        task = get_large_contextual_tasks()[:1][0]
+
+        class FixtureSelector:
+            def select(self, task, fixture_route):  # type: ignore[no-untyped-def]
+                return {
+                    **fixture_route,
+                    "router": "fixture_test_selector",
+                    "router_selected_block_id": fixture_route["selected_block_id"],
+                    "selection_source": "test",
+                    "router_success": True,
+                    "router_valid_selection": True,
+                    "executor_used_fallback": False,
+                    "router_selection_matches_fixture": True,
+                    "router_latency_ms": 1,
+                    "router_input_tokens": 5,
+                    "router_output_tokens": 6,
+                    "router_total_tokens": 11,
+                    "router_error": "",
+                    "router_confidence": 1.0,
+                    "router_reason": "fixture selection for token accounting test",
+                }
+
+        class TokenProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                completion_tokens = 10 if self.calls == 1 else 30
+                prompt_tokens = 100 if self.calls == 1 else 20
+                return {
+                    "choices": [
+                        {"message": {"content": "cache region Priya Nair pay-ops"}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens,
+                    },
+                }
+
+        report = run_benchmark(
+            tasks=[task],
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=False,
+            selection_mode="router",
+            provider=TokenProvider(),  # type: ignore[arg-type]
+            selector=FixtureSelector(),
+        )
+
+        accounting = report["summary"]["token_accounting"]
+        self.assertEqual(accounting["router_inclusive_average_input_tokens"], 25.0)
+        self.assertEqual(accounting["router_inclusive_average_output_tokens"], 36.0)
+        self.assertEqual(accounting["output_token_delta"], 26.0)
+        self.assertEqual(accounting["output_token_ratio"], 3.6)
+        self.assertTrue(accounting["output_tokens_increased"])
+        self.assertTrue(accounting["total_tokens_reduced"])
+
+        row = report["per_task"][0]
+        self.assertEqual(row["input_token_delta"], -75.0)
+        self.assertEqual(row["output_token_delta"], 26.0)
+        self.assertEqual(row["output_token_ratio"], 3.6)
+        self.assertEqual(row["total_token_delta"], -49.0)
+        self.assertTrue(row["output_tokens_increased"])
+        self.assertTrue(row["total_tokens_reduced"])
+        self.assertTrue(row["output_expansion_offsets_input_reduction"])
+
+    def test_markdown_report_includes_token_accounting_section(self) -> None:
+        report = run_benchmark(
+            tasks=get_large_contextual_tasks()[:1],
+            repeat=1,
+            model="fake-lemonade-model",
+            dry_run=True,
+            selection_mode="both",
+        )
+
+        from runtime.run_large_contextual_benchmark import write_markdown
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.md"
+            write_markdown(path, report)
+            markdown = path.read_text(encoding="utf-8")
+
+        self.assertIn("Avg output tokens", markdown)
+        self.assertIn("## Token Accounting", markdown)
+        self.assertIn("| Router-inclusive |", markdown)
+        self.assertIn("| Output token delta |", markdown)
+        self.assertIn("| Output token ratio |", markdown)
+        self.assertIn("| Total token reduction |", markdown)
+        self.assertIn("Output expansion offsets input reduction", markdown)
 
     def test_empty_task_set_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "At least one"):
