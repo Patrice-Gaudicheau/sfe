@@ -106,3 +106,46 @@ python runtime/run_output_variation_benchmark.py \
   --router-provider alibaba \
   --selection-source router
 ```
+
+## Exploratory Live Results
+
+The following observations come from exploratory live runs after the benchmark
+migrated to the neutral `sfe.segment_selector` path. They are not definitive
+benchmark conclusions. Run sizes differ across providers, so the results are
+indicative rather than statistically balanced. The intended strategy in these
+runs was to use a stronger or more expensive model for segment selection and a
+cheaper or faster model for execution.
+
+OpenAI was tested through the neutral selector path with a minimal smoke run.
+The selector chose `payments-cache`, quality was `true/true`, and total tokens
+decreased. Output increased slightly in the smoke, but input savings dominated.
+
+Anthropic was tested through the neutral selector path with a minimal smoke and
+a `limit 5`, `repeat 1` run. The `limit 5` run produced five valid
+comparisons. Average total tokens decreased from `303.6` to `238.4`, a delta of
+`-65.2`. Output was nearly stable, with average output delta `-1.8`. One
+selected quality failure occurred on `broad_synthesis`, where the selected
+output missed the required fact `limited launch`. The current signal is stable
+token reduction, but quality must be checked per task.
+
+Alibaba/Qwen was tested through the neutral selector path with a minimal smoke
+and a `limit 5`, `repeat 1` run after prompt/format alignment. The `limit 5`
+run produced five valid comparisons and quality was `true/true` across the run.
+Average total tokens decreased from `1016.2` to `945.2`, a delta of `-71.0`.
+One full-offset case occurred on `ambiguous_diagnostic`: input decreased,
+output increased heavily, and selected total tokens became higher. The
+`broad_synthesis` task showed partial offset: output increased but total still
+decreased. The current signal is aggregate total reduction, but output
+expansion can erase savings on individual tasks.
+
+SFE's direct effect remains input reduction. Output reduction is conditional
+and depends on provider, task, prompt, and output contract. Total token
+reduction can still happen when output increases, and output expansion can
+partially or fully offset input savings. Quality metrics are necessary:
+cheaper or shorter output is not automatically better.
+
+Keep output variation as a dedicated benchmark for now. Do not merge these
+results into the original benchmarks yet. For stronger provider comparison, run
+balanced `limit 5`, `repeat 3` campaigns for Anthropic and Alibaba, or rerun all
+providers with the same repeat count. Investigate task families with quality
+failures or full-offset behavior before drawing product claims.
