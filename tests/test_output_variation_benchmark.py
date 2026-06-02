@@ -31,6 +31,7 @@ from runtime.run_output_variation_benchmark import (
     build_prompt,
     build_segment_selection_input,
     compare_pair,
+    comparison_flags,
     get_output_variation_tasks,
     output_unchanged_or_near_equal,
     run_benchmark,
@@ -150,9 +151,13 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertFalse(comparison["output_unchanged_or_near_equal"])
         self.assertTrue(comparison["total_tokens_reduced"])
         self.assertFalse(comparison["output_expansion_offsets_input_reduction"])
+        self.assertFalse(
+            comparison["output_expansion_partially_offsets_input_reduction"]
+        )
+        self.assertFalse(comparison["output_expansion_fully_offsets_input_reduction"])
 
     def test_compare_pair_flags_output_increase_near_equal_total_reduction_and_offset(self) -> None:
-        increased = compare_pair(
+        partial_offset = compare_pair(
             _run_tokens(output_tokens=10, total_tokens=110),
             _run_tokens(input_tokens=40, output_tokens=30, total_tokens=70),
         )
@@ -165,15 +170,52 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
             _run_tokens(input_tokens=40, output_tokens=120, total_tokens=160),
         )
 
-        self.assertTrue(increased["output_tokens_increased"])
-        self.assertTrue(increased["total_tokens_reduced"])
-        self.assertTrue(increased["output_expansion_offsets_input_reduction"])
+        self.assertTrue(partial_offset["output_tokens_increased"])
+        self.assertTrue(partial_offset["total_tokens_reduced"])
+        self.assertTrue(partial_offset["output_expansion_offsets_input_reduction"])
+        self.assertTrue(
+            partial_offset["output_expansion_partially_offsets_input_reduction"]
+        )
+        self.assertFalse(partial_offset["output_expansion_fully_offsets_input_reduction"])
         self.assertTrue(near_equal["output_unchanged_or_near_equal"])
         self.assertFalse(near_equal["output_tokens_reduced"])
         self.assertFalse(near_equal["output_tokens_increased"])
+        self.assertTrue(near_equal["output_expansion_offsets_input_reduction"])
+        self.assertTrue(
+            near_equal["output_expansion_partially_offsets_input_reduction"]
+        )
+        self.assertFalse(near_equal["output_expansion_fully_offsets_input_reduction"])
         self.assertFalse(fully_offset["total_tokens_reduced"])
         self.assertTrue(fully_offset["output_expansion_offsets_input_reduction"])
+        self.assertFalse(
+            fully_offset["output_expansion_partially_offsets_input_reduction"]
+        )
+        self.assertTrue(fully_offset["output_expansion_fully_offsets_input_reduction"])
         self.assertTrue(output_unchanged_or_near_equal(100, 103))
+
+    def test_comparison_flags_distinguish_partial_and_full_output_offset(self) -> None:
+        partial_offset = compare_pair(
+            _run_tokens(output_tokens=10, total_tokens=110),
+            _run_tokens(input_tokens=40, output_tokens=30, total_tokens=70),
+        )
+        full_offset = compare_pair(
+            _run_tokens(output_tokens=10, total_tokens=110),
+            _run_tokens(input_tokens=40, output_tokens=120, total_tokens=160),
+        )
+        no_offset = compare_pair(
+            _run_tokens(output_tokens=30, total_tokens=130),
+            _run_tokens(input_tokens=40, output_tokens=20, total_tokens=60),
+        )
+
+        self.assertIn("output_partially_offsets_input", comparison_flags(partial_offset))
+        self.assertNotIn("output_fully_offsets_input", comparison_flags(partial_offset))
+        self.assertIn("output_fully_offsets_input", comparison_flags(full_offset))
+        self.assertNotIn("output_partially_offsets_input", comparison_flags(full_offset))
+        self.assertFalse(no_offset["output_expansion_offsets_input_reduction"])
+        self.assertFalse(
+            no_offset["output_expansion_partially_offsets_input_reduction"]
+        )
+        self.assertFalse(no_offset["output_expansion_fully_offsets_input_reduction"])
 
     def test_quality_checks_required_facts_forbidden_mentions_and_format(self) -> None:
         task = self.tasks[0]

@@ -1124,6 +1124,8 @@ def compare_pair(baseline: dict[str, Any], selected: dict[str, Any]) -> dict[str
             "output_tokens_increased": False,
             "output_unchanged_or_near_equal": False,
             "output_expansion_offsets_input_reduction": False,
+            "output_expansion_partially_offsets_input_reduction": False,
+            "output_expansion_fully_offsets_input_reduction": False,
             "total_tokens_reduced": False,
             "baseline_success": baseline.get("success", False),
             "selected_success": False,
@@ -1139,6 +1141,9 @@ def compare_pair(baseline: dict[str, Any], selected: dict[str, Any]) -> dict[str
     near_equal = output_unchanged_or_near_equal(
         baseline["output_tokens"], selected["output_tokens"]
     )
+    output_offsets_input = input_delta < 0 and output_delta > 0
+    output_partially_offsets_input = output_offsets_input and total_delta < 0
+    output_fully_offsets_input = output_offsets_input and total_delta >= 0
     return {
         **base,
         "baseline_input_tokens": baseline["input_tokens"],
@@ -1160,7 +1165,11 @@ def compare_pair(baseline: dict[str, Any], selected: dict[str, Any]) -> dict[str
         "output_tokens_reduced": output_delta < 0 and not near_equal,
         "output_tokens_increased": output_delta > 0 and not near_equal,
         "output_unchanged_or_near_equal": near_equal,
-        "output_expansion_offsets_input_reduction": input_delta < 0 and output_delta > 0,
+        "output_expansion_offsets_input_reduction": output_offsets_input,
+        "output_expansion_partially_offsets_input_reduction": (
+            output_partially_offsets_input
+        ),
+        "output_expansion_fully_offsets_input_reduction": output_fully_offsets_input,
         "total_tokens_reduced": total_delta < 0,
         "baseline_success": baseline["success"],
         "selected_success": selected["success"],
@@ -1226,6 +1235,12 @@ def summarize_comparisons(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "output_expansion_offsets_input_reduction_count": count_true(
             valid, "output_expansion_offsets_input_reduction"
+        ),
+        "output_expansion_partially_offsets_input_reduction_count": count_true(
+            valid, "output_expansion_partially_offsets_input_reduction"
+        ),
+        "output_expansion_fully_offsets_input_reduction_count": count_true(
+            valid, "output_expansion_fully_offsets_input_reduction"
         ),
         "total_tokens_reduced_count": count_true(valid, "total_tokens_reduced"),
         "quality_pass_count": count_true(valid, "quality_pass"),
@@ -1390,8 +1405,10 @@ def comparison_flags(comparison: dict[str, Any]) -> str:
         flags.append("output_near_equal")
     if comparison["total_tokens_reduced"]:
         flags.append("total_reduced")
-    if comparison["output_expansion_offsets_input_reduction"]:
-        flags.append("output_offsets_input")
+    if comparison["output_expansion_partially_offsets_input_reduction"]:
+        flags.append("output_partially_offsets_input")
+    if comparison["output_expansion_fully_offsets_input_reduction"]:
+        flags.append("output_fully_offsets_input")
     return ", ".join(flags) or "none"
 
 

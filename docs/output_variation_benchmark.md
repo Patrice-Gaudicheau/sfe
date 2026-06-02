@@ -26,7 +26,11 @@ contract.
 The benchmark reports baseline and selected input, output, and total tokens,
 plus output delta, output ratio, input and total reduction percentages, and
 flags for output reduction, output increase, near-equal output, total-token
-reduction, and output expansion that offsets input reduction.
+reduction, and output expansion that offsets input reduction. The legacy
+`output_expansion_offsets_input_reduction` field means output increased while
+input decreased. Newer fields distinguish whether that expansion partially
+offset input savings while total tokens still decreased, or fully offset input
+savings so selected total tokens were flat or higher.
 
 The benchmark also includes lightweight quality checks. Shorter output is not
 automatically treated as better: required facts must be present, forbidden
