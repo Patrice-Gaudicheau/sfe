@@ -157,3 +157,26 @@ def test_lemonade_router_model_prefers_sfe_router_model() -> None:
     assert provider.calls[0]["model"] == "router-model"
     assert provider.calls[0]["messages"][0]["role"] == "system"
     assert "system_instruction" not in provider.calls[0]
+
+
+def test_google_router_reviewer_uses_google_model_and_system_message() -> None:
+    provider = FakeProvider()
+    reviewer = create_configured_router_json_reviewer(
+        system_instruction="Return JSON.",
+        prompt_builder=lambda payload: json.dumps(payload, sort_keys=True),
+        valid_decisions={"OK_TEST", "KO_BLOCK"},
+        max_tokens=128,
+        environ={
+            "SFE_PROVIDER": "google",
+            "SFE_GOOGLE_MODEL": "gemini-env",
+        },
+        provider_factories={"google": lambda: provider},
+    )
+
+    decision = reviewer.review({"task": "check"})
+
+    assert decision.provider_name == "google"
+    assert decision.model == "gemini-env"
+    assert provider.calls[0]["model"] == "gemini-env"
+    assert provider.calls[0]["messages"][0]["role"] == "system"
+    assert "system_instruction" not in provider.calls[0]

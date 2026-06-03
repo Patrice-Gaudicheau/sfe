@@ -25,6 +25,7 @@ import sfe_proxy.shadow_router as shadow_router_module
 from sfe_proxy.config import (
     DEFAULT_ALIBABA_UPSTREAM_BASE_URL,
     DEFAULT_ANTHROPIC_TIMEOUT_SECONDS,
+    DEFAULT_GOOGLE_UPSTREAM_BASE_URL,
     DEFAULT_HOST,
     DEFAULT_LEMONADE_UPSTREAM_BASE_URL,
     DEFAULT_MODE,
@@ -358,6 +359,21 @@ def test_proxy_config_uses_sfe_provider_for_alibaba(monkeypatch) -> None:
     assert config.upstream_api_key == "alibaba-key"
 
 
+def test_proxy_config_uses_sfe_provider_for_google(monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PROXY_PROVIDER", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("SFE_GOOGLE_BASE_URL", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER", "google")
+    monkeypatch.setenv("GOOGLE_API_KEY", "configured-value")
+
+    config = ProxyConfig.from_env()
+
+    assert config.provider == "google"
+    assert config.upstream_base_url == DEFAULT_GOOGLE_UPSTREAM_BASE_URL
+    assert config.upstream_api_key == "configured-value"
+
+
 def test_proxy_config_alibaba_uses_dashscope_key_fallback(monkeypatch) -> None:
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_BASE_URL", raising=False)
     monkeypatch.delenv("SFE_PROXY_UPSTREAM_API_KEY", raising=False)
@@ -454,6 +470,19 @@ def test_alibaba_default_upstream_url_appends_proxy_path() -> None:
     assert (
         _request_upstream_url(config, "/v1/chat/completions")
         == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+    )
+
+
+def test_google_default_upstream_url_strips_openai_client_v1_prefix() -> None:
+    config = ProxyConfig(
+        provider="google",
+        upstream_base_url=DEFAULT_GOOGLE_UPSTREAM_BASE_URL,
+        upstream_api_key="upstream-secret",
+    )
+
+    assert (
+        _request_upstream_url(config, "/v1/chat/completions")
+        == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     )
 
 
@@ -730,6 +759,7 @@ def test_proxy_config_rejects_unsupported_provider(monkeypatch) -> None:
         assert "lemonade" in str(exc)
         assert "alibaba" in str(exc)
         assert "anthropic" in str(exc)
+        assert "google" in str(exc)
         assert "SFE_PROXY_UPSTREAM_API_KEY" not in str(exc)
     else:
         raise AssertionError("unsupported proxy provider should fail")
@@ -800,8 +830,8 @@ def test_pass_through_preserves_json_body_status_and_safe_auth_logging() -> None
     assert '"stream": false' in joined_logs
 
 
-def test_openai_lemonade_and_alibaba_provider_aliases_use_openai_compatible_path() -> None:
-    for provider in ("openai", "lemonade", "alibaba"):
+def test_openai_lemonade_alibaba_and_google_aliases_use_openai_compatible_path() -> None:
+    for provider in ("openai", "lemonade", "alibaba", "google"):
         upstream = _start_upstream(
             status=200,
             body=b'{"id":"alias-upstream","object":"chat.completion"}',
@@ -827,7 +857,10 @@ def test_openai_lemonade_and_alibaba_provider_aliases_use_openai_compatible_path
             "id": "alias-upstream",
             "object": "chat.completion",
         }
-        assert RecordingUpstreamHandler.records[-1]["path"] == "/v1/chat/completions"
+        expected_path = (
+            "/chat/completions" if provider == "google" else "/v1/chat/completions"
+        )
+        assert RecordingUpstreamHandler.records[-1]["path"] == expected_path
         assert json.loads(
             RecordingUpstreamHandler.records[-1]["body"].decode("utf-8")
         ) == payload

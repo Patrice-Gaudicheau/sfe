@@ -20,10 +20,12 @@ CANONICAL_PROVIDER_VALUES = (
     "lemonade",
     "alibaba",
     "anthropic",
+    "google",
 )
 PROVIDER_ALIASES = {
     "openai-api": "openai",
     "alibaba-api": "alibaba",
+    "gemini": "google",
 }
 
 

@@ -118,11 +118,12 @@ include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
 | Category | Typical runner pattern | API key required | Notes |
 | --- | --- | --- | --- |
 | Deterministic runners | `runtime/run_high_overlap_*_benchmark.py` | No | Validate fixtures and report strict deterministic outcomes. |
-| Large/contextual runner | `runtime/run_large_contextual_benchmark.py` | No for `--dry-run`; yes for live providers | Supports `lemonade`, `openai-api`, `alibaba-api`, and `anthropic` executors. |
+| Large/contextual runner | `runtime/run_large_contextual_benchmark.py` | No for `--dry-run`; yes for live providers | Supports `lemonade`, `openai-api`, `alibaba-api`, `anthropic`, and `google` executors. |
 | Selector-only OpenAI smokes | `runtime/run_high_overlap_*_openai_selector_smoke.py` | Yes for live run | Use blind `candidate-N` handles and validate selected source. |
 | Selected-context OpenAI executor smokes | `runtime/run_high_overlap_*_openai_executor_smoke.py` | Yes for live run | Executor receives deterministic authoritative context only. |
 | Selected-vs-full OpenAI comparisons | `runtime/run_high_overlap_*_contamination_comparison.py` | Yes for live run | Compare selected authoritative context with full fixture context. |
 | Alibaba/Qwen smoke | `runtime/run_alibaba_smoke.py` | Yes for live run | Tiny provider smoke path; not a benchmark campaign. |
+| Google/Gemini smoke | `runtime/run_google_smoke.py` | Yes for live run | Tiny Gemini OpenAI-compatible smoke path; not a benchmark campaign. |
 
 Generated local reports should stay outside tracked files, preferably under
 `/tmp`, unless a summarized documentation note is intentionally added.

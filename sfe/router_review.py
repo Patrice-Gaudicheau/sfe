@@ -19,6 +19,12 @@ from providers.anthropic import (
     AnthropicProvider,
     MissingAnthropicAPIKeyError,
 )
+from providers.google import (
+    DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL,
+    GoogleAPIError,
+    GoogleAPIProvider,
+    MissingGoogleAPIKeyError,
+)
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
 from providers.openai_api import (
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
@@ -233,6 +239,19 @@ def create_configured_router_json_reviewer(
             provider_error_types=(AnthropicAPIError,),
             **common,
         )
+    if provider_name == "google":
+        return DirectProviderJsonReviewer(
+            provider=provider_factory(),
+            provider_name=provider_name,
+            model=(
+                first_env_value(environ, ("SFE_GOOGLE_MODEL",))
+                or DEFAULT_GOOGLE_MODEL
+            ),
+            call_style="system_message",
+            missing_key_errors=(MissingGoogleAPIKeyError,),
+            provider_error_types=(GoogleAPIError,),
+            **common,
+        )
     return UnsupportedProviderJsonReviewer(
         provider_name,
         reason=unsupported_provider_reason,
@@ -254,6 +273,8 @@ def provider_factory_for(
         return AlibabaAPIProvider
     if provider_name == "anthropic":
         return AnthropicProvider
+    if provider_name == "google":
+        return GoogleAPIProvider
     return lambda: None
 
 

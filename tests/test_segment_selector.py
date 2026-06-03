@@ -123,13 +123,14 @@ class SegmentSelectorTests(unittest.TestCase):
         self.assertIsNone(result.error_type)
         self.assertTrue(result.selection_usable)
 
-    def test_provider_factory_and_model_env_resolution_for_openai_anthropic_alibaba(self) -> None:
+    def test_provider_factory_and_model_env_resolution_for_openai_anthropic_alibaba_google(self) -> None:
         with patch.dict(
             os.environ,
             {
                 "SFE_OPENAI_ROUTER_MODEL": "env-openai-router",
                 "SFE_ANTHROPIC_ROUTER_MODEL": "env-anthropic-router",
                 "SFE_ALIBABA_ROUTER_MODEL": "env-alibaba-router",
+                "SFE_GOOGLE_MODEL": "env-google-model",
             },
             clear=True,
         ):
@@ -145,6 +146,10 @@ class SegmentSelectorTests(unittest.TestCase):
                 provider_name="alibaba",
                 provider_factories={"alibaba": lambda: FakeProvider()},
             )
+            google = create_configured_segment_selector(
+                provider_name="google",
+                provider_factories={"google": lambda: FakeProvider()},
+            )
 
         self.assertEqual(openai.provider_name, "openai")
         self.assertEqual(openai.model, "env-openai-router")
@@ -152,9 +157,11 @@ class SegmentSelectorTests(unittest.TestCase):
         self.assertEqual(anthropic.model, "env-anthropic-router")
         self.assertEqual(alibaba.provider_name, "alibaba")
         self.assertEqual(alibaba.model, "env-alibaba-router")
+        self.assertEqual(google.provider_name, "google")
+        self.assertEqual(google.model, "env-google-model")
 
     def test_fake_provider_paths_work_without_network_for_each_supported_provider(self) -> None:
-        for provider_name in ("openai", "anthropic", "alibaba"):
+        for provider_name in ("openai", "anthropic", "alibaba", "google"):
             with self.subTest(provider_name=provider_name):
                 provider = FakeProvider(
                     {

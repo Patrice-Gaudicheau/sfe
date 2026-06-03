@@ -22,6 +22,8 @@ from runtime.run_large_contextual_benchmark import (
     ANTHROPIC_JSON_PATH,
     BENCHMARK_TYPE,
     FINAL_PHASE_CONCLUSION,
+    GOOGLE_API_EXECUTOR,
+    GOOGLE_API_JSON_PATH,
     LemonadeBlockSelector,
     OPENAI_API_EXECUTOR,
     OPENAI_API_JSON_PATH,
@@ -764,6 +766,86 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
         for run in report["runs"]:
             self.assertEqual(run["provider"], "alibaba-api")
+
+    def test_google_cli_uses_env_defaults_and_report_paths(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_GOOGLE_MODEL": "env-google-model",
+                "SFE_GOOGLE_BASE_URL": "https://google.example.test/v1beta/openai",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            ["run_large_contextual_benchmark.py", "--executor", "google", "--dry-run"],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, "google")
+        self.assertEqual(args.model, "env-google-model")
+        self.assertEqual(args.router_model, "env-google-model")
+        self.assertEqual(args.base_url, "https://google.example.test/v1beta/openai")
+        self.assertEqual(args.json, GOOGLE_API_JSON_PATH)
+
+    def test_google_provider_path_is_constructed_without_network_in_tests(self) -> None:
+        class FakeGoogleProvider:
+            def __init__(self, base_url: str, timeout: float) -> None:
+                self.base_url = base_url
+                self.timeout = timeout
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "cache key region code Priya Nair pay-ops"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeGoogleProvider] = []
+
+        def make_provider(base_url: str, timeout: float) -> FakeGoogleProvider:
+            provider = FakeGoogleProvider(base_url, timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.GoogleAPIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="example-google-model",
+                base_url="https://google.example.test/v1beta/openai",
+                timeout_seconds=7,
+                dry_run=False,
+                selection_mode="fixture",
+                executor=GOOGLE_API_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(
+            providers[0].base_url,
+            "https://google.example.test/v1beta/openai",
+        )
+        self.assertEqual(providers[0].timeout, 7)
+        self.assertEqual(providers[0].calls, 2)
+        self.assertEqual(report["metadata"]["executor"], "google")
+        self.assertEqual(report["metadata"]["api_style"], "openai_compatible_chat")
+        self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
+        for run in report["runs"]:
+            self.assertEqual(run["provider"], "google")
 
     def test_practical_tier_dry_run_fixture_report_is_serializable(self) -> None:
         report = run_benchmark(

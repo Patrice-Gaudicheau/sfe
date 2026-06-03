@@ -373,7 +373,8 @@ or `TEMP` point to `/mnt/c/...`.
 ## Provider Support
 
 The current prototype has provider paths for OpenAI, Lemonade, Alibaba/Qwen,
-and Anthropic. They do not all have identical maturity or API shape.
+Anthropic, and Google/Gemini. They do not all have identical maturity or API
+shape.
 
 | Provider | Benchmark path | Standby proxy notes | Notes |
 | --- | --- | --- | --- |
@@ -381,6 +382,7 @@ and Anthropic. They do not all have identical maturity or API shape.
 | Lemonade | `--executor lemonade` and historical/local benchmark runners | Historical proxy support exists, but the proxy is not the current user path. | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
 | Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Historical proxy support exists, but the proxy is not the current user path. | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
 | Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
+| Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Standby proxy can pass through the OpenAI-compatible endpoint, but the proxy is not the current user path. | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`. |
 
 Proxy-specific variables remain in `.env.example` for historical and standby
 work, but the proxy is not the recommended active path for TUI V0.1. For the
@@ -418,12 +420,21 @@ SFE_ALIBABA_EXECUTOR_MODEL=qwen3.6-plus
 SFE_ALIBABA_DISABLE_THINKING=true
 ```
 
+Google/Gemini benchmark runs are optional and require:
+
+```bash
+GOOGLE_API_KEY=
+SFE_GOOGLE_MODEL=gemini-2.5-flash-lite
+SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+```
+
 ## Live API Caution
 
 Deterministic tests do not require an API key. Live OpenAI runners require
 `OPENAI_API_KEY`; live Anthropic runners require `ANTHROPIC_API_KEY`; live
-Alibaba/Qwen runners require `ALIBABA_API_KEY`. Keep secrets in a local `.env`
-file and never commit them.
+Alibaba/Qwen runners require `ALIBABA_API_KEY`; live Google/Gemini runners
+require `GOOGLE_API_KEY`. Keep secrets in a local `.env` file and never commit
+them.
 
 Generated benchmark reports should be written under `/tmp` or another
 untracked local location. Some selected-vs-full comparison runner names do not
@@ -471,7 +482,7 @@ python runtime/run_large_contextual_benchmark.py --task-tier standard --selectio
 
 Provider-backed large/contextual runs use the same runner with an explicit
 executor. Current executor choices are `lemonade`, `openai-api`,
-`alibaba-api`, and `anthropic`:
+`alibaba-api`, `anthropic`, and `google`:
 
 ```bash
 python runtime/run_large_contextual_benchmark.py \
@@ -517,6 +528,12 @@ Run one tiny Alibaba/Qwen smoke test when local credentials are configured:
 
 ```bash
 python runtime/run_alibaba_smoke.py --model qwen3.6-flash
+```
+
+Run one tiny Google/Gemini smoke test when local credentials are configured:
+
+```bash
+python runtime/run_google_smoke.py --model gemini-2.5-flash-lite
 ```
 
 Run the Cognitive Map deterministic micro-benchmark:

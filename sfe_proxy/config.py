@@ -14,16 +14,19 @@ DEFAULT_PORT = 17891
 DEFAULT_UPSTREAM_BASE_URL = "https://api.openai.com"
 DEFAULT_LEMONADE_UPSTREAM_BASE_URL = "http://127.0.0.1:13305"
 DEFAULT_ALIBABA_UPSTREAM_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode"
+DEFAULT_GOOGLE_UPSTREAM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 DEFAULT_PROXY_PROVIDER = "openai-compatible"
 OPENAI_PROXY_PROVIDER = "openai"
 LEMONADE_PROXY_PROVIDER = "lemonade"
 ALIBABA_PROXY_PROVIDER = "alibaba"
 ANTHROPIC_PROXY_PROVIDER = "anthropic"
+GOOGLE_PROXY_PROVIDER = "google"
 OPENAI_COMPATIBLE_PROXY_PROVIDERS = (
     DEFAULT_PROXY_PROVIDER,
     OPENAI_PROXY_PROVIDER,
     LEMONADE_PROXY_PROVIDER,
     ALIBABA_PROXY_PROVIDER,
+    GOOGLE_PROXY_PROVIDER,
 )
 SUPPORTED_PROXY_PROVIDERS = (
     DEFAULT_PROXY_PROVIDER,
@@ -31,6 +34,7 @@ SUPPORTED_PROXY_PROVIDERS = (
     LEMONADE_PROXY_PROVIDER,
     ALIBABA_PROXY_PROVIDER,
     ANTHROPIC_PROXY_PROVIDER,
+    GOOGLE_PROXY_PROVIDER,
 )
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
@@ -107,6 +111,8 @@ class ProxyConfig:
                 os.getenv("ALIBABA_API_KEY", "")
                 or os.getenv("DASHSCOPE_API_KEY", "")
             )
+        if provider == GOOGLE_PROXY_PROVIDER and not upstream_api_key:
+            upstream_api_key = os.getenv("GOOGLE_API_KEY", "")
         if (
             provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS
             and not upstream_api_key
@@ -227,6 +233,10 @@ class ProxyConfig:
                 "SFE_PROXY_UPSTREAM_API_KEY, ALIBABA_API_KEY, or DASHSCOPE_API_KEY "
                 "is required for alibaba proxy provider."
             )
+        if self.provider == GOOGLE_PROXY_PROVIDER and not self.upstream_api_key:
+            raise ValueError(
+                "SFE_PROXY_UPSTREAM_API_KEY or GOOGLE_API_KEY is required for google proxy provider."
+            )
         if self.provider in OPENAI_COMPATIBLE_PROXY_PROVIDERS and not self.upstream_api_key:
             raise ValueError(
                 "SFE_PROXY_UPSTREAM_API_KEY is required for proxy mode; "
@@ -291,6 +301,11 @@ def _default_upstream_base_url(provider: str) -> str:
         return (
             os.getenv("SFE_ALIBABA_BASE_URL", "").strip()
             or DEFAULT_ALIBABA_UPSTREAM_BASE_URL
+        )
+    if provider == GOOGLE_PROXY_PROVIDER:
+        return (
+            os.getenv("SFE_GOOGLE_BASE_URL", "").strip()
+            or DEFAULT_GOOGLE_UPSTREAM_BASE_URL
         )
     return DEFAULT_UPSTREAM_BASE_URL
 

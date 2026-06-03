@@ -23,14 +23,15 @@ The benchmark tests whether SFE can provide a practical advantage when the execu
 Each task contains multiple context blocks. One block is clearly relevant to the user question; the remaining blocks are plausible distractors. The baseline receives all blocks. The spatial/SFE path receives the user question plus only the selected relevant block.
 
 The benchmark began as Lemonade-first. The current runner also supports
-provider-backed execution through `lemonade`, `openai-api`, `alibaba-api`, and
-`anthropic` executors. These provider paths should still be compared only when
-the run protocol is aligned.
+provider-backed execution through `lemonade`, `openai-api`, `alibaba-api`,
+`anthropic`, and `google` executors. These provider paths should still be
+compared only when the run protocol is aligned.
 
 ## Benchmark Shape
 
 - Benchmark type: `large/contextual`
-- Executor choices: `lemonade`, `openai-api`, `alibaba-api`, and `anthropic`
+- Executor choices: `lemonade`, `openai-api`, `alibaba-api`, `anthropic`, and
+  `google`
 - Default router: `fixture_relevance_router`
 - Optional real router: `lemonade_block_selector`
 - Current fixture task count: 7

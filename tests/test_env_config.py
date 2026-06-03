@@ -90,6 +90,12 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_ALIBABA_ROUTER_MODEL=qwen3.6-flash", text)
         self.assertIn("SFE_ALIBABA_EXECUTOR_MODEL=qwen3.6-plus", text)
         self.assertIn("SFE_ALIBABA_DISABLE_THINKING=true", text)
+        self.assertIn("GOOGLE_API_KEY=", text)
+        self.assertIn("SFE_GOOGLE_MODEL=gemini-2.5-flash-lite", text)
+        self.assertIn(
+            "SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/",
+            text,
+        )
         self.assertIn("ANTHROPIC_API_KEY=", text)
         self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=", text)
         self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=", text)
@@ -109,6 +115,8 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "DASHSCOPE_API_KEY=")
             if line.startswith("SFE_ALIBABA_MODEL="):
                 self.assertEqual(line, "SFE_ALIBABA_MODEL=")
+            if line.startswith("GOOGLE_API_KEY="):
+                self.assertEqual(line, "GOOGLE_API_KEY=")
             if line.startswith("ANTHROPIC_API_KEY="):
                 self.assertEqual(line, "ANTHROPIC_API_KEY=")
             if line.startswith("SFE_ANTHROPIC_ROUTER_MODEL="):

@@ -29,6 +29,10 @@ from providers.anthropic import (  # noqa: E402
     DEFAULT_EXECUTOR_MODEL as DEFAULT_ANTHROPIC_EXECUTOR_MODEL,
     AnthropicProvider,
 )
+from providers.google import (  # noqa: E402
+    DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL,
+    GoogleAPIProvider,
+)
 from providers.openai_api import (  # noqa: E402
     DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_EXECUTOR_MODEL,
     OpenAIAPIProvider,
@@ -62,11 +66,13 @@ EXECUTOR_FIXTURE = "fixture"
 EXECUTOR_OPENAI_API = "openai-api"
 EXECUTOR_ANTHROPIC = "anthropic"
 EXECUTOR_ALIBABA_API = "alibaba-api"
+EXECUTOR_GOOGLE = "google"
 EXECUTORS = (
     EXECUTOR_FIXTURE,
     EXECUTOR_OPENAI_API,
     EXECUTOR_ANTHROPIC,
     EXECUTOR_ALIBABA_API,
+    EXECUTOR_GOOGLE,
 )
 SELECTION_SOURCE_FIXTURE = "fixture"
 SELECTION_SOURCE_ROUTER = "router"
@@ -74,10 +80,12 @@ SELECTION_SOURCES = (SELECTION_SOURCE_FIXTURE, SELECTION_SOURCE_ROUTER)
 ROUTER_PROVIDER_OPENAI = "openai"
 ROUTER_PROVIDER_ANTHROPIC = "anthropic"
 ROUTER_PROVIDER_ALIBABA = "alibaba"
+ROUTER_PROVIDER_GOOGLE = "google"
 ROUTER_PROVIDERS = (
     ROUTER_PROVIDER_OPENAI,
     ROUTER_PROVIDER_ANTHROPIC,
     ROUTER_PROVIDER_ALIBABA,
+    ROUTER_PROVIDER_GOOGLE,
 )
 DEFAULT_ROUTER_SELECTION_PROVIDER = ROUTER_PROVIDER_OPENAI
 KNOWN_ROUTER_SELECTION_STATUSES = KNOWN_SEGMENT_SELECTION_STATUSES
@@ -372,7 +380,7 @@ def _parse_args() -> argparse.Namespace:
     ):
         parser.error(
             "--selection-source router requires --executor openai-api, anthropic, "
-            "or alibaba-api."
+            "alibaba-api, or google."
         )
     return args
 
@@ -405,6 +413,8 @@ def _make_executor_provider(executor: str) -> Any:
         return AnthropicProvider()
     if executor == EXECUTOR_ALIBABA_API:
         return AlibabaAPIProvider()
+    if executor == EXECUTOR_GOOGLE:
+        return GoogleAPIProvider()
     raise ValueError(f"Unsupported executor {executor!r}.")
 
 
@@ -415,6 +425,8 @@ def _default_executor_model(executor: str) -> str | None:
         return os.getenv("SFE_ANTHROPIC_EXECUTOR_MODEL") or DEFAULT_ANTHROPIC_EXECUTOR_MODEL
     if executor == EXECUTOR_ALIBABA_API:
         return os.getenv("SFE_ALIBABA_EXECUTOR_MODEL") or DEFAULT_ALIBABA_EXECUTOR_MODEL
+    if executor == EXECUTOR_GOOGLE:
+        return os.getenv("SFE_GOOGLE_MODEL") or DEFAULT_GOOGLE_MODEL
     return None
 
 
@@ -423,6 +435,8 @@ def _default_router_provider(executor: str) -> str:
         return ROUTER_PROVIDER_ANTHROPIC
     if executor == EXECUTOR_ALIBABA_API:
         return ROUTER_PROVIDER_ALIBABA
+    if executor == EXECUTOR_GOOGLE:
+        return ROUTER_PROVIDER_GOOGLE
     return DEFAULT_ROUTER_SELECTION_PROVIDER
 
 
@@ -433,6 +447,8 @@ def _default_router_model(router_provider: str) -> str | None:
         return os.getenv("SFE_ANTHROPIC_ROUTER_MODEL") or None
     if router_provider == ROUTER_PROVIDER_ALIBABA:
         return os.getenv("SFE_ALIBABA_ROUTER_MODEL") or None
+    if router_provider == ROUTER_PROVIDER_GOOGLE:
+        return os.getenv("SFE_GOOGLE_MODEL") or None
     return None
 
 
@@ -1010,7 +1026,7 @@ def _router_provider_from_env(provider: str | None) -> str:
     if selected not in ROUTER_PROVIDERS:
         raise ValueError(
             "Router selection source requires --router-provider to be openai, "
-            "anthropic, or alibaba."
+            "anthropic, alibaba, or google."
         )
     return selected
 

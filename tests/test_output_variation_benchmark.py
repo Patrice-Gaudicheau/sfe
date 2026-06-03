@@ -21,6 +21,7 @@ from runtime.run_output_variation_benchmark import (
     EXECUTOR_FIXTURE,
     EXECUTOR_ANTHROPIC,
     EXECUTOR_ALIBABA_API,
+    EXECUTOR_GOOGLE,
     ROUTER_SELECTION_NOTE,
     FixtureOutputVariationExecutor,
     SegmentSelectorOutputVariationSelector,
@@ -359,6 +360,29 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.router_provider, "alibaba")
         self.assertEqual(args.model, "env-alibaba-executor")
         self.assertEqual(args.router_model, "env-alibaba-router")
+
+    def test_cli_parses_google_router_and_executor_env_defaults(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"SFE_GOOGLE_MODEL": "env-google-model"},
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--executor",
+                "google",
+                "--selection-source",
+                "router",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, EXECUTOR_GOOGLE)
+        self.assertEqual(args.router_provider, "google")
+        self.assertEqual(args.model, "env-google-model")
+        self.assertEqual(args.router_model, "env-google-model")
 
     def test_task_family_filter_can_run_single_family(self) -> None:
         selected = [task for task in self.tasks if task.family == "bounded_output_control"]

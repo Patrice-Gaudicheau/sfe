@@ -25,6 +25,7 @@ from .config import (
     ANTHROPIC_PROXY_PROVIDER,
     DRY_RUN_ENABLED_MODE,
     ENABLED_MODE,
+    GOOGLE_PROXY_PROVIDER,
     SHADOW_MODE,
     ProxyConfig,
 )
@@ -685,6 +686,8 @@ def _upstream_url(config: ProxyConfig, path: str) -> str:
 def _request_upstream_url(config: ProxyConfig, path: str) -> str:
     if config.provider == ANTHROPIC_PROXY_PROVIDER:
         return _anthropic_messages_url(config)
+    if config.provider == GOOGLE_PROXY_PROVIDER and path.startswith("/v1/"):
+        return _upstream_url(config, path.removeprefix("/v1"))
     return _upstream_url(config, path)
 
 

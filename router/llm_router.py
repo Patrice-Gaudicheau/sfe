@@ -35,6 +35,12 @@ from providers.alibaba import (
     AlibabaAPIProvider,
     PROVIDER_NAME as ALIBABA_API_PROVIDER_NAME,
 )
+from providers.google import (
+    DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL,
+    GoogleAPIError,
+    GoogleAPIProvider,
+    PROVIDER_NAME as GOOGLE_API_PROVIDER_NAME,
+)
 from router.mock_router import route as mock_route
 
 
@@ -231,6 +237,115 @@ def route_with_alibaba_api(
         timeout_seconds=timeout_seconds,
     )
     return decision
+
+
+def route_with_google(
+    task: str,
+    router_model: str | None = None,
+    executor_model: str | None = None,
+    timeout_seconds: float | None = None,
+) -> dict:
+    """Ask Google Gemini for a routing decision, falling back explicitly on errors."""
+    decision, _diagnostics = route_with_google_diagnostics(
+        task,
+        router_model=router_model,
+        executor_model=executor_model,
+        timeout_seconds=timeout_seconds,
+    )
+    return decision
+
+
+def route_with_google_diagnostics(
+    task: str,
+    router_model: str | None = None,
+    executor_model: str | None = None,
+    timeout_seconds: float | None = None,
+) -> tuple[dict, dict[str, Any]]:
+    """Return a contract-compliant routing decision from Google Gemini."""
+    router_model = router_model or os.getenv("SFE_GOOGLE_MODEL") or DEFAULT_GOOGLE_MODEL
+    executor_model = executor_model or os.getenv("SFE_GOOGLE_MODEL") or DEFAULT_GOOGLE_MODEL
+    provider = GoogleAPIProvider(timeout=timeout_seconds)
+    diagnostics = {
+        "router": GOOGLE_API_PROVIDER_NAME,
+        "provider": GOOGLE_API_PROVIDER_NAME,
+        "model": router_model,
+        "executor_model": executor_model,
+        "timeout_seconds": provider.timeout,
+        "attempt_count": 0,
+        "success": False,
+        "json_valid": False,
+        "used_fallback": False,
+        "decision_source": "",
+        "errors": [],
+    }
+
+    prompts = [_build_prompt(task), _build_retry_prompt(task)]
+    for attempt_index, prompt in enumerate(prompts, start=1):
+        diagnostics["attempt_count"] = attempt_index
+        try:
+            response = provider.chat(
+                [{"role": "user", "content": prompt}],
+                model=router_model,
+                max_tokens=512,
+                temperature=0.0,
+            )
+            router_metrics = _provider_router_metrics(
+                response, metadata_key="google_api", error=""
+            )
+            output = _extract_response_text(response)
+            decision = _parse_json(output)
+            diagnostics["json_valid"] = True
+            _validate_decision(decision)
+            decision, correction = _apply_classification_guard(task, decision)
+            if correction:
+                diagnostics.setdefault("corrections", []).append(correction)
+                LOGGER.warning("Google API router classification corrected; %s", correction)
+            decision["provider"] = GOOGLE_API_PROVIDER_NAME
+            decision["router_model"] = router_model
+            decision["model"] = executor_model
+            decision.update(router_metrics)
+            diagnostics["success"] = True
+            diagnostics["decision_source"] = GOOGLE_API_PROVIDER_NAME
+            return decision, diagnostics
+        except GoogleAPIError as exc:
+            api_error = dict(exc.diagnostics)
+            error = f"attempt {attempt_index}: {exc}"
+            diagnostics["errors"].append(error)
+            diagnostics.setdefault("api_errors", []).append(api_error)
+            diagnostics["api_error_retry_count"] = api_error.get("api_error_retry_count", 0)
+            LOGGER.warning("Google API router attempt failed; %s", error)
+            if api_error.get("api_error_type") in {
+                "unsupported_parameter",
+                "authentication",
+                "model_access",
+            }:
+                break
+        except Exception as exc:
+            error = f"attempt {attempt_index}: {exc}"
+            diagnostics["errors"].append(error)
+            LOGGER.warning("Google API router attempt failed; %s", error)
+
+    fallback = _safe_fallback(task, "Google API router failed after retry", diagnostics["errors"])
+    fallback["provider"] = GOOGLE_API_PROVIDER_NAME
+    fallback["router_model"] = router_model
+    fallback["model"] = executor_model
+    fallback.update(_empty_router_metrics(router_error="; ".join(diagnostics["errors"])))
+    if diagnostics.get("api_errors"):
+        last_api_error = diagnostics["api_errors"][-1]
+        fallback.update(
+            {
+                "api_error_status": last_api_error.get("api_error_status"),
+                "api_error_type": last_api_error.get("api_error_type"),
+                "api_error_code": last_api_error.get("api_error_code"),
+                "api_error_message": last_api_error.get("api_error_message"),
+                "api_error_retry_count": int(last_api_error.get("api_error_retry_count") or 0),
+                "api_error_attempts": last_api_error.get("api_error_attempts") or [],
+            }
+        )
+    diagnostics["used_fallback"] = True
+    diagnostics["decision_source"] = "mock_fallback"
+    diagnostics["fallback_reason"] = "Google API router failed after retry"
+    return fallback, diagnostics
 
 
 def route_with_alibaba_api_diagnostics(

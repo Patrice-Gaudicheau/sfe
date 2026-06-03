@@ -6262,6 +6262,7 @@ def test_tui_executor_factory_selects_openai_compatible_from_sfe_provider() -> N
     (
         ("alibaba", "SFE_ALIBABA_EXECUTOR_MODEL", "qwen-test"),
         ("anthropic", "SFE_ANTHROPIC_EXECUTOR_MODEL", "claude-test"),
+        ("google", "SFE_GOOGLE_MODEL", "gemini-test"),
     ),
 )
 def test_tui_executor_factory_selects_other_direct_providers(
@@ -6528,7 +6529,7 @@ def test_tui_invalid_provider_renders_configuration_guidance(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert "reason: provider_configuration_error" in rendered
-    assert "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, or anthropic" in rendered
+    assert "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, anthropic, or google" in rendered
     assert "bad-provider" not in rendered
 
 

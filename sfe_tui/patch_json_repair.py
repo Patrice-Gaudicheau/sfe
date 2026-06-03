@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from providers.alibaba import DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MODEL
 from providers.anthropic import DEFAULT_ROUTER_MODEL as DEFAULT_ANTHROPIC_ROUTER_MODEL
+from providers.google import DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL
 from providers.openai_api import DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL
 from sfe.patch_json_repair import (
     PatchJsonRepairer as _PatchJsonRepairer,
@@ -170,6 +171,14 @@ def create_tui_patch_json_repairer(
             model=first_env_value(environ, ("SFE_ANTHROPIC_ROUTER_MODEL",))
             or DEFAULT_ANTHROPIC_ROUTER_MODEL,
             call_style="system_instruction",
+        )
+    if provider_name == "google":
+        return ConfiguredPatchJsonRepairer(
+            provider=factory(),
+            provider_name=provider_name,
+            model=first_env_value(environ, ("SFE_GOOGLE_MODEL",))
+            or DEFAULT_GOOGLE_MODEL,
+            call_style="system_message",
         )
     return DisabledPatchJsonRepairer()
 

@@ -34,6 +34,12 @@ from providers.alibaba import (
     DEFAULT_ROUTER_MODEL as ALIBABA_API_DEFAULT_ROUTER_MODEL,
     AlibabaAPIProvider,
 )
+from providers.google import (
+    API_STYLE as GOOGLE_API_STYLE,
+    DEFAULT_BASE_URL as GOOGLE_API_DEFAULT_BASE_URL,
+    DEFAULT_MODEL as GOOGLE_API_DEFAULT_MODEL,
+    GoogleAPIProvider,
+)
 from providers.anthropic import (
     API_STYLE as ANTHROPIC_API_STYLE,
     DEFAULT_BASE_URL as ANTHROPIC_DEFAULT_BASE_URL,
@@ -85,21 +91,26 @@ ANTHROPIC_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_anthro
 ANTHROPIC_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_anthropic.md"
 ALIBABA_API_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_alibaba_api.json"
 ALIBABA_API_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_alibaba_api.md"
+GOOGLE_API_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_google.json"
+GOOGLE_API_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_google.md"
 FIXTURE_ROUTER_NAME = "fixture_relevance_router"
 LEMONADE_EXECUTOR = "lemonade"
 OPENAI_API_EXECUTOR = "openai-api"
 ANTHROPIC_EXECUTOR = "anthropic"
 ALIBABA_API_EXECUTOR = "alibaba-api"
+GOOGLE_API_EXECUTOR = "google"
 EXECUTORS = (
     LEMONADE_EXECUTOR,
     OPENAI_API_EXECUTOR,
     ANTHROPIC_EXECUTOR,
     ALIBABA_API_EXECUTOR,
+    GOOGLE_API_EXECUTOR,
 )
 LEMONADE_BLOCK_SELECTOR_NAME = "lemonade_block_selector"
 OPENAI_API_BLOCK_SELECTOR_NAME = "openai_api_block_selector"
 ANTHROPIC_BLOCK_SELECTOR_NAME = "anthropic_messages_block_selector"
 ALIBABA_API_BLOCK_SELECTOR_NAME = "alibaba_api_block_selector"
+GOOGLE_API_BLOCK_SELECTOR_NAME = "google_api_block_selector"
 REAL_ROUTER_NAME = LEMONADE_BLOCK_SELECTOR_NAME
 DRY_RUN_ROUTER_NAME = "dry_run_fixture_block_selector"
 SELECTION_MODES = ("fixture", "router", "both")
@@ -240,7 +251,8 @@ def _parse_args() -> argparse.Namespace:
             "Executor model id. Defaults to SFE_EXECUTOR_MODEL for Lemonade or "
             "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API or "
             "SFE_ANTHROPIC_EXECUTOR_MODEL for Anthropic or "
-            "SFE_ALIBABA_EXECUTOR_MODEL for Alibaba/Qwen."
+            "SFE_ALIBABA_EXECUTOR_MODEL for Alibaba/Qwen or SFE_GOOGLE_MODEL "
+            "for Google/Gemini."
         ),
     )
     parser.add_argument(
@@ -248,7 +260,8 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Provider base URL. Defaults to SFE_LEMONADE_BASE_URL for Lemonade "
             "or OPENAI_BASE_URL for OpenAI API or ANTHROPIC_BASE_URL for Anthropic "
-            "or ALIBABA_BASE_URL for Alibaba/Qwen."
+            "or ALIBABA_BASE_URL for Alibaba/Qwen or SFE_GOOGLE_BASE_URL for "
+            "Google/Gemini."
         ),
     )
     parser.add_argument(
@@ -303,7 +316,8 @@ def _parse_args() -> argparse.Namespace:
             "Router model id for --selection-mode router or both. Defaults to "
             "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI API "
             "or SFE_ANTHROPIC_ROUTER_MODEL for Anthropic or "
-            "SFE_ALIBABA_ROUTER_MODEL for Alibaba/Qwen."
+            "SFE_ALIBABA_ROUTER_MODEL for Alibaba/Qwen or SFE_GOOGLE_MODEL for "
+            "Google/Gemini."
         ),
     )
     parser.add_argument("--json", type=Path)
@@ -337,6 +351,8 @@ def _default_executor_model(executor: str) -> str:
         return os.getenv("SFE_ANTHROPIC_EXECUTOR_MODEL") or ANTHROPIC_DEFAULT_EXECUTOR_MODEL
     if executor == ALIBABA_API_EXECUTOR:
         return os.getenv("SFE_ALIBABA_EXECUTOR_MODEL") or ALIBABA_API_DEFAULT_EXECUTOR_MODEL
+    if executor == GOOGLE_API_EXECUTOR:
+        return os.getenv("SFE_GOOGLE_MODEL") or GOOGLE_API_DEFAULT_MODEL
     return os.getenv("SFE_EXECUTOR_MODEL") or DEFAULT_EXECUTION_MODEL
 
 
@@ -347,6 +363,8 @@ def _default_router_model(executor: str) -> str:
         return os.getenv("SFE_ANTHROPIC_ROUTER_MODEL") or ANTHROPIC_DEFAULT_ROUTER_MODEL
     if executor == ALIBABA_API_EXECUTOR:
         return os.getenv("SFE_ALIBABA_ROUTER_MODEL") or ALIBABA_API_DEFAULT_ROUTER_MODEL
+    if executor == GOOGLE_API_EXECUTOR:
+        return os.getenv("SFE_GOOGLE_MODEL") or GOOGLE_API_DEFAULT_MODEL
     return os.getenv("SFE_ROUTER_MODEL") or DEFAULT_ROUTER_MODEL
 
 
@@ -357,6 +375,8 @@ def _default_base_url(executor: str) -> str:
         return os.getenv("ANTHROPIC_BASE_URL") or ANTHROPIC_DEFAULT_BASE_URL
     if executor == ALIBABA_API_EXECUTOR:
         return os.getenv("ALIBABA_BASE_URL") or ALIBABA_API_DEFAULT_BASE_URL
+    if executor == GOOGLE_API_EXECUTOR:
+        return os.getenv("SFE_GOOGLE_BASE_URL") or GOOGLE_API_DEFAULT_BASE_URL
     return os.getenv("SFE_LEMONADE_BASE_URL") or LEMONADE_DEFAULT_BASE_URL
 
 
@@ -367,6 +387,8 @@ def _default_json_path(executor: str) -> Path:
         return ANTHROPIC_JSON_PATH
     if executor == ALIBABA_API_EXECUTOR:
         return ALIBABA_API_JSON_PATH
+    if executor == GOOGLE_API_EXECUTOR:
+        return GOOGLE_API_JSON_PATH
     return DEFAULT_JSON_PATH
 
 
@@ -377,6 +399,8 @@ def _default_md_path(executor: str) -> Path:
         return ANTHROPIC_MD_PATH
     if executor == ALIBABA_API_EXECUTOR:
         return ALIBABA_API_MD_PATH
+    if executor == GOOGLE_API_EXECUTOR:
+        return GOOGLE_API_MD_PATH
     return DEFAULT_MD_PATH
 
 
@@ -2144,6 +2168,8 @@ def _make_provider(executor: str, base_url: str, timeout_seconds: float) -> Chat
         return AnthropicProvider(base_url=base_url, timeout=timeout_seconds)
     if executor == ALIBABA_API_EXECUTOR:
         return AlibabaAPIProvider(base_url=base_url, timeout=timeout_seconds)
+    if executor == GOOGLE_API_EXECUTOR:
+        return GoogleAPIProvider(base_url=base_url, timeout=timeout_seconds)
     provider = LemonadeProvider(base_url=base_url)
     provider.timeout = timeout_seconds
     return provider
@@ -2259,6 +2285,8 @@ def _block_selector_name(executor: str) -> str:
         return ANTHROPIC_BLOCK_SELECTOR_NAME
     if executor == ALIBABA_API_EXECUTOR:
         return ALIBABA_API_BLOCK_SELECTOR_NAME
+    if executor == GOOGLE_API_EXECUTOR:
+        return GOOGLE_API_BLOCK_SELECTOR_NAME
     return LEMONADE_BLOCK_SELECTOR_NAME
 
 
@@ -2269,6 +2297,8 @@ def _selection_source(executor: str) -> str:
         return "anthropic_messages"
     if executor == ALIBABA_API_EXECUTOR:
         return "alibaba_api"
+    if executor == GOOGLE_API_EXECUTOR:
+        return "google_api"
     return "lemonade"
 
 
@@ -2277,6 +2307,8 @@ def _api_style(executor: str) -> str:
         return "openai_responses"
     if executor == ANTHROPIC_EXECUTOR:
         return ANTHROPIC_API_STYLE
+    if executor == GOOGLE_API_EXECUTOR:
+        return GOOGLE_API_STYLE
     return "openai_compatible_chat"
 
 

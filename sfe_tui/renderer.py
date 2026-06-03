@@ -1261,7 +1261,7 @@ def _failure_guidance(error_category: str | None) -> str:
         "invalid_json": "provider returned non-JSON data",
         "provider_error": "provider call failed; check provider configuration and retry",
         "provider_configuration_error": (
-            "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, or anthropic"
+            "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, anthropic, or google"
         ),
         "provider_not_supported": "selected provider is not supported by the TUI executor yet",
         "invalid_response": "provider returned an invalid response",

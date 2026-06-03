@@ -34,6 +34,7 @@ def test_blank_sfe_provider_returns_default() -> None:
         ("lemonade", "lemonade"),
         ("alibaba", "alibaba"),
         ("anthropic", "anthropic"),
+        ("google", "google"),
         ("openai-compatible", "openai-compatible"),
     ),
 )
@@ -53,6 +54,11 @@ def test_openai_api_alias_normalizes_to_openai() -> None:
 def test_alibaba_api_alias_normalizes_to_alibaba() -> None:
     assert normalize_provider_name("alibaba-api") == "alibaba"
     assert resolve_sfe_provider({"SFE_PROVIDER": "ALIBABA-API"}) == "alibaba"
+
+
+def test_gemini_alias_normalizes_to_google() -> None:
+    assert normalize_provider_name("gemini") == "google"
+    assert resolve_sfe_provider({"SFE_PROVIDER": "GEMINI"}) == "google"
 
 
 def test_unknown_provider_raises_clear_error() -> None:

@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from router.llm_router import (
     route_with_alibaba_api,
     route_with_codexcli,
+    route_with_google,
     route_with_llm,
     route_with_openai_api,
 )
@@ -39,6 +40,11 @@ from providers.alibaba import (
     DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MODEL,
     PROVIDER_NAME as ALIBABA_API_PROVIDER_NAME,
     AlibabaAPIProvider,
+)
+from providers.google import (
+    DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL,
+    PROVIDER_NAME as GOOGLE_API_PROVIDER_NAME,
+    GoogleAPIProvider,
 )
 from providers.lemonade import LemonadeProvider
 from runtime.logger import log_run
@@ -165,6 +171,7 @@ def _parse_args() -> argparse.Namespace:
             OPENAI_CODEXCLI_PROVIDER_NAME,
             OPENAI_API_PROVIDER_NAME,
             ALIBABA_API_PROVIDER_NAME,
+            GOOGLE_API_PROVIDER_NAME,
         ),
         default="mock",
     )
@@ -176,6 +183,7 @@ def _parse_args() -> argparse.Namespace:
             OPENAI_CODEXCLI_PROVIDER_NAME,
             OPENAI_API_PROVIDER_NAME,
             ALIBABA_API_PROVIDER_NAME,
+            GOOGLE_API_PROVIDER_NAME,
         ),
         default="mock",
     )
@@ -186,7 +194,8 @@ def _parse_args() -> argparse.Namespace:
             "Router model for OpenAI backends. Defaults by backend: "
             f"{OPENAI_API_PROVIDER_NAME}={DEFAULT_OPENAI_API_ROUTER_MODEL}, "
             f"{OPENAI_CODEXCLI_PROVIDER_NAME}={DEFAULT_CODEXCLI_ROUTER_MODEL}, "
-            f"{ALIBABA_API_PROVIDER_NAME}={DEFAULT_ALIBABA_ROUTER_MODEL}."
+            f"{ALIBABA_API_PROVIDER_NAME}={DEFAULT_ALIBABA_ROUTER_MODEL}, "
+            f"{GOOGLE_API_PROVIDER_NAME}={DEFAULT_GOOGLE_MODEL}."
         ),
     )
     parser.add_argument(
@@ -246,6 +255,13 @@ def _route_task(
             executor_model=_alibaba_executor_model_or_none(executor_model),
             timeout_seconds=timeout_seconds,
         )
+    if router_name == GOOGLE_API_PROVIDER_NAME:
+        return route_with_google(
+            task,
+            router_model=router_model,
+            executor_model=_google_model_or_none(executor_model),
+            timeout_seconds=timeout_seconds,
+        )
     return route(task)
 
 
@@ -301,6 +317,18 @@ def _execute_task(
         )
     if executor_name == ALIBABA_API_PROVIDER_NAME:
         return _execute_with_alibaba_api(
+            task,
+            task_label,
+            routing_decision,
+            mode,
+            router_name,
+            executor_name,
+            executor_model,
+            timeout_seconds,
+            debug_raw_response,
+        )
+    if executor_name == GOOGLE_API_PROVIDER_NAME:
+        return _execute_with_google(
             task,
             task_label,
             routing_decision,
@@ -679,6 +707,84 @@ def _execute_with_alibaba_api(
     }
 
 
+def _execute_with_google(
+    task: str,
+    task_label: str,
+    routing_decision: dict,
+    mode: str,
+    router_name: str,
+    executor_name: str,
+    executor_model: str,
+    timeout_seconds: float,
+    debug_raw_response: bool,
+) -> dict:
+    provider = GoogleAPIProvider(timeout=timeout_seconds)
+    model = _google_model_or_none(executor_model) or os.getenv("SFE_GOOGLE_MODEL") or DEFAULT_GOOGLE_MODEL
+    prompt = _build_execution_prompt(task, routing_decision, mode)
+    prompt_style = _prompt_style(mode, routing_decision)
+    zone_path = _zone_path(routing_decision["task_type"])
+    response: dict = {}
+    response_text = ""
+    latency_ms = 0
+    error_marker = ""
+
+    started = time.perf_counter()
+    try:
+        response = provider.chat(
+            [{"role": "user", "content": prompt}],
+            model=model,
+            max_tokens=160,
+            temperature=0.2,
+        )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        response_text = _extract_response_text(response)
+        error_marker = _executor_error_marker(response_text)
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        error_marker = str(exc)
+
+    if debug_raw_response:
+        print(f"raw response diagnostics: {_raw_response_diagnostics(response)}")
+
+    tokens = _extract_token_usage(response, prompt, response_text)
+
+    return {
+        "executor_model": model,
+        "error_marker": error_marker,
+        "response_text": response_text,
+        "tokens": tokens,
+        "latency_ms": latency_ms,
+        "run_data": {
+            "task_type": routing_decision["task_type"],
+            "mode": mode,
+            "provider": GOOGLE_API_PROVIDER_NAME,
+            "model": model,
+            "input_tokens": tokens["input_tokens"],
+            "output_tokens": tokens["output_tokens"],
+            "total_tokens": tokens["total_tokens"],
+            "latency_ms": latency_ms,
+            "success": not error_marker,
+            "router": router_name,
+            "executor": executor_name,
+            "router_model": routing_decision.get("router_model") or _default_router_model_for_backend(executor_name),
+            "executor_model": model,
+            **_router_metrics_for_log(routing_decision),
+            "prompt_style": prompt_style,
+            "task_label": task_label,
+            "error": error_marker,
+            "zone_path": zone_path,
+            "notes": _build_notes(
+                router_name,
+                executor_name,
+                prompt_style,
+                task_label,
+                error_marker,
+                zone_path=zone_path,
+            ),
+        },
+    }
+
+
 def _select_lemonade_executor_model() -> str:
     return os.getenv("SFE_EXECUTOR_MODEL") or DEFAULT_EXECUTION_MODEL
 
@@ -689,6 +795,12 @@ def _alibaba_executor_model_or_none(executor_model: str | None) -> str | None:
     return executor_model
 
 
+def _google_model_or_none(model: str | None) -> str | None:
+    if not model or model == DEFAULT_OPENAI_EXECUTOR_MODEL:
+        return None
+    return model
+
+
 def _router_model_for_display(routing_decision: dict) -> str:
     return str(routing_decision.get("router_model") or routing_decision.get("model") or "")
 
@@ -696,6 +808,8 @@ def _router_model_for_display(routing_decision: dict) -> str:
 def _default_router_model_for_backend(backend_name: str) -> str:
     if backend_name == ALIBABA_API_PROVIDER_NAME:
         return DEFAULT_ALIBABA_ROUTER_MODEL
+    if backend_name == GOOGLE_API_PROVIDER_NAME:
+        return DEFAULT_GOOGLE_MODEL
     if backend_name == OPENAI_API_PROVIDER_NAME:
         return DEFAULT_OPENAI_API_ROUTER_MODEL
     return DEFAULT_CODEXCLI_ROUTER_MODEL

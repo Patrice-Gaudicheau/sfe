@@ -107,6 +107,16 @@ python runtime/run_output_variation_benchmark.py \
   --selection-source router
 ```
 
+Example live Google/Gemini router/executor run after setting `GOOGLE_API_KEY`,
+`SFE_GOOGLE_MODEL`, and `SFE_GOOGLE_BASE_URL` in local `.env`:
+
+```bash
+python runtime/run_output_variation_benchmark.py \
+  --executor google \
+  --router-provider google \
+  --selection-source router
+```
+
 ## Exploratory Live Results
 
 The following observations come from exploratory live runs after the benchmark
