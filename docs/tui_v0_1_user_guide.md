@@ -383,10 +383,12 @@ The current TUI behavior intentionally keeps these boundaries:
 
 Empty-workspace file creation through the DEV `/run` workspace-write path works
 in principle, but it depends on the configured executor model producing a
-strict Git-style unified diff. SFE treats that diff as a contract: file sections
-must start with `diff --git a/<relative-path> b/<relative-path>`, new files must
-use normal `/dev/null` file headers inside that section, and hunk line counts
-must exactly match the hunk body.
+mechanically valid patch response. `/run` calls the executor patch provider once,
+then parses the response as structured file-replacement JSON or a strict
+Git-style unified diff. For unified diffs, file sections must start with
+`diff --git a/<relative-path> b/<relative-path>`, new files must use normal
+`/dev/null` file headers inside that section, and hunk line counts must exactly
+match the hunk body.
 
 Some local or mid-sized models can understand the task and still produce an
 invalid unified diff. The most common observed failure in empty-workspace
@@ -397,9 +399,10 @@ instead of accepting, rewriting, or silently repairing malformed output.
 
 `/run-report` can show bounded hunk accounting diagnostics for these failures,
 including the failing path, hunk header, declared counts, actual counts, and
-whether the hunk looks like a new-file hunk. The pipeline may make one LLM patch
-repair attempt for `impossible_hunk_accounting`, but smaller or local models can
-still fail if they cannot reproduce exact hunk counts.
+whether the hunk looks like a new-file hunk. `/run` does not perform a second LLM
+repair pass for `impossible_hunk_accounting` or other invalid patch proposals.
+Invalid patch output fails explicitly and must be retried or fixed by producing a
+valid patch response.
 
 A controlled comparison of the same empty-workspace ToDo web app task completed
 with OpenAI as the router and executor provider. That run generated and applied
