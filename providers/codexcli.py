@@ -60,22 +60,29 @@ class CodexCLIProvider:
         max_tokens: int = 512,
         temperature: float = 0.2,
         progress_sink: ProviderProgressSink | None = None,
+        system_instruction: str | None = None,
         **_: Any,
     ) -> dict[str, Any]:
-        """Run Codex CLI and normalize JSONL events to a chat-completion shape."""
-        prompt = _messages_to_prompt(messages)
+        """Run Codex CLI and normalize JSONL events to a chat-completion shape.
+
+        Codex CLI currently receives max_tokens and temperature as request
+        metadata only; the adapter does not add unsupported transport flags.
+        """
+        prompt = _messages_to_prompt(messages, system_instruction=system_instruction)
         started = time.perf_counter()
         command = build_codex_exec_command(model=model, sandbox=self.sandbox)
         supervisor = ProviderCallSupervisor(
             provider=PROVIDER_NAME,
             model=model,
             progress_sink=progress_sink,
+            idle_timeout_seconds=self.timeout,
         )
         supervisor.start(
             {
                 "command": command,
                 "cwd": str(self.cwd),
                 "max_tokens_requested": max_tokens,
+                "timeout_seconds": self.timeout,
             }
         )
 
@@ -284,8 +291,14 @@ def _first_int(data: dict[str, Any], keys: tuple[str, ...]) -> int | None:
     return None
 
 
-def _messages_to_prompt(messages: list[dict[str, str]]) -> str:
+def _messages_to_prompt(
+    messages: list[dict[str, str]],
+    *,
+    system_instruction: str | None = None,
+) -> str:
     parts = []
+    if system_instruction:
+        parts.append(f"SYSTEM:\n{system_instruction}")
     for message in messages:
         role = str(message.get("role") or "user")
         content = str(message.get("content") or "")
