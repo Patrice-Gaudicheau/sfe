@@ -55,6 +55,7 @@ from providers.openai_api import (
 )
 from providers.codexcli import (
     DEFAULT_EXECUTOR_MODEL as CODEXCLI_DEFAULT_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as CODEXCLI_DEFAULT_ROUTER_MODEL,
     PROVIDER_NAME as OPENAI_CODEXCLI_EXECUTOR,
     CodexCLIProvider,
 )
@@ -120,6 +121,7 @@ OPENAI_API_BLOCK_SELECTOR_NAME = "openai_api_block_selector"
 ANTHROPIC_BLOCK_SELECTOR_NAME = "anthropic_messages_block_selector"
 ALIBABA_API_BLOCK_SELECTOR_NAME = "alibaba_api_block_selector"
 GOOGLE_API_BLOCK_SELECTOR_NAME = "google_api_block_selector"
+CODEXCLI_BLOCK_SELECTOR_NAME = "codexcli_block_selector"
 REAL_ROUTER_NAME = LEMONADE_BLOCK_SELECTOR_NAME
 DRY_RUN_ROUTER_NAME = "dry_run_fixture_block_selector"
 SELECTION_MODES = ("fixture", "router", "both")
@@ -332,8 +334,8 @@ def _parse_args() -> argparse.Namespace:
         "--router-model",
         help=(
             "Router model id for --selection-mode router or both. Defaults to "
-            "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI API "
-            "or SFE_ANTHROPIC_ROUTER_MODEL for Anthropic or "
+            "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI "
+            "API/CodexCLI or SFE_ANTHROPIC_ROUTER_MODEL for Anthropic or "
             "SFE_ALIBABA_ROUTER_MODEL for Alibaba/Qwen or SFE_GOOGLE_MODEL for "
             "Google/Gemini."
         ),
@@ -346,11 +348,6 @@ def _parse_args() -> argparse.Namespace:
         help="Build prompts and deterministic metrics without calling a provider.",
     )
     args = parser.parse_args()
-    if args.executor == OPENAI_CODEXCLI_EXECUTOR and args.selection_mode != "fixture":
-        parser.error(
-            "--executor openai-codexcli currently supports "
-            "--selection-mode fixture only in this benchmark."
-        )
     if (
         args.codexcli_idle_timeout_seconds is not None
         and args.codexcli_idle_timeout_seconds <= 0
@@ -389,7 +386,7 @@ def _default_executor_model(executor: str) -> str:
 
 def _default_router_model(executor: str) -> str | None:
     if executor == OPENAI_CODEXCLI_EXECUTOR:
-        return None
+        return os.getenv("SFE_OPENAI_ROUTER_MODEL") or CODEXCLI_DEFAULT_ROUTER_MODEL
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_ROUTER_MODEL") or OPENAI_API_DEFAULT_ROUTER_MODEL
     if executor == ANTHROPIC_EXECUTOR:
@@ -2081,11 +2078,6 @@ def run_benchmark(
         raise ValueError(f"Unknown selection mode: {selection_mode}")
     if executor not in EXECUTORS:
         raise ValueError(f"Unknown executor: {executor}")
-    if executor == OPENAI_CODEXCLI_EXECUTOR and selection_mode != "fixture":
-        raise ValueError(
-            "openai-codexcli currently supports selection_mode='fixture' only "
-            "in the large/contextual benchmark."
-        )
     task_tier = normalize_task_tier(task_tier)
     base_url = base_url or _default_base_url(executor)
     provider_pacer = ProviderCallPacer(
@@ -2110,6 +2102,7 @@ def run_benchmark(
         executor=executor,
         base_url=base_url,
         timeout_seconds=timeout_seconds,
+        codexcli_idle_timeout_seconds=codexcli_idle_timeout_seconds,
         router_model=router_model,
         provider_pacer=provider_pacer,
     )
@@ -2250,6 +2243,7 @@ def _make_selector(
     executor: str,
     base_url: str,
     timeout_seconds: float,
+    codexcli_idle_timeout_seconds: float | None,
     router_model: str,
     provider_pacer: ProviderCallPacer | None = None,
 ) -> BlockSelector | None:
@@ -2257,7 +2251,12 @@ def _make_selector(
         return None
     if dry_run:
         return DryRunBlockSelector()
-    provider = _make_provider(executor, base_url, timeout_seconds)
+    provider = _make_provider(
+        executor,
+        base_url,
+        timeout_seconds,
+        codexcli_idle_timeout_seconds=codexcli_idle_timeout_seconds,
+    )
     return LemonadeBlockSelector(
         provider=provider,
         model=router_model,
@@ -2348,6 +2347,8 @@ def _router_name_for_selection_mode(selection_mode: str, dry_run: bool, executor
 
 
 def _block_selector_name(executor: str) -> str:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return CODEXCLI_BLOCK_SELECTOR_NAME
     if executor == OPENAI_API_EXECUTOR:
         return OPENAI_API_BLOCK_SELECTOR_NAME
     if executor == ANTHROPIC_EXECUTOR:
@@ -2360,6 +2361,8 @@ def _block_selector_name(executor: str) -> str:
 
 
 def _selection_source(executor: str) -> str:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return "codexcli"
     if executor == OPENAI_API_EXECUTOR:
         return "openai_api"
     if executor == ANTHROPIC_EXECUTOR:

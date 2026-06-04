@@ -22,6 +22,7 @@ from runtime.run_large_contextual_benchmark import (
     ANTHROPIC_JSON_PATH,
     BENCHMARK_TYPE,
     CODEXCLI_JSON_PATH,
+    CODEXCLI_DEFAULT_ROUTER_MODEL,
     CODEXCLI_PROCESS_BASE_URL,
     FINAL_PHASE_CONCLUSION,
     GOOGLE_API_EXECUTOR,
@@ -653,11 +654,11 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(args.executor, OPENAI_CODEXCLI_EXECUTOR)
         self.assertEqual(args.model, "env-codex-executor")
-        self.assertIsNone(args.router_model)
+        self.assertEqual(args.router_model, CODEXCLI_DEFAULT_ROUTER_MODEL)
         self.assertEqual(args.base_url, CODEXCLI_PROCESS_BASE_URL)
         self.assertEqual(args.json, CODEXCLI_JSON_PATH)
 
-    def test_codexcli_cli_rejects_router_selection_modes_for_now(self) -> None:
+    def test_codexcli_cli_accepts_router_selection_modes_benchmark_locally(self) -> None:
         for selection_mode in ("router", "both"):
             with self.subTest(selection_mode=selection_mode), patch.object(
                 sys,
@@ -668,22 +669,93 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
                     OPENAI_CODEXCLI_EXECUTOR,
                     "--selection-mode",
                     selection_mode,
+                    "--router-model",
+                    "gpt-router",
                     "--dry-run",
                 ],
             ):
-                with self.assertRaises(SystemExit):
-                    _parse_args()
+                args = _parse_args()
 
-    def test_codexcli_run_benchmark_rejects_router_selection_modes_for_now(self) -> None:
-        with self.assertRaisesRegex(ValueError, "selection_mode='fixture' only"):
-            run_benchmark(
+            self.assertEqual(args.executor, OPENAI_CODEXCLI_EXECUTOR)
+            self.assertEqual(args.selection_mode, selection_mode)
+            self.assertEqual(args.router_model, "gpt-router")
+
+    def test_codexcli_both_mode_uses_separate_router_and_executor_models_without_live_call(self) -> None:
+        class FakeCodexCLIProvider:
+            def __init__(self, idle_timeout: float | None = None) -> None:
+                self.idle_timeout = idle_timeout
+                self.calls = 0
+                self.models: list[str] = []
+                self.prompts: list[str] = []
+
+            def chat(self, messages, *_, model: str, **__) -> dict[str, object]:  # type: ignore[no-untyped-def]
+                self.calls += 1
+                prompt = str(messages[0]["content"])
+                self.models.append(model)
+                self.prompts.append(prompt)
+                if "Return JSON only" in prompt:
+                    content = json.dumps(
+                        {
+                            "selected_block_id": "pay-ops",
+                            "confidence": 1.0,
+                            "reason": "contains cache key region and Priya Nair",
+                        }
+                    )
+                else:
+                    content = "cache key salted with the region code Priya Nair pay-ops"
+                return {
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeCodexCLIProvider] = []
+
+        def make_provider(idle_timeout: float | None = None) -> FakeCodexCLIProvider:
+            provider = FakeCodexCLIProvider(idle_timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.CodexCLIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
                 tasks=get_large_contextual_tasks()[:1],
                 repeat=1,
-                model="gpt-test",
-                dry_run=True,
-                selection_mode="router",
+                model="gpt-executor",
+                base_url=CODEXCLI_PROCESS_BASE_URL,
+                timeout_seconds=7,
+                codexcli_idle_timeout_seconds=180,
+                dry_run=False,
+                selection_mode="both",
+                router_model="gpt-router",
                 executor=OPENAI_CODEXCLI_EXECUTOR,
             )
+
+        self.assertEqual(len(providers), 2)
+        executor_provider, router_provider = providers
+        self.assertEqual(executor_provider.models, ["gpt-executor"] * 3)
+        self.assertEqual(router_provider.models, ["gpt-router"])
+        self.assertEqual(executor_provider.calls, 3)
+        self.assertEqual(router_provider.calls, 1)
+        self.assertEqual(report["metadata"]["executor"], OPENAI_CODEXCLI_EXECUTOR)
+        self.assertEqual(report["metadata"]["router"], "codexcli_block_selector")
+        self.assertEqual(report["metadata"]["router_model"], "gpt-router")
+        self.assertEqual(report["metadata"]["codexcli_idle_timeout_seconds"], 180)
+        self.assertEqual(
+            set(report["summary"]["modes"]),
+            {"baseline", "spatial_fixture", "spatial_router"},
+        )
+        router_run = next(run for run in report["runs"] if run["mode"] == "spatial_router")
+        self.assertEqual(router_run["router_selected_block_id"], "pay-ops")
+        self.assertEqual(router_run["selection_source"], "codexcli")
+        self.assertTrue(router_run["router_success"])
+        self.assertTrue(router_run["router_valid_selection"])
+        self.assertTrue(router_run["router_selection_matches_fixture"])
 
     def test_codexcli_provider_path_is_constructed_without_live_call_in_tests(self) -> None:
         class FakeCodexCLIProvider:
