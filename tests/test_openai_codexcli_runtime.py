@@ -24,8 +24,8 @@ from runtime.logger import list_runs, log_run
 
 
 class OpenAICodexCLIRuntimeTests(unittest.TestCase):
-    def test_codexcli_default_router_model_remains_mini(self) -> None:
-        self.assertEqual(CODEXCLI_DEFAULT_ROUTER_MODEL, "gpt-5.4-mini")
+    def test_codexcli_default_router_model_is_large(self) -> None:
+        self.assertEqual(CODEXCLI_DEFAULT_ROUTER_MODEL, "gpt-5.5")
 
     def test_cli_parses_openai_router_executor_and_models(self) -> None:
         argv = [
