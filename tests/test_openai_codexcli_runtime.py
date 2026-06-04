@@ -17,15 +17,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from providers.codexcli import DEFAULT_ROUTER_MODEL as CODEXCLI_DEFAULT_ROUTER_MODEL, PROVIDER_NAME
+from providers.codexcli import (
+    DEFAULT_EXECUTOR_MODEL as CODEXCLI_DEFAULT_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as CODEXCLI_DEFAULT_ROUTER_MODEL,
+    PROVIDER_NAME,
+)
 from router import llm_router
 from runtime import run_effectiveness_benchmark, run_experiment
 from runtime.logger import list_runs, log_run
 
 
 class OpenAICodexCLIRuntimeTests(unittest.TestCase):
-    def test_codexcli_default_router_model_is_large(self) -> None:
-        self.assertEqual(CODEXCLI_DEFAULT_ROUTER_MODEL, "gpt-5.5")
+    def test_codexcli_default_models_match_openai_api_pairing(self) -> None:
+        self.assertEqual(CODEXCLI_DEFAULT_ROUTER_MODEL, "gpt-5.4")
+        self.assertEqual(CODEXCLI_DEFAULT_EXECUTOR_MODEL, "gpt-5.4")
 
     def test_cli_parses_openai_router_executor_and_models(self) -> None:
         argv = [

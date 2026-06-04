@@ -20,8 +20,8 @@ PROVIDER_NAME = "openai-codexcli"
 # SFE_OPENAI_ROUTER_MODEL and SFE_OPENAI_EXECUTOR_MODEL in the runtime layer.
 # These identifiers may depend on the user's account, provider availability, or
 # Codex setup, so public users should explicitly configure their own model IDs.
-DEFAULT_ROUTER_MODEL = "gpt-5.5"
-DEFAULT_EXECUTOR_MODEL = "gpt-5.4-mini"
+DEFAULT_ROUTER_MODEL = "gpt-5.4"
+DEFAULT_EXECUTOR_MODEL = "gpt-5.4"
 DEFAULT_TIMEOUT = 300
 DEFAULT_SANDBOX = "read-only"
 
