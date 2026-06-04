@@ -235,7 +235,8 @@ class CodexCLIProviderTests(unittest.TestCase):
 
         class SpySupervisor:
             def __init__(self, **kwargs: object) -> None:
-                created["idle_timeout_seconds"] = kwargs["idle_timeout_seconds"]
+                self.idle_timeout_seconds = kwargs["idle_timeout_seconds"]
+                created["idle_timeout_seconds"] = self.idle_timeout_seconds
 
             def start(self, metadata: dict[str, object]) -> None:
                 created["start_metadata"] = metadata
@@ -263,7 +264,77 @@ class CodexCLIProviderTests(unittest.TestCase):
 
         self.assertEqual(response["choices"][0]["message"]["content"], "Done.")
         self.assertEqual(created["idle_timeout_seconds"], 12.0)
-        self.assertEqual(created["start_metadata"]["timeout_seconds"], 12.0)
+        self.assertEqual(created["start_metadata"]["idle_timeout_seconds"], 12.0)
+
+    def test_chat_accepts_explicit_idle_timeout_for_supervisor(self) -> None:
+        created: dict[str, object] = {}
+
+        class SpySupervisor:
+            def __init__(self, **kwargs: object) -> None:
+                self.idle_timeout_seconds = kwargs["idle_timeout_seconds"]
+                created["idle_timeout_seconds"] = self.idle_timeout_seconds
+
+            def start(self, metadata: dict[str, object]) -> None:
+                created["start_metadata"] = metadata
+
+            def fail(self, metadata: dict[str, object] | None = None) -> None:
+                created["fail_metadata"] = metadata
+
+            def complete(self, metadata: dict[str, object] | None = None) -> None:
+                created["complete_metadata"] = metadata
+
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, idle_timeout=7)
+        stdout = (
+            '{"type":"thread.started","thread_id":"thread-1"}\n'
+            '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n'
+        )
+
+        with patch("providers.codexcli.ProviderCallSupervisor", SpySupervisor), patch(
+            "providers.codexcli._run_codex_process",
+            return_value=(stdout, "", 0),
+        ):
+            provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+            )
+
+        self.assertEqual(created["idle_timeout_seconds"], 7.0)
+        self.assertEqual(created["start_metadata"]["idle_timeout_seconds"], 7.0)
+
+    def test_chat_uses_shared_idle_timeout_when_not_explicit(self) -> None:
+        created: dict[str, object] = {}
+
+        class SpySupervisor:
+            def __init__(self, **kwargs: object) -> None:
+                self.idle_timeout_seconds = 300.0
+                created["idle_timeout_seconds_argument"] = kwargs["idle_timeout_seconds"]
+
+            def start(self, metadata: dict[str, object]) -> None:
+                created["start_metadata"] = metadata
+
+            def fail(self, metadata: dict[str, object] | None = None) -> None:
+                created["fail_metadata"] = metadata
+
+            def complete(self, metadata: dict[str, object] | None = None) -> None:
+                created["complete_metadata"] = metadata
+
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT)
+        stdout = (
+            '{"type":"thread.started","thread_id":"thread-1"}\n'
+            '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n'
+        )
+
+        with patch("providers.codexcli.ProviderCallSupervisor", SpySupervisor), patch(
+            "providers.codexcli._run_codex_process",
+            return_value=(stdout, "", 0),
+        ):
+            provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+            )
+
+        self.assertIsNone(created["idle_timeout_seconds_argument"])
+        self.assertEqual(created["start_metadata"]["idle_timeout_seconds"], 300.0)
 
     def test_chat_raises_runtime_error_on_failed_command(self) -> None:
         provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)

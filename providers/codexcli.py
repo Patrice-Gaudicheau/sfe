@@ -33,6 +33,7 @@ class CodexCLIProvider:
         self,
         cwd: str | Path | None = None,
         timeout: float | None = None,
+        idle_timeout: float | None = None,
         sandbox: str | None = None,
     ) -> None:
         self.cwd = Path(cwd or os.getcwd())
@@ -40,6 +41,12 @@ class CodexCLIProvider:
         self.timeout = float(timeout_value)
         if self.timeout <= 0:
             raise ValueError("CodexCLI timeout must be greater than 0.")
+        idle_timeout_value = idle_timeout if idle_timeout is not None else timeout
+        self.idle_timeout = (
+            float(idle_timeout_value) if idle_timeout_value is not None else None
+        )
+        if self.idle_timeout is not None and self.idle_timeout <= 0:
+            raise ValueError("CodexCLI idle timeout must be greater than 0.")
         self.sandbox = sandbox or os.getenv("SFE_CODEXCLI_SANDBOX") or DEFAULT_SANDBOX
 
     def health(self) -> dict[str, Any]:
@@ -75,14 +82,14 @@ class CodexCLIProvider:
             provider=PROVIDER_NAME,
             model=model,
             progress_sink=progress_sink,
-            idle_timeout_seconds=self.timeout,
+            idle_timeout_seconds=self.idle_timeout,
         )
         supervisor.start(
             {
                 "command": command,
                 "cwd": str(self.cwd),
                 "max_tokens_requested": max_tokens,
-                "timeout_seconds": self.timeout,
+                "idle_timeout_seconds": supervisor.idle_timeout_seconds,
             }
         )
 
