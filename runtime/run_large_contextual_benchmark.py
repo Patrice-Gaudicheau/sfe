@@ -3051,7 +3051,10 @@ def build_prompt(
     return (
         "/no_think\n"
         "Answer using only the provided context blocks. Do not use outside facts. "
-        "Return a concise final answer and include the block id that supports it.\n\n"
+        "Return a concise final answer and include the block id that supports it. "
+        "Preserve exact identifiers, labels, dataset names, policy names, status "
+        "tags, and hyphenated markers from the context; copy requested values "
+        "verbatim instead of paraphrasing them.\n\n"
         f"{structural_schema}"
         f"Benchmark: {BENCHMARK_TYPE}\n"
         f"Mode: {mode}\n"

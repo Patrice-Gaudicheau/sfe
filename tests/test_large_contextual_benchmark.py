@@ -335,6 +335,21 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
                 estimate_tokens(build_prompt(task, "baseline", route)),
             )
 
+    def test_executor_prompt_requires_exact_marker_preservation(self) -> None:
+        task = next(
+            task
+            for task in get_large_contextual_tasks(TASK_TIER_PRACTICAL)
+            if task.task_label == "large_contextual_long_cobalt_dispatch_reconciliation"
+        )
+        route = select_relevant_block(task)
+        prompt = build_prompt(task, "spatial", route)
+
+        self.assertIn("Preserve exact identifiers", prompt)
+        self.assertIn("hyphenated markers", prompt)
+        self.assertIn("copy requested values verbatim", prompt)
+        self.assertIn("oxygen-critical", prompt)
+        self.assertIn("HarborReplay-12", prompt)
+
     def test_practical_tier_spatial_prompt_includes_only_selected_block(self) -> None:
         for task in get_large_contextual_tasks(TASK_TIER_PRACTICAL):
             route = select_relevant_block(task)
