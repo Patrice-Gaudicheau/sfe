@@ -223,6 +223,7 @@ def main() -> None:
         model=args.model,
         base_url=args.base_url,
         timeout_seconds=args.timeout_seconds,
+        codexcli_idle_timeout_seconds=args.codexcli_idle_timeout_seconds,
         max_tokens=args.max_tokens,
         dry_run=args.dry_run,
         selection_mode=args.selection_mode,
@@ -278,6 +279,14 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_TIMEOUT,
         help="Lemonade request timeout.",
+    )
+    parser.add_argument(
+        "--codexcli-idle-timeout-seconds",
+        type=float,
+        help=(
+            "Idle supervision window for --executor openai-codexcli. Defaults "
+            "to the shared SFE provider idle timeout instead of --timeout-seconds."
+        ),
     )
     parser.add_argument("--max-tokens", type=int, default=160)
     parser.add_argument(
@@ -342,6 +351,11 @@ def _parse_args() -> argparse.Namespace:
             "--executor openai-codexcli currently supports "
             "--selection-mode fixture only in this benchmark."
         )
+    if (
+        args.codexcli_idle_timeout_seconds is not None
+        and args.codexcli_idle_timeout_seconds <= 0
+    ):
+        parser.error("--codexcli-idle-timeout-seconds must be greater than 0.")
     return _resolve_provider_defaults(args)
 
 
@@ -2039,6 +2053,7 @@ def run_benchmark(
     max_tokens: int = 160,
     dry_run: bool = False,
     provider: ChatProvider | None = None,
+    codexcli_idle_timeout_seconds: float | None = None,
     selection_mode: str = "fixture",
     router_model: str | None = None,
     selector: BlockSelector | None = None,
@@ -2052,6 +2067,8 @@ def run_benchmark(
         raise ValueError("--repeat must be at least 1.")
     if timeout_seconds <= 0:
         raise ValueError("--timeout-seconds must be greater than 0.")
+    if codexcli_idle_timeout_seconds is not None and codexcli_idle_timeout_seconds <= 0:
+        raise ValueError("--codexcli-idle-timeout-seconds must be greater than 0.")
     if max_tokens < 1:
         raise ValueError("--max-tokens must be at least 1.")
     if max_output_repairs < 0:
@@ -2076,7 +2093,16 @@ def run_benchmark(
         sleep_func=sleep_func,
     )
 
-    provider = provider or (None if dry_run else _make_provider(executor, base_url, timeout_seconds))
+    provider = provider or (
+        None
+        if dry_run
+        else _make_provider(
+            executor,
+            base_url,
+            timeout_seconds,
+            codexcli_idle_timeout_seconds=codexcli_idle_timeout_seconds,
+        )
+    )
     router_model = router_model or _default_router_model(executor)
     selector = selector or _make_selector(
         selection_mode=selection_mode,
@@ -2148,6 +2174,11 @@ def run_benchmark(
             "run_count": len(runs),
             "dry_run": dry_run,
             "provider_call_delay_seconds": provider_call_delay_seconds,
+            "codexcli_idle_timeout_seconds": (
+                codexcli_idle_timeout_seconds
+                if executor == OPENAI_CODEXCLI_EXECUTOR
+                else None
+            ),
             "selection_verification": {
                 "enabled": selection_verification_enabled,
                 "trigger": (
@@ -2191,9 +2222,15 @@ def run_benchmark(
     }
 
 
-def _make_provider(executor: str, base_url: str, timeout_seconds: float) -> ChatProvider:
+def _make_provider(
+    executor: str,
+    base_url: str,
+    timeout_seconds: float,
+    *,
+    codexcli_idle_timeout_seconds: float | None = None,
+) -> ChatProvider:
     if executor == OPENAI_CODEXCLI_EXECUTOR:
-        return CodexCLIProvider(timeout=timeout_seconds)
+        return CodexCLIProvider(idle_timeout=codexcli_idle_timeout_seconds)
     if executor == OPENAI_API_EXECUTOR:
         return OpenAIAPIProvider(base_url=base_url, timeout=timeout_seconds)
     if executor == ANTHROPIC_EXECUTOR:

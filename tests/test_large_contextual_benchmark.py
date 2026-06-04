@@ -462,6 +462,39 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(args.provider_call_delay_seconds, 1.5)
 
+    def test_cli_accepts_codexcli_idle_timeout_seconds(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_large_contextual_benchmark.py",
+                "--executor",
+                OPENAI_CODEXCLI_EXECUTOR,
+                "--codexcli-idle-timeout-seconds",
+                "240",
+                "--dry-run",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.codexcli_idle_timeout_seconds, 240)
+
+    def test_cli_rejects_invalid_codexcli_idle_timeout_seconds(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_large_contextual_benchmark.py",
+                "--executor",
+                OPENAI_CODEXCLI_EXECUTOR,
+                "--codexcli-idle-timeout-seconds",
+                "0",
+                "--dry-run",
+            ],
+        ):
+            with self.assertRaises(SystemExit):
+                _parse_args()
+
     def test_provider_call_delay_sleeps_between_live_provider_calls(self) -> None:
         task = get_large_contextual_tasks()[:1][0]
         fixture_block_id = str(select_relevant_block(task)["selected_block_id"])
@@ -639,8 +672,8 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
     def test_codexcli_provider_path_is_constructed_without_live_call_in_tests(self) -> None:
         class FakeCodexCLIProvider:
-            def __init__(self, timeout: float) -> None:
-                self.timeout = timeout
+            def __init__(self, idle_timeout: float | None = None) -> None:
+                self.idle_timeout = idle_timeout
                 self.calls = 0
 
             def chat(self, *_: object, **__: object) -> dict[str, object]:
@@ -662,8 +695,8 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
         providers: list[FakeCodexCLIProvider] = []
 
-        def make_provider(timeout: float) -> FakeCodexCLIProvider:
-            provider = FakeCodexCLIProvider(timeout)
+        def make_provider(idle_timeout: float | None = None) -> FakeCodexCLIProvider:
+            provider = FakeCodexCLIProvider(idle_timeout)
             providers.append(provider)
             return provider
 
@@ -683,17 +716,83 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
             )
 
         self.assertEqual(len(providers), 1)
-        self.assertEqual(providers[0].timeout, 7)
+        self.assertIsNone(providers[0].idle_timeout)
         self.assertEqual(providers[0].calls, 2)
         self.assertEqual(report["metadata"]["executor"], OPENAI_CODEXCLI_EXECUTOR)
         self.assertEqual(report["metadata"]["provider"], OPENAI_CODEXCLI_EXECUTOR)
         self.assertEqual(report["metadata"]["api_style"], "codexcli_process_jsonl")
         self.assertEqual(report["metadata"]["base_url"], CODEXCLI_PROCESS_BASE_URL)
         self.assertIsNone(report["metadata"]["router_model"])
+        self.assertIsNone(report["metadata"]["codexcli_idle_timeout_seconds"])
         self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
         for run in report["runs"]:
             self.assertEqual(run["provider"], OPENAI_CODEXCLI_EXECUTOR)
             self.assertEqual(run["executor"], OPENAI_CODEXCLI_EXECUTOR)
+
+    def test_codexcli_explicit_idle_timeout_is_passed_without_live_call(self) -> None:
+        class FakeCodexCLIProvider:
+            def __init__(self, idle_timeout: float | None = None) -> None:
+                self.idle_timeout = idle_timeout
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "cache key region code Priya Nair pay-ops"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeCodexCLIProvider] = []
+
+        def make_provider(idle_timeout: float | None = None) -> FakeCodexCLIProvider:
+            provider = FakeCodexCLIProvider(idle_timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.CodexCLIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="gpt-test",
+                base_url=CODEXCLI_PROCESS_BASE_URL,
+                timeout_seconds=7,
+                codexcli_idle_timeout_seconds=180,
+                dry_run=False,
+                selection_mode="fixture",
+                executor=OPENAI_CODEXCLI_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].idle_timeout, 180)
+        self.assertEqual(providers[0].calls, 2)
+        self.assertEqual(report["metadata"]["codexcli_idle_timeout_seconds"], 180)
+
+    def test_run_benchmark_rejects_invalid_codexcli_idle_timeout_seconds(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "--codexcli-idle-timeout-seconds must be greater than 0",
+        ):
+            run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="gpt-test",
+                dry_run=True,
+                executor=OPENAI_CODEXCLI_EXECUTOR,
+                codexcli_idle_timeout_seconds=0,
+            )
 
     def test_anthropic_dry_run_uses_same_fixture_modes_and_metadata(self) -> None:
         report = run_benchmark(
