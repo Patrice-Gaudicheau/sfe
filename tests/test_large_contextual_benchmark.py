@@ -21,10 +21,13 @@ from runtime.run_large_contextual_benchmark import (
     ANTHROPIC_EXECUTOR,
     ANTHROPIC_JSON_PATH,
     BENCHMARK_TYPE,
+    CODEXCLI_JSON_PATH,
+    CODEXCLI_PROCESS_BASE_URL,
     FINAL_PHASE_CONCLUSION,
     GOOGLE_API_EXECUTOR,
     GOOGLE_API_JSON_PATH,
     LemonadeBlockSelector,
+    OPENAI_CODEXCLI_EXECUTOR,
     OPENAI_API_EXECUTOR,
     OPENAI_API_JSON_PATH,
     TASK_TIER_HIGH_CONTEXT,
@@ -582,6 +585,115 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
         for run in report["runs"]:
             self.assertEqual(run["provider"], "openai-api")
+
+    def test_codexcli_cli_uses_openai_executor_env_default_and_report_path(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"SFE_OPENAI_EXECUTOR_MODEL": "env-codex-executor"},
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                "run_large_contextual_benchmark.py",
+                "--executor",
+                OPENAI_CODEXCLI_EXECUTOR,
+                "--dry-run",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, OPENAI_CODEXCLI_EXECUTOR)
+        self.assertEqual(args.model, "env-codex-executor")
+        self.assertIsNone(args.router_model)
+        self.assertEqual(args.base_url, CODEXCLI_PROCESS_BASE_URL)
+        self.assertEqual(args.json, CODEXCLI_JSON_PATH)
+
+    def test_codexcli_cli_rejects_router_selection_modes_for_now(self) -> None:
+        for selection_mode in ("router", "both"):
+            with self.subTest(selection_mode=selection_mode), patch.object(
+                sys,
+                "argv",
+                [
+                    "run_large_contextual_benchmark.py",
+                    "--executor",
+                    OPENAI_CODEXCLI_EXECUTOR,
+                    "--selection-mode",
+                    selection_mode,
+                    "--dry-run",
+                ],
+            ):
+                with self.assertRaises(SystemExit):
+                    _parse_args()
+
+    def test_codexcli_run_benchmark_rejects_router_selection_modes_for_now(self) -> None:
+        with self.assertRaisesRegex(ValueError, "selection_mode='fixture' only"):
+            run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="gpt-test",
+                dry_run=True,
+                selection_mode="router",
+                executor=OPENAI_CODEXCLI_EXECUTOR,
+            )
+
+    def test_codexcli_provider_path_is_constructed_without_live_call_in_tests(self) -> None:
+        class FakeCodexCLIProvider:
+            def __init__(self, timeout: float) -> None:
+                self.timeout = timeout
+                self.calls = 0
+
+            def chat(self, *_: object, **__: object) -> dict[str, object]:
+                self.calls += 1
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "cache key region code Priya Nair pay-ops"
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeCodexCLIProvider] = []
+
+        def make_provider(timeout: float) -> FakeCodexCLIProvider:
+            provider = FakeCodexCLIProvider(timeout)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.CodexCLIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="gpt-test",
+                base_url=CODEXCLI_PROCESS_BASE_URL,
+                timeout_seconds=7,
+                dry_run=False,
+                selection_mode="fixture",
+                executor=OPENAI_CODEXCLI_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].timeout, 7)
+        self.assertEqual(providers[0].calls, 2)
+        self.assertEqual(report["metadata"]["executor"], OPENAI_CODEXCLI_EXECUTOR)
+        self.assertEqual(report["metadata"]["provider"], OPENAI_CODEXCLI_EXECUTOR)
+        self.assertEqual(report["metadata"]["api_style"], "codexcli_process_jsonl")
+        self.assertEqual(report["metadata"]["base_url"], CODEXCLI_PROCESS_BASE_URL)
+        self.assertIsNone(report["metadata"]["router_model"])
+        self.assertEqual(set(report["summary"]["modes"]), {"baseline", "spatial"})
+        for run in report["runs"]:
+            self.assertEqual(run["provider"], OPENAI_CODEXCLI_EXECUTOR)
+            self.assertEqual(run["executor"], OPENAI_CODEXCLI_EXECUTOR)
 
     def test_anthropic_dry_run_uses_same_fixture_modes_and_metadata(self) -> None:
         report = run_benchmark(

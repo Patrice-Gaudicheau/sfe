@@ -53,6 +53,11 @@ from providers.openai_api import (
     DEFAULT_ROUTER_MODEL as OPENAI_API_DEFAULT_ROUTER_MODEL,
     OpenAIAPIProvider,
 )
+from providers.codexcli import (
+    DEFAULT_EXECUTOR_MODEL as CODEXCLI_DEFAULT_EXECUTOR_MODEL,
+    PROVIDER_NAME as OPENAI_CODEXCLI_EXECUTOR,
+    CodexCLIProvider,
+)
 from router.llm_router import DEFAULT_ROUTER_MODEL
 from runtime.run_experiment import (
     DEFAULT_EXECUTION_MODEL,
@@ -93,6 +98,9 @@ ALIBABA_API_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_alib
 ALIBABA_API_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_alibaba_api.md"
 GOOGLE_API_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_google.json"
 GOOGLE_API_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_google.md"
+CODEXCLI_JSON_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_codexcli.json"
+CODEXCLI_MD_PATH = PROJECT_ROOT / "logs" / "large_contextual_benchmark_codexcli.md"
+CODEXCLI_PROCESS_BASE_URL = "process:codex-cli"
 FIXTURE_ROUTER_NAME = "fixture_relevance_router"
 LEMONADE_EXECUTOR = "lemonade"
 OPENAI_API_EXECUTOR = "openai-api"
@@ -101,6 +109,7 @@ ALIBABA_API_EXECUTOR = "alibaba-api"
 GOOGLE_API_EXECUTOR = "google"
 EXECUTORS = (
     LEMONADE_EXECUTOR,
+    OPENAI_CODEXCLI_EXECUTOR,
     OPENAI_API_EXECUTOR,
     ANTHROPIC_EXECUTOR,
     ALIBABA_API_EXECUTOR,
@@ -249,7 +258,7 @@ def _parse_args() -> argparse.Namespace:
         "--model",
         help=(
             "Executor model id. Defaults to SFE_EXECUTOR_MODEL for Lemonade or "
-            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API or "
+            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API/CodexCLI or "
             "SFE_ANTHROPIC_EXECUTOR_MODEL for Anthropic or "
             "SFE_ALIBABA_EXECUTOR_MODEL for Alibaba/Qwen or SFE_GOOGLE_MODEL "
             "for Google/Gemini."
@@ -327,7 +336,13 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Build prompts and deterministic metrics without calling a provider.",
     )
-    return _resolve_provider_defaults(parser.parse_args())
+    args = parser.parse_args()
+    if args.executor == OPENAI_CODEXCLI_EXECUTOR and args.selection_mode != "fixture":
+        parser.error(
+            "--executor openai-codexcli currently supports "
+            "--selection-mode fixture only in this benchmark."
+        )
+    return _resolve_provider_defaults(args)
 
 
 def _resolve_provider_defaults(args: argparse.Namespace) -> argparse.Namespace:
@@ -345,6 +360,8 @@ def _resolve_provider_defaults(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def _default_executor_model(executor: str) -> str:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or CODEXCLI_DEFAULT_EXECUTOR_MODEL
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or OPENAI_API_DEFAULT_EXECUTOR_MODEL
     if executor == ANTHROPIC_EXECUTOR:
@@ -356,7 +373,9 @@ def _default_executor_model(executor: str) -> str:
     return os.getenv("SFE_EXECUTOR_MODEL") or DEFAULT_EXECUTION_MODEL
 
 
-def _default_router_model(executor: str) -> str:
+def _default_router_model(executor: str) -> str | None:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return None
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_ROUTER_MODEL") or OPENAI_API_DEFAULT_ROUTER_MODEL
     if executor == ANTHROPIC_EXECUTOR:
@@ -369,6 +388,8 @@ def _default_router_model(executor: str) -> str:
 
 
 def _default_base_url(executor: str) -> str:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return CODEXCLI_PROCESS_BASE_URL
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("OPENAI_BASE_URL") or OPENAI_API_DEFAULT_BASE_URL
     if executor == ANTHROPIC_EXECUTOR:
@@ -381,6 +402,8 @@ def _default_base_url(executor: str) -> str:
 
 
 def _default_json_path(executor: str) -> Path:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return CODEXCLI_JSON_PATH
     if executor == OPENAI_API_EXECUTOR:
         return OPENAI_API_JSON_PATH
     if executor == ANTHROPIC_EXECUTOR:
@@ -393,6 +416,8 @@ def _default_json_path(executor: str) -> Path:
 
 
 def _default_md_path(executor: str) -> Path:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return CODEXCLI_MD_PATH
     if executor == OPENAI_API_EXECUTOR:
         return OPENAI_API_MD_PATH
     if executor == ANTHROPIC_EXECUTOR:
@@ -2039,6 +2064,11 @@ def run_benchmark(
         raise ValueError(f"Unknown selection mode: {selection_mode}")
     if executor not in EXECUTORS:
         raise ValueError(f"Unknown executor: {executor}")
+    if executor == OPENAI_CODEXCLI_EXECUTOR and selection_mode != "fixture":
+        raise ValueError(
+            "openai-codexcli currently supports selection_mode='fixture' only "
+            "in the large/contextual benchmark."
+        )
     task_tier = normalize_task_tier(task_tier)
     base_url = base_url or _default_base_url(executor)
     provider_pacer = ProviderCallPacer(
@@ -2162,6 +2192,8 @@ def run_benchmark(
 
 
 def _make_provider(executor: str, base_url: str, timeout_seconds: float) -> ChatProvider:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return CodexCLIProvider(timeout=timeout_seconds)
     if executor == OPENAI_API_EXECUTOR:
         return OpenAIAPIProvider(base_url=base_url, timeout=timeout_seconds)
     if executor == ANTHROPIC_EXECUTOR:
@@ -2303,6 +2335,8 @@ def _selection_source(executor: str) -> str:
 
 
 def _api_style(executor: str) -> str:
+    if executor == OPENAI_CODEXCLI_EXECUTOR:
+        return "codexcli_process_jsonl"
     if executor == OPENAI_API_EXECUTOR:
         return "openai_responses"
     if executor == ANTHROPIC_EXECUTOR:
