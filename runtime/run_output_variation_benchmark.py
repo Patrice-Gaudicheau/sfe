@@ -37,6 +37,11 @@ from providers.openai_api import (  # noqa: E402
     DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_EXECUTOR_MODEL,
     OpenAIAPIProvider,
 )
+from providers.codexcli import (  # noqa: E402
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_CODEXCLI_EXECUTOR_MODEL,
+    PROVIDER_NAME as EXECUTOR_OPENAI_CODEXCLI,
+    CodexCLIProvider,
+)
 from runtime.metrics import (  # noqa: E402
     average,
     estimate_text_tokens,
@@ -69,6 +74,7 @@ EXECUTOR_ALIBABA_API = "alibaba-api"
 EXECUTOR_GOOGLE = "google"
 EXECUTORS = (
     EXECUTOR_FIXTURE,
+    EXECUTOR_OPENAI_CODEXCLI,
     EXECUTOR_OPENAI_API,
     EXECUTOR_ANTHROPIC,
     EXECUTOR_ALIBABA_API,
@@ -379,8 +385,8 @@ def _parse_args() -> argparse.Namespace:
         and args.executor == EXECUTOR_FIXTURE
     ):
         parser.error(
-            "--selection-source router requires --executor openai-api, anthropic, "
-            "alibaba-api, or google."
+            "--selection-source router requires --executor openai-codexcli, "
+            "openai-api, anthropic, alibaba-api, or google."
         )
     return args
 
@@ -407,6 +413,8 @@ def _build_selector(args: argparse.Namespace) -> OutputVariationSelector:
 
 
 def _make_executor_provider(executor: str) -> Any:
+    if executor == EXECUTOR_OPENAI_CODEXCLI:
+        return CodexCLIProvider()
     if executor == EXECUTOR_OPENAI_API:
         return OpenAIAPIProvider()
     if executor == EXECUTOR_ANTHROPIC:
@@ -419,6 +427,8 @@ def _make_executor_provider(executor: str) -> Any:
 
 
 def _default_executor_model(executor: str) -> str | None:
+    if executor == EXECUTOR_OPENAI_CODEXCLI:
+        return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_CODEXCLI_EXECUTOR_MODEL
     if executor == EXECUTOR_OPENAI_API:
         return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL
     if executor == EXECUTOR_ANTHROPIC:

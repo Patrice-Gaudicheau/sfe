@@ -19,14 +19,18 @@ from runtime.run_output_variation_benchmark import (
     BENCHMARK_TYPE,
     DRY_RUN_NOTE,
     EXECUTOR_FIXTURE,
+    EXECUTOR_OPENAI_CODEXCLI,
     EXECUTOR_ANTHROPIC,
     EXECUTOR_ALIBABA_API,
     EXECUTOR_GOOGLE,
     ROUTER_SELECTION_NOTE,
     FixtureOutputVariationExecutor,
+    ProviderOutputVariationExecutor,
     SegmentSelectorOutputVariationSelector,
     SELECTION_SOURCE_FIXTURE,
     SELECTION_SOURCE_ROUTER,
+    _build_executor,
+    _make_executor_provider,
     _parse_args,
     block_ids_for_mode,
     build_prompt,
@@ -383,6 +387,61 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.router_provider, "google")
         self.assertEqual(args.model, "env-google-model")
         self.assertEqual(args.router_model, "env-google-model")
+
+    def test_cli_parses_codexcli_executor_env_default_without_codex_router(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"SFE_OPENAI_EXECUTOR_MODEL": "env-codex-executor"},
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--executor",
+                EXECUTOR_OPENAI_CODEXCLI,
+                "--selection-source",
+                "fixture",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, EXECUTOR_OPENAI_CODEXCLI)
+        self.assertEqual(args.model, "env-codex-executor")
+        self.assertEqual(args.router_provider, "openai")
+        self.assertIsNone(args.router_model)
+
+    def test_codexcli_executor_factory_is_benchmark_local_and_mockable(self) -> None:
+        fake_provider = object()
+        with patch(
+            "runtime.run_output_variation_benchmark.CodexCLIProvider",
+            return_value=fake_provider,
+        ) as provider_class:
+            provider = _make_executor_provider(EXECUTOR_OPENAI_CODEXCLI)
+
+        self.assertIs(provider, fake_provider)
+        provider_class.assert_called_once_with()
+
+    def test_build_executor_accepts_codexcli_without_live_provider_call(self) -> None:
+        fake_provider = object()
+
+        class Args:
+            executor = EXECUTOR_OPENAI_CODEXCLI
+            model = "gpt-test"
+            max_tokens = 123
+
+        with patch(
+            "runtime.run_output_variation_benchmark.CodexCLIProvider",
+            return_value=fake_provider,
+        ):
+            executor = _build_executor(Args())
+
+        self.assertIsInstance(executor, ProviderOutputVariationExecutor)
+        self.assertEqual(executor.executor_name, EXECUTOR_OPENAI_CODEXCLI)
+        self.assertEqual(executor.provider, EXECUTOR_OPENAI_CODEXCLI)
+        self.assertEqual(executor.model, "gpt-test")
+        self.assertEqual(executor.max_tokens, 123)
+        self.assertIs(executor.provider_instance, fake_provider)
 
     def test_task_family_filter_can_run_single_family(self) -> None:
         selected = [task for task in self.tasks if task.family == "bounded_output_control"]
