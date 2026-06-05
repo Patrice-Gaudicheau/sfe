@@ -35,7 +35,6 @@ class CodexCLIProvider:
         timeout: float | None = None,
         idle_timeout: float | None = None,
         sandbox: str | None = None,
-        reasoning_effort: str | None = None,
     ) -> None:
         self.cwd = Path(cwd or os.getcwd())
         timeout_value = timeout if timeout is not None else DEFAULT_TIMEOUT
@@ -49,7 +48,6 @@ class CodexCLIProvider:
         if self.idle_timeout is not None and self.idle_timeout <= 0:
             raise ValueError("CodexCLI idle timeout must be greater than 0.")
         self.sandbox = sandbox or os.getenv("SFE_CODEXCLI_SANDBOX") or DEFAULT_SANDBOX
-        self.reasoning_effort = reasoning_effort
 
     def health(self) -> dict[str, Any]:
         """Return whether the codex executable is available."""
@@ -79,11 +77,7 @@ class CodexCLIProvider:
         """
         prompt = _messages_to_prompt(messages, system_instruction=system_instruction)
         started = time.perf_counter()
-        command = build_codex_exec_command(
-            model=model,
-            sandbox=self.sandbox,
-            reasoning_effort=self.reasoning_effort,
-        )
+        command = build_codex_exec_command(model=model, sandbox=self.sandbox)
         supervisor = ProviderCallSupervisor(
             provider=PROVIDER_NAME,
             model=model,
@@ -131,7 +125,6 @@ class CodexCLIProvider:
                 "command": command,
                 "max_tokens_requested": max_tokens,
                 "temperature_requested": temperature,
-                "reasoning_effort": self.reasoning_effort,
             },
         }
 
@@ -225,11 +218,7 @@ def _run_codex_process(
     return "".join(stdout_parts), "".join(stderr_parts), returncode
 
 
-def build_codex_exec_command(
-    model: str,
-    sandbox: str = DEFAULT_SANDBOX,
-    reasoning_effort: str | None = None,
-) -> list[str]:
+def build_codex_exec_command(model: str, sandbox: str = DEFAULT_SANDBOX) -> list[str]:
     """Build the non-interactive Codex command used by the benchmark adapter."""
     command = [
         "codex",
@@ -241,13 +230,9 @@ def build_codex_exec_command(
         model,
         "--skip-git-repo-check",
     ]
-    effective_reasoning_effort = (
-        reasoning_effort
-        if reasoning_effort is not None
-        else os.getenv("SFE_CODEXCLI_REASONING_EFFORT", "").strip()
-    )
-    if effective_reasoning_effort:
-        command.extend(["-c", f'model_reasoning_effort="{effective_reasoning_effort}"'])
+    reasoning_effort = os.getenv("SFE_CODEXCLI_REASONING_EFFORT", "").strip()
+    if reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     return command
 
 

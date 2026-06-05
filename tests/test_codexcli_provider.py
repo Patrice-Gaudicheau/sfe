@@ -145,18 +145,6 @@ class CodexCLIProviderTests(unittest.TestCase):
             ],
         )
 
-    def test_build_command_explicit_reasoning_effort_overrides_env(self) -> None:
-        with patch.dict(
-            "providers.codexcli.os.environ",
-            {"SFE_CODEXCLI_REASONING_EFFORT": "high"},
-        ):
-            command = build_codex_exec_command(
-                "gpt-5.5",
-                reasoning_effort="low",
-            )
-
-        self.assertEqual(command[-2:], ["-c", 'model_reasoning_effort="low"'])
-
     def test_parse_jsonl_extracts_visible_answer_thread_and_usage(self) -> None:
         parsed = parse_codex_jsonl(
             "\n".join(
@@ -241,25 +229,6 @@ class CodexCLIProviderTests(unittest.TestCase):
         self.assertEqual(metadata["temperature_requested"], 0.7)
         self.assertNotIn("42", metadata["command"])
         self.assertNotIn("0.7", metadata["command"])
-
-    def test_chat_uses_instance_reasoning_effort_in_command(self) -> None:
-        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1, reasoning_effort="low")
-        fake_process = FakeProcess(
-            stdout_lines=[
-                '{"type":"thread.started","thread_id":"thread-1"}\n',
-                '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n',
-            ],
-        )
-
-        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
-            response = provider.chat(
-                [{"role": "user", "content": "hello"}],
-                model="gpt-5.5",
-            )
-
-        metadata = response["codexcli"]
-        self.assertEqual(metadata["reasoning_effort"], "low")
-        self.assertEqual(metadata["command"][-2:], ["-c", 'model_reasoning_effort="low"'])
 
     def test_chat_wires_timeout_into_supervisor_and_start_metadata(self) -> None:
         created: dict[str, object] = {}
