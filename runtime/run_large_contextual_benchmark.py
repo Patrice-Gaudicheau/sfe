@@ -152,6 +152,7 @@ FINAL_PHASE_CONCLUSION = (
 SELECTION_VERIFICATION_TRIGGER_STRUCTURAL_TIER = "structural_tier"
 OUTPUT_VALIDATION_TRIGGER_STRUCTURAL_TIER = "structural_tier"
 OUTPUT_REPAIR_TRIGGER_STRUCTURAL_TIER = "structural_tier"
+CODEXCLI_REASONING_EFFORTS = ("low", "medium", "high")
 
 
 class ChatProvider(Protocol):
@@ -226,6 +227,7 @@ def main() -> None:
         base_url=args.base_url,
         timeout_seconds=args.timeout_seconds,
         codexcli_idle_timeout_seconds=args.codexcli_idle_timeout_seconds,
+        codexcli_router_reasoning_effort=args.codexcli_router_reasoning_effort,
         max_tokens=args.max_tokens,
         dry_run=args.dry_run,
         selection_mode=args.selection_mode,
@@ -288,6 +290,14 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Idle supervision window for --executor openai-codexcli. Defaults "
             "to the shared SFE provider idle timeout instead of --timeout-seconds."
+        ),
+    )
+    parser.add_argument(
+        "--codexcli-router-reasoning-effort",
+        choices=CODEXCLI_REASONING_EFFORTS,
+        help=(
+            "CodexCLI model_reasoning_effort override for router calls only. "
+            "Executor calls are unchanged."
         ),
     )
     parser.add_argument("--max-tokens", type=int, default=160)
@@ -2051,6 +2061,7 @@ def run_benchmark(
     dry_run: bool = False,
     provider: ChatProvider | None = None,
     codexcli_idle_timeout_seconds: float | None = None,
+    codexcli_router_reasoning_effort: str | None = None,
     selection_mode: str = "fixture",
     router_model: str | None = None,
     selector: BlockSelector | None = None,
@@ -2066,6 +2077,14 @@ def run_benchmark(
         raise ValueError("--timeout-seconds must be greater than 0.")
     if codexcli_idle_timeout_seconds is not None and codexcli_idle_timeout_seconds <= 0:
         raise ValueError("--codexcli-idle-timeout-seconds must be greater than 0.")
+    if (
+        codexcli_router_reasoning_effort is not None
+        and codexcli_router_reasoning_effort not in CODEXCLI_REASONING_EFFORTS
+    ):
+        raise ValueError(
+            "--codexcli-router-reasoning-effort must be one of: "
+            + ", ".join(CODEXCLI_REASONING_EFFORTS)
+        )
     if max_tokens < 1:
         raise ValueError("--max-tokens must be at least 1.")
     if max_output_repairs < 0:
@@ -2103,6 +2122,7 @@ def run_benchmark(
         base_url=base_url,
         timeout_seconds=timeout_seconds,
         codexcli_idle_timeout_seconds=codexcli_idle_timeout_seconds,
+        codexcli_router_reasoning_effort=codexcli_router_reasoning_effort,
         router_model=router_model,
         provider_pacer=provider_pacer,
     )
@@ -2172,6 +2192,12 @@ def run_benchmark(
                 if executor == OPENAI_CODEXCLI_EXECUTOR
                 else None
             ),
+            "codexcli_router_reasoning_effort": (
+                codexcli_router_reasoning_effort
+                if executor == OPENAI_CODEXCLI_EXECUTOR
+                and selection_mode in ("router", "both")
+                else None
+            ),
             "selection_verification": {
                 "enabled": selection_verification_enabled,
                 "trigger": (
@@ -2221,9 +2247,13 @@ def _make_provider(
     timeout_seconds: float,
     *,
     codexcli_idle_timeout_seconds: float | None = None,
+    codexcli_reasoning_effort: str | None = None,
 ) -> ChatProvider:
     if executor == OPENAI_CODEXCLI_EXECUTOR:
-        return CodexCLIProvider(idle_timeout=codexcli_idle_timeout_seconds)
+        kwargs: dict[str, Any] = {"idle_timeout": codexcli_idle_timeout_seconds}
+        if codexcli_reasoning_effort is not None:
+            kwargs["reasoning_effort"] = codexcli_reasoning_effort
+        return CodexCLIProvider(**kwargs)
     if executor == OPENAI_API_EXECUTOR:
         return OpenAIAPIProvider(base_url=base_url, timeout=timeout_seconds)
     if executor == ANTHROPIC_EXECUTOR:
@@ -2244,6 +2274,7 @@ def _make_selector(
     base_url: str,
     timeout_seconds: float,
     codexcli_idle_timeout_seconds: float | None,
+    codexcli_router_reasoning_effort: str | None,
     router_model: str,
     provider_pacer: ProviderCallPacer | None = None,
 ) -> BlockSelector | None:
@@ -2256,6 +2287,11 @@ def _make_selector(
         base_url,
         timeout_seconds,
         codexcli_idle_timeout_seconds=codexcli_idle_timeout_seconds,
+        codexcli_reasoning_effort=(
+            codexcli_router_reasoning_effort
+            if executor == OPENAI_CODEXCLI_EXECUTOR
+            else None
+        ),
     )
     return LemonadeBlockSelector(
         provider=provider,

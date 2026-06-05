@@ -495,6 +495,25 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(args.codexcli_idle_timeout_seconds, 240)
 
+    def test_cli_accepts_codexcli_router_reasoning_effort(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_large_contextual_benchmark.py",
+                "--executor",
+                OPENAI_CODEXCLI_EXECUTOR,
+                "--selection-mode",
+                "both",
+                "--codexcli-router-reasoning-effort",
+                "low",
+                "--dry-run",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.codexcli_router_reasoning_effort, "low")
+
     def test_cli_rejects_invalid_codexcli_idle_timeout_seconds(self) -> None:
         with patch.object(
             sys,
@@ -756,6 +775,74 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         self.assertTrue(router_run["router_success"])
         self.assertTrue(router_run["router_valid_selection"])
         self.assertTrue(router_run["router_selection_matches_fixture"])
+
+    def test_codexcli_router_reasoning_effort_applies_only_to_router_provider(self) -> None:
+        class FakeCodexCLIProvider:
+            def __init__(
+                self,
+                idle_timeout: float | None = None,
+                reasoning_effort: str | None = None,
+            ) -> None:
+                self.idle_timeout = idle_timeout
+                self.reasoning_effort = reasoning_effort
+                self.calls = 0
+                self.models: list[str] = []
+
+            def chat(self, messages, *_, model: str, **__) -> dict[str, object]:  # type: ignore[no-untyped-def]
+                self.calls += 1
+                self.models.append(model)
+                prompt = str(messages[0]["content"])
+                if "Return JSON only" in prompt:
+                    content = json.dumps(
+                        {
+                            "selected_block_id": "pay-ops",
+                            "confidence": 1.0,
+                            "reason": "contains cache key region and Priya Nair",
+                        }
+                    )
+                else:
+                    content = "cache key salted with the region code Priya Nair pay-ops"
+                return {
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+
+        providers: list[FakeCodexCLIProvider] = []
+
+        def make_provider(**kwargs: object) -> FakeCodexCLIProvider:
+            provider = FakeCodexCLIProvider(**kwargs)
+            providers.append(provider)
+            return provider
+
+        with patch(
+            "runtime.run_large_contextual_benchmark.CodexCLIProvider",
+            side_effect=make_provider,
+        ):
+            report = run_benchmark(
+                tasks=get_large_contextual_tasks()[:1],
+                repeat=1,
+                model="gpt-executor",
+                base_url=CODEXCLI_PROCESS_BASE_URL,
+                timeout_seconds=7,
+                codexcli_idle_timeout_seconds=180,
+                codexcli_router_reasoning_effort="low",
+                dry_run=False,
+                selection_mode="both",
+                router_model="gpt-router",
+                executor=OPENAI_CODEXCLI_EXECUTOR,
+            )
+
+        self.assertEqual(len(providers), 2)
+        executor_provider, router_provider = providers
+        self.assertIsNone(executor_provider.reasoning_effort)
+        self.assertEqual(router_provider.reasoning_effort, "low")
+        self.assertEqual(executor_provider.models, ["gpt-executor"] * 3)
+        self.assertEqual(router_provider.models, ["gpt-router"])
+        self.assertEqual(report["metadata"]["codexcli_router_reasoning_effort"], "low")
 
     def test_codexcli_provider_path_is_constructed_without_live_call_in_tests(self) -> None:
         class FakeCodexCLIProvider:
