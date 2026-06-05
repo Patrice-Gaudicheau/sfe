@@ -6344,7 +6344,7 @@ def test_tui_codexcli_executor_maps_errors_safely(
     assert result.provider_name == "codexcli"
 
 
-def test_tui_codexcli_patch_executor_is_not_enabled() -> None:
+def test_tui_codexcli_patch_executor_proposes_text_only() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
         environ={"SFE_PROVIDER": "codexcli"},
@@ -6355,11 +6355,12 @@ def test_tui_codexcli_patch_executor_is_not_enabled() -> None:
         {"instructions": [], "task": None, "selected_context_segments": []}
     )
 
-    assert result.answer is None
-    assert result.error_category == "provider_not_supported"
-    assert result.provider_calls_made == 0
+    assert result.answer == "provider answer"
+    assert result.error_category is None
+    assert result.provider_calls_made == 1
     assert result.provider_name == "codexcli"
-    assert not provider.calls
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["max_tokens"] == DEFAULT_PATCH_OUTPUT_TOKENS
 
 
 @pytest.mark.parametrize(
@@ -6614,7 +6615,7 @@ def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert "/backend" not in rendered
 
 
-def test_tui_patch_does_not_enable_codexcli_patch_executor(tmp_path) -> None:
+def test_tui_patch_uses_codexcli_patch_proposal_executor(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("selected context", encoding="utf-8")
     provider = FakeProvider()
@@ -6636,9 +6637,73 @@ def test_tui_patch_does_not_enable_codexcli_patch_executor(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert "provider: codexcli" in rendered
-    assert "status: failed (provider_not_supported)" in rendered
-    assert "reason: provider_not_supported" in rendered
-    assert not provider.calls
+    assert "Patch proposal only, not applied" in rendered
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["max_tokens"] == DEFAULT_PATCH_OUTPUT_TOKENS
+
+
+def test_tui_patch_codexcli_provider_error_does_not_modify_workspace(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider(error=CodexCLITimeoutError("timed out"))
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch selected context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "codexcli"},
+                provider_factories={"codexcli": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: codexcli" in rendered
+    assert "status: failed (timeout)" in rendered
+    assert "reason: timeout" in rendered
+    assert source.read_text(encoding="utf-8") == "selected context"
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+
+
+def test_tui_patch_codexcli_proposal_does_not_directly_write_files(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("old context\n", encoding="utf-8")
+    diff = "\n".join(
+        [
+            "diff --git a/context.txt b/context.txt",
+            "--- a/context.txt",
+            "+++ b/context.txt",
+            "@@ -1 +1 @@",
+            "-old context",
+            "+new context",
+        ]
+    )
+    provider = FakeProvider(response={"choices": [{"message": {"content": diff}}]})
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch selected context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "codexcli"},
+                provider_factories={"codexcli": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "Patch proposal only, not applied" in rendered
+    assert source.read_text(encoding="utf-8") == "old context\n"
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
 
 
 def test_tui_patch_renders_safe_lemonade_failure_category(tmp_path) -> None:
