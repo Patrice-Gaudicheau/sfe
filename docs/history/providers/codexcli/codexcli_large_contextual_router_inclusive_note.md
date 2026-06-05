@@ -71,6 +71,10 @@ CodexCLI defaults were later aligned with the OpenAI API `.env` model pairing:
 - `DEFAULT_EXECUTOR_MODEL = "gpt-5.4"`
 - Commit: `c49cde9` Align CodexCLI default models with OpenAI API
 
+Phase 5.5 later kept these provider defaults but decoupled CodexCLI model
+environment variables from OpenAI API model variables. Current CodexCLI paths
+use `SFE_CODEXCLI_ROUTER_MODEL` and `SFE_CODEXCLI_EXECUTOR_MODEL`.
+
 The aligned repeat-3 run used:
 
 ```bash

@@ -1121,7 +1121,11 @@ def test_run_pipeline_codexcli_dev_patch_executor_applies_valid_unified_diff_thr
     manager = _manager()
     provider = FakeChatProvider(answer=_valid_new_file_diff())
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "codexcli"},
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_MODEL": "gpt-codex-dev-patch-executor",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-openai-executor-ignored",
+        },
         provider_factories={"codexcli": lambda: provider},
     )
 
@@ -1147,6 +1151,7 @@ def test_run_pipeline_codexcli_dev_patch_executor_applies_valid_unified_diff_thr
     assert result.patch_applied is True
     assert result.promoted_files == ("index.html",)
     assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert provider.calls[0]["model"] == "gpt-codex-dev-patch-executor"
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == DEFAULT_PATCH_OUTPUT_TOKENS
     assert manager.cleanup(result.workspace_session).cleaned is True

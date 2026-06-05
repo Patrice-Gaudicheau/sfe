@@ -132,8 +132,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--executor-model",
-        default=os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL,
-        help="Executor model for OpenAI/CodexCLI runs.",
+        default=None,
+        help="Executor model for provider runs. Defaults to the provider-specific env var.",
     )
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS_PATH)
     parser.add_argument("--repeat", "--repeats", type=int, default=3)
@@ -147,7 +147,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--router-model",
         help=(
-            "Model used by llm, llm_raw, and OpenAI/CodexCLI routers. Lemonade "
+            "Model used by llm, llm_raw, and provider routers. Lemonade "
             f"defaults to SFE_ROUTER_MODEL or {DEFAULT_ROUTER_MODEL}; "
             f"{OPENAI_API_PROVIDER_NAME} defaults to {DEFAULT_OPENAI_API_ROUTER_MODEL}; "
             f"{OPENAI_CODEXCLI_PROVIDER_NAME} defaults to {DEFAULT_CODEXCLI_ROUTER_MODEL}; "
@@ -457,7 +457,7 @@ def _resolve_router_model(router_name: str, router_model: str | None) -> str | N
     if router_name == OPENAI_API_PROVIDER_NAME:
         return router_model or os.getenv("SFE_OPENAI_ROUTER_MODEL") or DEFAULT_OPENAI_API_ROUTER_MODEL
     if router_name == OPENAI_CODEXCLI_PROVIDER_NAME:
-        return router_model or os.getenv("SFE_OPENAI_ROUTER_MODEL") or DEFAULT_CODEXCLI_ROUTER_MODEL
+        return router_model or os.getenv("SFE_CODEXCLI_ROUTER_MODEL") or DEFAULT_CODEXCLI_ROUTER_MODEL
     if router_name not in ("llm", "llm_raw"):
         return None
     return router_model or os.getenv("SFE_ROUTER_MODEL") or DEFAULT_ROUTER_MODEL
@@ -476,7 +476,13 @@ def _resolve_executor_model(executor_name: str, executor_model: str | None) -> s
             or os.getenv("SFE_GOOGLE_MODEL")
             or DEFAULT_GOOGLE_MODEL
         )
-    if executor_name in (OPENAI_CODEXCLI_PROVIDER_NAME, OPENAI_API_PROVIDER_NAME):
+    if executor_name == OPENAI_CODEXCLI_PROVIDER_NAME:
+        return (
+            executor_model
+            or os.getenv("SFE_CODEXCLI_EXECUTOR_MODEL")
+            or DEFAULT_OPENAI_EXECUTOR_MODEL
+        )
+    if executor_name == OPENAI_API_PROVIDER_NAME:
         return executor_model or os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL
     if executor_name == "lemonade":
         return _select_lemonade_executor_model()

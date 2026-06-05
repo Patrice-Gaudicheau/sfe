@@ -279,7 +279,7 @@ class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
             provider_name=provider_name,
             model=(
                 model
-                or _first_env_value(environ, ("SFE_OPENAI_EXECUTOR_MODEL",))
+                or _first_env_value(environ, ("SFE_CODEXCLI_EXECUTOR_MODEL",))
                 or DEFAULT_CODEXCLI_EXECUTOR_MODEL
             ),
             call_style="system_instruction",

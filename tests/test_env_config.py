@@ -76,6 +76,8 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_PROVIDER=openai", text)
         self.assertIn("SFE_OPENAI_ROUTER_MODEL=", text)
         self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=", text)
+        self.assertIn("SFE_CODEXCLI_ROUTER_MODEL=", text)
+        self.assertIn("SFE_CODEXCLI_EXECUTOR_MODEL=", text)
         self.assertIn("ALIBABA_API_KEY=", text)
         self.assertIn(
             "ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
@@ -109,6 +111,10 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "SFE_OPENAI_ROUTER_MODEL=")
             if line.startswith("SFE_OPENAI_EXECUTOR_MODEL="):
                 self.assertEqual(line, "SFE_OPENAI_EXECUTOR_MODEL=")
+            if line.startswith("SFE_CODEXCLI_ROUTER_MODEL="):
+                self.assertEqual(line, "SFE_CODEXCLI_ROUTER_MODEL=")
+            if line.startswith("SFE_CODEXCLI_EXECUTOR_MODEL="):
+                self.assertEqual(line, "SFE_CODEXCLI_EXECUTOR_MODEL=")
             if line.startswith("ALIBABA_API_KEY="):
                 self.assertEqual(line, "ALIBABA_API_KEY=")
             if line.startswith("DASHSCOPE_API_KEY="):

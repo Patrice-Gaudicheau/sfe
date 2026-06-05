@@ -142,12 +142,12 @@ def route_with_codexcli_diagnostics(
     """Return a contract-compliant routing decision from CodexCLI/OpenAI."""
     router_model = (
         router_model
-        or os.getenv("SFE_OPENAI_ROUTER_MODEL")
+        or os.getenv("SFE_CODEXCLI_ROUTER_MODEL")
         or DEFAULT_CODEXCLI_ROUTER_MODEL
     )
     executor_model = (
         executor_model
-        or os.getenv("SFE_OPENAI_EXECUTOR_MODEL")
+        or os.getenv("SFE_CODEXCLI_EXECUTOR_MODEL")
         or DEFAULT_OPENAI_EXECUTION_MODEL
     )
     provider = CodexCLIProvider(timeout=timeout_seconds)

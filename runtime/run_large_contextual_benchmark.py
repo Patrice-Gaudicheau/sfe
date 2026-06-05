@@ -261,7 +261,8 @@ def _parse_args() -> argparse.Namespace:
         "--model",
         help=(
             "Executor model id. Defaults to SFE_EXECUTOR_MODEL for Lemonade or "
-            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API/CodexCLI or "
+            "SFE_OPENAI_EXECUTOR_MODEL for OpenAI API or "
+            "SFE_CODEXCLI_EXECUTOR_MODEL for CodexCLI or "
             "SFE_ANTHROPIC_EXECUTOR_MODEL for Anthropic or "
             "SFE_ALIBABA_EXECUTOR_MODEL for Alibaba/Qwen or SFE_GOOGLE_MODEL "
             "for Google/Gemini."
@@ -335,9 +336,9 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Router model id for --selection-mode router or both. Defaults to "
             "SFE_ROUTER_MODEL for Lemonade or SFE_OPENAI_ROUTER_MODEL for OpenAI "
-            "API/CodexCLI or SFE_ANTHROPIC_ROUTER_MODEL for Anthropic or "
-            "SFE_ALIBABA_ROUTER_MODEL for Alibaba/Qwen or SFE_GOOGLE_MODEL for "
-            "Google/Gemini."
+            "API or SFE_CODEXCLI_ROUTER_MODEL for CodexCLI or "
+            "SFE_ANTHROPIC_ROUTER_MODEL for Anthropic or SFE_ALIBABA_ROUTER_MODEL "
+            "for Alibaba/Qwen or SFE_GOOGLE_MODEL for Google/Gemini."
         ),
     )
     parser.add_argument("--json", type=Path)
@@ -372,7 +373,7 @@ def _resolve_provider_defaults(args: argparse.Namespace) -> argparse.Namespace:
 
 def _default_executor_model(executor: str) -> str:
     if executor == OPENAI_CODEXCLI_EXECUTOR:
-        return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or CODEXCLI_DEFAULT_EXECUTOR_MODEL
+        return os.getenv("SFE_CODEXCLI_EXECUTOR_MODEL") or CODEXCLI_DEFAULT_EXECUTOR_MODEL
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or OPENAI_API_DEFAULT_EXECUTOR_MODEL
     if executor == ANTHROPIC_EXECUTOR:
@@ -386,7 +387,7 @@ def _default_executor_model(executor: str) -> str:
 
 def _default_router_model(executor: str) -> str | None:
     if executor == OPENAI_CODEXCLI_EXECUTOR:
-        return os.getenv("SFE_OPENAI_ROUTER_MODEL") or CODEXCLI_DEFAULT_ROUTER_MODEL
+        return os.getenv("SFE_CODEXCLI_ROUTER_MODEL") or CODEXCLI_DEFAULT_ROUTER_MODEL
     if executor == OPENAI_API_EXECUTOR:
         return os.getenv("SFE_OPENAI_ROUTER_MODEL") or OPENAI_API_DEFAULT_ROUTER_MODEL
     if executor == ANTHROPIC_EXECUTOR:

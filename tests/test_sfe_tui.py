@@ -6087,11 +6087,20 @@ def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> No
 def test_tui_executor_factory_selects_openai_from_sfe_provider() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "openai"},
+        environ={
+            "SFE_PROVIDER": "openai",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-openai-executor",
+        },
         provider_factories={"openai": lambda: provider},
     )
 
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
     assert executor.provider_name == "openai"
+    assert result.provider_name == "openai"
+    assert provider.calls[0]["model"] == "gpt-openai-executor"
 
 
 def test_tui_executor_factory_selects_lemonade_from_sfe_provider() -> None:
@@ -6263,7 +6272,8 @@ def test_tui_executor_factory_selects_codexcli_read_only_provider() -> None:
     executor = create_tui_executor(
         environ={
             "SFE_PROVIDER": "codexcli",
-            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-codex-executor",
+            "SFE_CODEXCLI_EXECUTOR_MODEL": "gpt-codex-executor",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-openai-executor-ignored",
         },
         provider_factories={"codexcli": lambda: provider},
     )
@@ -6288,7 +6298,10 @@ def test_tui_executor_factory_selects_codexcli_read_only_provider() -> None:
 def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "codexcli"},
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-openai-executor-ignored",
+        },
         provider_factories={"codexcli": lambda: provider},
     )
 
@@ -6347,7 +6360,11 @@ def test_tui_codexcli_executor_maps_errors_safely(
 def test_tui_codexcli_patch_executor_proposes_text_only() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "codexcli"},
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_MODEL": "gpt-codex-patch-executor",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-openai-executor-ignored",
+        },
         provider_factories={"codexcli": lambda: provider},
     )
 
@@ -6359,6 +6376,7 @@ def test_tui_codexcli_patch_executor_proposes_text_only() -> None:
     assert result.error_category is None
     assert result.provider_calls_made == 1
     assert result.provider_name == "codexcli"
+    assert provider.calls[0]["model"] == "gpt-codex-patch-executor"
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == DEFAULT_PATCH_OUTPUT_TOKENS
 

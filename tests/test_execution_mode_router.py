@@ -109,6 +109,26 @@ def test_execution_mode_prompt_asks_semantic_routing_question() -> None:
     assert "outside the workspace" in prompt
 
 
+def test_execution_mode_router_factory_openai_uses_openai_router_model() -> None:
+    provider = FakeCodexCLIProvider(
+        '{"execution_mode":"console_output","reason":"The task asks for an answer."}'
+    )
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER": "openai",
+            "SFE_OPENAI_ROUTER_MODEL": "gpt-openai-router",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+
+    decision = router.decide(task="Explain the architecture.")
+
+    assert router.provider_name == "openai"
+    assert router.model == "gpt-openai-router"
+    assert decision.model == "gpt-openai-router"
+    assert provider.calls[0]["model"] == "gpt-openai-router"
+
+
 def test_execution_mode_router_factory_selects_codexcli_from_sfe_provider() -> None:
     provider = FakeCodexCLIProvider(
         '{"execution_mode":"console_output","reason":"The task asks for an answer.","confidence":0.8}'
@@ -116,7 +136,8 @@ def test_execution_mode_router_factory_selects_codexcli_from_sfe_provider() -> N
     router = create_configured_execution_mode_router(
         environ={
             "SFE_PROVIDER": "codexcli",
-            "SFE_OPENAI_ROUTER_MODEL": "gpt-router-test",
+            "SFE_CODEXCLI_ROUTER_MODEL": "gpt-codex-router-test",
+            "SFE_OPENAI_ROUTER_MODEL": "gpt-openai-router-ignored",
         },
         provider_factories={"codexcli": lambda: provider},
     )
@@ -124,12 +145,12 @@ def test_execution_mode_router_factory_selects_codexcli_from_sfe_provider() -> N
     decision = router.decide(task="Explain the architecture.")
 
     assert router.provider_name == "codexcli"
-    assert router.model == "gpt-router-test"
+    assert router.model == "gpt-codex-router-test"
     assert decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
     assert decision.provider_name == "codexcli"
-    assert decision.model == "gpt-router-test"
+    assert decision.model == "gpt-codex-router-test"
     assert decision.provider_calls_made == 1
-    assert provider.calls[0]["model"] == "gpt-router-test"
+    assert provider.calls[0]["model"] == "gpt-codex-router-test"
     assert provider.calls[0]["system_instruction"] == EXECUTION_MODE_ROUTER_SYSTEM_INSTRUCTION
     assert provider.calls[0]["messages"] == [
         {"role": "user", "content": build_execution_mode_prompt(task="Explain the architecture.")}
@@ -141,7 +162,10 @@ def test_execution_mode_router_codexcli_uses_default_router_model() -> None:
         '{"execution_mode":"workspace_write","reason":"The task asks to edit files."}'
     )
     router = create_configured_execution_mode_router(
-        environ={"SFE_PROVIDER": "codexcli"},
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_OPENAI_ROUTER_MODEL": "gpt-openai-router-ignored",
+        },
         provider_factories={"codexcli": lambda: provider},
     )
 

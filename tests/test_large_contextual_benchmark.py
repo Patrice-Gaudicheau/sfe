@@ -635,10 +635,15 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
         for run in report["runs"]:
             self.assertEqual(run["provider"], "openai-api")
 
-    def test_codexcli_cli_uses_openai_executor_env_default_and_report_path(self) -> None:
+    def test_codexcli_cli_uses_codexcli_env_defaults_and_report_path(self) -> None:
         with patch.dict(
             os.environ,
-            {"SFE_OPENAI_EXECUTOR_MODEL": "env-codex-executor"},
+            {
+                "SFE_CODEXCLI_EXECUTOR_MODEL": "env-codex-executor",
+                "SFE_CODEXCLI_ROUTER_MODEL": "env-codex-router",
+                "SFE_OPENAI_EXECUTOR_MODEL": "env-openai-executor-ignored",
+                "SFE_OPENAI_ROUTER_MODEL": "env-openai-router-ignored",
+            },
             clear=True,
         ), patch.object(
             sys,
@@ -654,7 +659,7 @@ class LargeContextualBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(args.executor, OPENAI_CODEXCLI_EXECUTOR)
         self.assertEqual(args.model, "env-codex-executor")
-        self.assertEqual(args.router_model, CODEXCLI_DEFAULT_ROUTER_MODEL)
+        self.assertEqual(args.router_model, "env-codex-router")
         self.assertEqual(args.base_url, CODEXCLI_PROCESS_BASE_URL)
         self.assertEqual(args.json, CODEXCLI_JSON_PATH)
 
