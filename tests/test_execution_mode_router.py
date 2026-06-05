@@ -115,18 +115,18 @@ def test_execution_mode_router_factory_selects_codexcli_from_sfe_provider() -> N
     )
     router = create_configured_execution_mode_router(
         environ={
-            "SFE_PROVIDER": "openai-codexcli",
+            "SFE_PROVIDER": "codexcli",
             "SFE_OPENAI_ROUTER_MODEL": "gpt-router-test",
         },
-        provider_factories={"openai-codexcli": lambda: provider},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     decision = router.decide(task="Explain the architecture.")
 
-    assert router.provider_name == "openai-codexcli"
+    assert router.provider_name == "codexcli"
     assert router.model == "gpt-router-test"
     assert decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
-    assert decision.provider_name == "openai-codexcli"
+    assert decision.provider_name == "codexcli"
     assert decision.model == "gpt-router-test"
     assert decision.provider_calls_made == 1
     assert provider.calls[0]["model"] == "gpt-router-test"
@@ -141,13 +141,13 @@ def test_execution_mode_router_codexcli_uses_default_router_model() -> None:
         '{"execution_mode":"workspace_write","reason":"The task asks to edit files."}'
     )
     router = create_configured_execution_mode_router(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     decision = router.decide(task="Update the README.")
 
-    assert router.provider_name == "openai-codexcli"
+    assert router.provider_name == "codexcli"
     assert router.model == "gpt-5.4"
     assert decision.execution_mode == EXECUTION_MODE_WORKSPACE_WRITE
     assert decision.model == "gpt-5.4"
@@ -157,8 +157,8 @@ def test_execution_mode_router_codexcli_uses_default_router_model() -> None:
 def test_execution_mode_router_codexcli_invalid_output_fails_safely(content: str) -> None:
     provider = FakeCodexCLIProvider(content)
     router = create_configured_execution_mode_router(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     with pytest.raises(ExecutionModeRouterError) as exc_info:
@@ -171,8 +171,8 @@ def test_execution_mode_router_codexcli_invalid_output_fails_safely(content: str
 def test_execution_mode_router_codexcli_unavailable_fails_safely() -> None:
     provider = FakeCodexCLIProvider(ok=False)
     router = create_configured_execution_mode_router(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     with pytest.raises(ExecutionModeRouterError) as exc_info:
@@ -185,8 +185,8 @@ def test_execution_mode_router_codexcli_unavailable_fails_safely() -> None:
 def test_execution_mode_router_codexcli_provider_error_fails_safely() -> None:
     provider = FakeCodexCLIProvider(error=RuntimeError("raw codex failure"))
     router = create_configured_execution_mode_router(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     with pytest.raises(ExecutionModeRouterError) as exc_info:

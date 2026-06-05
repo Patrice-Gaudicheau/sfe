@@ -14,6 +14,6 @@ Phase 1.5 closes two audit gaps:
   non-resume `CodexCLIProvider.chat` calls still use the existing
   non-interactive `codex exec --json` command path.
 
-This change does not add `SFE_PROVIDER=openai-codexcli`, does not wire CodexCLI
+This change does not add `SFE_PROVIDER=codexcli`, does not wire CodexCLI
 into the configured `/run` execution-mode router, and does not enable CodexCLI
 for TUI or DEV patch execution.

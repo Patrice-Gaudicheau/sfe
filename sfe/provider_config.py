@@ -13,15 +13,16 @@ from typing import Mapping
 SFE_PROVIDER_ENV = "SFE_PROVIDER"
 DEFAULT_SFE_PROVIDER = "openai"
 DEFAULT_PROXY_STANDBY_PROVIDER = "openai-compatible"
+CODEXCLI_SFE_PROVIDER = "codexcli"
 
 CANONICAL_PROVIDER_VALUES = (
     "openai-compatible",
-    "openai-codexcli",
     "openai",
     "lemonade",
     "alibaba",
     "anthropic",
     "google",
+    CODEXCLI_SFE_PROVIDER,
 )
 PROVIDER_ALIASES = {
     "openai-api": "openai",

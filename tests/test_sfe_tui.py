@@ -6262,22 +6262,22 @@ def test_tui_executor_factory_selects_codexcli_read_only_provider() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
         environ={
-            "SFE_PROVIDER": "openai-codexcli",
+            "SFE_PROVIDER": "codexcli",
             "SFE_OPENAI_EXECUTOR_MODEL": "gpt-codex-executor",
         },
-        provider_factories={"openai-codexcli": lambda: provider},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     result = executor.execute(
         {"instructions": [], "task": None, "selected_context_segments": []}
     )
 
-    assert executor.provider_name == "openai-codexcli"
+    assert executor.provider_name == "codexcli"
     assert result == ExecutorResponse(
         answer="provider answer",
         error_category=None,
         provider_calls_made=1,
-        provider_name="openai-codexcli",
+        provider_name="codexcli",
     )
     assert provider.calls[0]["model"] == "gpt-codex-executor"
     assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
@@ -6288,8 +6288,8 @@ def test_tui_executor_factory_selects_codexcli_read_only_provider() -> None:
 def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     result = executor.execute(
@@ -6303,8 +6303,8 @@ def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
 def test_tui_codexcli_console_uses_console_instruction() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     result = executor.answer_console(
@@ -6312,7 +6312,7 @@ def test_tui_codexcli_console_uses_console_instruction() -> None:
     )
 
     assert result.answer == "provider answer"
-    assert result.provider_name == "openai-codexcli"
+    assert result.provider_name == "codexcli"
     assert provider.calls[0]["system_instruction"] == CONSOLE_SYSTEM_INSTRUCTION
     assert provider.calls[0]["system_instruction"] != PATCH_SYSTEM_INSTRUCTION
 
@@ -6330,8 +6330,8 @@ def test_tui_codexcli_executor_maps_errors_safely(
 ) -> None:
     provider = FakeProvider(error=error)
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     result = executor.execute(
@@ -6341,14 +6341,14 @@ def test_tui_codexcli_executor_maps_errors_safely(
     assert result.answer is None
     assert result.error_category == expected_category
     assert result.provider_calls_made == 1
-    assert result.provider_name == "openai-codexcli"
+    assert result.provider_name == "codexcli"
 
 
 def test_tui_codexcli_patch_executor_is_not_enabled() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROVIDER": "openai-codexcli"},
-        provider_factories={"openai-codexcli": lambda: provider},
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
     )
 
     result = executor.propose_patch(
@@ -6358,7 +6358,7 @@ def test_tui_codexcli_patch_executor_is_not_enabled() -> None:
     assert result.answer is None
     assert result.error_category == "provider_not_supported"
     assert result.provider_calls_made == 0
-    assert result.provider_name == "openai-codexcli"
+    assert result.provider_name == "codexcli"
     assert not provider.calls
 
 
@@ -6474,8 +6474,8 @@ def test_tui_dry_run_makes_no_codexcli_provider_call(tmp_path) -> None:
         cwd=tmp_path,
         backend=DirectBackend(
             executor=create_tui_executor(
-                environ={"SFE_PROVIDER": "openai-codexcli"},
-                provider_factories={"openai-codexcli": lambda: provider},
+                environ={"SFE_PROVIDER": "codexcli"},
+                provider_factories={"codexcli": lambda: provider},
             )
         ),
     )
@@ -6528,15 +6528,15 @@ def test_tui_ask_uses_codexcli_read_only_provider_without_proxy(tmp_path) -> Non
         cwd=tmp_path,
         backend=DirectBackend(
             executor=create_tui_executor(
-                environ={"SFE_PROVIDER": "openai-codexcli"},
-                provider_factories={"openai-codexcli": lambda: provider},
+                environ={"SFE_PROVIDER": "codexcli"},
+                provider_factories={"codexcli": lambda: provider},
             )
         ),
     )
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "provider: openai-codexcli" in rendered
+    assert "provider: codexcli" in rendered
     assert "SFE answer\nprovider answer" in rendered
     assert provider.calls
     assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
@@ -6627,15 +6627,15 @@ def test_tui_patch_does_not_enable_codexcli_patch_executor(tmp_path) -> None:
         cwd=tmp_path,
         backend=DirectBackend(
             executor=create_tui_executor(
-                environ={"SFE_PROVIDER": "openai-codexcli"},
-                provider_factories={"openai-codexcli": lambda: provider},
+                environ={"SFE_PROVIDER": "codexcli"},
+                provider_factories={"codexcli": lambda: provider},
             )
         ),
     )
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "provider: openai-codexcli" in rendered
+    assert "provider: codexcli" in rendered
     assert "status: failed (provider_not_supported)" in rendered
     assert "reason: provider_not_supported" in rendered
     assert not provider.calls

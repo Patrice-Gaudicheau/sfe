@@ -21,7 +21,6 @@ from providers.anthropic import (
 )
 from providers.codexcli import (
     DEFAULT_ROUTER_MODEL as DEFAULT_CODEXCLI_ROUTER_MODEL,
-    PROVIDER_NAME as CODEXCLI_PROVIDER_NAME,
     CodexCLIProvider,
 )
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
@@ -32,7 +31,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import resolve_sfe_provider
+from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_provider
 
 
 EXECUTION_MODE_CONSOLE_OUTPUT = "console_output"
@@ -211,7 +210,7 @@ def create_configured_execution_mode_router(
             missing_key_errors=(MissingOpenAIAPIKeyError,),
             provider_error_types=(OpenAIAPIError,),
         )
-    if provider_name == CODEXCLI_PROVIDER_NAME:
+    if provider_name == CODEXCLI_SFE_PROVIDER:
         return ConfiguredLLMExecutionModeRouter(
             provider=factory(),
             provider_name=provider_name,
@@ -375,7 +374,7 @@ def _provider_factory_for(
         return provider_factories[provider_name]
     if provider_name in ("openai", "openai-compatible"):
         return OpenAIAPIProvider
-    if provider_name == CODEXCLI_PROVIDER_NAME:
+    if provider_name == CODEXCLI_SFE_PROVIDER:
         return CodexCLIProvider
     if provider_name == "lemonade":
         return LemonadeProvider

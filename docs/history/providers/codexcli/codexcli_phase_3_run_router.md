@@ -4,7 +4,7 @@ Date: 2026-06-05
 
 This note records the narrow Phase 3 CodexCLI integration.
 
-`SFE_PROVIDER=openai-codexcli` is now accepted by shared provider
+`SFE_PROVIDER=codexcli` is now accepted by shared provider
 configuration and wired into the `/run` execution-mode router through
 `CodexCLIProvider`. The router uses the existing `SFE_OPENAI_ROUTER_MODEL`
 convention and the existing `system_instruction` chat path.

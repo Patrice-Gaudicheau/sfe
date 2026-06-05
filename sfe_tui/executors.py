@@ -20,7 +20,6 @@ from providers.anthropic import (
 )
 from providers.codexcli import (
     DEFAULT_EXECUTOR_MODEL as DEFAULT_CODEXCLI_EXECUTOR_MODEL,
-    PROVIDER_NAME as CODEXCLI_PROVIDER_NAME,
     CodexCLIProvider,
 )
 from providers.google import (
@@ -37,7 +36,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import resolve_sfe_provider
+from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_provider
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
@@ -271,7 +270,7 @@ class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
         *,
         provider: CodexCLIProvider | None = None,
         model: str | None = None,
-        provider_name: str = CODEXCLI_PROVIDER_NAME,
+        provider_name: str = CODEXCLI_SFE_PROVIDER,
         environ: Mapping[str, str] | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
@@ -348,7 +347,7 @@ def create_tui_executor(
             provider_name=provider_name,
             environ=environ,
         )
-    if provider_name == CODEXCLI_PROVIDER_NAME:
+    if provider_name == CODEXCLI_SFE_PROVIDER:
         return CodexCLIReadOnlyExecutor(
             provider=provider_factory(),
             provider_name=provider_name,
@@ -420,7 +419,7 @@ def _provider_factory(
         return provider_factories[provider_name]
     if provider_name in ("openai", "openai-compatible"):
         return OpenAIAPIProvider
-    if provider_name == CODEXCLI_PROVIDER_NAME:
+    if provider_name == CODEXCLI_SFE_PROVIDER:
         return CodexCLIProvider
     if provider_name == "lemonade":
         return LemonadeProvider
