@@ -263,7 +263,7 @@ class OpenAIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
 
 
 class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
-    """CodexCLI-backed executor for non-mutating TUI answer modes only."""
+    """CodexCLI-backed executor for TUI answers and patch proposals."""
 
     def __init__(
         self,
@@ -284,12 +284,8 @@ class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
             ),
             call_style="system_instruction",
             max_output_tokens=max_output_tokens,
-            max_patch_output_tokens=0,
+            max_patch_output_tokens=DEFAULT_PATCH_OUTPUT_TOKENS,
         )
-
-    def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
-        del executor_payload
-        return _unsupported_provider_response(self.provider_name)
 
 
 class ProviderConfigurationErrorExecutor:

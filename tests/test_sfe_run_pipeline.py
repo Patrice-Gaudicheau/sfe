@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from providers.codexcli import CodexCLITimeoutError
 from sfe.discovery import discover_workspace_context
 from sfe.discovery_router import DiscoveryRouterSelection
 from sfe.execution_mode_router import (
@@ -34,7 +35,12 @@ from sfe.run_pipeline import (
 from sfe.workspace_isolation import WorkspaceIsolationPolicy, WorkspaceManager
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import DirectBackend
-from sfe_tui.executors import ExecutorResponse
+from sfe_tui.executors import (
+    DEFAULT_PATCH_OUTPUT_TOKENS,
+    PATCH_SYSTEM_INSTRUCTION,
+    ExecutorResponse,
+    create_tui_executor,
+)
 from sfe_tui.renderer import render_help, render_run_result
 
 
@@ -77,6 +83,27 @@ class FakeExecutor:
     def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.patch_calls.append(executor_payload)
         return ExecutorResponse(self.patch_answer, None, 1, provider_name=self.provider_name)
+
+
+class FakeChatProvider:
+    def __init__(
+        self,
+        *,
+        answer: str | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.answer = "provider answer" if answer is None else answer
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def health(self) -> dict[str, object]:
+        return {"ok": True}
+
+    def chat(self, messages: list[dict[str, str]], **kwargs: object) -> dict[str, object]:
+        self.calls.append({"messages": messages, **kwargs})
+        if self.error is not None:
+            raise self.error
+        return {"choices": [{"message": {"content": self.answer}}]}
 
 
 class FakeDiscoveryRouter:
@@ -1084,6 +1111,151 @@ def test_run_pipeline_valid_unified_diff_applies_without_repair_metadata(
     assert result.patch_applied is True
     assert result.promoted_files == ("index.html",)
     assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_codexcli_dev_patch_executor_applies_valid_unified_diff_through_sfe_pipeline(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    provider = FakeChatProvider(answer=_valid_new_file_diff())
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.executor_provider == "codexcli"
+    assert result.patch_result is not None
+    assert result.patch_result.summary["executor_provider"] == "codexcli"
+    assert result.patch_result.summary["patch_applied"] is False
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["max_tokens"] == DEFAULT_PATCH_OUTPUT_TOKENS
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_codexcli_prose_only_patch_fails_without_mutation(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    provider = FakeChatProvider(answer="I would update context.txt with new text.")
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    assert result.executor_provider == "codexcli"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_codexcli_unsafe_path_is_rejected_without_mutation(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    provider = FakeChatProvider(answer=_valid_new_file_diff(path="../outside.txt"))
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context with an unsafe file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "path_outside_workspace"
+    assert result.executor_provider == "codexcli"
+    assert result.patch_applied is False
+    assert not (tmp_path / "outside.txt").exists()
+    assert not (repo / "outside.txt").exists()
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_codexcli_timeout_does_not_mutate_worktree(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    provider = FakeChatProvider(error=CodexCLITimeoutError("timed out"))
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "patch_generation"
+    assert result.issue.reason == "timeout"
+    assert result.executor_provider == "codexcli"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
