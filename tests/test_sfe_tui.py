@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from providers.codexcli import CodexCLITimeoutError
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
 from sfe.contracts import (
     ContextSegment,
@@ -6257,6 +6258,110 @@ def test_tui_executor_factory_selects_openai_compatible_from_sfe_provider() -> N
     assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
 
 
+def test_tui_executor_factory_selects_codexcli_read_only_provider() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "openai-codexcli",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-codex-executor",
+        },
+        provider_factories={"openai-codexcli": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "openai-codexcli"
+    assert result == ExecutorResponse(
+        answer="provider answer",
+        error_category=None,
+        provider_calls_made=1,
+        provider_name="openai-codexcli",
+    )
+    assert provider.calls[0]["model"] == "gpt-codex-executor"
+    assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["max_tokens"] == DEFAULT_MAX_OUTPUT_TOKENS
+    assert provider.calls[0]["messages"][0]["role"] == "user"
+
+
+def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "openai-codexcli"},
+        provider_factories={"openai-codexcli": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["model"] == "gpt-5.4"
+
+
+def test_tui_codexcli_console_uses_console_instruction() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "openai-codexcli"},
+        provider_factories={"openai-codexcli": lambda: provider},
+    )
+
+    result = executor.answer_console(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert result.provider_name == "openai-codexcli"
+    assert provider.calls[0]["system_instruction"] == CONSOLE_SYSTEM_INSTRUCTION
+    assert provider.calls[0]["system_instruction"] != PATCH_SYSTEM_INSTRUCTION
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_category"),
+    (
+        (CodexCLITimeoutError("timed out"), "timeout"),
+        (RuntimeError("raw codex process failure"), "provider_error"),
+    ),
+)
+def test_tui_codexcli_executor_maps_errors_safely(
+    error: Exception,
+    expected_category: str,
+) -> None:
+    provider = FakeProvider(error=error)
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "openai-codexcli"},
+        provider_factories={"openai-codexcli": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer is None
+    assert result.error_category == expected_category
+    assert result.provider_calls_made == 1
+    assert result.provider_name == "openai-codexcli"
+
+
+def test_tui_codexcli_patch_executor_is_not_enabled() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "openai-codexcli"},
+        provider_factories={"openai-codexcli": lambda: provider},
+    )
+
+    result = executor.propose_patch(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer is None
+    assert result.error_category == "provider_not_supported"
+    assert result.provider_calls_made == 0
+    assert result.provider_name == "openai-codexcli"
+    assert not provider.calls
+
+
 @pytest.mark.parametrize(
     ("provider_name", "model_env", "model_value"),
     (
@@ -6350,6 +6455,38 @@ def test_tui_dry_run_makes_no_provider_call_with_sfe_provider(tmp_path) -> None:
     assert not provider.calls
 
 
+def test_tui_dry_run_makes_no_codexcli_provider_call(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            [
+                "",
+                "/files context.txt",
+                "/task Explain selected context",
+                "/dry-run",
+                "/quit",
+            ]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "openai-codexcli"},
+                provider_factories={"openai-codexcli": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "executor/provider called: no" in rendered
+    assert "provider calls made: 0" in rendered
+    assert not provider.calls
+
+
 def test_tui_ask_uses_resolved_provider_without_proxy(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("selected context", encoding="utf-8")
@@ -6374,6 +6511,35 @@ def test_tui_ask_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert "provider: lemonade" in rendered
     assert "SFE answer\nprovider answer" in rendered
     assert provider.calls
+    assert "ProxyBackend" not in rendered
+    assert "/backend" not in rendered
+
+
+def test_tui_ask_uses_codexcli_read_only_provider_without_proxy(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Explain selected context", "/ask", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "openai-codexcli"},
+                provider_factories={"openai-codexcli": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: openai-codexcli" in rendered
+    assert "SFE answer\nprovider answer" in rendered
+    assert provider.calls
+    assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
     assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
@@ -6446,6 +6612,33 @@ def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert "system_instruction" not in provider.calls[0]
     assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
+
+
+def test_tui_patch_does_not_enable_codexcli_patch_executor(tmp_path) -> None:
+    source = tmp_path / "context.txt"
+    source.write_text("selected context", encoding="utf-8")
+    provider = FakeProvider()
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/files context.txt", "/task Patch selected context", "/patch", "/quit"]
+        ),
+        output=output.append,
+        cwd=tmp_path,
+        backend=DirectBackend(
+            executor=create_tui_executor(
+                environ={"SFE_PROVIDER": "openai-codexcli"},
+                provider_factories={"openai-codexcli": lambda: provider},
+            )
+        ),
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "provider: openai-codexcli" in rendered
+    assert "status: failed (provider_not_supported)" in rendered
+    assert "reason: provider_not_supported" in rendered
+    assert not provider.calls
 
 
 def test_tui_patch_renders_safe_lemonade_failure_category(tmp_path) -> None:

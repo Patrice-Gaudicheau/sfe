@@ -18,6 +18,11 @@ from providers.anthropic import (
     AnthropicProvider,
     MissingAnthropicAPIKeyError,
 )
+from providers.codexcli import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_CODEXCLI_EXECUTOR_MODEL,
+    PROVIDER_NAME as CODEXCLI_PROVIDER_NAME,
+    CodexCLIProvider,
+)
 from providers.google import (
     DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL,
     GoogleAPIError,
@@ -258,6 +263,36 @@ class OpenAIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
         )
 
 
+class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
+    """CodexCLI-backed executor for non-mutating TUI answer modes only."""
+
+    def __init__(
+        self,
+        *,
+        provider: CodexCLIProvider | None = None,
+        model: str | None = None,
+        provider_name: str = CODEXCLI_PROVIDER_NAME,
+        environ: Mapping[str, str] | None = None,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    ) -> None:
+        super().__init__(
+            provider=provider or CodexCLIProvider(),
+            provider_name=provider_name,
+            model=(
+                model
+                or _first_env_value(environ, ("SFE_OPENAI_EXECUTOR_MODEL",))
+                or DEFAULT_CODEXCLI_EXECUTOR_MODEL
+            ),
+            call_style="system_instruction",
+            max_output_tokens=max_output_tokens,
+            max_patch_output_tokens=0,
+        )
+
+    def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        del executor_payload
+        return _unsupported_provider_response(self.provider_name)
+
+
 class ProviderConfigurationErrorExecutor:
     """Executor that reports invalid TUI provider configuration safely."""
 
@@ -309,6 +344,12 @@ def create_tui_executor(
     )
     if provider_name in ("openai", "openai-compatible"):
         return OpenAIReadOnlyExecutor(
+            provider=provider_factory(),
+            provider_name=provider_name,
+            environ=environ,
+        )
+    if provider_name == CODEXCLI_PROVIDER_NAME:
+        return CodexCLIReadOnlyExecutor(
             provider=provider_factory(),
             provider_name=provider_name,
             environ=environ,
@@ -379,6 +420,8 @@ def _provider_factory(
         return provider_factories[provider_name]
     if provider_name in ("openai", "openai-compatible"):
         return OpenAIAPIProvider
+    if provider_name == CODEXCLI_PROVIDER_NAME:
+        return CodexCLIProvider
     if provider_name == "lemonade":
         return LemonadeProvider
     if provider_name == "alibaba":
