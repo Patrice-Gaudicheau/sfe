@@ -6787,7 +6787,10 @@ def test_tui_invalid_provider_renders_configuration_guidance(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     assert "reason: provider_configuration_error" in rendered
-    assert "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, anthropic, or google" in rendered
+    assert (
+        "set SFE_PROVIDER to openai-compatible, openai, lemonade, alibaba, "
+        "anthropic, google, or codexcli"
+    ) in rendered
     assert "bad-provider" not in rendered
 
 
