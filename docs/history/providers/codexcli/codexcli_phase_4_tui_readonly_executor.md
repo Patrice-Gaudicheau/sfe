@@ -10,5 +10,6 @@ console-style answers and read-only `/ask` answers. The executor uses
 passes TUI system instructions through the existing `system_instruction` chat
 path.
 
-This change does not enable CodexCLI for patch proposal, DEV patch execution,
-or patch application. Phase 5 remains future work.
+At this phase, CodexCLI was not enabled for patch proposal, DEV patch execution,
+or patch application. Phase 5 later enabled DEV patch proposal only, with SFE
+remaining responsible for validation and application.

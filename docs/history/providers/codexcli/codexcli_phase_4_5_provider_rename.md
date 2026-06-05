@@ -13,5 +13,6 @@ Benchmark dispatch still uses the existing `openai-codexcli` provider enum from
 benchmark paths and historical benchmark reports already use it, and changing
 benchmark enums is separate from the SFE configuration surface rename.
 
-This change does not enable CodexCLI for patch proposal, DEV patch execution,
-or patch application. Phase 5 remains future work.
+At this phase, CodexCLI was still not enabled for patch proposal, DEV patch
+execution, or patch application. Phase 5 later enabled DEV patch proposal only,
+with SFE remaining responsible for validation and application.
