@@ -214,7 +214,7 @@ def create_configured_execution_mode_router(
         return ConfiguredLLMExecutionModeRouter(
             provider=factory(),
             provider_name=provider_name,
-            model=_first_env_value(environ, ("SFE_OPENAI_ROUTER_MODEL",))
+            model=_first_env_value(environ, ("SFE_CODEXCLI_ROUTER_MODEL",))
             or DEFAULT_CODEXCLI_ROUTER_MODEL,
             call_style="system_instruction",
         )

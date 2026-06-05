@@ -189,9 +189,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--router-model",
-        default=os.getenv("SFE_OPENAI_ROUTER_MODEL"),
+        default=None,
         help=(
-            "Router model for OpenAI backends. Defaults by backend: "
+            "Router model for provider backends. Defaults by backend env/default: "
             f"{OPENAI_API_PROVIDER_NAME}={DEFAULT_OPENAI_API_ROUTER_MODEL}, "
             f"{OPENAI_CODEXCLI_PROVIDER_NAME}={DEFAULT_CODEXCLI_ROUTER_MODEL}, "
             f"{ALIBABA_API_PROVIDER_NAME}={DEFAULT_ALIBABA_ROUTER_MODEL}, "
@@ -200,8 +200,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--executor-model",
-        default=os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL,
-        help="Executor model for OpenAI/CodexCLI runs.",
+        default=None,
+        help="Executor model for provider runs. Defaults to the provider-specific env var.",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -472,7 +472,11 @@ def _execute_with_codexcli(
     debug_raw_response: bool,
 ) -> dict:
     provider = CodexCLIProvider(timeout=timeout_seconds)
-    model = executor_model or DEFAULT_OPENAI_EXECUTOR_MODEL
+    model = (
+        executor_model
+        or os.getenv("SFE_CODEXCLI_EXECUTOR_MODEL")
+        or DEFAULT_OPENAI_EXECUTOR_MODEL
+    )
     prompt = _build_execution_prompt(task, routing_decision, mode)
     prompt_style = _prompt_style(mode, routing_decision)
     zone_path = _zone_path(routing_decision["task_type"])
@@ -559,7 +563,11 @@ def _execute_with_openai_api(
     debug_raw_response: bool,
 ) -> dict:
     provider = OpenAIAPIProvider(timeout=timeout_seconds)
-    model = executor_model or DEFAULT_OPENAI_EXECUTOR_MODEL
+    model = (
+        executor_model
+        or os.getenv("SFE_OPENAI_EXECUTOR_MODEL")
+        or DEFAULT_OPENAI_EXECUTOR_MODEL
+    )
     prompt = _build_execution_prompt(task, routing_decision, mode)
     prompt_style = _prompt_style(mode, routing_decision)
     zone_path = _zone_path(routing_decision["task_type"])

@@ -391,7 +391,10 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
     def test_cli_parses_codexcli_executor_env_default_without_codex_router(self) -> None:
         with patch.dict(
             os.environ,
-            {"SFE_OPENAI_EXECUTOR_MODEL": "env-codex-executor"},
+            {
+                "SFE_CODEXCLI_EXECUTOR_MODEL": "env-codex-executor",
+                "SFE_OPENAI_EXECUTOR_MODEL": "env-openai-executor-ignored",
+            },
             clear=True,
         ), patch.object(
             sys,
@@ -410,6 +413,31 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertEqual(args.model, "env-codex-executor")
         self.assertEqual(args.router_provider, "openai")
         self.assertIsNone(args.router_model)
+
+    def test_cli_parses_codexcli_router_env_default_with_codex_router(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_CODEXCLI_ROUTER_MODEL": "env-codex-router",
+                "SFE_OPENAI_ROUTER_MODEL": "env-openai-router-ignored",
+            },
+            clear=True,
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                "run_output_variation_benchmark.py",
+                "--executor",
+                EXECUTOR_OPENAI_CODEXCLI,
+                "--selection-source",
+                "router",
+            ],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.executor, EXECUTOR_OPENAI_CODEXCLI)
+        self.assertEqual(args.router_provider, "openai")
+        self.assertEqual(args.router_model, "env-codex-router")
 
     def test_codexcli_executor_factory_is_benchmark_local_and_mockable(self) -> None:
         fake_provider = object()

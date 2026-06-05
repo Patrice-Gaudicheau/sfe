@@ -377,7 +377,10 @@ def _parse_args() -> argparse.Namespace:
         args.executor = EXECUTOR_FIXTURE
     args.model = args.model or _default_executor_model(args.executor)
     args.router_provider = args.router_provider or _default_router_provider(args.executor)
-    args.router_model = args.router_model or _default_router_model(args.router_provider)
+    args.router_model = args.router_model or _default_router_model(
+        args.router_provider,
+        executor=args.executor,
+    )
     if args.dry_run and args.selection_source == SELECTION_SOURCE_ROUTER:
         parser.error("--selection-source router requires live router selection; omit --dry-run.")
     if (
@@ -428,7 +431,7 @@ def _make_executor_provider(executor: str) -> Any:
 
 def _default_executor_model(executor: str) -> str | None:
     if executor == EXECUTOR_OPENAI_CODEXCLI:
-        return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_CODEXCLI_EXECUTOR_MODEL
+        return os.getenv("SFE_CODEXCLI_EXECUTOR_MODEL") or DEFAULT_CODEXCLI_EXECUTOR_MODEL
     if executor == EXECUTOR_OPENAI_API:
         return os.getenv("SFE_OPENAI_EXECUTOR_MODEL") or DEFAULT_OPENAI_EXECUTOR_MODEL
     if executor == EXECUTOR_ANTHROPIC:
@@ -450,7 +453,9 @@ def _default_router_provider(executor: str) -> str:
     return DEFAULT_ROUTER_SELECTION_PROVIDER
 
 
-def _default_router_model(router_provider: str) -> str | None:
+def _default_router_model(router_provider: str, *, executor: str | None = None) -> str | None:
+    if router_provider == ROUTER_PROVIDER_OPENAI and executor == EXECUTOR_OPENAI_CODEXCLI:
+        return os.getenv("SFE_CODEXCLI_ROUTER_MODEL") or None
     if router_provider == ROUTER_PROVIDER_OPENAI:
         return os.getenv("SFE_OPENAI_ROUTER_MODEL") or None
     if router_provider == ROUTER_PROVIDER_ANTHROPIC:

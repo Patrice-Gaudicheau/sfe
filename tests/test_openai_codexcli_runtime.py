@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -28,7 +29,7 @@ from runtime.logger import list_runs, log_run
 
 
 class OpenAICodexCLIRuntimeTests(unittest.TestCase):
-    def test_codexcli_default_models_match_openai_api_pairing(self) -> None:
+    def test_codexcli_default_models_remain_provider_defaults(self) -> None:
         self.assertEqual(CODEXCLI_DEFAULT_ROUTER_MODEL, "gpt-5.4")
         self.assertEqual(CODEXCLI_DEFAULT_EXECUTOR_MODEL, "gpt-5.4")
 
@@ -298,6 +299,73 @@ class OpenAICodexCLIRuntimeTests(unittest.TestCase):
         self.assertEqual(decision["router_total_tokens"], 122)
         self.assertEqual(decision["router_error"], "")
 
+    def test_codexcli_router_uses_codexcli_env_model_defaults(self) -> None:
+        class FakeProvider:
+            def __init__(self, **_: object) -> None:
+                self.timeout = 12
+                self.calls: list[dict[str, object]] = []
+
+            def chat(self, messages, **kwargs) -> dict[str, object]:  # type: ignore[no-untyped-def]
+                self.calls.append({"messages": messages, **kwargs})
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "task_type": "writing",
+                                        "role": "writer",
+                                        "provider": "local",
+                                        "model": kwargs["model"],
+                                        "memory_zones": [],
+                                        "execution_mode": "direct",
+                                        "max_input_tokens": 4000,
+                                        "max_output_tokens": 1000,
+                                        "requires_review": False,
+                                        "confidence": 0.9,
+                                        "rationale": "writing task",
+                                    }
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 101,
+                        "completion_tokens": 21,
+                        "total_tokens": 122,
+                    },
+                    "codexcli": {"latency_ms": 1234},
+                }
+
+        providers: list[FakeProvider] = []
+
+        def make_provider(**kwargs: object) -> FakeProvider:
+            del kwargs
+            provider = FakeProvider()
+            providers.append(provider)
+            return provider
+
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_CODEXCLI_ROUTER_MODEL": "env-codex-router",
+                "SFE_CODEXCLI_EXECUTOR_MODEL": "env-codex-executor",
+                "SFE_OPENAI_ROUTER_MODEL": "env-openai-router-ignored",
+                "SFE_OPENAI_EXECUTOR_MODEL": "env-openai-executor-ignored",
+            },
+            clear=True,
+        ), patch.object(llm_router, "CodexCLIProvider", make_provider):
+            decision, diagnostics = llm_router.route_with_codexcli_diagnostics(
+                "Write one sentence.",
+                timeout_seconds=12,
+            )
+
+        self.assertEqual(diagnostics["model"], "env-codex-router")
+        self.assertEqual(diagnostics["executor_model"], "env-codex-executor")
+        self.assertEqual(decision["router_model"], "env-codex-router")
+        self.assertEqual(decision["model"], "env-codex-executor")
+        self.assertEqual(providers[0].calls[0]["model"], "env-codex-router")
+
     def test_route_task_openai_uses_configured_models(self) -> None:
         fake_decision = {
             "task_type": "analysis",
@@ -348,6 +416,52 @@ class OpenAICodexCLIRuntimeTests(unittest.TestCase):
         self.assertEqual(args.router_model, "gpt-5.4-mini")
         self.assertEqual(args.executor_model, "gpt-5.5")
         self.assertEqual(args.repeat, 1)
+
+    def test_effectiveness_codexcli_model_defaults_use_codexcli_env(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_CODEXCLI_ROUTER_MODEL": "env-codex-router",
+                "SFE_CODEXCLI_EXECUTOR_MODEL": "env-codex-executor",
+                "SFE_OPENAI_ROUTER_MODEL": "env-openai-router-ignored",
+                "SFE_OPENAI_EXECUTOR_MODEL": "env-openai-executor-ignored",
+            },
+            clear=True,
+        ):
+            router_model = run_effectiveness_benchmark._resolve_router_model(
+                PROVIDER_NAME,
+                None,
+            )
+            executor_model = run_effectiveness_benchmark._resolve_executor_model(
+                PROVIDER_NAME,
+                None,
+            )
+
+        self.assertEqual(router_model, "env-codex-router")
+        self.assertEqual(executor_model, "env-codex-executor")
+
+    def test_effectiveness_openai_api_model_defaults_still_use_openai_env(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_OPENAI_ROUTER_MODEL": "env-openai-router",
+                "SFE_OPENAI_EXECUTOR_MODEL": "env-openai-executor",
+                "SFE_CODEXCLI_ROUTER_MODEL": "env-codex-router-ignored",
+                "SFE_CODEXCLI_EXECUTOR_MODEL": "env-codex-executor-ignored",
+            },
+            clear=True,
+        ):
+            router_model = run_effectiveness_benchmark._resolve_router_model(
+                run_effectiveness_benchmark.OPENAI_API_PROVIDER_NAME,
+                None,
+            )
+            executor_model = run_effectiveness_benchmark._resolve_executor_model(
+                run_effectiveness_benchmark.OPENAI_API_PROVIDER_NAME,
+                None,
+            )
+
+        self.assertEqual(router_model, "env-openai-router")
+        self.assertEqual(executor_model, "env-openai-executor")
 
     def test_effectiveness_deltas_include_executor_only_and_end_to_end_costs(self) -> None:
         baseline = {

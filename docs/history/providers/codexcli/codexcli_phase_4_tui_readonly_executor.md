@@ -8,7 +8,8 @@ This note records the narrow Phase 4 CodexCLI integration.
 console-style answers and read-only `/ask` answers. The executor uses
 `SFE_OPENAI_EXECUTOR_MODEL` with the CodexCLI provider default as fallback, and
 passes TUI system instructions through the existing `system_instruction` chat
-path.
+path. Phase 5.5 later decoupled CodexCLI from OpenAI API model variables by
+moving public SFE CodexCLI execution to `SFE_CODEXCLI_EXECUTOR_MODEL`.
 
 At this phase, CodexCLI was not enabled for patch proposal, DEV patch execution,
 or patch application. Phase 5 later enabled DEV patch proposal only, with SFE
