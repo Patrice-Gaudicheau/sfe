@@ -19,6 +19,11 @@ from providers.anthropic import (
     AnthropicProvider,
     MissingAnthropicAPIKeyError,
 )
+from providers.codexcli import (
+    DEFAULT_ROUTER_MODEL as DEFAULT_CODEXCLI_ROUTER_MODEL,
+    PROVIDER_NAME as CODEXCLI_PROVIDER_NAME,
+    CodexCLIProvider,
+)
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
 from providers.openai_api import (
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
@@ -206,6 +211,14 @@ def create_configured_execution_mode_router(
             missing_key_errors=(MissingOpenAIAPIKeyError,),
             provider_error_types=(OpenAIAPIError,),
         )
+    if provider_name == CODEXCLI_PROVIDER_NAME:
+        return ConfiguredLLMExecutionModeRouter(
+            provider=factory(),
+            provider_name=provider_name,
+            model=_first_env_value(environ, ("SFE_OPENAI_ROUTER_MODEL",))
+            or DEFAULT_CODEXCLI_ROUTER_MODEL,
+            call_style="system_instruction",
+        )
     if provider_name == "lemonade":
         return ConfiguredLLMExecutionModeRouter(
             provider=factory(),
@@ -362,6 +375,8 @@ def _provider_factory_for(
         return provider_factories[provider_name]
     if provider_name in ("openai", "openai-compatible"):
         return OpenAIAPIProvider
+    if provider_name == CODEXCLI_PROVIDER_NAME:
+        return CodexCLIProvider
     if provider_name == "lemonade":
         return LemonadeProvider
     if provider_name == "alibaba":

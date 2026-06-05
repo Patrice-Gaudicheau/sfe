@@ -16,6 +16,7 @@ DEFAULT_PROXY_STANDBY_PROVIDER = "openai-compatible"
 
 CANONICAL_PROVIDER_VALUES = (
     "openai-compatible",
+    "openai-codexcli",
     "openai",
     "lemonade",
     "alibaba",

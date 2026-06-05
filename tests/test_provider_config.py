@@ -31,6 +31,7 @@ def test_blank_sfe_provider_returns_default() -> None:
     ("provider", "expected"),
     (
         ("openai", "openai"),
+        ("openai-codexcli", "openai-codexcli"),
         ("lemonade", "lemonade"),
         ("alibaba", "alibaba"),
         ("anthropic", "anthropic"),
@@ -64,11 +65,6 @@ def test_gemini_alias_normalizes_to_google() -> None:
 def test_unknown_provider_raises_clear_error() -> None:
     with pytest.raises(ValueError, match="Unsupported SFE provider"):
         resolve_sfe_provider({"SFE_PROVIDER": "unknown-provider"})
-
-
-def test_codexcli_is_not_a_shared_sfe_provider_yet() -> None:
-    with pytest.raises(ValueError, match="Unsupported SFE provider"):
-        resolve_sfe_provider({"SFE_PROVIDER": "openai-codexcli"})
 
 
 def test_default_is_normalized_and_validated() -> None:
