@@ -14,8 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.codexcli import (
+    CodexCLITimeoutError,
     CodexCLIProvider,
     _run_codex_process,
+    build_codex_resume_command,
     build_codex_exec_command,
     parse_codex_jsonl,
 )
@@ -104,6 +106,39 @@ class TimeoutSupervisor:
         raise TimeoutError("CodexCLI process stalled")
 
 
+class NonIdleSupervisor:
+    internal_heartbeat_seconds = 0.001
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.idle_checks = 0
+
+    def emit(
+        self,
+        kind: str,
+        *,
+        source: str,
+        real_provider_signal: bool,
+        resets_idle_timer: bool | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        del source, real_provider_signal, resets_idle_timer, metadata
+        self.events.append(kind)
+
+    def check_idle(self) -> None:
+        self.idle_checks += 1
+
+
+class AdvancingClock:
+    def __init__(self, step: float = 0.01) -> None:
+        self.current = 0.0
+        self.step = step
+
+    def __call__(self) -> float:
+        self.current += self.step
+        return self.current
+
+
 class CodexCLIProviderTests(unittest.TestCase):
     def test_build_command_uses_json_model_and_read_only_sandbox(self) -> None:
         command = build_codex_exec_command("gpt-5.5")
@@ -144,6 +179,57 @@ class CodexCLIProviderTests(unittest.TestCase):
                 'model_reasoning_effort="medium"',
             ],
         )
+
+    def test_build_resume_command_reads_prompt_from_stdin(self) -> None:
+        command = build_codex_resume_command("gpt-5.5", "thread-1")
+
+        self.assertEqual(
+            command,
+            [
+                "codex",
+                "exec",
+                "resume",
+                "--json",
+                "--model",
+                "gpt-5.5",
+                "--skip-git-repo-check",
+                "thread-1",
+                "-",
+            ],
+        )
+
+    def test_build_resume_command_uses_reasoning_effort_without_changing_exec_command(
+        self,
+    ) -> None:
+        with patch.dict(
+            "providers.codexcli.os.environ",
+            {"SFE_CODEXCLI_REASONING_EFFORT": "high"},
+        ):
+            resume_command = build_codex_resume_command("gpt-5.5", " thread-1 ")
+            exec_command = build_codex_exec_command("gpt-5.5")
+
+        self.assertEqual(
+            resume_command,
+            [
+                "codex",
+                "exec",
+                "resume",
+                "--json",
+                "--model",
+                "gpt-5.5",
+                "--skip-git-repo-check",
+                "-c",
+                'model_reasoning_effort="high"',
+                "thread-1",
+                "-",
+            ],
+        )
+        self.assertEqual(exec_command[0:3], ["codex", "exec", "--sandbox"])
+        self.assertNotIn("resume", exec_command)
+
+    def test_build_resume_command_rejects_empty_session_id(self) -> None:
+        with self.assertRaisesRegex(ValueError, "session id"):
+            build_codex_resume_command("gpt-5.5", " ")
 
     def test_parse_jsonl_extracts_visible_answer_thread_and_usage(self) -> None:
         parsed = parse_codex_jsonl(
@@ -408,10 +494,48 @@ class CodexCLIProviderTests(unittest.TestCase):
                     cwd=PROJECT_ROOT,
                     prompt="hello",
                     supervisor=supervisor,
+                    timeout_seconds=30,
                 )
 
         self.assertTrue(fake_process.killed)
         self.assertIn("internal_wait", supervisor.events)
+
+    def test_run_codex_process_kills_process_when_total_timeout_expires(self) -> None:
+        fake_process = FakeNeverExitsProcess(stdout_lines=[], returncode=0)
+        supervisor = NonIdleSupervisor()
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+            with self.assertRaisesRegex(CodexCLITimeoutError, "total timeout"):
+                _run_codex_process(
+                    command=["codex", "exec", "--json"],
+                    cwd=PROJECT_ROOT,
+                    prompt="hello",
+                    supervisor=supervisor,
+                    timeout_seconds=0.015,
+                    clock=AdvancingClock(step=0.01),
+                )
+
+        self.assertTrue(fake_process.killed)
+        self.assertEqual(supervisor.idle_checks, 0)
+
+    def test_chat_reports_total_timeout_as_clear_provider_error(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=0.015, idle_timeout=30)
+        fake_process = FakeNeverExitsProcess(stdout_lines=[], returncode=0)
+        events, sink = collect_progress_events()
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process), patch(
+            "providers.codexcli.time.monotonic",
+            AdvancingClock(step=0.01),
+        ):
+            with self.assertRaisesRegex(CodexCLITimeoutError, "CodexCLI exceeded total timeout"):
+                provider.chat(
+                    [{"role": "user", "content": "hello"}],
+                    model="gpt-5.5",
+                    progress_sink=sink,
+                )
+
+        self.assertTrue(fake_process.killed)
+        self.assertIn("call_failed", [event.kind for event in events])
 
 
 if __name__ == "__main__":

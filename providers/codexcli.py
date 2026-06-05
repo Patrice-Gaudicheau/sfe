@@ -26,6 +26,10 @@ DEFAULT_TIMEOUT = 300
 DEFAULT_SANDBOX = "read-only"
 
 
+class CodexCLITimeoutError(TimeoutError):
+    """Raised when the Codex CLI process exceeds the total wall-clock timeout."""
+
+
 class CodexCLIProvider:
     """Small chat-like adapter around `codex exec --json`."""
 
@@ -99,6 +103,7 @@ class CodexCLIProvider:
                 cwd=self.cwd,
                 prompt=prompt,
                 supervisor=supervisor,
+                timeout_seconds=self.timeout,
             )
         except Exception as exc:
             supervisor.fail({"error_type": type(exc).__name__})
@@ -135,7 +140,11 @@ def _run_codex_process(
     cwd: Path,
     prompt: str,
     supervisor: ProviderCallSupervisor,
+    timeout_seconds: float,
+    clock: Any = time.monotonic,
 ) -> tuple[str, str, int]:
+    if timeout_seconds <= 0:
+        raise ValueError("CodexCLI timeout must be greater than 0.")
     supervisor.emit(
         "request_sent",
         source="codexcli",
@@ -182,7 +191,13 @@ def _run_codex_process(
 
     stdout_done = False
     stderr_done = False
+    deadline = clock() + timeout_seconds
     while not (stdout_done and stderr_done and process.poll() is not None):
+        if clock() >= deadline:
+            _terminate_process(process)
+            raise CodexCLITimeoutError(
+                f"CodexCLI exceeded total timeout of {timeout_seconds:g} seconds"
+            )
         try:
             stream, value = output_queue.get(timeout=supervisor.internal_heartbeat_seconds)
         except queue.Empty:
@@ -196,7 +211,7 @@ def _run_codex_process(
             try:
                 supervisor.check_idle()
             except Exception:
-                process.kill()
+                _terminate_process(process)
                 raise
             continue
         if stream == "stdout" and value is not None:
@@ -218,6 +233,17 @@ def _run_codex_process(
     return "".join(stdout_parts), "".join(stderr_parts), returncode
 
 
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    try:
+        process.kill()
+    except (OSError, ValueError):
+        pass
+    try:
+        process.wait()
+    except (OSError, ValueError):
+        pass
+
+
 def build_codex_exec_command(model: str, sandbox: str = DEFAULT_SANDBOX) -> list[str]:
     """Build the non-interactive Codex command used by the benchmark adapter."""
     command = [
@@ -233,6 +259,27 @@ def build_codex_exec_command(model: str, sandbox: str = DEFAULT_SANDBOX) -> list
     reasoning_effort = os.getenv("SFE_CODEXCLI_REASONING_EFFORT", "").strip()
     if reasoning_effort:
         command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    return command
+
+
+def build_codex_resume_command(model: str, session_id: str) -> list[str]:
+    """Build a Codex exec resume command that reads the resumed prompt from stdin."""
+    normalized_session_id = session_id.strip()
+    if not normalized_session_id:
+        raise ValueError("CodexCLI resume session id must not be empty.")
+    command = [
+        "codex",
+        "exec",
+        "resume",
+        "--json",
+        "--model",
+        model,
+        "--skip-git-repo-check",
+    ]
+    reasoning_effort = os.getenv("SFE_CODEXCLI_REASONING_EFFORT", "").strip()
+    if reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    command.extend([normalized_session_id, "-"])
     return command
 
 
