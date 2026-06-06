@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
+import io
 import json
 import os
 import sys
@@ -28,6 +30,7 @@ from runtime.run_codexcli_output_token_benchmark import (  # noqa: E402
     build_patch_prompt,
     clean_reports,
     classify_token_usage,
+    context_token_count,
     create_playground_fixtures,
     get_dev_patch_tasks,
     guard_codexcli_live_provider,
@@ -210,6 +213,103 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
             self.assertIn("htmlspecialchars", get_dev_patch_tasks()[0].patched_files["blog/index.php"])
             self.assertIn("$posts = require", target.read_text(encoding="utf-8"))
             self.assertNotEqual(target.read_text(encoding="utf-8"), "mutated\n")
+
+    def test_medium_fixture_is_created_and_reset_correctly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_playground_fixtures(root)
+            target = (
+                root / "fixtures" / "medium-php-blog-noise" / "public" / "index.php"
+            )
+            docs = (
+                root / "fixtures" / "medium-php-blog-noise" / "docs"
+                / "deployment-checklist.md"
+            )
+            target.write_text("mutated\n", encoding="utf-8")
+
+            reset_playground_fixtures(root)
+
+            self.assertTrue(target.exists())
+            self.assertTrue(docs.exists())
+            self.assertIn("$posts = require", target.read_text(encoding="utf-8"))
+            self.assertNotEqual(target.read_text(encoding="utf-8"), "mutated\n")
+
+    def test_medium_task_is_included_and_has_meaningful_context_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_playground_fixtures(root)
+            task = _task_by_id("medium_php_blog_escape")
+
+            selected_tokens = context_token_count(
+                root,
+                task,
+                task.selected_context_files,
+            )
+            full_tokens = context_token_count(root, task, task.context_files)
+
+            self.assertIn(task.task_id, [item.task_id for item in get_dev_patch_tasks()])
+            self.assertEqual(task.project, "medium-php-blog-noise")
+            self.assertEqual(
+                task.selected_context_files,
+                ("content/posts.php", "public/index.php"),
+            )
+            self.assertGreater(full_tokens - selected_tokens, 3000)
+            self.assertGreater(full_tokens, selected_tokens * 5)
+
+    def test_medium_selected_and_full_prompts_can_be_generated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_playground_fixtures(root)
+            task = _task_by_id("medium_php_blog_escape")
+            workspace_root = root / "fixtures" / task.project
+
+            selected_prompt = build_patch_prompt(workspace_root, task, CONDITION_SELECTED)
+            full_prompt = build_patch_prompt(workspace_root, task, CONDITION_FULL)
+
+            self.assertIn("FILE content/posts.php", selected_prompt)
+            self.assertIn("FILE public/index.php", selected_prompt)
+            self.assertNotIn("FILE docs/deployment-checklist.md", selected_prompt)
+            self.assertIn("FILE docs/deployment-checklist.md", full_prompt)
+            self.assertIn("FILE assets/search.js", full_prompt)
+            self.assertGreater(len(full_prompt) - len(selected_prompt), 12000)
+
+    def test_dry_run_can_target_medium_task_without_live_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output):
+                main(
+                    [
+                        "--playground-dir",
+                        str(root),
+                        "--dry-run",
+                        "--task-id",
+                        "medium_php_blog_escape",
+                    ]
+                )
+
+            rendered = output.getvalue()
+            self.assertIn("planned_task: medium_php_blog_escape", rendered)
+            self.assertNotIn("planned_task: tiny_php_blog_escape", rendered)
+
+    def test_run_campaign_task_id_filter_selects_only_medium_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = run_campaign(
+                CampaignConfig(
+                    playground_dir=Path(tmpdir),
+                    task_ids=("medium_php_blog_escape",),
+                )
+            )
+
+            self.assertTrue(report["metadata"]["dry_run"])
+            self.assertEqual(report["metadata"]["task_ids"], ["medium_php_blog_escape"])
+            self.assertEqual(report["metadata"]["task_filter"], ["medium_php_blog_escape"])
+            self.assertEqual(len(report["tasks"]), 1)
+            self.assertEqual(
+                {record["task_id"] for record in report["records"]},
+                {"medium_php_blog_escape"},
+            )
 
     def test_benchmark_runs_with_fake_provider_without_live_codexcli(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -466,6 +566,10 @@ def _make_report_dir(reports_dir: Path, name: str) -> Path:
     path.mkdir(parents=True)
     (path / "summary.md").write_text("# summary\n", encoding="utf-8")
     return path
+
+
+def _task_by_id(task_id: str):
+    return next(task for task in get_dev_patch_tasks() if task.task_id == task_id)
 
 
 if __name__ == "__main__":
