@@ -12,6 +12,7 @@ import csv
 import difflib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,8 @@ DEFAULT_PLAYGROUND_DIR = (
     / "codexcli-output-token-campaign"
 )
 DEFAULT_MAX_LIVE_TASKS = 1
+DEFAULT_KEEP_LAST_REPORTS = 5
+REPORT_TIMESTAMP_RE = re.compile(r"(\d{8}T\d{6}Z)$")
 CSV_FIELDS = (
     "run_id",
     "task_id",
@@ -124,10 +127,13 @@ class CampaignConfig:
     timeout_seconds: float = 300
 
     @property
+    def reports_root(self) -> Path:
+        return self.reports_base_dir or (self.playground_dir / "reports")
+
+    @property
     def reports_dir(self) -> Path:
-        base = self.reports_base_dir or (self.playground_dir / "reports")
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        return base / f"{self.campaign_name}-{stamp}"
+        return self.reports_root / f"{self.campaign_name}-{stamp}"
 
     @classmethod
     def from_env(
@@ -185,6 +191,16 @@ class PatchExecutor(Protocol):
         timeout_seconds: float,
     ) -> dict[str, Any]:
         ...
+
+
+@dataclass(frozen=True)
+class ReportCleanupResult:
+    reports_dir: Path
+    keep_last_reports: int
+    dry_run: bool
+    missing_reports_dir: bool
+    deleted_dirs: tuple[Path, ...]
+    kept_dirs: tuple[Path, ...]
 
 
 class LiveCodexCLIPatchExecutor:
@@ -263,6 +279,14 @@ def main(argv: list[str] | None = None) -> None:
     load_repo_env()
     args = parse_args(argv)
     config = config_from_args(args)
+    if args.clean_reports:
+        cleanup = clean_reports(
+            config,
+            keep_last_reports=args.keep_last_reports,
+            dry_run=args.clean_reports_dry_run or args.dry_run,
+        )
+        print_cleanup_result(cleanup)
+        return
     if args.reset_fixtures:
         reset_playground_fixtures(config.playground_dir)
         print(f"fixtures_reset: {config.playground_dir}")
@@ -290,6 +314,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--campaign-name", default="codexcli-output-token-campaign")
     parser.add_argument("--create-fixtures", action="store_true")
     parser.add_argument("--reset-fixtures", action="store_true")
+    parser.add_argument(
+        "--clean-reports",
+        action="store_true",
+        help="Delete old timestamped benchmark report directories explicitly.",
+    )
+    parser.add_argument(
+        "--keep-last-reports",
+        type=int,
+        default=DEFAULT_KEEP_LAST_REPORTS,
+        help="With --clean-reports, keep the newest N report directories.",
+    )
+    parser.add_argument(
+        "--clean-reports-dry-run",
+        action="store_true",
+        help="With --clean-reports, print old report directories without deleting.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Plan only; no provider calls.")
     parser.add_argument("--live", action="store_true", help="Allow live CodexCLI calls.")
     parser.add_argument(
@@ -313,6 +353,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--live and --fake-provider are mutually exclusive.")
     if args.max_tasks is not None and args.max_tasks < 1:
         parser.error("--max-tasks must be at least 1.")
+    if args.keep_last_reports < 0:
+        parser.error("--keep-last-reports must be 0 or greater.")
+    if args.clean_reports_dry_run:
+        args.clean_reports = True
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be greater than 0.")
     return args
@@ -411,6 +455,100 @@ def print_live_warning(config: CampaignConfig, tasks: list[DevPatchTask]) -> Non
 
 def select_tasks(tasks: list[DevPatchTask], *, max_tasks: int | None) -> list[DevPatchTask]:
     return tasks[:max_tasks] if max_tasks is not None else tasks
+
+
+def clean_reports(
+    config: CampaignConfig,
+    *,
+    keep_last_reports: int = DEFAULT_KEEP_LAST_REPORTS,
+    dry_run: bool = False,
+) -> ReportCleanupResult:
+    if keep_last_reports < 0:
+        raise ValueError("keep_last_reports must be 0 or greater.")
+    reports_dir = validate_reports_cleanup_root(config)
+    if not reports_dir.exists():
+        return ReportCleanupResult(
+            reports_dir=reports_dir,
+            keep_last_reports=keep_last_reports,
+            dry_run=dry_run,
+            missing_reports_dir=True,
+            deleted_dirs=(),
+            kept_dirs=(),
+        )
+    if not reports_dir.is_dir():
+        raise ValueError("reports cleanup path is not a directory.")
+
+    report_dirs = sorted(
+        (path for path in reports_dir.iterdir() if path.is_dir()),
+        key=report_directory_sort_key,
+    )
+    kept = tuple(report_dirs[-keep_last_reports:]) if keep_last_reports else ()
+    kept_set = set(kept)
+    delete_candidates = tuple(path for path in report_dirs if path not in kept_set)
+    if not dry_run:
+        for path in delete_candidates:
+            assert_cleanup_child(reports_dir, path)
+            shutil.rmtree(path)
+    return ReportCleanupResult(
+        reports_dir=reports_dir,
+        keep_last_reports=keep_last_reports,
+        dry_run=dry_run,
+        missing_reports_dir=False,
+        deleted_dirs=delete_candidates,
+        kept_dirs=kept,
+    )
+
+
+def validate_reports_cleanup_root(config: CampaignConfig) -> Path:
+    reports_dir = config.reports_root.expanduser().resolve()
+    playground_dir = config.playground_dir.expanduser().resolve()
+    if reports_dir.name != "reports":
+        raise ValueError("refusing cleanup: reports path must be named 'reports'.")
+    if reports_dir == playground_dir:
+        raise ValueError("refusing cleanup: reports path is the playground root.")
+    if reports_dir == playground_dir / "fixtures":
+        raise ValueError("refusing cleanup: reports path is the fixtures directory.")
+    if config.reports_base_dir is None:
+        expected = (playground_dir / "reports").resolve()
+        if reports_dir != expected:
+            raise ValueError("refusing cleanup: reports path is not the benchmark reports directory.")
+    return reports_dir
+
+
+def assert_cleanup_child(reports_dir: Path, child: Path) -> None:
+    resolved_reports = reports_dir.resolve()
+    resolved_child = child.resolve()
+    if resolved_child.parent != resolved_reports:
+        raise ValueError("refusing cleanup: deletion candidate is not an immediate reports child.")
+    if not resolved_child.is_dir():
+        raise ValueError("refusing cleanup: deletion candidate is not a directory.")
+
+
+def report_directory_sort_key(path: Path) -> tuple[str, str]:
+    match = REPORT_TIMESTAMP_RE.search(path.name)
+    if match is not None:
+        return (match.group(1), path.name)
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    return (f"{mtime_ns:020d}", path.name)
+
+
+def print_cleanup_result(result: ReportCleanupResult) -> None:
+    print(f"reports_dir: {result.reports_dir}")
+    print(f"keep_last_reports: {result.keep_last_reports}")
+    print(f"cleanup_dry_run: {result.dry_run}")
+    if result.missing_reports_dir:
+        print("cleanup_status: reports_dir_missing")
+        return
+    action = "would_delete" if result.dry_run else "deleted"
+    if not result.deleted_dirs:
+        print(f"cleanup_status: no_report_directories_to_{action}")
+    for path in result.deleted_dirs:
+        print(f"{action}: {path}")
+    for path in result.kept_dirs:
+        print(f"kept: {path}")
 
 
 def reset_playground_fixtures(playground_dir: Path) -> None:
