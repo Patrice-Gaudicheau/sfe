@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import csv
 import sys
 import tempfile
 import unittest
@@ -40,6 +41,41 @@ class ExplodingExecutor:
     def execute(self, **_: object) -> dict[str, object]:
         self.calls += 1
         raise AssertionError("executor should not be called")
+
+
+class InvalidHunkExecutor:
+    provider_name = "codexcli"
+
+    def execute(self, **_: object) -> dict[str, object]:
+        return {
+            "choices": [{"message": {"content": INVALID_HUNK_DIFF}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            },
+        }
+
+
+INVALID_HUNK_DIFF = "\n".join(
+    [
+        "diff --git a/blog/index.php b/blog/index.php",
+        "--- a/blog/index.php",
+        "+++ b/blog/index.php",
+        "@@ -6,8 +6,8 @@",
+        " <body>",
+        "  <main>",
+        "    <?php foreach ($posts as $post): ?>",
+        "      <article>",
+        "-        <h2><?= $post['title'] ?></h2>",
+        "-        <p><?= $post['body'] ?></p>",
+        "+        <h2><?= htmlspecialchars($post['title'], ENT_QUOTES, 'UTF-8') ?></h2>",
+        "+        <p><?= htmlspecialchars($post['body'], ENT_QUOTES, 'UTF-8') ?></p>",
+        "      </article>",
+        "    <?php endforeach; ?>",
+        "  </main>",
+    ]
+)
 
 
 class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
@@ -118,6 +154,7 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
             self.assertTrue(markdown.exists())
             self.assertEqual(len(jsonl.read_text(encoding="utf-8").splitlines()), 1)
             self.assertIn("output_token_source", csv.read_text(encoding="utf-8"))
+            self.assertIn("patch_issue_reason", csv.read_text(encoding="utf-8"))
             self.assertIn("CodexCLI DEV/Patch", markdown.read_text(encoding="utf-8"))
 
     def test_playground_fixture_creation_and_reset_work(self) -> None:
@@ -151,6 +188,10 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
             self.assertTrue(record["patch_accepted"])
             self.assertTrue(record["patch_applied"])
             self.assertEqual(record["output_token_source"], TOKEN_SOURCE_MEASURED)
+            self.assertIsNone(record["patch_issue_category"])
+            self.assertIsNone(record["patch_issue_reason"])
+            self.assertIsNone(record["hunk_accounting_diagnostics"])
+            self.assertTrue(Path(record["prompt_artifact_path"]).exists())
 
     def test_invalid_prose_only_patch_output_is_recorded_safely(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -168,6 +209,8 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
             self.assertFalse(record["patch_accepted"])
             self.assertFalse(record["patch_applied"])
             self.assertEqual(record["error_category"], "invalid_patch_proposal")
+            self.assertEqual(record["patch_issue_category"], "invalid_patch_proposal")
+            self.assertEqual(record["patch_issue_reason"], "missing_diff_header")
 
     def test_no_worktree_mutation_occurs_on_provider_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -208,6 +251,64 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
             row = json.loads(Path(report["artifacts"]["jsonl"]).read_text(encoding="utf-8"))
             self.assertEqual(row["output_token_source"], TOKEN_SOURCE_ESTIMATED)
             self.assertEqual(row["provider"], "codexcli")
+
+    def test_impossible_hunk_accounting_is_recorded_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = run_campaign(
+                CampaignConfig(
+                    playground_dir=Path(tmpdir),
+                    fake_provider=True,
+                    max_tasks=1,
+                    conditions=(CONDITION_SELECTED,),
+                ),
+                executor=InvalidHunkExecutor(),
+            )
+            record = report["records"][0]
+
+            self.assertEqual(record["error_category"], "invalid_patch_proposal")
+            self.assertEqual(record["patch_issue_category"], "invalid_patch_proposal")
+            self.assertEqual(record["patch_issue_reason"], "impossible_hunk_accounting")
+            self.assertIn("actual_old_new=9/9", record["patch_diagnostic_message"])
+            diagnostics = record["hunk_accounting_diagnostics"]
+            self.assertEqual(diagnostics["declared_old_count"], 8)
+            self.assertEqual(diagnostics["declared_new_count"], 8)
+            self.assertEqual(diagnostics["actual_old_side_count"], 9)
+            self.assertEqual(diagnostics["actual_new_side_count"], 9)
+
+    def test_jsonl_csv_and_markdown_include_patch_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = run_campaign(
+                CampaignConfig(
+                    playground_dir=Path(tmpdir),
+                    fake_provider=True,
+                    max_tasks=1,
+                    conditions=(CONDITION_SELECTED,),
+                ),
+                executor=InvalidHunkExecutor(),
+            )
+
+            jsonl_path = Path(report["artifacts"]["jsonl"])
+            csv_path = Path(report["artifacts"]["csv"])
+            md_path = Path(report["artifacts"]["markdown"])
+            row = json.loads(jsonl_path.read_text(encoding="utf-8"))
+            self.assertEqual(row["patch_issue_reason"], "impossible_hunk_accounting")
+            self.assertEqual(
+                row["hunk_accounting_diagnostics"]["actual_old_side_count"],
+                9,
+            )
+
+            with csv_path.open(newline="", encoding="utf-8") as handle:
+                csv_row = next(csv.DictReader(handle))
+            self.assertEqual(
+                csv_row["patch_issue_reason"],
+                "impossible_hunk_accounting",
+            )
+            self.assertIn("actual_old_side_count", csv_row["hunk_accounting_diagnostics"])
+            self.assertTrue(Path(csv_row["prompt_artifact_path"]).exists())
+
+            markdown = md_path.read_text(encoding="utf-8")
+            self.assertIn("diagnostic", markdown)
+            self.assertIn("impossible_hunk_accounting", markdown)
 
 
 if __name__ == "__main__":
