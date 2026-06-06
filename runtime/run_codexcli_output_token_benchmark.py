@@ -35,6 +35,7 @@ from runtime.run_experiment import _extract_response_text  # noqa: E402
 from sfe.contracts import approximate_token_count  # noqa: E402
 from sfe.env import load_repo_env  # noqa: E402
 from sfe.patching import (  # noqa: E402
+    PatchIssue,
     PatchSummary,
     apply_patch_to_workspace,
     parse_unified_diff,
@@ -82,6 +83,12 @@ CSV_FIELDS = (
     "files_modified_count",
     "diff_line_count",
     "output_text_length",
+    "prompt_artifact_path",
+    "patch_issue_category",
+    "patch_issue_reason",
+    "patch_issue_path",
+    "patch_diagnostic_message",
+    "hunk_accounting_diagnostics",
     "retry_count",
     "relaunch_count",
     "error_category",
@@ -453,6 +460,7 @@ def run_task_condition(
         shutil.rmtree(workspace_root)
     shutil.copytree(source_project, workspace_root)
     prompt = build_patch_prompt(workspace_root, task, condition)
+    prompt_artifact_path = write_prompt_artifact(reports_dir, run_id, prompt)
     output = ""
     response: dict[str, Any] = {}
     error_category: str | None = None
@@ -489,6 +497,7 @@ def run_task_condition(
         "run_id": run_id,
         "execution_status": execution_status,
         "workspace_path": str(workspace_root),
+        "prompt_artifact_path": prompt_artifact_path,
         "prompt_text_length": len(prompt),
         "output_text_length": len(output),
         "output": output,
@@ -506,6 +515,7 @@ def plan_record(config: CampaignConfig, task: DevPatchTask, condition: str) -> d
         "run_id": f"planned-{task.task_id}-{condition}",
         "execution_status": "planned_dry_run",
         "workspace_path": None,
+        "prompt_artifact_path": None,
         "prompt_text_length": None,
         "output_text_length": 0,
         "output": "",
@@ -522,6 +532,7 @@ def plan_record(config: CampaignConfig, task: DevPatchTask, condition: str) -> d
         "files_modified_count": 0,
         "diff_line_count": 0,
         "patch_summary": None,
+        **empty_patch_issue_fields(),
         "retry_count": 0,
         "relaunch_count": 0,
         "error_category": None,
@@ -583,6 +594,13 @@ def build_patch_prompt(workspace_root: Path, task: DevPatchTask, condition: str)
         + "\n\n".join(context_parts)
         + "\n\nReturn only a strict Git-style unified diff."
     )
+
+
+def write_prompt_artifact(reports_dir: Path, run_id: str, prompt: str) -> str:
+    prompt_path = reports_dir / "prompts" / f"{run_id}.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    return str(prompt_path)
 
 
 def classify_token_usage(
@@ -654,6 +672,7 @@ def evaluate_and_apply_patch(
             "files_modified_count": 0,
             "diff_line_count": len(output.splitlines()),
             "patch_summary": None,
+            **empty_patch_issue_fields(),
             "error_category": prior_error_category,
         }
     parsed = parse_unified_diff(output)
@@ -666,15 +685,20 @@ def evaluate_and_apply_patch(
             "files_modified_count": 0,
             "diff_line_count": len(output.splitlines()),
             "patch_summary": summary_to_dict(parsed.summary),
+            **patch_issue_fields(parsed.issue),
             "error_category": "invalid_patch_proposal",
         }
     guard_issue = validate_patch_paths(workspace_root, parsed.summary.paths)
     if guard_issue is not None:
-        return rejected_patch_record(output, parsed.summary, guard_issue.reason)
+        return rejected_patch_record(output, parsed.summary, guard_issue)
     validation = validate_patch_targets(workspace_root, parsed.patch)
     if not validation.ok:
-        reason = validation.issue.reason if validation.issue is not None else "patch_not_applicable"
-        return rejected_patch_record(output, parsed.summary, reason)
+        return rejected_patch_record(
+            output,
+            parsed.summary,
+            validation.issue,
+            fallback_reason="patch_not_applicable",
+        )
     apply_result = apply_patch_to_workspace(workspace_root, validation.patch or parsed.patch)
     if not apply_result.applied:
         reason = apply_result.issue.reason if apply_result.issue is not None else "patch_apply_failed"
@@ -686,6 +710,7 @@ def evaluate_and_apply_patch(
             "files_modified_count": 0,
             "diff_line_count": len(output.splitlines()),
             "patch_summary": summary_to_dict(validation.summary or parsed.summary),
+            **patch_issue_fields(apply_result.issue, fallback_reason=reason),
             "error_category": reason,
         }
     tests_status, tests_detail = run_task_tests(workspace_root, test_commands) if run_tests else ("not_run", "disabled")
@@ -698,11 +723,19 @@ def evaluate_and_apply_patch(
         "files_modified_count": summary.file_count,
         "diff_line_count": len(output.splitlines()),
         "patch_summary": summary_to_dict(summary),
+        **empty_patch_issue_fields(),
         "error_category": None if tests_status in ("passed", "not_run") else "tests_failed",
     }
 
 
-def rejected_patch_record(output: str, summary: PatchSummary, reason: str) -> dict[str, Any]:
+def rejected_patch_record(
+    output: str,
+    summary: PatchSummary,
+    issue: PatchIssue | None,
+    *,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    reason = issue.reason if issue is not None else (fallback_reason or "patch_rejected")
     return {
         "patch_accepted": False,
         "patch_applied": False,
@@ -711,7 +744,85 @@ def rejected_patch_record(output: str, summary: PatchSummary, reason: str) -> di
         "files_modified_count": 0,
         "diff_line_count": len(output.splitlines()),
         "patch_summary": summary_to_dict(summary),
+        **patch_issue_fields(issue, fallback_reason=fallback_reason),
         "error_category": reason,
+    }
+
+
+def empty_patch_issue_fields() -> dict[str, Any]:
+    return {
+        "patch_issue_category": None,
+        "patch_issue_reason": None,
+        "patch_issue_path": None,
+        "patch_diagnostic_message": None,
+        "hunk_accounting_diagnostics": None,
+    }
+
+
+def patch_issue_fields(
+    issue: PatchIssue | None,
+    *,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    if issue is None:
+        fields = empty_patch_issue_fields()
+        if fallback_reason:
+            fields["patch_issue_reason"] = fallback_reason
+            fields["patch_diagnostic_message"] = fallback_reason
+        return fields
+    return {
+        "patch_issue_category": issue.category,
+        "patch_issue_reason": issue.reason,
+        "patch_issue_path": issue.path,
+        "patch_diagnostic_message": patch_diagnostic_message(issue),
+        "hunk_accounting_diagnostics": hunk_accounting_to_dict(
+            issue.hunk_accounting
+        ),
+    }
+
+
+def patch_diagnostic_message(issue: PatchIssue) -> str:
+    parts = [f"{issue.category}: {issue.reason}"]
+    if issue.path:
+        parts.append(f"path={issue.path}")
+    diagnostics = issue.hunk_accounting
+    if diagnostics is not None:
+        parts.extend(
+            [
+                f"hunk={diagnostics.hunk_header}",
+                (
+                    "declared_old_new="
+                    f"{diagnostics.declared_old_count}/{diagnostics.declared_new_count}"
+                ),
+                (
+                    "actual_old_new="
+                    f"{diagnostics.actual_old_side_count}/"
+                    f"{diagnostics.actual_new_side_count}"
+                ),
+            ]
+        )
+    return "; ".join(parts)
+
+
+def hunk_accounting_to_dict(diagnostics: Any) -> dict[str, Any] | None:
+    if diagnostics is None:
+        return None
+    return {
+        "path": diagnostics.path,
+        "hunk_header": diagnostics.hunk_header,
+        "declared_old_start": diagnostics.declared_old_start,
+        "declared_old_count": diagnostics.declared_old_count,
+        "declared_new_start": diagnostics.declared_new_start,
+        "declared_new_count": diagnostics.declared_new_count,
+        "actual_old_side_count": diagnostics.actual_old_side_count,
+        "actual_new_side_count": diagnostics.actual_new_side_count,
+        "actual_context_line_count": diagnostics.actual_context_line_count,
+        "actual_removed_line_count": diagnostics.actual_removed_line_count,
+        "actual_added_line_count": diagnostics.actual_added_line_count,
+        "looks_like_new_file": diagnostics.looks_like_new_file,
+        "old_file_header_is_dev_null": diagnostics.old_file_header_is_dev_null,
+        "hunk_body_only_added_lines": diagnostics.hunk_body_only_added_lines,
+        "llm_correctable_in_principle": diagnostics.llm_correctable_in_principle,
     }
 
 
@@ -858,7 +969,17 @@ def write_csv(path: Path, records: list[dict[str, Any]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
         for record in records:
-            writer.writerow(record)
+            writer.writerow(csv_safe_record(record))
+
+
+def csv_safe_record(record: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key, value in record.items():
+        if isinstance(value, (dict, list, tuple)):
+            safe[key] = json.dumps(value, sort_keys=True)
+        else:
+            safe[key] = value
+    return safe
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -896,13 +1017,19 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Runs",
         "",
-        "| task | condition | output tokens | source | patch | tests | error |",
-        "| --- | --- | ---: | --- | --- | --- | --- |",
+        (
+            "| task | condition | output tokens | source | patch | tests | "
+            "error | diagnostic |"
+        ),
+        "| --- | --- | ---: | --- | --- | --- | --- | --- |",
     ]
     for record in report["records"]:
         patch = "applied" if record["patch_applied"] else "not_applied"
         lines.append(
-            "| {task} | {condition} | {tokens} | {source} | {patch} | {tests} | {error} |".format(
+            (
+                "| {task} | {condition} | {tokens} | {source} | {patch} | "
+                "{tests} | {error} | {diagnostic} |"
+            ).format(
                 task=record["task_id"],
                 condition=record["condition"],
                 tokens=record["output_tokens"],
@@ -910,6 +1037,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 patch=patch,
                 tests=record["tests_status"],
                 error=record["error_category"] or "",
+                diagnostic=record["patch_issue_reason"] or "",
             )
         )
     return "\n".join(lines) + "\n"
