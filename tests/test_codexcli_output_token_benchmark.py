@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
-import csv
 import sys
 import tempfile
 import unittest
@@ -23,10 +23,12 @@ from runtime.run_codexcli_output_token_benchmark import (  # noqa: E402
     TOKEN_SOURCE_MISSING,
     CampaignConfig,
     FakeCodexCLIPatchExecutor,
+    clean_reports,
     classify_token_usage,
     create_playground_fixtures,
     get_dev_patch_tasks,
     guard_codexcli_live_provider,
+    main,
     reset_playground_fixtures,
     run_campaign,
 )
@@ -309,6 +311,122 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
             markdown = md_path.read_text(encoding="utf-8")
             self.assertIn("diagnostic", markdown)
             self.assertIn("impossible_hunk_accounting", markdown)
+
+    def test_clean_reports_keeps_last_n_report_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            reports = root / "reports"
+            old = _make_report_dir(reports, "smoke-20260101T000000Z")
+            kept_one = _make_report_dir(reports, "smoke-20260102T000000Z")
+            kept_two = _make_report_dir(reports, "smoke-20260103T000000Z")
+
+            result = clean_reports(
+                CampaignConfig(playground_dir=root),
+                keep_last_reports=2,
+            )
+
+            self.assertFalse(old.exists())
+            self.assertTrue(kept_one.exists())
+            self.assertTrue(kept_two.exists())
+            self.assertEqual([path.name for path in result.deleted_dirs], [old.name])
+            self.assertEqual(
+                [path.name for path in result.kept_dirs],
+                [kept_one.name, kept_two.name],
+            )
+
+    def test_clean_reports_keep_zero_deletes_all_report_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            reports = root / "reports"
+            first = _make_report_dir(reports, "smoke-20260101T000000Z")
+            second = _make_report_dir(reports, "smoke-20260102T000000Z")
+
+            result = clean_reports(
+                CampaignConfig(playground_dir=root),
+                keep_last_reports=0,
+            )
+
+            self.assertFalse(first.exists())
+            self.assertFalse(second.exists())
+            self.assertTrue(reports.exists())
+            self.assertEqual(len(result.deleted_dirs), 2)
+            self.assertEqual(result.kept_dirs, ())
+
+    def test_no_report_cleanup_occurs_without_explicit_clean_reports_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            old = _make_report_dir(root / "reports", "smoke-20260101T000000Z")
+
+            main(["--playground-dir", str(root), "--dry-run", "--max-tasks", "1"])
+
+            self.assertTrue(old.exists())
+
+    def test_clean_reports_dry_run_deletes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            reports = root / "reports"
+            old = _make_report_dir(reports, "smoke-20260101T000000Z")
+            new = _make_report_dir(reports, "smoke-20260102T000000Z")
+
+            result = clean_reports(
+                CampaignConfig(playground_dir=root),
+                keep_last_reports=1,
+                dry_run=True,
+            )
+
+            self.assertTrue(old.exists())
+            self.assertTrue(new.exists())
+            self.assertEqual([path.name for path in result.deleted_dirs], [old.name])
+            self.assertEqual([path.name for path in result.kept_dirs], [new.name])
+
+    def test_clean_reports_missing_reports_directory_exits_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+
+            result = clean_reports(CampaignConfig(playground_dir=root))
+
+            self.assertTrue(result.missing_reports_dir)
+            self.assertEqual(result.deleted_dirs, ())
+            self.assertFalse((root / "reports").exists())
+
+    def test_clean_reports_rejects_unsafe_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+
+            with self.assertRaisesRegex(ValueError, "reports path"):
+                clean_reports(
+                    CampaignConfig(
+                        playground_dir=root,
+                        reports_base_dir=root / "fixtures",
+                    )
+                )
+
+    def test_clean_reports_does_not_touch_non_report_files_outside_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            reports = root / "reports"
+            old = _make_report_dir(reports, "smoke-20260101T000000Z")
+            sentinel = root / "do-not-delete.txt"
+            sentinel.write_text("keep\n", encoding="utf-8")
+            fixture_file = root / "fixtures" / "fixture.txt"
+            fixture_file.parent.mkdir(parents=True)
+            fixture_file.write_text("keep fixture\n", encoding="utf-8")
+            reports_file = reports / "README.txt"
+            reports_file.write_text("not a report dir\n", encoding="utf-8")
+
+            clean_reports(CampaignConfig(playground_dir=root), keep_last_reports=0)
+
+            self.assertFalse(old.exists())
+            self.assertTrue(sentinel.exists())
+            self.assertTrue(fixture_file.exists())
+            self.assertTrue(reports_file.exists())
+
+
+def _make_report_dir(reports_dir: Path, name: str) -> Path:
+    path = reports_dir / name
+    path.mkdir(parents=True)
+    (path / "summary.md").write_text("# summary\n", encoding="utf-8")
+    return path
 
 
 if __name__ == "__main__":
