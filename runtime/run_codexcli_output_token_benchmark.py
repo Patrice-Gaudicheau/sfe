@@ -130,6 +130,7 @@ class CampaignConfig:
     live: bool = False
     fake_provider: bool = False
     max_tasks: int | None = None
+    task_ids: tuple[str, ...] = ()
     conditions: tuple[str, ...] = CONDITIONS
     run_tests: bool = False
     timeout_seconds: float = 300
@@ -156,6 +157,7 @@ class CampaignConfig:
         live: bool = False,
         fake_provider: bool = False,
         max_tasks: int | None = None,
+        task_ids: tuple[str, ...] = (),
         conditions: tuple[str, ...] = CONDITIONS,
         run_tests: bool = False,
         timeout_seconds: float = 300,
@@ -179,6 +181,7 @@ class CampaignConfig:
             live=live,
             fake_provider=fake_provider,
             max_tasks=max_tasks,
+            task_ids=task_ids,
             conditions=conditions,
             run_tests=run_tests,
             timeout_seconds=timeout_seconds,
@@ -350,6 +353,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--executor-model")
     parser.add_argument("--max-tasks", type=int)
     parser.add_argument(
+        "--task-id",
+        action="append",
+        default=None,
+        help="Run only the requested benchmark task id. May be repeated.",
+    )
+    parser.add_argument(
         "--condition",
         choices=("both", *CONDITIONS),
         default="both",
@@ -384,6 +393,7 @@ def config_from_args(args: argparse.Namespace) -> CampaignConfig:
         live=live,
         fake_provider=fake_provider,
         max_tasks=args.max_tasks,
+        task_ids=tuple(args.task_id or ()),
         conditions=conditions,
         run_tests=args.run_tests,
         timeout_seconds=args.timeout_seconds,
@@ -396,7 +406,11 @@ def run_campaign(
     executor: PatchExecutor | None = None,
 ) -> dict[str, Any]:
     config = normalize_config(config)
-    tasks = select_tasks(get_dev_patch_tasks(), max_tasks=config.max_tasks)
+    tasks = select_tasks(
+        get_dev_patch_tasks(),
+        max_tasks=config.max_tasks,
+        task_ids=config.task_ids,
+    )
     create_playground_fixtures(config.playground_dir, reset=False)
     dry_run = not config.live and not config.fake_provider and executor is None
     if config.live:
@@ -433,6 +447,7 @@ def normalize_config(config: CampaignConfig) -> CampaignConfig:
         config,
         provider=normalize_provider(config.provider),
         max_tasks=max_tasks,
+        task_ids=tuple(config.task_ids),
         conditions=conditions,
     )
 
@@ -461,8 +476,21 @@ def print_live_warning(config: CampaignConfig, tasks: list[DevPatchTask]) -> Non
     )
 
 
-def select_tasks(tasks: list[DevPatchTask], *, max_tasks: int | None) -> list[DevPatchTask]:
-    return tasks[:max_tasks] if max_tasks is not None else tasks
+def select_tasks(
+    tasks: list[DevPatchTask],
+    *,
+    max_tasks: int | None,
+    task_ids: tuple[str, ...] = (),
+) -> list[DevPatchTask]:
+    selected = tasks
+    if task_ids:
+        requested = set(task_ids)
+        by_id = {task.task_id: task for task in tasks}
+        unknown = sorted(requested - set(by_id))
+        if unknown:
+            raise ValueError(f"Unknown benchmark task id: {unknown[0]}")
+        selected = [task for task in tasks if task.task_id in requested]
+    return selected[:max_tasks] if max_tasks is not None else selected
 
 
 def clean_reports(
@@ -1055,6 +1083,8 @@ def build_report(
             "fake_provider": config.fake_provider,
             "live": config.live,
             "task_count": len(tasks),
+            "task_ids": [task.task_id for task in tasks],
+            "task_filter": list(config.task_ids),
             "condition_count": len(config.conditions),
             "run_count": len(records),
             "reports_dir": str(reports_dir),
@@ -1256,6 +1286,7 @@ def get_dev_patch_tasks() -> list[DevPatchTask]:
             },
             test_commands=(("php", "-l", "blog/index.php"),),
         ),
+        _medium_php_blog_noise_task(),
         DevPatchTask(
             task_id="php_form_email_validation",
             project="php-form-filters",
@@ -1416,6 +1447,209 @@ def get_dev_patch_tasks() -> list[DevPatchTask]:
             test_commands=(("php", "-l", "export.php"),),
         ),
     ]
+
+
+def _medium_php_blog_noise_task() -> DevPatchTask:
+    files = {
+        "README.md": _medium_markdown_doc("Medium PHP Blog", "project orientation", 12),
+        "docs/editorial-guidelines.md": _medium_markdown_doc(
+            "Editorial Guidelines",
+            "publishing workflow and content tone",
+            18,
+        ),
+        "docs/deployment-checklist.md": _medium_markdown_doc(
+            "Deployment Checklist",
+            "release validation and server operations",
+            16,
+        ),
+        "docs/legacy-migration.md": _medium_markdown_doc(
+            "Legacy Migration Notes",
+            "old route mapping and archive behavior",
+            18,
+        ),
+        "docs/theme-notes.md": _medium_markdown_doc(
+            "Theme Notes",
+            "visual tokens and spacing conventions",
+            14,
+        ),
+        "content/posts.php": _medium_posts_php(),
+        "public/index.php": _medium_public_index_php(escaped=False),
+        "public/archive.php": _medium_simple_php_page("archive", 12),
+        "public/about.php": _medium_simple_php_page("about", 10),
+        "includes/format.php": _medium_php_helper("format", 12),
+        "includes/navigation.php": _medium_php_helper("navigation", 10),
+        "includes/legacy_escape.php": _medium_php_helper("legacy_escape", 8),
+        "admin/dashboard.php": _medium_simple_php_page("admin_dashboard", 14),
+        "admin/import.php": _medium_simple_php_page("admin_import", 14),
+        "assets/styles.css": _medium_css("site", 42),
+        "assets/admin.css": _medium_css("admin", 34),
+        "assets/theme.css": _medium_css("theme", 34),
+        "assets/search.js": _medium_js("search", 36),
+        "assets/comments.js": _medium_js("comments", 34),
+        "assets/archive.js": _medium_js("archive", 34),
+        "data/archive.csv": _medium_csv(36),
+        "data/tags.json": _medium_json_tags(28),
+        "examples/old-index.php": _medium_simple_php_page("old_index_example", 16),
+        "examples/static-preview.html": _medium_html_preview(24),
+    }
+    return DevPatchTask(
+        task_id="medium_php_blog_escape",
+        project="medium-php-blog-noise",
+        instruction=(
+            "Patch the public blog index so post titles and bodies are escaped "
+            "with htmlspecialchars before rendering. Keep the change localized "
+            "to the public index output."
+        ),
+        files=files,
+        context_files=tuple(files.keys()),
+        selected_context_files=("content/posts.php", "public/index.php"),
+        patched_files={"public/index.php": _medium_public_index_php(escaped=True)},
+        test_commands=(("php", "-l", "public/index.php"),),
+    )
+
+
+def _medium_public_index_php(*, escaped: bool) -> str:
+    title_expr = "$post['title']"
+    body_expr = "$post['body']"
+    if escaped:
+        title_expr = "htmlspecialchars($post['title'], ENT_QUOTES, 'UTF-8')"
+        body_expr = "htmlspecialchars($post['body'], ENT_QUOTES, 'UTF-8')"
+    return (
+        "<?php $posts = require __DIR__ . '/../content/posts.php'; ?>\n"
+        "<!doctype html>\n"
+        "<html lang=\"en\">\n"
+        "<head><meta charset=\"utf-8\"><title>Medium Blog</title></head>\n"
+        "<body>\n"
+        "  <main class=\"post-list\">\n"
+        "    <?php foreach ($posts as $post): ?>\n"
+        "      <article class=\"post-card\">\n"
+        f"        <h2><?= {title_expr} ?></h2>\n"
+        f"        <p><?= {body_expr} ?></p>\n"
+        "      </article>\n"
+        "    <?php endforeach; ?>\n"
+        "  </main>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def _medium_posts_php() -> str:
+    return (
+        "<?php\n"
+        "return [\n"
+        "    ['title' => 'Launch Notes', 'body' => 'First public build with archive pages.'],\n"
+        "    ['title' => 'Roadmap', 'body' => 'Next work covers search, feeds, and themes.'],\n"
+        "    ['title' => 'Security Review', 'body' => 'Public output must escape titles and bodies.'],\n"
+        "];\n"
+    )
+
+
+def _medium_markdown_doc(title: str, subject: str, sections: int) -> str:
+    lines = [f"# {title}", ""]
+    for index in range(1, sections + 1):
+        lines.extend(
+            [
+                f"## Section {index}",
+                (
+                    f"This note documents {subject} for the medium PHP blog fixture. "
+                    "It is realistic background for full-context pressure, but it is "
+                    "not the public index template that renders post output."
+                ),
+                (
+                    "Operators should preserve existing paths, avoid database work, "
+                    "and keep edits localized unless the task explicitly names another file."
+                ),
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _medium_css(prefix: str, blocks: int) -> str:
+    lines = [f"/* {prefix} styles for medium PHP blog fixture */"]
+    for index in range(1, blocks + 1):
+        lines.extend(
+            [
+                f".{prefix}-block-{index} {{",
+                f"  margin: {index % 5}px {index % 7}px;",
+                f"  padding: {8 + (index % 4)}px;",
+                "  border: 1px solid #d8dde3;",
+                "  color: #1f2933;",
+                "}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _medium_js(name: str, blocks: int) -> str:
+    lines = [f"const {name}State = {{ enabled: true, items: [] }};"]
+    for index in range(1, blocks + 1):
+        lines.extend(
+            [
+                f"function {name}Helper{index}(value) {{",
+                f"  const label = `{name}-{index}-${{value}}`;",
+                "  return label.trim().toLowerCase();",
+                "}",
+            ]
+        )
+    lines.append(f"export {{ {name}State }};")
+    return "\n".join(lines) + "\n"
+
+
+def _medium_php_helper(name: str, functions: int) -> str:
+    lines = ["<?php", f"// Helper functions for {name}; not used by public/index.php."]
+    for index in range(1, functions + 1):
+        lines.extend(
+            [
+                f"function {name}_label_{index}(string $value): string",
+                "{",
+                f"    return trim($value) . '::{name}-{index}';",
+                "}",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _medium_simple_php_page(name: str, paragraphs: int) -> str:
+    lines = [
+        "<?php",
+        f"$pageTitle = '{name}';",
+        "?>",
+        "<!doctype html>",
+        "<html lang=\"en\">",
+        "<body>",
+        f"<h1><?= $pageTitle ?></h1>",
+    ]
+    for index in range(1, paragraphs + 1):
+        lines.append(
+            f"<p>Static {name} paragraph {index} with operational background.</p>"
+        )
+    lines.extend(["</body>", "</html>"])
+    return "\n".join(lines) + "\n"
+
+
+def _medium_html_preview(blocks: int) -> str:
+    lines = ["<!doctype html>", "<html lang=\"en\">", "<body>"]
+    for index in range(1, blocks + 1):
+        lines.append(f"<section><h2>Preview {index}</h2><p>Archived static copy.</p></section>")
+    lines.extend(["</body>", "</html>"])
+    return "\n".join(lines) + "\n"
+
+
+def _medium_csv(rows: int) -> str:
+    lines = ["id,title,status"]
+    for index in range(1, rows + 1):
+        lines.append(f"{index},Archive item {index},published")
+    return "\n".join(lines) + "\n"
+
+
+def _medium_json_tags(count: int) -> str:
+    payload = [
+        {"id": index, "slug": f"tag-{index}", "label": f"Tag {index}"}
+        for index in range(1, count + 1)
+    ]
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 if __name__ == "__main__":
