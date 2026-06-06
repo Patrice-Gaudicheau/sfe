@@ -525,6 +525,17 @@ Build prompts and reports without provider calls:
 python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
 ```
 
+Run the CodexCLI-only DEV/Patch output-token protocol without live provider
+calls:
+
+```bash
+python runtime/run_codexcli_output_token_benchmark.py --dry-run --max-tasks 1
+```
+
+For the protocol, fixture reset command, safe one-task live commands, and
+Campaign A/B model setup, see
+`docs/history/providers/codexcli/codexcli_output_token_dev_patch_benchmark_protocol.md`.
+
 Run one tiny Alibaba/Qwen smoke test when local credentials are configured:
 
 ```bash
