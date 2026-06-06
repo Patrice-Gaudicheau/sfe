@@ -17,12 +17,15 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from runtime.run_codexcli_output_token_benchmark import (  # noqa: E402
+    CONDITION_FULL,
     CONDITION_SELECTED,
+    PATCH_FORMAT_INSTRUCTIONS,
     TOKEN_SOURCE_ESTIMATED,
     TOKEN_SOURCE_MEASURED,
     TOKEN_SOURCE_MISSING,
     CampaignConfig,
     FakeCodexCLIPatchExecutor,
+    build_patch_prompt,
     clean_reports,
     classify_token_usage,
     create_playground_fixtures,
@@ -116,6 +119,42 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
     def test_codexcli_only_live_provider_guard_rejects_paid_api_provider(self) -> None:
         with self.assertRaisesRegex(ValueError, "CodexCLI-only"):
             guard_codexcli_live_provider("openai")
+
+    def test_selected_context_prompt_includes_small_hunk_accounting_instruction(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_playground_fixtures(root)
+            task = get_dev_patch_tasks()[0]
+            workspace_root = root / "fixtures" / task.project
+
+            prompt = build_patch_prompt(workspace_root, task, CONDITION_SELECTED)
+
+            self.assertIn("Condition: selected_context_dev_patch", prompt)
+            self.assertIn(PATCH_FORMAT_INSTRUCTIONS, prompt)
+            self.assertIn("Keep hunks as small as possible", prompt)
+            self.assertIn("minimal surrounding context", prompt)
+            self.assertIn("one small hunk per localized edit", prompt)
+            self.assertIn("hunk header exactly matches", prompt)
+            self.assertIn("reduce surrounding context", prompt)
+            self.assertIn("do not include prose outside the diff", prompt)
+
+    def test_full_context_prompt_uses_same_safe_patch_format_clarification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_playground_fixtures(root)
+            task = get_dev_patch_tasks()[0]
+            workspace_root = root / "fixtures" / task.project
+
+            selected_prompt = build_patch_prompt(workspace_root, task, CONDITION_SELECTED)
+            full_prompt = build_patch_prompt(workspace_root, task, CONDITION_FULL)
+
+            self.assertIn("Condition: full_context_dev_patch", full_prompt)
+            self.assertIn(PATCH_FORMAT_INSTRUCTIONS, full_prompt)
+            self.assertIn(PATCH_FORMAT_INSTRUCTIONS, selected_prompt)
+            self.assertEqual(
+                selected_prompt.split("Patch format requirements:\n", 1)[1],
+                full_prompt.split("Patch format requirements:\n", 1)[1],
+            )
 
     def test_output_token_records_distinguish_measured_estimated_and_missing(self) -> None:
         measured = classify_token_usage(
