@@ -62,6 +62,14 @@ DEFAULT_PLAYGROUND_DIR = (
 DEFAULT_MAX_LIVE_TASKS = 1
 DEFAULT_KEEP_LAST_REPORTS = 5
 REPORT_TIMESTAMP_RE = re.compile(r"(\d{8}T\d{6}Z)$")
+PATCH_FORMAT_INSTRUCTIONS = (
+    "Patch format requirements:\n"
+    "- Return only a valid Git-style unified diff; do not include prose outside the diff.\n"
+    "- Keep hunks as small as possible and use minimal surrounding context.\n"
+    "- Prefer one small hunk per localized edit.\n"
+    "- Ensure every hunk header exactly matches the old and new line counts in the hunk body.\n"
+    "- If uncertain about line counts, reduce surrounding context rather than inventing a larger hunk."
+)
 CSV_FIELDS = (
     "run_id",
     "task_id",
@@ -730,7 +738,7 @@ def build_patch_prompt(workspace_root: Path, task: DevPatchTask, condition: str)
         f"{task.instruction}\n\n"
         "Selected workspace context for this condition:\n"
         + "\n\n".join(context_parts)
-        + "\n\nReturn only a strict Git-style unified diff."
+        + f"\n\n{PATCH_FORMAT_INSTRUCTIONS}"
     )
 
 
