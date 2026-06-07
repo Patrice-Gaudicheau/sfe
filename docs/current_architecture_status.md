@@ -198,11 +198,14 @@ Dockerized proxy operation is also standby infrastructure, not the recommended
 current user path.
 
 Provider selection for SFE runtime roles can be split with
-`SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`. Each role-specific value
-overrides `SFE_PROVIDER`; blank or absent role values fall back to
-`SFE_PROVIDER`, then the surface default. Standby proxy compatibility keeps its
-existing semantics and still accepts `SFE_PROXY_PROVIDER` as a legacy fallback,
-but new proxy configuration should use `SFE_PROVIDER`.
+`SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and
+`SFE_PROVIDER_EXECUTOR`. Router and executor role-specific values override
+`SFE_PROVIDER`; blank or absent role values fall back to `SFE_PROVIDER`, then
+the surface default. Discovery first checks `SFE_PROVIDER_DISCOVERY`, then
+falls back to `SFE_PROVIDER_ROUTER`, then `SFE_PROVIDER`, then the surface
+default. Standby proxy compatibility keeps its existing semantics and still
+accepts `SFE_PROXY_PROVIDER` as a legacy fallback, but new proxy configuration
+should use `SFE_PROVIDER`.
 
 CodexCLI is exposed on public SFE surfaces as `SFE_PROVIDER=codexcli` or through
 role-specific provider selection. `SFE_CODEXCLI_ROUTER_MODEL` and
@@ -213,6 +216,11 @@ falls back to the shared value. The benchmark-local `openai-codexcli` name is
 retained for benchmark history and internal dispatch compatibility. In DEV
 patch mode CodexCLI proposes patch text only; SFE still owns patch parsing,
 path validation, worktree isolation, application, and rejection.
+CodexCLI discovery routing is not currently supported. When CodexCLI is used
+for `/run` execution-mode routing and DEV/Patch execution, use a
+discovery-supported provider explicitly, for example
+`SFE_PROVIDER_ROUTER=codexcli`, `SFE_PROVIDER_DISCOVERY=openai`, and
+`SFE_PROVIDER_EXECUTOR=codexcli`.
 
 `ProxyBackend` may remain in the TUI codebase as an internal experimental stub,
 but it must not be exposed as a user-facing backend yet. The TUI should not

@@ -19,8 +19,10 @@ from sfe.discovery_router import (
     DISCOVERY_ROUTER_MODE,
     DiscoveryRouterError,
     DiscoveryRouterSelection,
+    create_configured_discovery_router,
     parse_discovery_router_output,
 )
+from sfe.execution_mode_router import create_configured_execution_mode_router
 from sfe.contracts import build_contract
 from sfe_tui.routers import LocalSegmentRouter
 
@@ -68,6 +70,19 @@ class FakeDiscoveryRouter:
         )
 
 
+class FakeProvider:
+    def __init__(self, answer: str = '{"files_to_inspect":[],"reason":"none"}') -> None:
+        self.answer = answer
+        self.calls: list[dict[str, object]] = []
+
+    def health(self) -> dict[str, object]:
+        return {"ok": True}
+
+    def chat(self, messages: list[dict[str, str]], **kwargs: object) -> dict[str, object]:
+        self.calls.append({"messages": messages, **kwargs})
+        return {"choices": [{"message": {"content": self.answer}}]}
+
+
 def test_discovery_rejects_missing_workspace_or_missing_task_safely(tmp_path) -> None:
     missing = discover_workspace_context(
         workspace_root=tmp_path / "missing",
@@ -91,6 +106,112 @@ def test_discovery_rejects_missing_workspace_or_missing_task_safely(tmp_path) ->
     assert no_task.task_present is False
     assert no_task.stop_reason == "missing_task"
     assert no_task.scanned_file_count == 0
+
+
+def test_configured_discovery_router_uses_discovery_provider_override_only() -> None:
+    discovery_provider = FakeProvider()
+    execution_provider = FakeProvider(
+        '{"execution_mode":"workspace_write","reason":"edit files"}'
+    )
+    environ = {
+        "SFE_PROVIDER": "openai",
+        "SFE_PROVIDER_ROUTER": "codexcli",
+        "SFE_PROVIDER_DISCOVERY": "openai",
+        "SFE_OPENAI_ROUTER_MODEL": "openai-discovery-model",
+        "SFE_CODEXCLI_ROUTER_MODEL": "codexcli-execution-router-model",
+    }
+
+    discovery_router = create_configured_discovery_router(
+        environ=environ,
+        provider_factories={"openai": lambda: discovery_provider},
+    )
+    execution_router = create_configured_execution_mode_router(
+        environ=environ,
+        provider_factories={"codexcli": lambda: execution_provider},
+    )
+
+    assert discovery_router.provider_name == "openai"
+    assert discovery_router.model == "openai-discovery-model"
+    assert execution_router.provider_name == "codexcli"
+    assert execution_router.model == "codexcli-execution-router-model"
+
+
+def test_configured_discovery_router_blank_discovery_provider_falls_back_to_router_provider() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER": "openai",
+            "SFE_PROVIDER_ROUTER": "lemonade",
+            "SFE_PROVIDER_DISCOVERY": " ",
+            "SFE_ROUTER_MODEL": "lemonade-discovery-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    assert router.provider_name == "lemonade"
+    assert router.model == "lemonade-discovery-model"
+
+
+def test_configured_discovery_router_legacy_shared_provider_fallback_still_works() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER": "alibaba",
+            "SFE_ALIBABA_ROUTER_MODEL": "alibaba-discovery-model",
+        },
+        provider_factories={"alibaba": lambda: provider},
+    )
+
+    assert router.provider_name == "alibaba"
+    assert router.model == "alibaba-discovery-model"
+
+
+def test_discovery_with_codexcli_router_without_discovery_override_is_unsupported(
+    tmp_path,
+) -> None:
+    _write(tmp_path / "content" / "posts.php", "<?php return [];\n")
+    _write(tmp_path / "public" / "index.php", "<?php echo $post['title'];\n")
+    _write(tmp_path / "tests" / "render_smoke.php", "<?php\n")
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="escape PHP blog output",
+        router=create_configured_discovery_router(
+            environ={"SFE_PROVIDER_ROUTER": "codexcli"}
+        ),
+    )
+
+    assert result.scanned_file_count == 3
+    assert result.workspace_map_count == 3
+    assert result.candidate_count == 0
+    assert result.stop_reason == "discovery_router_provider_not_supported"
+    assert result.router_provider_name == "codexcli"
+    assert result.router_error_category == "discovery_router_provider_not_supported"
+
+
+def test_non_git_php_workspace_scans_files_with_supported_discovery_router(
+    tmp_path,
+) -> None:
+    _write(tmp_path / "content" / "posts.php", "<?php return [];\n")
+    _write(tmp_path / "public" / "index.php", "<?php echo $post['title'];\n")
+    _write(tmp_path / "tests" / "render_smoke.php", "<?php\n")
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="escape PHP blog output",
+        router=FakeDiscoveryRouter(
+            ("content/posts.php", "public/index.php", "tests/render_smoke.php")
+        ),
+    )
+
+    assert result.scanned_file_count == 3
+    assert result.workspace_map_count == 3
+    assert _refs(result) == [
+        "content/posts.php",
+        "public/index.php",
+        "tests/render_smoke.php",
+    ]
+    assert result.loaded_candidate_count == 3
 
 
 def test_discovery_empty_workspace_returns_valid_empty_context(tmp_path) -> None:

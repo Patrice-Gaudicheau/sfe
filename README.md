@@ -319,8 +319,11 @@ Use `SFE_PROVIDER` as the canonical provider selector for SFE surfaces,
 including the TUI and standby proxy compatibility path.
 For SFE runtime roles, `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`
 optionally override `SFE_PROVIDER`; when either is absent or blank, SFE falls
-back to `SFE_PROVIDER` and then the surface default. The standby proxy keeps its
-existing provider semantics and does not use the role-specific selectors yet.
+back to `SFE_PROVIDER` and then the surface default. Discovery routing can be
+overridden separately with `SFE_PROVIDER_DISCOVERY`; blank or absent discovery
+provider falls back to `SFE_PROVIDER_ROUTER`, then `SFE_PROVIDER`, then the
+surface default. The standby proxy keeps its existing provider semantics and
+does not use the role-specific selectors yet.
 
 ## Minimal Verification
 
@@ -387,7 +390,7 @@ shape.
 | Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Historical proxy support exists, but the proxy is not the current user path. | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
 | Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
 | Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Standby proxy can pass through the OpenAI-compatible endpoint, but the proxy is not the current user path. | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`. |
-| CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Proxy notes remain historical/stress-test material, not the recommended CodexCLI path. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`. Model selection remains `SFE_CODEXCLI_ROUTER_MODEL` and `SFE_CODEXCLI_EXECUTOR_MODEL`. `SFE_CODEXCLI_ROUTER_EFFORT` and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT`; absent or blank role effort falls back to the legacy shared value. CodexCLI can route `/run`, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for patch parsing, validation, worktree isolation, application, and rejection. |
+| CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Proxy notes remain historical/stress-test material, not the recommended CodexCLI path. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`. Discovery routing does not currently support CodexCLI, so the recommended mixed `/run` setup is `SFE_PROVIDER_ROUTER=codexcli`, `SFE_PROVIDER_DISCOVERY=openai` or another configured discovery-supported provider, and `SFE_PROVIDER_EXECUTOR=codexcli`. Model selection remains `SFE_CODEXCLI_ROUTER_MODEL` and `SFE_CODEXCLI_EXECUTOR_MODEL`. `SFE_CODEXCLI_ROUTER_EFFORT` and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT`; absent or blank role effort falls back to the legacy shared value. CodexCLI can route `/run`, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for patch parsing, validation, worktree isolation, application, and rejection. |
 
 Proxy-specific variables remain in `.env.example` for historical and standby
 work, but the proxy is not the recommended active path for TUI V0.1. For the

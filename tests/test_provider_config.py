@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sfe.provider_config import (
     normalize_provider_name,
+    resolve_sfe_discovery_provider,
     resolve_sfe_executor_provider,
     resolve_sfe_provider,
     resolve_sfe_provider_with_legacy_fallback,
@@ -104,6 +105,44 @@ def test_executor_provider_overrides_shared_provider() -> None:
     )
 
 
+def test_discovery_provider_overrides_router_and_shared_provider() -> None:
+    assert (
+        resolve_sfe_discovery_provider(
+            {
+                "SFE_PROVIDER": "openai",
+                "SFE_PROVIDER_ROUTER": "codexcli",
+                "SFE_PROVIDER_DISCOVERY": "lemonade",
+            }
+        )
+        == "lemonade"
+    )
+
+
+def test_blank_discovery_provider_falls_back_to_router_provider() -> None:
+    assert (
+        resolve_sfe_discovery_provider(
+            {
+                "SFE_PROVIDER": "openai",
+                "SFE_PROVIDER_ROUTER": "codexcli",
+                "SFE_PROVIDER_DISCOVERY": " ",
+            }
+        )
+        == "codexcli"
+    )
+
+
+def test_discovery_provider_falls_back_to_shared_provider() -> None:
+    assert (
+        resolve_sfe_discovery_provider(
+            {
+                "SFE_PROVIDER": "alibaba-api",
+                "SFE_PROVIDER_ROUTER": "",
+            }
+        )
+        == "alibaba"
+    )
+
+
 def test_blank_role_provider_falls_back_to_shared_provider() -> None:
     environ = {
         "SFE_PROVIDER": "lemonade",
@@ -125,6 +164,8 @@ def test_unknown_role_provider_raises_clear_error() -> None:
         resolve_sfe_router_provider({"SFE_PROVIDER_ROUTER": "bad-router"})
     with pytest.raises(ValueError, match="Unsupported SFE provider"):
         resolve_sfe_executor_provider({"SFE_PROVIDER_EXECUTOR": "bad-executor"})
+    with pytest.raises(ValueError, match="Unsupported SFE provider"):
+        resolve_sfe_discovery_provider({"SFE_PROVIDER_DISCOVERY": "bad-discovery"})
 
 
 def test_sfe_provider_takes_precedence_over_legacy_provider() -> None:

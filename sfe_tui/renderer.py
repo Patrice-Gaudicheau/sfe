@@ -346,6 +346,19 @@ def _run_issue_hint(result: RunResult) -> str | None:
             "executor returned an invalid or empty response; use /run-report "
             "for diagnostics or retry /run"
         )
+    if (
+        issue.category == "context_discovery"
+        and issue.reason == "discovery_router_provider_not_supported"
+    ):
+        provider_name = None
+        if result.discovery_result is not None:
+            provider_name = result.discovery_result.router_provider_name
+        provider_label = provider_name or "the configured provider"
+        return (
+            f"configured discovery provider {provider_label} is not supported; "
+            "set SFE_PROVIDER_DISCOVERY to openai, lemonade, alibaba, or another "
+            "discovery-supported provider"
+        )
     diagnostics = result.patch_proposal_diagnostics
     if (
         issue.category == "invalid_patch_proposal"

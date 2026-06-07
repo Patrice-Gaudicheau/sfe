@@ -344,7 +344,27 @@ class RunPipeline:
             f"SFE: context candidates inspected: {discovery_result.candidate_count}",
             candidate_count=discovery_result.candidate_count,
             workspace_map_count=discovery_result.workspace_map_count,
+            scanned_file_count=discovery_result.scanned_file_count,
+            router_provider_name=discovery_result.router_provider_name,
+            stop_reason=discovery_result.stop_reason,
         )
+        if discovery_result.router_error_category is not None:
+            return _with_git_preparation(
+                RunResult(
+                    status=RUN_STATUS_FAILED,
+                    issue=RunIssue(
+                        "context_discovery",
+                        discovery_result.router_error_category,
+                    ),
+                    execution_mode_decision=execution_mode_decision,
+                    workspace_session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=created,
+                    discovery_result=discovery_result,
+                    warnings=_base_warnings(),
+                ),
+                git_preparation,
+            )
         context_files = list(
             load_discovered_context(
                 workspace_root=active_workspace,

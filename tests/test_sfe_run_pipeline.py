@@ -42,7 +42,7 @@ from sfe_tui.executors import (
     ExecutorResponse,
     create_tui_executor,
 )
-from sfe_tui.renderer import render_help, render_run_result
+from sfe_tui.renderer import render_help, render_run_result, render_run_result_normal
 
 
 class FakeExecutor:
@@ -1203,6 +1203,46 @@ def test_run_pipeline_supports_codexcli_router_with_openai_executor_config(
     assert router_provider.calls[0]["model"] == "gpt-codex-router-role"
     assert executor_provider.calls[0]["model"] == "gpt-openai-executor-role"
     assert result.promoted_files == ("index.html",)
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_fails_before_executor_when_discovery_provider_is_unsupported(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor()
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER_ROUTER", "codexcli")
+    monkeypatch.setenv("SFE_PROVIDER_EXECUTOR", "codexcli")
+    monkeypatch.delenv("SFE_PROVIDER_DISCOVERY", raising=False)
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "context_discovery"
+    assert result.issue.reason == "discovery_router_provider_not_supported"
+    assert result.discovery_result is not None
+    assert result.discovery_result.scanned_file_count >= 1
+    assert result.discovery_result.workspace_map_count >= 1
+    assert result.discovery_result.candidate_count == 0
+    assert result.discovery_result.router_provider_name == "codexcli"
+    assert executor.patch_calls == []
+    assert result.patch_result is None
+    rendered = render_run_result_normal(result)
+    assert "hint: configured discovery provider codexcli is not supported" in rendered
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
