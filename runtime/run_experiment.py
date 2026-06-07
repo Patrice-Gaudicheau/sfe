@@ -31,6 +31,7 @@ from providers.codexcli import (
     CodexCLIProvider,
 )
 from providers.openai_api import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_API_EXECUTOR_MODEL,
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_API_ROUTER_MODEL,
     PROVIDER_NAME as OPENAI_API_PROVIDER_NAME,
     OpenAIAPIProvider,
@@ -798,15 +799,22 @@ def _select_lemonade_executor_model() -> str:
 
 
 def _alibaba_executor_model_or_none(executor_model: str | None) -> str | None:
-    if not executor_model or executor_model == DEFAULT_OPENAI_EXECUTOR_MODEL:
+    if not executor_model or _is_openai_executor_model(executor_model):
         return None
     return executor_model
 
 
 def _google_model_or_none(model: str | None) -> str | None:
-    if not model or model == DEFAULT_OPENAI_EXECUTOR_MODEL:
+    if not model or _is_openai_executor_model(model):
         return None
     return model
+
+
+def _is_openai_executor_model(model: str) -> bool:
+    return model in {
+        DEFAULT_OPENAI_EXECUTOR_MODEL,
+        DEFAULT_OPENAI_API_EXECUTOR_MODEL,
+    }
 
 
 def _router_model_for_display(routing_decision: dict) -> str:
