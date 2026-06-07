@@ -21,6 +21,7 @@ from sfe.execution_mode_router import (
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
     ExecutionModeRouterError,
+    create_configured_execution_mode_router,
 )
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.run_pipeline import (
@@ -1154,6 +1155,54 @@ def test_run_pipeline_codexcli_dev_patch_executor_applies_valid_unified_diff_thr
     assert provider.calls[0]["model"] == "gpt-codex-dev-patch-executor"
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
     assert provider.calls[0]["max_tokens"] == DEFAULT_PATCH_OUTPUT_TOKENS
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_supports_codexcli_router_with_openai_executor_config(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    router_provider = FakeChatProvider(
+        answer='{"execution_mode":"workspace_write","reason":"The task asks to edit files."}'
+    )
+    executor_provider = FakeChatProvider(answer=_valid_new_file_diff())
+    environ = {
+        "SFE_PROVIDER": "lemonade",
+        "SFE_PROVIDER_ROUTER": "codexcli",
+        "SFE_PROVIDER_EXECUTOR": "openai",
+        "SFE_CODEXCLI_ROUTER_MODEL": "gpt-codex-router-role",
+        "SFE_OPENAI_EXECUTOR_MODEL": "gpt-openai-executor-role",
+    }
+    execution_mode_router = create_configured_execution_mode_router(
+        environ=environ,
+        provider_factories={"codexcli": lambda: router_provider},
+    )
+    executor = create_tui_executor(
+        environ=environ,
+        provider_factories={"openai": lambda: executor_provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=execution_mode_router,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.execution_mode_decision is not None
+    assert result.execution_mode_decision.provider_name == "codexcli"
+    assert result.executor_provider == "openai"
+    assert router_provider.calls[0]["model"] == "gpt-codex-router-role"
+    assert executor_provider.calls[0]["model"] == "gpt-openai-executor-role"
+    assert result.promoted_files == ("index.html",)
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

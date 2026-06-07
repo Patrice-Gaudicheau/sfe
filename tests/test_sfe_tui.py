@@ -6295,6 +6295,71 @@ def test_tui_executor_factory_selects_codexcli_read_only_provider() -> None:
     assert provider.calls[0]["messages"][0]["role"] == "user"
 
 
+def test_tui_executor_factory_uses_executor_provider_override() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "openai",
+            "SFE_PROVIDER_ROUTER": "openai",
+            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_MODEL": "gpt-codex-executor-role",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "codexcli"
+    assert result.provider_name == "codexcli"
+    assert provider.calls[0]["model"] == "gpt-codex-executor-role"
+
+
+def test_tui_executor_blank_executor_provider_falls_back_to_sfe_provider() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_PROVIDER_EXECUTOR": " ",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert executor.provider_name == "codexcli"
+    assert result.provider_name == "codexcli"
+
+
+def test_tui_codexcli_executor_uses_role_specific_effort() -> None:
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_EFFORT": "high",
+            "SFE_CODEXCLI_REASONING_EFFORT": "low",
+        }
+    )
+
+    assert executor.provider_name == "codexcli"
+    assert getattr(executor, "provider").reasoning_effort == "high"
+
+
+def test_tui_codexcli_executor_effort_falls_back_to_legacy() -> None:
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_EFFORT": " ",
+            "SFE_CODEXCLI_REASONING_EFFORT": "medium",
+        }
+    )
+
+    assert executor.provider_name == "codexcli"
+    assert getattr(executor, "provider").reasoning_effort == "medium"
+
+
 def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(

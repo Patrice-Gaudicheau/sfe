@@ -36,7 +36,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_provider
+from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_executor_provider
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
@@ -275,7 +275,13 @@ class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
         super().__init__(
-            provider=provider or CodexCLIProvider(),
+            provider=provider
+            or CodexCLIProvider(
+                reasoning_effort=_first_env_value(
+                    environ,
+                    ("SFE_CODEXCLI_EXECUTOR_EFFORT", "SFE_CODEXCLI_REASONING_EFFORT"),
+                )
+            ),
             provider_name=provider_name,
             model=(
                 model
@@ -327,9 +333,9 @@ def create_tui_executor(
     environ: Mapping[str, str] | None = None,
     provider_factories: Mapping[str, ProviderFactory] | None = None,
 ) -> ReadOnlyExecutor:
-    """Create the DirectBackend TUI executor selected by SFE_PROVIDER."""
+    """Create the DirectBackend TUI executor selected by the executor provider config."""
     try:
-        provider_name = resolve_sfe_provider(environ, default="openai")
+        provider_name = resolve_sfe_executor_provider(environ, default="openai")
     except ValueError:
         return ProviderConfigurationErrorExecutor()
 
@@ -345,7 +351,12 @@ def create_tui_executor(
         )
     if provider_name == CODEXCLI_SFE_PROVIDER:
         return CodexCLIReadOnlyExecutor(
-            provider=provider_factory(),
+            provider=_instantiate_codexcli_provider(
+                provider_name,
+                provider_factory,
+                provider_factories,
+                environ,
+            ),
             provider_name=provider_name,
             environ=environ,
         )
@@ -426,6 +437,22 @@ def _provider_factory(
     if provider_name == "google":
         return GoogleAPIProvider
     return lambda: None
+
+
+def _instantiate_codexcli_provider(
+    provider_name: str,
+    provider_factory: ProviderFactory,
+    provider_factories: Mapping[str, ProviderFactory] | None,
+    environ: Mapping[str, str] | None,
+) -> Any:
+    if provider_factories and provider_name in provider_factories:
+        return provider_factory()
+    return provider_factory(
+        reasoning_effort=_first_env_value(
+            environ,
+            ("SFE_CODEXCLI_EXECUTOR_EFFORT", "SFE_CODEXCLI_REASONING_EFFORT"),
+        )
+    )
 
 
 def _call_provider_chat(

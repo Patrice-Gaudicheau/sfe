@@ -119,6 +119,29 @@ class CodexCLIOutputTokenBenchmarkTests(unittest.TestCase):
         self.assertEqual(config.router_model, "router-env")
         self.assertEqual(config.executor_model, "executor-env")
 
+    def test_campaign_config_accepts_executor_provider_when_shared_provider_absent(
+        self,
+    ) -> None:
+        with patch.dict(os.environ, {"SFE_PROVIDER_EXECUTOR": "codexcli"}, clear=True):
+            config = CampaignConfig.from_env()
+
+        self.assertEqual(config.provider, "codexcli")
+
+    def test_campaign_config_shared_provider_takes_precedence_over_executor_provider(
+        self,
+    ) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SFE_PROVIDER": "openai",
+                "SFE_PROVIDER_EXECUTOR": "codexcli",
+            },
+            clear=True,
+        ):
+            config = CampaignConfig.from_env()
+
+        self.assertEqual(config.provider, "openai")
+
     def test_codexcli_only_live_provider_guard_rejects_paid_api_provider(self) -> None:
         with self.assertRaisesRegex(ValueError, "CodexCLI-only"):
             guard_codexcli_live_provider("openai")

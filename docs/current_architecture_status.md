@@ -197,16 +197,22 @@ interface.
 Dockerized proxy operation is also standby infrastructure, not the recommended
 current user path.
 
-Provider selection is shared across SFE surfaces through `SFE_PROVIDER`.
-Standby proxy compatibility still accepts `SFE_PROXY_PROVIDER` as a legacy
-fallback, but new configuration should use `SFE_PROVIDER`.
+Provider selection for SFE runtime roles can be split with
+`SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`. Each role-specific value
+overrides `SFE_PROVIDER`; blank or absent role values fall back to
+`SFE_PROVIDER`, then the surface default. Standby proxy compatibility keeps its
+existing semantics and still accepts `SFE_PROXY_PROVIDER` as a legacy fallback,
+but new proxy configuration should use `SFE_PROVIDER`.
 
-CodexCLI is exposed on public SFE surfaces as `SFE_PROVIDER=codexcli`, with
-`SFE_CODEXCLI_ROUTER_MODEL` and `SFE_CODEXCLI_EXECUTOR_MODEL` for model
-selection. The benchmark-local `openai-codexcli` name is retained for benchmark
-history and internal dispatch compatibility. In DEV patch mode CodexCLI
-proposes patch text only; SFE still owns patch parsing, path validation,
-worktree isolation, application, and rejection.
+CodexCLI is exposed on public SFE surfaces as `SFE_PROVIDER=codexcli` or through
+role-specific provider selection. `SFE_CODEXCLI_ROUTER_MODEL` and
+`SFE_CODEXCLI_EXECUTOR_MODEL` remain the model selectors. Role-specific
+`SFE_CODEXCLI_ROUTER_EFFORT` and `SFE_CODEXCLI_EXECUTOR_EFFORT` override the
+legacy shared `SFE_CODEXCLI_REASONING_EFFORT`; absent or blank role effort
+falls back to the shared value. The benchmark-local `openai-codexcli` name is
+retained for benchmark history and internal dispatch compatibility. In DEV
+patch mode CodexCLI proposes patch text only; SFE still owns patch parsing,
+path validation, worktree isolation, application, and rejection.
 
 `ProxyBackend` may remain in the TUI codebase as an internal experimental stub,
 but it must not be exposed as a user-facing backend yet. The TUI should not

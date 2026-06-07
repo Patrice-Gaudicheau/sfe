@@ -162,7 +162,12 @@ class CampaignConfig:
         run_tests: bool = False,
         timeout_seconds: float = 300,
     ) -> "CampaignConfig":
-        resolved_provider = provider or os.getenv("SFE_PROVIDER") or PUBLIC_CODEXCLI_PROVIDER
+        resolved_provider = (
+            provider
+            or os.getenv("SFE_PROVIDER")
+            or os.getenv("SFE_PROVIDER_EXECUTOR")
+            or PUBLIC_CODEXCLI_PROVIDER
+        )
         return cls(
             playground_dir=playground_dir,
             reports_base_dir=reports_base_dir,
@@ -228,7 +233,15 @@ class LiveCodexCLIPatchExecutor:
         timeout_seconds: float,
     ) -> dict[str, Any]:
         del task, condition
-        provider = CodexCLIProvider(cwd=workspace_root, timeout=timeout_seconds)
+        provider = CodexCLIProvider(
+            cwd=workspace_root,
+            timeout=timeout_seconds,
+            reasoning_effort=(
+                os.getenv("SFE_CODEXCLI_EXECUTOR_EFFORT", "").strip()
+                or os.getenv("SFE_CODEXCLI_REASONING_EFFORT", "").strip()
+                or None
+            ),
+        )
         return provider.chat(
             [{"role": "user", "content": prompt}],
             model=model,
@@ -462,7 +475,8 @@ def normalize_provider(provider: str) -> str:
 def guard_codexcli_live_provider(provider: str) -> None:
     if normalize_provider(provider) != PUBLIC_CODEXCLI_PROVIDER:
         raise ValueError(
-            "This benchmark is CodexCLI-only. Set SFE_PROVIDER=codexcli or pass "
+            "This benchmark is CodexCLI-only. Set SFE_PROVIDER=codexcli, set "
+            "SFE_PROVIDER_EXECUTOR=codexcli when SFE_PROVIDER is absent, or pass "
             "--provider codexcli. Live OpenAI API, Anthropic, Google, Alibaba, "
             "Qwen API, DeepSeek API, and other paid API providers are rejected."
         )

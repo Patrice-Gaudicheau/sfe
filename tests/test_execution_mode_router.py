@@ -157,6 +157,71 @@ def test_execution_mode_router_factory_selects_codexcli_from_sfe_provider() -> N
     ]
 
 
+def test_execution_mode_router_uses_router_provider_override() -> None:
+    provider = FakeCodexCLIProvider(
+        '{"execution_mode":"console_output","reason":"The task asks for an answer."}'
+    )
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER": "openai",
+            "SFE_PROVIDER_ROUTER": "codexcli",
+            "SFE_PROVIDER_EXECUTOR": "openai",
+            "SFE_CODEXCLI_ROUTER_MODEL": "gpt-codex-router-role",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    decision = router.decide(task="Explain the architecture.")
+
+    assert router.provider_name == "codexcli"
+    assert decision.provider_name == "codexcli"
+    assert provider.calls[0]["model"] == "gpt-codex-router-role"
+
+
+def test_execution_mode_router_blank_router_provider_falls_back_to_sfe_provider() -> None:
+    provider = FakeCodexCLIProvider(
+        '{"execution_mode":"workspace_write","reason":"The task asks to edit files."}'
+    )
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_PROVIDER_ROUTER": " ",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    decision = router.decide(task="Update the README.")
+
+    assert router.provider_name == "codexcli"
+    assert decision.execution_mode == EXECUTION_MODE_WORKSPACE_WRITE
+
+
+def test_execution_mode_router_codexcli_uses_role_specific_effort() -> None:
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "codexcli",
+            "SFE_CODEXCLI_ROUTER_EFFORT": "low",
+            "SFE_CODEXCLI_REASONING_EFFORT": "high",
+        }
+    )
+
+    assert router.provider_name == "codexcli"
+    assert getattr(router, "provider").reasoning_effort == "low"
+
+
+def test_execution_mode_router_codexcli_effort_falls_back_to_legacy() -> None:
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "codexcli",
+            "SFE_CODEXCLI_ROUTER_EFFORT": " ",
+            "SFE_CODEXCLI_REASONING_EFFORT": "medium",
+        }
+    )
+
+    assert router.provider_name == "codexcli"
+    assert getattr(router, "provider").reasoning_effort == "medium"
+
+
 def test_execution_mode_router_codexcli_uses_default_router_model() -> None:
     provider = FakeCodexCLIProvider(
         '{"execution_mode":"workspace_write","reason":"The task asks to edit files."}'

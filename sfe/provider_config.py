@@ -11,6 +11,8 @@ from typing import Mapping
 
 
 SFE_PROVIDER_ENV = "SFE_PROVIDER"
+SFE_PROVIDER_ROUTER_ENV = "SFE_PROVIDER_ROUTER"
+SFE_PROVIDER_EXECUTOR_ENV = "SFE_PROVIDER_EXECUTOR"
 DEFAULT_SFE_PROVIDER = "openai"
 DEFAULT_PROXY_STANDBY_PROVIDER = "openai-compatible"
 CODEXCLI_SFE_PROVIDER = "codexcli"
@@ -57,6 +59,30 @@ def resolve_sfe_provider(
     return normalize_provider_name(provider)
 
 
+def resolve_sfe_router_provider(
+    environ: Mapping[str, str] | None = None,
+    default: str = DEFAULT_SFE_PROVIDER,
+) -> str:
+    """Resolve the router provider from SFE_PROVIDER_ROUTER, SFE_PROVIDER, or default."""
+    return _resolve_sfe_role_provider(
+        environ=environ,
+        role_env_var=SFE_PROVIDER_ROUTER_ENV,
+        default=default,
+    )
+
+
+def resolve_sfe_executor_provider(
+    environ: Mapping[str, str] | None = None,
+    default: str = DEFAULT_SFE_PROVIDER,
+) -> str:
+    """Resolve the executor provider from SFE_PROVIDER_EXECUTOR, SFE_PROVIDER, or default."""
+    return _resolve_sfe_role_provider(
+        environ=environ,
+        role_env_var=SFE_PROVIDER_EXECUTOR_ENV,
+        default=default,
+    )
+
+
 def resolve_sfe_provider_with_legacy_fallback(
     environ: Mapping[str, str] | None = None,
     legacy_env_var: str = "SFE_PROXY_PROVIDER",
@@ -70,6 +96,22 @@ def resolve_sfe_provider_with_legacy_fallback(
     legacy_provider = _env_value(env, legacy_env_var)
     if legacy_provider is not None:
         return normalize_provider_name(legacy_provider)
+    return normalize_provider_name(default)
+
+
+def _resolve_sfe_role_provider(
+    *,
+    environ: Mapping[str, str] | None,
+    role_env_var: str,
+    default: str,
+) -> str:
+    env = os.environ if environ is None else environ
+    provider = _env_value(env, role_env_var)
+    if provider is not None:
+        return normalize_provider_name(provider)
+    shared_provider = _env_value(env, SFE_PROVIDER_ENV)
+    if shared_provider is not None:
+        return normalize_provider_name(shared_provider)
     return normalize_provider_name(default)
 
 

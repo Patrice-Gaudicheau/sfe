@@ -33,7 +33,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import resolve_sfe_provider
+from sfe.provider_config import resolve_sfe_router_provider
 
 
 DEFAULT_LEMONADE_ROUTER_MODEL = "Qwen3-0.6B-GGUF"
@@ -174,7 +174,7 @@ def create_configured_router_json_reviewer(
     unsupported_provider_reason: str = "configured provider is not supported for router review",
 ) -> JsonReviewer:
     try:
-        provider_name = resolve_sfe_provider(environ, default="openai")
+        provider_name = resolve_sfe_router_provider(environ, default="openai")
     except ValueError:
         return ProviderConfigurationErrorJsonReviewer()
 

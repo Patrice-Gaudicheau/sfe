@@ -31,7 +31,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_provider
+from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_router_provider
 
 
 EXECUTION_MODE_CONSOLE_OUTPUT = "console_output"
@@ -195,7 +195,7 @@ def create_configured_execution_mode_router(
     provider_factories: Mapping[str, Any] | None = None,
 ) -> ExecutionModeRouter:
     try:
-        provider_name = resolve_sfe_provider(environ, default="openai")
+        provider_name = resolve_sfe_router_provider(environ, default="openai")
     except ValueError:
         return ProviderConfigurationErrorExecutionModeRouter()
 
@@ -212,7 +212,12 @@ def create_configured_execution_mode_router(
         )
     if provider_name == CODEXCLI_SFE_PROVIDER:
         return ConfiguredLLMExecutionModeRouter(
-            provider=factory(),
+            provider=_instantiate_codexcli_provider(
+                provider_name,
+                factory,
+                provider_factories,
+                environ,
+            ),
             provider_name=provider_name,
             model=_first_env_value(environ, ("SFE_CODEXCLI_ROUTER_MODEL",))
             or DEFAULT_CODEXCLI_ROUTER_MODEL,
@@ -383,6 +388,22 @@ def _provider_factory_for(
     if provider_name == "anthropic":
         return AnthropicProvider
     return lambda: None
+
+
+def _instantiate_codexcli_provider(
+    provider_name: str,
+    factory: Any,
+    provider_factories: Mapping[str, Any] | None,
+    environ: Mapping[str, str] | None,
+) -> Any:
+    if provider_factories and provider_name in provider_factories:
+        return factory()
+    return factory(
+        reasoning_effort=_first_env_value(
+            environ,
+            ("SFE_CODEXCLI_ROUTER_EFFORT", "SFE_CODEXCLI_REASONING_EFFORT"),
+        )
+    )
 
 
 def _first_env_value(

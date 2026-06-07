@@ -141,7 +141,11 @@ class AdvancingClock:
 
 class CodexCLIProviderTests(unittest.TestCase):
     def test_build_command_uses_json_model_and_read_only_sandbox(self) -> None:
-        command = build_codex_exec_command("gpt-5.5")
+        with patch.dict(
+            "providers.codexcli.os.environ",
+            {"SFE_CODEXCLI_REASONING_EFFORT": ""},
+        ):
+            command = build_codex_exec_command("gpt-5.5")
 
         self.assertEqual(
             command,
@@ -180,8 +184,37 @@ class CodexCLIProviderTests(unittest.TestCase):
             ],
         )
 
+    def test_build_command_explicit_reasoning_effort_overrides_legacy_env(self) -> None:
+        with patch.dict(
+            "providers.codexcli.os.environ",
+            {"SFE_CODEXCLI_REASONING_EFFORT": "high"},
+        ):
+            command = build_codex_exec_command(
+                "gpt-5.5",
+                reasoning_effort="low",
+            )
+
+        self.assertIn('model_reasoning_effort="low"', command)
+        self.assertNotIn('model_reasoning_effort="high"', command)
+
+    def test_build_command_blank_explicit_reasoning_effort_uses_legacy_env(self) -> None:
+        with patch.dict(
+            "providers.codexcli.os.environ",
+            {"SFE_CODEXCLI_REASONING_EFFORT": "medium"},
+        ):
+            command = build_codex_exec_command(
+                "gpt-5.5",
+                reasoning_effort=" ",
+            )
+
+        self.assertIn('model_reasoning_effort="medium"', command)
+
     def test_build_resume_command_reads_prompt_from_stdin(self) -> None:
-        command = build_codex_resume_command("gpt-5.5", "thread-1")
+        with patch.dict(
+            "providers.codexcli.os.environ",
+            {"SFE_CODEXCLI_REASONING_EFFORT": ""},
+        ):
+            command = build_codex_resume_command("gpt-5.5", "thread-1")
 
         self.assertEqual(
             command,
@@ -315,6 +348,26 @@ class CodexCLIProviderTests(unittest.TestCase):
         self.assertEqual(metadata["temperature_requested"], 0.7)
         self.assertNotIn("42", metadata["command"])
         self.assertNotIn("0.7", metadata["command"])
+
+    def test_chat_emits_provider_reasoning_effort_in_command(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1, reasoning_effort="high")
+        fake_process = FakeProcess(
+            stdout_lines=[
+                '{"type":"thread.started","thread_id":"thread-1"}\n',
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n',
+            ],
+        )
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+            response = provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+            )
+
+        self.assertIn(
+            'model_reasoning_effort="high"',
+            response["codexcli"]["command"],
+        )
 
     def test_chat_wires_timeout_into_supervisor_and_start_metadata(self) -> None:
         created: dict[str, object] = {}

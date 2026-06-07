@@ -150,7 +150,14 @@ def route_with_codexcli_diagnostics(
         or os.getenv("SFE_CODEXCLI_EXECUTOR_MODEL")
         or DEFAULT_OPENAI_EXECUTION_MODEL
     )
-    provider = CodexCLIProvider(timeout=timeout_seconds)
+    provider = CodexCLIProvider(
+        timeout=timeout_seconds,
+        reasoning_effort=(
+            os.getenv("SFE_CODEXCLI_ROUTER_EFFORT", "").strip()
+            or os.getenv("SFE_CODEXCLI_REASONING_EFFORT", "").strip()
+            or None
+        ),
+    )
     diagnostics = {
         "router": OPENAI_CODEXCLI_PROVIDER_NAME,
         "provider": OPENAI_CODEXCLI_PROVIDER_NAME,

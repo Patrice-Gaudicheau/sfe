@@ -27,7 +27,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import resolve_sfe_provider
+from sfe.provider_config import resolve_sfe_router_provider
 
 
 DEFAULT_LEMONADE_DISCOVERY_MODEL = "Qwen3-0.6B-GGUF"
@@ -203,7 +203,7 @@ def create_configured_discovery_router(
     provider_factories: Mapping[str, Any] | None = None,
 ) -> DiscoveryRouter:
     try:
-        provider_name = resolve_sfe_provider(environ, default="openai")
+        provider_name = resolve_sfe_router_provider(environ, default="openai")
     except ValueError:
         return ProviderConfigurationErrorDiscoveryRouter()
 

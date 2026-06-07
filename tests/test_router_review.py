@@ -159,6 +159,28 @@ def test_lemonade_router_model_prefers_sfe_router_model() -> None:
     assert "system_instruction" not in provider.calls[0]
 
 
+def test_router_reviewer_uses_router_provider_override() -> None:
+    provider = FakeProvider()
+    reviewer = create_configured_router_json_reviewer(
+        system_instruction="Return JSON.",
+        prompt_builder=lambda payload: json.dumps(payload, sort_keys=True),
+        valid_decisions={"OK_TEST", "KO_BLOCK"},
+        max_tokens=128,
+        environ={
+            "SFE_PROVIDER": "openai",
+            "SFE_PROVIDER_ROUTER": "lemonade",
+            "SFE_ROUTER_MODEL": "router-role-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    decision = reviewer.review({"task": "check"})
+
+    assert decision.provider_name == "lemonade"
+    assert decision.model == "router-role-model"
+    assert provider.calls[0]["model"] == "router-role-model"
+
+
 def test_google_router_reviewer_uses_google_model_and_system_message() -> None:
     provider = FakeProvider()
     reviewer = create_configured_router_json_reviewer(

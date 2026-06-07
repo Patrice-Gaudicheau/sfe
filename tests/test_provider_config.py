@@ -14,8 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sfe.provider_config import (
     normalize_provider_name,
+    resolve_sfe_executor_provider,
     resolve_sfe_provider,
     resolve_sfe_provider_with_legacy_fallback,
+    resolve_sfe_router_provider,
 )
 
 
@@ -76,6 +78,53 @@ def test_default_is_normalized_and_validated() -> None:
     assert resolve_sfe_provider({}, default="OPENAI-API") == "openai"
     with pytest.raises(ValueError, match="Unsupported SFE provider"):
         resolve_sfe_provider({}, default="invalid-default")
+
+
+def test_router_provider_overrides_shared_provider() -> None:
+    assert (
+        resolve_sfe_router_provider(
+            {
+                "SFE_PROVIDER": "openai",
+                "SFE_PROVIDER_ROUTER": "codexcli",
+            }
+        )
+        == "codexcli"
+    )
+
+
+def test_executor_provider_overrides_shared_provider() -> None:
+    assert (
+        resolve_sfe_executor_provider(
+            {
+                "SFE_PROVIDER": "openai",
+                "SFE_PROVIDER_EXECUTOR": "codexcli",
+            }
+        )
+        == "codexcli"
+    )
+
+
+def test_blank_role_provider_falls_back_to_shared_provider() -> None:
+    environ = {
+        "SFE_PROVIDER": "lemonade",
+        "SFE_PROVIDER_ROUTER": " ",
+        "SFE_PROVIDER_EXECUTOR": "",
+    }
+
+    assert resolve_sfe_router_provider(environ) == "lemonade"
+    assert resolve_sfe_executor_provider(environ) == "lemonade"
+
+
+def test_role_provider_falls_back_to_default_when_role_and_shared_unset() -> None:
+    assert resolve_sfe_router_provider({}, default="alibaba-api") == "alibaba"
+    assert resolve_sfe_executor_provider({}, default="gemini") == "google"
+
+
+def test_unknown_role_provider_raises_clear_error() -> None:
+    with pytest.raises(ValueError, match="Unsupported SFE provider"):
+        resolve_sfe_router_provider({"SFE_PROVIDER_ROUTER": "bad-router"})
+    with pytest.raises(ValueError, match="Unsupported SFE provider"):
+        resolve_sfe_executor_provider({"SFE_PROVIDER_EXECUTOR": "bad-executor"})
 
 
 def test_sfe_provider_takes_precedence_over_legacy_provider() -> None:
