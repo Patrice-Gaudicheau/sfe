@@ -39,6 +39,7 @@ def test_blank_sfe_provider_returns_default() -> None:
         ("alibaba", "alibaba"),
         ("anthropic", "anthropic"),
         ("google", "google"),
+        ("ollama", "ollama"),
         ("openai-compatible", "openai-compatible"),
     ),
 )

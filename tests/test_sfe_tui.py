@@ -4663,7 +4663,8 @@ def test_tui_run_json_patch_proposal_missing_diff_header_hints_unified_diff(
     assert cleanup.cleaned is True
 
 
-def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path) -> None:
+def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", raising=False)
     repo = init_git_repo(tmp_path / "repo")
     raw_output = invalid_new_file_hunk_count_diff()
     executor = FakeExecutor(

@@ -26,6 +26,11 @@ from providers.google import (
     MissingGoogleAPIKeyError,
 )
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
+from providers.ollama import (
+    DEFAULT_MODEL as DEFAULT_OLLAMA_MODEL,
+    OllamaProvider,
+    OllamaProviderError,
+)
 from providers.openai_api import (
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
     MissingOpenAIAPIKeyError,
@@ -33,7 +38,7 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import resolve_sfe_router_provider
+from sfe.provider_config import OLLAMA_SFE_PROVIDER, resolve_sfe_router_provider
 
 
 DEFAULT_LEMONADE_ROUTER_MODEL = "Qwen3-0.6B-GGUF"
@@ -252,6 +257,21 @@ def create_configured_router_json_reviewer(
             provider_error_types=(GoogleAPIError,),
             **common,
         )
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return DirectProviderJsonReviewer(
+            provider=provider_factory(),
+            provider_name=provider_name,
+            model=(
+                first_env_value(
+                    environ,
+                    ("SFE_OLLAMA_ROUTER_MODEL", "SFE_OLLAMA_MODEL"),
+                )
+                or DEFAULT_OLLAMA_MODEL
+            ),
+            call_style="system_message",
+            provider_error_classifier=classify_ollama_error,
+            **common,
+        )
     return UnsupportedProviderJsonReviewer(
         provider_name,
         reason=unsupported_provider_reason,
@@ -275,6 +295,8 @@ def provider_factory_for(
         return AnthropicProvider
     if provider_name == "google":
         return GoogleAPIProvider
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return OllamaProvider
     return lambda: None
 
 
@@ -375,6 +397,12 @@ def classify_provider_error(
 
 def classify_lemonade_error(exc: Exception) -> str | None:
     if isinstance(exc, LemonadeProviderError):
+        return f"router_{exc.error_category}"
+    return None
+
+
+def classify_ollama_error(exc: Exception) -> str | None:
+    if isinstance(exc, OllamaProviderError):
         return f"router_{exc.error_category}"
     return None
 

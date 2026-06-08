@@ -30,6 +30,11 @@ from providers.google import (
     MissingGoogleAPIKeyError,
 )
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
+from providers.ollama import (
+    DEFAULT_MODEL as DEFAULT_OLLAMA_MODEL,
+    OllamaProvider,
+    OllamaProviderError,
+)
 from providers.openai_api import (
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
     MissingOpenAIAPIKeyError,
@@ -37,7 +42,11 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_discovery_provider
+from sfe.provider_config import (
+    CODEXCLI_SFE_PROVIDER,
+    OLLAMA_SFE_PROVIDER,
+    resolve_sfe_discovery_provider,
+)
 
 
 DEFAULT_LEMONADE_DISCOVERY_MODEL = "Qwen3-0.6B-GGUF"
@@ -149,6 +158,11 @@ class ConfiguredLLMDiscoveryRouter:
                 "configured discovery router provider failed",
             ) from exc
         except LemonadeProviderError as exc:
+            raise DiscoveryRouterError(
+                f"discovery_router_{exc.error_category}",
+                "configured discovery router provider failed",
+            ) from exc
+        except OllamaProviderError as exc:
             raise DiscoveryRouterError(
                 f"discovery_router_{exc.error_category}",
                 "configured discovery router provider failed",
@@ -301,6 +315,21 @@ def create_configured_discovery_router(
             missing_key_errors=(MissingGoogleAPIKeyError,),
             provider_error_types=(GoogleAPIError,),
         )
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return ConfiguredLLMDiscoveryRouter(
+            provider=factory(),
+            provider_name=provider_name,
+            model=_first_env_value(
+                environ,
+                (
+                    "SFE_OLLAMA_DISCOVERY_MODEL",
+                    "SFE_OLLAMA_ROUTER_MODEL",
+                    "SFE_OLLAMA_MODEL",
+                ),
+            )
+            or DEFAULT_OLLAMA_MODEL,
+            call_style="system_message",
+        )
     return UnsupportedProviderDiscoveryRouter(provider_name)
 
 
@@ -430,6 +459,8 @@ def _provider_factory_for(
         return AnthropicProvider
     if provider_name == "google":
         return GoogleAPIProvider
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return OllamaProvider
     return lambda: None
 
 

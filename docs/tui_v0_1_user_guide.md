@@ -36,7 +36,7 @@ make sfe-tui
 This loads local `.env` settings into the TUI subprocess if `.env` exists, then
 runs `python -m sfe_tui`. The `.env` file is local/private, ignored by git, and
 must not be committed. The TUI executor provider is selected with
-`SFE_PROVIDER`, for example `SFE_PROVIDER=lemonade`.
+`SFE_PROVIDER`, for example `SFE_PROVIDER=lemonade` or `SFE_PROVIDER=ollama`.
 
 You can also launch the module directly when the environment is already
 configured:
@@ -44,6 +44,21 @@ configured:
 ```bash
 python -m sfe_tui
 ```
+
+For local Ollama use, Ollama must be running and the selected model must
+already be pulled:
+
+```bash
+ollama pull qwen3.5:4b
+SFE_PROVIDER=ollama
+SFE_OLLAMA_BASE_URL=http://localhost:11434
+SFE_OLLAMA_MODEL=qwen3.5:4b
+```
+
+`SFE_OLLAMA_ROUTER_MODEL`, `SFE_OLLAMA_DISCOVERY_MODEL`, and
+`SFE_OLLAMA_EXECUTOR_MODEL` can override the shared model for specific TUI
+roles. Ollama support is intended for local experimentation on capable
+machines, not as a claim that local models outperform cloud providers.
 
 At startup, select a workspace or accept the current directory. The TUI displays
 workspace paths using safe relative labels where possible.
@@ -219,6 +234,17 @@ loading them. It does not write files, run shell commands, execute tools, or
 expose raw file contents in diagnostics. It excludes obvious unsafe/local/generated
 inputs such as `.env`, cache directories, local logs, local databases, JSONL
 streams, binary/non-UTF-8 files, and common build artifacts.
+
+With `SFE_PROVIDER=ollama`, provider-backed TUI calls go to the configured
+Ollama endpoint. `/dry-run` remains a local preview and still makes zero
+provider calls.
+
+Ollama troubleshooting:
+
+- Server not running: start Ollama and check `curl http://localhost:11434/api/tags`.
+- Model not found: run `ollama pull <model>` for the configured model name.
+- Slow responses: use a smaller model, a more capable GPU, or increase `SFE_OLLAMA_TIMEOUT_SECONDS`.
+- WSL networking: if Ollama runs inside the same WSL environment, `localhost` is expected to work. If it runs on Windows, set `SFE_OLLAMA_BASE_URL` to the reachable host URL when localhost forwarding is unavailable.
 
 `DiscoveryResult` is render-safe: its load results are scrubbed and should be
 used only for diagnostics. When the TUI later builds the real SFE contract for

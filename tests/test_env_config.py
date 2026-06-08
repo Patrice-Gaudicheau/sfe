@@ -110,6 +110,12 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_ROUTER_MODEL=Qwen3-0.6B-GGUF", text)
         self.assertIn("SFE_LEMONADE_DISCOVERY_MODEL=", text)
         self.assertIn("SFE_EXECUTOR_MODEL=Qwen3.5-35B-A3B-GGUF", text)
+        self.assertIn("SFE_OLLAMA_BASE_URL=http://localhost:11434", text)
+        self.assertIn("SFE_OLLAMA_MODEL=qwen3.5:4b", text)
+        self.assertIn("SFE_OLLAMA_ROUTER_MODEL=", text)
+        self.assertIn("SFE_OLLAMA_DISCOVERY_MODEL=", text)
+        self.assertIn("SFE_OLLAMA_EXECUTOR_MODEL=", text)
+        self.assertIn("SFE_OLLAMA_TIMEOUT_SECONDS=120", text)
         self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{12,}")
         for line in text.splitlines():
             if line.startswith("OPENAI_API_KEY="):
@@ -150,6 +156,12 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "SFE_ANTHROPIC_EXECUTOR_MODEL=")
             if line.startswith("SFE_LEMONADE_DISCOVERY_MODEL="):
                 self.assertEqual(line, "SFE_LEMONADE_DISCOVERY_MODEL=")
+            if line.startswith("SFE_OLLAMA_ROUTER_MODEL="):
+                self.assertEqual(line, "SFE_OLLAMA_ROUTER_MODEL=")
+            if line.startswith("SFE_OLLAMA_DISCOVERY_MODEL="):
+                self.assertEqual(line, "SFE_OLLAMA_DISCOVERY_MODEL=")
+            if line.startswith("SFE_OLLAMA_EXECUTOR_MODEL="):
+                self.assertEqual(line, "SFE_OLLAMA_EXECUTOR_MODEL=")
 
     def test_gitignore_ignores_env_but_allows_env_example(self) -> None:
         gitignore = PROJECT_ROOT / ".gitignore"

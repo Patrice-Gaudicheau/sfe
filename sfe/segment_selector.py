@@ -26,6 +26,11 @@ from providers.google import (
     GoogleAPIProvider,
     MissingGoogleAPIKeyError,
 )
+from providers.ollama import (
+    DEFAULT_MODEL as DEFAULT_OLLAMA_MODEL,
+    OllamaProvider,
+    OllamaProviderError,
+)
 from providers.openai_api import (
     DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
     MissingOpenAIAPIKeyError,
@@ -40,7 +45,13 @@ from sfe.provider_progress import ProviderCallIdleTimeoutError
 
 SEGMENT_SELECTOR_MODE = "sfe_segment_selector"
 SEGMENT_SELECTOR_MAX_TOKENS = 220
-SUPPORTED_SEGMENT_SELECTOR_PROVIDERS = ("openai", "anthropic", "alibaba", "google")
+SUPPORTED_SEGMENT_SELECTOR_PROVIDERS = (
+    "openai",
+    "anthropic",
+    "alibaba",
+    "google",
+    "ollama",
+)
 KNOWN_SEGMENT_SELECTION_STATUSES = frozenset(
     {
         "approved",
@@ -425,6 +436,11 @@ def _default_router_model(provider_name: str, environ: Mapping[str, str] | None)
         return _first_env_value(environ, ("SFE_ALIBABA_ROUTER_MODEL",)) or DEFAULT_ALIBABA_ROUTER_MODEL
     if provider_name == "google":
         return _first_env_value(environ, ("SFE_GOOGLE_MODEL",)) or DEFAULT_GOOGLE_MODEL
+    if provider_name == "ollama":
+        return _first_env_value(
+            environ,
+            ("SFE_OLLAMA_ROUTER_MODEL", "SFE_OLLAMA_MODEL"),
+        ) or DEFAULT_OLLAMA_MODEL
     raise SegmentSelectionError(
         "segment_selector_provider_not_supported",
         "configured segment selector provider is not supported",
@@ -446,6 +462,8 @@ def _provider_factory_for(
         return AlibabaAPIProvider
     if provider_name == "google":
         return GoogleAPIProvider
+    if provider_name == "ollama":
+        return OllamaProvider
     return lambda: None
 
 
@@ -470,6 +488,8 @@ def _provider_error_types(provider_name: str) -> tuple[type[Exception], ...]:
         return (AlibabaAPIError,)
     if provider_name == "google":
         return (GoogleAPIError,)
+    if provider_name == "ollama":
+        return (OllamaProviderError,)
     return ()
 
 

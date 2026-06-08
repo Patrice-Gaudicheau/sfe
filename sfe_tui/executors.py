@@ -29,6 +29,11 @@ from providers.google import (
     MissingGoogleAPIKeyError,
 )
 from providers.lemonade import LemonadeProvider, LemonadeProviderError
+from providers.ollama import (
+    DEFAULT_MODEL as DEFAULT_OLLAMA_MODEL,
+    OllamaProvider,
+    OllamaProviderError,
+)
 from providers.openai_api import (
     DEFAULT_EXECUTOR_MODEL,
     MissingOpenAIAPIKeyError,
@@ -36,7 +41,11 @@ from providers.openai_api import (
     OpenAIAPIProvider,
 )
 from sfe.provider_progress import ProviderCallIdleTimeoutError
-from sfe.provider_config import CODEXCLI_SFE_PROVIDER, resolve_sfe_executor_provider
+from sfe.provider_config import (
+    CODEXCLI_SFE_PROVIDER,
+    OLLAMA_SFE_PROVIDER,
+    resolve_sfe_executor_provider,
+)
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
@@ -418,6 +427,20 @@ def create_tui_executor(
             missing_key_errors=(MissingGoogleAPIKeyError,),
             provider_error_types=(GoogleAPIError,),
         )
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return DirectProviderReadOnlyExecutor(
+            provider=provider_factory(),
+            provider_name=provider_name,
+            model=(
+                _first_env_value(
+                    environ,
+                    ("SFE_OLLAMA_EXECUTOR_MODEL", "SFE_OLLAMA_MODEL"),
+                )
+                or DEFAULT_OLLAMA_MODEL
+            ),
+            call_style="system_message",
+            provider_error_classifier=_classify_ollama_error,
+        )
     return UnsupportedProviderExecutor(provider_name)
 
 
@@ -440,6 +463,8 @@ def _provider_factory(
         return AnthropicProvider
     if provider_name == "google":
         return GoogleAPIProvider
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return OllamaProvider
     return lambda: None
 
 
@@ -516,6 +541,12 @@ def _classify_provider_error(
 
 def _classify_lemonade_error(exc: Exception) -> str | None:
     if isinstance(exc, LemonadeProviderError):
+        return exc.error_category
+    return None
+
+
+def _classify_ollama_error(exc: Exception) -> str | None:
+    if isinstance(exc, OllamaProviderError):
         return exc.error_category
     return None
 

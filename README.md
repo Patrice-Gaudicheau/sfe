@@ -326,8 +326,10 @@ surface default. Discovery model variables are provider-specific, for example
 `SFE_OPENAI_DISCOVERY_MODEL`, `SFE_LEMONADE_DISCOVERY_MODEL`, and
 `SFE_CODEXCLI_DISCOVERY_MODEL`, and fall back to the existing router/shared
 model variables when absent. Google discovery uses `SFE_GOOGLE_DISCOVERY_MODEL`
-with `SFE_GOOGLE_MODEL` as its fallback. The standby proxy keeps its existing
-provider semantics and does not use the role-specific selectors yet.
+with `SFE_GOOGLE_MODEL` as its fallback. Ollama discovery uses
+`SFE_OLLAMA_DISCOVERY_MODEL` with `SFE_OLLAMA_ROUTER_MODEL` and
+`SFE_OLLAMA_MODEL` as fallbacks. The standby proxy keeps its existing provider
+semantics and does not use the role-specific selectors yet.
 
 ## Minimal Verification
 
@@ -372,6 +374,14 @@ be reported safely if the configured provider is unavailable. No proxy is used.
 This read-only smoke uses advanced diagnostics; the canonical task path is
 `/task <question>` followed by `/run`.
 
+For a local Ollama read-only smoke, start Ollama, pull the configured model,
+and use the local provider:
+
+```bash
+ollama pull qwen3.5:4b
+SFE_PROVIDER=ollama SFE_OLLAMA_MODEL=qwen3.5:4b make sfe-tui
+```
+
 The full test suite can also be run from the repository root:
 
 ```bash
@@ -384,8 +394,8 @@ or `TEMP` point to `/mnt/c/...`.
 ## Provider Support
 
 The current prototype has provider paths for OpenAI, Lemonade, Alibaba/Qwen,
-Anthropic, and Google/Gemini. They do not all have identical maturity or API
-shape.
+Anthropic, Google/Gemini, Ollama, and CodexCLI. They do not all have identical
+maturity or API shape.
 
 | Provider | Benchmark path | Standby proxy notes | Notes |
 | --- | --- | --- | --- |
@@ -394,6 +404,7 @@ shape.
 | Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Historical proxy support exists, but the proxy is not the current user path. | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
 | Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
 | Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Standby proxy can pass through the OpenAI-compatible endpoint, but the proxy is not the current user path. | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, `SFE_GOOGLE_DISCOVERY_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`; absent or blank discovery model falls back to `SFE_GOOGLE_MODEL`, then the Google default. |
+| Ollama | TUI/core provider roles and `runtime/run_ollama_smoke.py` | Proxy support is not the recommended path. Use the direct local provider. | Local Ollama HTTP API provider for capable local machines and experimentation. Configure `SFE_PROVIDER=ollama`, `SFE_OLLAMA_BASE_URL`, and `SFE_OLLAMA_MODEL`. Default local endpoint is `http://localhost:11434`; the smoke-test model is `qwen3.5:4b`. Pull the model before use. This is a compatibility feature, not a performance claim. |
 | CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Proxy notes remain historical/stress-test material, not the recommended CodexCLI path. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and `SFE_PROVIDER_EXECUTOR`. Model selection uses `SFE_CODEXCLI_ROUTER_MODEL`, `SFE_CODEXCLI_DISCOVERY_MODEL`, and `SFE_CODEXCLI_EXECUTOR_MODEL`; absent or blank discovery model falls back to the router model, then the CodexCLI router default. `SFE_CODEXCLI_ROUTER_EFFORT`, `SFE_CODEXCLI_DISCOVERY_EFFORT`, and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT` for their respective roles; absent or blank discovery effort falls back to router effort, then the legacy shared value. CodexCLI can route `/run`, select discovery files from the workspace map, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for discovery path validation, patch parsing, validation, worktree isolation, application, and rejection. |
 
 Proxy-specific variables remain in `.env.example` for historical and standby
@@ -413,6 +424,31 @@ SFE_CODEXCLI_DISCOVERY_EFFORT="high"
 
 Google/Gemini discovery can be selected with `SFE_PROVIDER_DISCOVERY=google`
 and optionally `SFE_GOOGLE_DISCOVERY_MODEL=<model-id>`.
+
+Ollama can be selected for all TUI/core provider roles:
+
+```bash
+SFE_PROVIDER=ollama
+SFE_OLLAMA_BASE_URL=http://localhost:11434
+SFE_OLLAMA_MODEL=qwen3.5:4b
+```
+
+Optional role model overrides are `SFE_OLLAMA_ROUTER_MODEL`,
+`SFE_OLLAMA_DISCOVERY_MODEL`, and `SFE_OLLAMA_EXECUTOR_MODEL`. The selected
+model must already be available locally, for example with
+`ollama pull qwen3.5:4b`. The optional live smoke is:
+
+```bash
+SFE_OLLAMA_LIVE_SMOKE=1 SFE_OLLAMA_MODEL=qwen3.5:4b pytest tests/test_ollama_smoke.py -q
+python runtime/run_ollama_smoke.py --model qwen3.5:4b
+```
+
+Ollama troubleshooting:
+
+- Server not running: start Ollama and verify `curl http://localhost:11434/api/tags`.
+- Model not found: run `ollama pull <model>`, then retry with the same `SFE_OLLAMA_MODEL`.
+- Slow responses: local models can be slow on CPU-only machines or small GPUs; increase `SFE_OLLAMA_TIMEOUT_SECONDS` if needed.
+- WSL networking: when Ollama is installed inside WSL, `http://localhost:11434` is normally correct from the same WSL environment. If Ollama runs on Windows instead, ensure the Windows Ollama server is reachable from WSL and set `SFE_OLLAMA_BASE_URL` explicitly if localhost forwarding is not working.
 
 Lemonade is used here as a local OpenAI-compatible inference server. Configure it with:
 
@@ -459,8 +495,9 @@ SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 Deterministic tests do not require an API key. Live OpenAI runners require
 `OPENAI_API_KEY`; live Anthropic runners require `ANTHROPIC_API_KEY`; live
 Alibaba/Qwen runners require `ALIBABA_API_KEY`; live Google/Gemini runners
-require `GOOGLE_API_KEY`. Keep secrets in a local `.env` file and never commit
-them.
+require `GOOGLE_API_KEY`; live Ollama smokes require a running local Ollama
+server and a pulled local model. Keep secrets in a local `.env` file and never
+commit them.
 
 Generated benchmark reports should be written under `/tmp` or another
 untracked local location. Some selected-vs-full comparison runner names do not

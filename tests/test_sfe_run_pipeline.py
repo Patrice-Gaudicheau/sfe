@@ -1027,7 +1027,9 @@ def test_run_pipeline_reports_json_looking_patch_proposal_diagnostics(
 
 def test_run_pipeline_rejects_hunk_accounting_without_second_pass(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.delenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", raising=False)
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
     executor = FakeExecutor(_invalid_new_file_hunk_count_diff())

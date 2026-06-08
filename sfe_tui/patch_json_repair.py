@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from providers.alibaba import DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MODEL
 from providers.anthropic import DEFAULT_ROUTER_MODEL as DEFAULT_ANTHROPIC_ROUTER_MODEL
 from providers.google import DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL
+from providers.ollama import DEFAULT_MODEL as DEFAULT_OLLAMA_MODEL
 from providers.openai_api import DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL
 from sfe.patch_json_repair import (
     PatchJsonRepairer as _PatchJsonRepairer,
@@ -22,7 +23,7 @@ from sfe.router_review import (
     first_env_value,
     provider_factory_for,
 )
-from sfe.provider_config import resolve_sfe_provider
+from sfe.provider_config import OLLAMA_SFE_PROVIDER, resolve_sfe_provider
 
 
 PATCH_JSON_REPAIR_MAX_OUTPUT_TOKENS = 12_000
@@ -178,6 +179,17 @@ def create_tui_patch_json_repairer(
             provider_name=provider_name,
             model=first_env_value(environ, ("SFE_GOOGLE_MODEL",))
             or DEFAULT_GOOGLE_MODEL,
+            call_style="system_message",
+        )
+    if provider_name == OLLAMA_SFE_PROVIDER:
+        return ConfiguredPatchJsonRepairer(
+            provider=factory(),
+            provider_name=provider_name,
+            model=first_env_value(
+                environ,
+                ("SFE_OLLAMA_ROUTER_MODEL", "SFE_OLLAMA_MODEL"),
+            )
+            or DEFAULT_OLLAMA_MODEL,
             call_style="system_message",
         )
     return DisabledPatchJsonRepairer()
