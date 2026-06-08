@@ -14,7 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from providers.codexcli import CodexCLITimeoutError
 from sfe.discovery import discover_workspace_context
-from sfe.discovery_router import DiscoveryRouterSelection
+from sfe.discovery_router import (
+    DiscoveryRouterError,
+    DiscoveryRouterSelection,
+    create_configured_discovery_router,
+)
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
     EXECUTION_MODE_EXTERNAL_ACTION,
@@ -135,6 +139,24 @@ class FakeDiscoveryRouter:
             provider_name=self.provider_name,
             model=self.model,
             provider_calls_made=1,
+        )
+
+
+class FailingDiscoveryRouter:
+    provider_name = "unsupported-test-provider"
+    model = None
+
+    def select_files(
+        self,
+        *,
+        task: str,
+        workspace_map: list[dict[str, object]],
+        max_files: int,
+    ) -> DiscoveryRouterSelection:
+        del task, workspace_map, max_files
+        raise DiscoveryRouterError(
+            "discovery_router_provider_not_supported",
+            "configured provider is not supported for discovery routing",
         )
 
 
@@ -1206,21 +1228,17 @@ def test_run_pipeline_supports_codexcli_router_with_openai_executor_config(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_fails_before_executor_when_discovery_provider_is_unsupported(
+def test_run_pipeline_fails_before_executor_when_discovery_router_is_unsupported(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
     executor = FakeExecutor()
-    monkeypatch.delenv("SFE_PROVIDER", raising=False)
-    monkeypatch.setenv("SFE_PROVIDER_ROUTER", "codexcli")
-    monkeypatch.setenv("SFE_PROVIDER_EXECUTOR", "codexcli")
-    monkeypatch.delenv("SFE_PROVIDER_DISCOVERY", raising=False)
 
     result = RunPipeline(
         backend=DirectBackend(executor=executor),
         workspace_manager=manager,
+        discovery_router=FailingDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
     ).run(
         RunRequest(
@@ -1238,11 +1256,56 @@ def test_run_pipeline_fails_before_executor_when_discovery_provider_is_unsupport
     assert result.discovery_result.scanned_file_count >= 1
     assert result.discovery_result.workspace_map_count >= 1
     assert result.discovery_result.candidate_count == 0
-    assert result.discovery_result.router_provider_name == "codexcli"
+    assert result.discovery_result.router_provider_name == "unsupported-test-provider"
     assert executor.patch_calls == []
     assert result.patch_result is None
     rendered = render_run_result_normal(result)
-    assert "hint: configured discovery provider codexcli is not supported" in rendered
+    assert (
+        "hint: configured discovery provider unsupported-test-provider is not supported"
+        in rendered
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_supports_codexcli_discovery_with_fake_response(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor(_valid_new_file_diff())
+    discovery_provider = FakeChatProvider(
+        answer='{"files_to_inspect":["context.txt"],"reason":"Patch target context."}'
+    )
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER_ROUTER", "codexcli")
+    monkeypatch.setenv("SFE_PROVIDER_DISCOVERY", "codexcli")
+    monkeypatch.setenv("SFE_PROVIDER_EXECUTOR", "codexcli")
+    monkeypatch.setenv("SFE_CODEXCLI_DISCOVERY_MODEL", "codexcli-discovery-model")
+    discovery_router = create_configured_discovery_router(
+        provider_factories={"codexcli": lambda: discovery_provider}
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=discovery_router,
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.discovery_result is not None
+    assert result.discovery_result.router_provider_name == "codexcli"
+    assert result.discovery_result.router_model == "codexcli-discovery-model"
+    assert result.discovery_result.router_error_category is None
+    assert result.discovery_result.candidate_count == 1
+    assert result.promoted_files == ("index.html",)
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

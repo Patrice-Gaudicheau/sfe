@@ -136,6 +136,36 @@ def test_configured_discovery_router_uses_discovery_provider_override_only() -> 
     assert execution_router.model == "codexcli-execution-router-model"
 
 
+def test_openai_discovery_model_overrides_openai_router_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "openai",
+            "SFE_OPENAI_DISCOVERY_MODEL": "openai-discovery-model",
+            "SFE_OPENAI_ROUTER_MODEL": "openai-router-model",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+
+    assert router.provider_name == "openai"
+    assert router.model == "openai-discovery-model"
+
+
+def test_openai_discovery_model_falls_back_to_openai_router_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "openai",
+            "SFE_OPENAI_DISCOVERY_MODEL": " ",
+            "SFE_OPENAI_ROUTER_MODEL": "openai-router-model",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+
+    assert router.provider_name == "openai"
+    assert router.model == "openai-router-model"
+
+
 def test_configured_discovery_router_blank_discovery_provider_falls_back_to_router_provider() -> None:
     provider = FakeProvider()
     router = create_configured_discovery_router(
@@ -152,6 +182,46 @@ def test_configured_discovery_router_blank_discovery_provider_falls_back_to_rout
     assert router.model == "lemonade-discovery-model"
 
 
+def test_lemonade_discovery_model_overrides_router_and_shared_models() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "lemonade",
+            "SFE_LEMONADE_DISCOVERY_MODEL": "lemonade-discovery-model",
+            "SFE_ROUTER_MODEL": "lemonade-router-model",
+            "SFE_LEMONADE_MODEL": "lemonade-shared-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    assert router.provider_name == "lemonade"
+    assert router.model == "lemonade-discovery-model"
+
+
+def test_lemonade_discovery_model_falls_back_to_router_then_shared_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "lemonade",
+            "SFE_LEMONADE_DISCOVERY_MODEL": " ",
+            "SFE_ROUTER_MODEL": "lemonade-router-model",
+            "SFE_LEMONADE_MODEL": "lemonade-shared-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+    shared = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "lemonade",
+            "SFE_ROUTER_MODEL": " ",
+            "SFE_LEMONADE_MODEL": "lemonade-shared-model",
+        },
+        provider_factories={"lemonade": lambda: provider},
+    )
+
+    assert router.model == "lemonade-router-model"
+    assert shared.model == "lemonade-shared-model"
+
+
 def test_configured_discovery_router_legacy_shared_provider_fallback_still_works() -> None:
     provider = FakeProvider()
     router = create_configured_discovery_router(
@@ -166,27 +236,226 @@ def test_configured_discovery_router_legacy_shared_provider_fallback_still_works
     assert router.model == "alibaba-discovery-model"
 
 
-def test_discovery_with_codexcli_router_without_discovery_override_is_unsupported(
-    tmp_path,
-) -> None:
+def test_alibaba_discovery_model_overrides_alibaba_router_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "alibaba",
+            "SFE_ALIBABA_DISCOVERY_MODEL": "alibaba-discovery-model",
+            "SFE_ALIBABA_ROUTER_MODEL": "alibaba-router-model",
+        },
+        provider_factories={"alibaba": lambda: provider},
+    )
+
+    assert router.provider_name == "alibaba"
+    assert router.model == "alibaba-discovery-model"
+
+
+def test_anthropic_discovery_model_overrides_anthropic_router_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "anthropic",
+            "SFE_ANTHROPIC_DISCOVERY_MODEL": "anthropic-discovery-model",
+            "SFE_ANTHROPIC_ROUTER_MODEL": "anthropic-router-model",
+        },
+        provider_factories={"anthropic": lambda: provider},
+    )
+
+    assert router.provider_name == "anthropic"
+    assert router.model == "anthropic-discovery-model"
+
+
+def test_google_discovery_selects_files_with_fake_response(tmp_path) -> None:
+    _write(tmp_path / "public" / "index.php", "<?php echo 'raw';\n")
     _write(tmp_path / "content" / "posts.php", "<?php return [];\n")
-    _write(tmp_path / "public" / "index.php", "<?php echo $post['title'];\n")
-    _write(tmp_path / "tests" / "render_smoke.php", "<?php\n")
+    provider = FakeProvider(
+        '{"files_to_inspect":["public/index.php","content/posts.php"],'
+        '"reason":"rendered output and source data"}'
+    )
 
     result = discover_workspace_context(
         workspace_root=tmp_path,
         task="escape PHP blog output",
         router=create_configured_discovery_router(
-            environ={"SFE_PROVIDER_ROUTER": "codexcli"}
+            environ={
+                "SFE_PROVIDER_DISCOVERY": "google",
+                "SFE_GOOGLE_DISCOVERY_MODEL": "google-discovery-model",
+                "SFE_GOOGLE_MODEL": "google-shared-model",
+            },
+            provider_factories={"google": lambda: provider},
+        ),
+    )
+
+    assert _refs(result) == ["public/index.php", "content/posts.php"]
+    assert result.router_provider_name == "google"
+    assert result.router_model == "google-discovery-model"
+    assert result.router_error_category is None
+    assert provider.calls[0]["model"] == "google-discovery-model"
+    assert provider.calls[0]["messages"][0]["role"] == "system"
+
+
+def test_google_discovery_model_overrides_google_shared_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "google",
+            "SFE_GOOGLE_DISCOVERY_MODEL": "google-discovery-model",
+            "SFE_GOOGLE_MODEL": "google-shared-model",
+        },
+        provider_factories={"google": lambda: provider},
+    )
+
+    assert router.provider_name == "google"
+    assert router.model == "google-discovery-model"
+
+
+def test_google_discovery_model_falls_back_to_google_shared_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "google",
+            "SFE_GOOGLE_DISCOVERY_MODEL": " ",
+            "SFE_GOOGLE_MODEL": "google-shared-model",
+        },
+        provider_factories={"google": lambda: provider},
+    )
+
+    assert router.provider_name == "google"
+    assert router.model == "google-shared-model"
+
+
+def test_codexcli_discovery_selects_files_with_fake_response(
+    tmp_path,
+) -> None:
+    _write(tmp_path / "content" / "posts.php", "<?php return [];\n")
+    _write(tmp_path / "public" / "index.php", "<?php echo $post['title'];\n")
+    _write(tmp_path / "tests" / "render_smoke.php", "<?php\n")
+    provider = FakeProvider(
+        '{"files_to_inspect":["public/index.php","content/posts.php"],'
+        '"reason":"rendered output and source data"}'
+    )
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="escape PHP blog output",
+        router=create_configured_discovery_router(
+            environ={
+                "SFE_PROVIDER_DISCOVERY": "codexcli",
+                "SFE_CODEXCLI_DISCOVERY_MODEL": "codexcli-discovery-model",
+                "SFE_CODEXCLI_ROUTER_MODEL": "codexcli-router-model",
+            },
+            provider_factories={"codexcli": lambda: provider},
         ),
     )
 
     assert result.scanned_file_count == 3
     assert result.workspace_map_count == 3
-    assert result.candidate_count == 0
-    assert result.stop_reason == "discovery_router_provider_not_supported"
+    assert _refs(result) == ["public/index.php", "content/posts.php"]
+    assert result.loaded_candidate_count == 2
     assert result.router_provider_name == "codexcli"
-    assert result.router_error_category == "discovery_router_provider_not_supported"
+    assert result.router_model == "codexcli-discovery-model"
+    assert result.router_error_category is None
+    assert provider.calls[0]["model"] == "codexcli-discovery-model"
+    assert provider.calls[0]["system_instruction"]
+
+
+def test_codexcli_discovery_malformed_output_returns_router_error(tmp_path) -> None:
+    _write(tmp_path / "public" / "index.php", "<?php echo 'raw';\n")
+    provider = FakeProvider("not json")
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="escape PHP blog output",
+        router=create_configured_discovery_router(
+            environ={"SFE_PROVIDER_DISCOVERY": "codexcli"},
+            provider_factories={"codexcli": lambda: provider},
+        ),
+    )
+
+    assert result.candidate_count == 0
+    assert result.router_provider_name == "codexcli"
+    assert result.router_error_category == "invalid_discovery_router_response"
+    assert result.stop_reason == "invalid_discovery_router_response"
+
+
+def test_codexcli_discovery_unknown_paths_are_rejected_locally(tmp_path) -> None:
+    _write(tmp_path / "public" / "index.php", "<?php echo 'raw';\n")
+    provider = FakeProvider(
+        '{"files_to_inspect":["missing.php","public/index.php"],'
+        '"reason":"one bad and one good path"}'
+    )
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task="escape PHP blog output",
+        router=create_configured_discovery_router(
+            environ={"SFE_PROVIDER_DISCOVERY": "codexcli"},
+            provider_factories={"codexcli": lambda: provider},
+        ),
+    )
+
+    assert _refs(result) == ["public/index.php"]
+    assert result.router_error_category is None
+    assert result.skipped_reason_counts["path_not_found"] == 1
+
+
+def test_codexcli_discovery_model_overrides_codexcli_router_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "codexcli",
+            "SFE_CODEXCLI_DISCOVERY_MODEL": "codexcli-discovery-model",
+            "SFE_CODEXCLI_ROUTER_MODEL": "codexcli-router-model",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    assert router.provider_name == "codexcli"
+    assert router.model == "codexcli-discovery-model"
+
+
+def test_codexcli_discovery_model_falls_back_to_codexcli_router_model() -> None:
+    provider = FakeProvider()
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "codexcli",
+            "SFE_CODEXCLI_DISCOVERY_MODEL": " ",
+            "SFE_CODEXCLI_ROUTER_MODEL": "codexcli-router-model",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    assert router.provider_name == "codexcli"
+    assert router.model == "codexcli-router-model"
+
+
+def test_codexcli_discovery_uses_role_specific_effort() -> None:
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "codexcli",
+            "SFE_CODEXCLI_DISCOVERY_EFFORT": "low",
+            "SFE_CODEXCLI_ROUTER_EFFORT": "high",
+            "SFE_CODEXCLI_REASONING_EFFORT": "medium",
+        },
+    )
+
+    assert router.provider_name == "codexcli"
+    assert getattr(router, "provider").reasoning_effort == "low"
+
+
+def test_codexcli_discovery_effort_falls_back_to_router_effort() -> None:
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "codexcli",
+            "SFE_CODEXCLI_DISCOVERY_EFFORT": " ",
+            "SFE_CODEXCLI_ROUTER_EFFORT": "high",
+            "SFE_CODEXCLI_REASONING_EFFORT": "medium",
+        },
+    )
+
+    assert router.provider_name == "codexcli"
+    assert getattr(router, "provider").reasoning_effort == "high"
 
 
 def test_non_git_php_workspace_scans_files_with_supported_discovery_router(

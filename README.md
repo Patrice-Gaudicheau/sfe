@@ -322,8 +322,12 @@ optionally override `SFE_PROVIDER`; when either is absent or blank, SFE falls
 back to `SFE_PROVIDER` and then the surface default. Discovery routing can be
 overridden separately with `SFE_PROVIDER_DISCOVERY`; blank or absent discovery
 provider falls back to `SFE_PROVIDER_ROUTER`, then `SFE_PROVIDER`, then the
-surface default. The standby proxy keeps its existing provider semantics and
-does not use the role-specific selectors yet.
+surface default. Discovery model variables are provider-specific, for example
+`SFE_OPENAI_DISCOVERY_MODEL`, `SFE_LEMONADE_DISCOVERY_MODEL`, and
+`SFE_CODEXCLI_DISCOVERY_MODEL`, and fall back to the existing router/shared
+model variables when absent. Google discovery uses `SFE_GOOGLE_DISCOVERY_MODEL`
+with `SFE_GOOGLE_MODEL` as its fallback. The standby proxy keeps its existing
+provider semantics and does not use the role-specific selectors yet.
 
 ## Minimal Verification
 
@@ -389,13 +393,26 @@ shape.
 | Lemonade | `--executor lemonade` and historical/local benchmark runners | Historical proxy support exists, but the proxy is not the current user path. | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
 | Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Historical proxy support exists, but the proxy is not the current user path. | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
 | Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
-| Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Standby proxy can pass through the OpenAI-compatible endpoint, but the proxy is not the current user path. | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`. |
-| CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Proxy notes remain historical/stress-test material, not the recommended CodexCLI path. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`. Discovery routing does not currently support CodexCLI, so the recommended mixed `/run` setup is `SFE_PROVIDER_ROUTER=codexcli`, `SFE_PROVIDER_DISCOVERY=openai` or another configured discovery-supported provider, and `SFE_PROVIDER_EXECUTOR=codexcli`. Model selection remains `SFE_CODEXCLI_ROUTER_MODEL` and `SFE_CODEXCLI_EXECUTOR_MODEL`. `SFE_CODEXCLI_ROUTER_EFFORT` and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT`; absent or blank role effort falls back to the legacy shared value. CodexCLI can route `/run`, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for patch parsing, validation, worktree isolation, application, and rejection. |
+| Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Standby proxy can pass through the OpenAI-compatible endpoint, but the proxy is not the current user path. | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, `SFE_GOOGLE_DISCOVERY_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`; absent or blank discovery model falls back to `SFE_GOOGLE_MODEL`, then the Google default. |
+| CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Proxy notes remain historical/stress-test material, not the recommended CodexCLI path. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and `SFE_PROVIDER_EXECUTOR`. Model selection uses `SFE_CODEXCLI_ROUTER_MODEL`, `SFE_CODEXCLI_DISCOVERY_MODEL`, and `SFE_CODEXCLI_EXECUTOR_MODEL`; absent or blank discovery model falls back to the router model, then the CodexCLI router default. `SFE_CODEXCLI_ROUTER_EFFORT`, `SFE_CODEXCLI_DISCOVERY_EFFORT`, and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT` for their respective roles; absent or blank discovery effort falls back to router effort, then the legacy shared value. CodexCLI can route `/run`, select discovery files from the workspace map, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for discovery path validation, patch parsing, validation, worktree isolation, application, and rejection. |
 
 Proxy-specific variables remain in `.env.example` for historical and standby
 work, but the proxy is not the recommended active path for TUI V0.1. For the
 standby proxy, `SFE_PROVIDER` is the current provider selector;
 `SFE_PROXY_PROVIDER` is a legacy proxy-only fallback.
+
+Full CodexCLI `/run` routing can be configured explicitly:
+
+```env
+SFE_PROVIDER_ROUTER=codexcli
+SFE_PROVIDER_DISCOVERY=codexcli
+SFE_PROVIDER_EXECUTOR=codexcli
+SFE_CODEXCLI_DISCOVERY_MODEL="gpt-5.5"
+SFE_CODEXCLI_DISCOVERY_EFFORT="high"
+```
+
+Google/Gemini discovery can be selected with `SFE_PROVIDER_DISCOVERY=google`
+and optionally `SFE_GOOGLE_DISCOVERY_MODEL=<model-id>`.
 
 Lemonade is used here as a local OpenAI-compatible inference server. Configure it with:
 
@@ -433,6 +450,7 @@ Google/Gemini benchmark runs are optional and require:
 ```bash
 GOOGLE_API_KEY=
 SFE_GOOGLE_MODEL=gemini-2.5-flash-lite
+SFE_GOOGLE_DISCOVERY_MODEL=<google-discovery-model-id>
 SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 ```
 
