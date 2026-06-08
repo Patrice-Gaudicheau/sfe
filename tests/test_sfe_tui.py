@@ -1248,6 +1248,53 @@ def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
     assert "ProxyBackend" not in status_block
 
 
+def test_status_displays_resolved_provider_roles_for_explicit_split(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
+    monkeypatch.setenv("SFE_PROVIDER_ROUTER", "codexcli")
+    monkeypatch.setenv("SFE_PROVIDER_DISCOVERY", "openai")
+    monkeypatch.setenv("SFE_PROVIDER_EXECUTOR", "codexcli")
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/status", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    router_index = status_block.index("router provider: codexcli")
+    discovery_index = status_block.index("discovery provider: openai")
+    executor_index = status_block.index("executor provider: codexcli")
+    assert router_index < discovery_index < executor_index
+
+
+def test_status_displays_provider_roles_from_legacy_shared_provider(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_PROVIDER", "codexcli")
+    monkeypatch.delenv("SFE_PROVIDER_ROUTER", raising=False)
+    monkeypatch.delenv("SFE_PROVIDER_DISCOVERY", raising=False)
+    monkeypatch.delenv("SFE_PROVIDER_EXECUTOR", raising=False)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/status", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "router provider: codexcli" in status_block
+    assert "discovery provider: codexcli" in status_block
+    assert "executor provider: codexcli" in status_block
+
+
 def test_status_after_task_reports_task_without_content(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
@@ -6829,7 +6876,11 @@ def test_tui_patch_renders_safe_lemonade_failure_category(tmp_path) -> None:
     assert "http://" not in rendered
 
 
-def test_tui_status_displays_executor_provider_safely(tmp_path) -> None:
+def test_tui_status_displays_executor_provider_safely(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROVIDER", "lemonade")
+    monkeypatch.delenv("SFE_PROVIDER_ROUTER", raising=False)
+    monkeypatch.delenv("SFE_PROVIDER_DISCOVERY", raising=False)
+    monkeypatch.delenv("SFE_PROVIDER_EXECUTOR", raising=False)
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(["", "/status", "/quit"]),
@@ -6846,6 +6897,8 @@ def test_tui_status_displays_executor_provider_safely(tmp_path) -> None:
     assert app.run() == 0
     rendered = "\n".join(output)
     status_block = rendered.split("SFE TUI status", 1)[1]
+    assert "router provider: lemonade" in status_block
+    assert "discovery provider: lemonade" in status_block
     assert "executor provider: lemonade" in status_block
     assert "API_KEY" not in status_block
     assert "Authorization" not in status_block

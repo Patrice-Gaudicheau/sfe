@@ -53,6 +53,11 @@ from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairer,
 )
+from sfe.provider_config import (
+    resolve_sfe_discovery_provider,
+    resolve_sfe_executor_provider,
+    resolve_sfe_router_provider,
+)
 
 from .backends import (
     BackendAdapter,
@@ -87,6 +92,13 @@ ActivityIndicatorFactory = Callable[[], ActivityIndicator]
 def _default_color_enabled() -> bool:
     term = os.environ.get("TERM", "")
     return is_interactive() and "NO_COLOR" not in os.environ and term != "dumb"
+
+
+def _safe_resolve_provider(resolver: Callable[[], str]) -> str:
+    try:
+        return resolver()
+    except ValueError:
+        return "invalid"
 
 
 @dataclass(frozen=True)
@@ -209,6 +221,13 @@ class SfeTuiApp:
             skipped_context_files = sum(
                 1 for result in self.context_files if not result.loaded
             )
+            router_provider_name = _safe_resolve_provider(resolve_sfe_router_provider)
+            discovery_provider_name = _safe_resolve_provider(
+                resolve_sfe_discovery_provider
+            )
+            executor_provider_name = _safe_resolve_provider(
+                resolve_sfe_executor_provider
+            )
             self.output(
                 renderer.render_status(
                     workspace_selected=self.workspace_root is not None,
@@ -223,11 +242,9 @@ class SfeTuiApp:
                     task_present=bool(self.task.strip()),
                     discovery_result=self.discovery_result,
                     backend_name=self.backend.name,
-                    executor_provider_name=getattr(
-                        self.backend,
-                        "executor_provider_name",
-                        None,
-                    ),
+                    router_provider_name=router_provider_name,
+                    discovery_provider_name=discovery_provider_name,
+                    executor_provider_name=executor_provider_name,
                     latest_result=self.latest_result,
                     pending_patch_summary=(
                         self.pending_patch.summary

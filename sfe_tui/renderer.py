@@ -155,6 +155,8 @@ def render_status(
     loaded_context_segments: int,
     task_present: bool,
     backend_name: str,
+    router_provider_name: str | None = None,
+    discovery_provider_name: str | None = None,
     executor_provider_name: str | None = None,
     latest_result: ExecutionResult | None = None,
     discovery_result: DiscoveryResult | None = None,
@@ -178,9 +180,10 @@ def render_status(
         f"  discovered candidates: {_discovery_count(discovery_result, 'candidate_count')}",
         f"  discovered loaded candidates: {_discovery_count(discovery_result, 'loaded_candidate_count')}",
         f"  backend: {backend_name}",
+        f"  router provider: {_display_value(router_provider_name)}",
+        f"  discovery provider: {_display_value(discovery_provider_name)}",
+        f"  executor provider: {_display_value(executor_provider_name)}",
     ]
-    if executor_provider_name:
-        lines.append(f"  executor provider: {executor_provider_name}")
     lines.extend(
         [
             f"  latest result present: {_yes_no(latest_result_present)}",
