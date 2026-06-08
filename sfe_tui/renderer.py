@@ -442,6 +442,12 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
             lines.append(f"  issue path: {issue.path}")
     if issue is not None and issue.hunk_accounting is not None:
         lines.extend(_render_hunk_accounting_diagnostics(issue.hunk_accounting))
+    if result.patch_hunk_count_normalization is not None:
+        lines.extend(
+            _render_hunk_count_normalization(
+                result.patch_hunk_count_normalization
+            )
+        )
     if result.patch_proposal_diagnostics is not None:
         diagnostics = result.patch_proposal_diagnostics
         file_headers = (
@@ -489,8 +495,9 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
 
 
 def _render_hunk_accounting_diagnostics(diagnostics: object) -> list[str]:
-    return [
+    lines = [
         "SFE hunk accounting diagnostics",
+        f"  message: {_display_value(getattr(diagnostics, 'message', None))}",
         f"  hunk path: {_display_value(getattr(diagnostics, 'path', None))}",
         f"  hunk header: {_display_value(getattr(diagnostics, 'hunk_header', None))}",
         "  declared old start: "
@@ -520,6 +527,34 @@ def _render_hunk_accounting_diagnostics(diagnostics: object) -> list[str]:
         "  LLM-correctable in principle: "
         f"{_yes_no(bool(getattr(diagnostics, 'llm_correctable_in_principle', False)))}",
     ]
+    return lines
+
+
+def _render_hunk_count_normalization(diagnostics: object) -> list[str]:
+    changes = tuple(getattr(diagnostics, "changes", ()) or ())
+    lines = [
+        "SFE hunk count normalization",
+        f"  applied: {_yes_no(bool(getattr(diagnostics, 'applied', False)))}",
+        f"  message: {_display_value(getattr(diagnostics, 'message', None))}",
+        f"  normalized hunks: {len(changes)}",
+    ]
+    for change in changes:
+        lines.extend(
+            [
+                f"  normalized hunk path: {_display_value(getattr(change, 'path', None))}",
+                "  original hunk header: "
+                f"{_display_value(getattr(change, 'original_hunk_header', None))}",
+                "  normalized hunk header: "
+                f"{_display_value(getattr(change, 'normalized_hunk_header', None))}",
+                "  declared old/new count: "
+                f"{_display_value(getattr(change, 'declared_old_count', None))}/"
+                f"{_display_value(getattr(change, 'declared_new_count', None))}",
+                "  actual old/new count: "
+                f"{_display_value(getattr(change, 'actual_old_side_count', None))}/"
+                f"{_display_value(getattr(change, 'actual_new_side_count', None))}",
+            ]
+        )
+    return lines
 
 
 def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | None:

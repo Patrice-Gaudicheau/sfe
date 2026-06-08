@@ -30,7 +30,7 @@ SUPPORTED_STRUCTURED_ACTIONS = frozenset(
 _DIFF_HEADER_RE = re.compile(r"^diff --git (a/[^ ]+) (b/[^ ]+)$")
 _HUNK_HEADER_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
-    r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@(?: .*)?$"
+    r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@(?P<section> .*)?$"
 )
 _METADATA_PREFIXES = (
     "index ",
@@ -121,6 +121,48 @@ class HunkAccountingDiagnostics:
     old_file_header_is_dev_null: bool
     hunk_body_only_added_lines: bool
     llm_correctable_in_principle: bool
+    message: str
+
+
+@dataclass(frozen=True)
+class HunkCountNormalizationChange:
+    path: str
+    original_hunk_header: str
+    normalized_hunk_header: str
+    declared_old_count: int
+    declared_new_count: int
+    actual_old_side_count: int
+    actual_new_side_count: int
+    actual_context_line_count: int
+    actual_removed_line_count: int
+    actual_added_line_count: int
+
+
+@dataclass(frozen=True)
+class HunkCountNormalizationDiagnostics:
+    applied: bool
+    changes: tuple[HunkCountNormalizationChange, ...] = ()
+
+    @property
+    def message(self) -> str:
+        if not self.applied or not self.changes:
+            return "No hunk count normalization was applied."
+        if len(self.changes) == 1:
+            change = self.changes[0]
+            return (
+                "Hunk count normalization applied: declared old/new count was "
+                f"{change.declared_old_count}/{change.declared_new_count}, "
+                f"but hunk body implies {change.actual_old_side_count}/"
+                f"{change.actual_new_side_count}."
+            )
+        return f"Hunk count normalization applied to {len(self.changes)} hunks."
+
+
+@dataclass(frozen=True)
+class HunkCountNormalizationResult:
+    normalized_text: str | None
+    diagnostics: HunkCountNormalizationDiagnostics
+    issue: PatchIssue | None = None
 
 
 @dataclass(frozen=True)
@@ -277,18 +319,6 @@ def parse_unified_diff(text: str) -> PatchParseResult:
                     old_seen += 1
                 if marker in {" ", "+"}:
                     new_seen += 1
-                if old_seen > old_count or new_seen > new_count:
-                    return _hunk_accounting_error(
-                        path=_strip_diff_prefix(new_path),
-                        hunk_header_text=hunk_header_text,
-                        old_start=old_start,
-                        old_count=old_count,
-                        new_start=new_start,
-                        new_count=new_count,
-                        hunk_lines=hunk_lines,
-                        old_file_path=old_file_path,
-                        operation=operation,
-                    )
                 index += 1
             if old_seen != old_count or new_seen != new_count:
                 return _hunk_accounting_error(
@@ -328,6 +358,167 @@ def parse_unified_diff(text: str) -> PatchParseResult:
         return _parse_error("empty_patch")
     patch = ParsedPatch(files=tuple(files))
     return PatchParseResult(patch=patch, issue=None, summary=summarize_patch(patch))
+
+
+def normalize_unified_diff_hunk_counts(text: str) -> HunkCountNormalizationResult:
+    """Normalize only hunk old/new counts derived from hunk bodies.
+
+    This does not change paths, hunk starts, or any hunk body line. Callers must
+    re-run the strict parser and normal validation before applying the result.
+    """
+
+    lines = text.split("\n") if text else []
+    had_trailing_newline = bool(lines and lines[-1] == "")
+    if had_trailing_newline:
+        lines = lines[:-1]
+    if not lines:
+        return _hunk_count_normalization_error("empty_patch")
+    if lines[0].strip() != lines[0] or not lines[0].startswith("diff --git "):
+        return _hunk_count_normalization_error("missing_diff_header")
+
+    normalized_lines = list(lines)
+    changes: list[HunkCountNormalizationChange] = []
+    index = 0
+    while index < len(lines):
+        header = lines[index]
+        match = _DIFF_HEADER_RE.match(header)
+        if match is None:
+            return _hunk_count_normalization_error("unexpected_non_diff_text")
+        old_path = match.group(1)
+        new_path = match.group(2)
+        path_issue = _validate_prefixed_pair(old_path, new_path)
+        if path_issue is not None:
+            return HunkCountNormalizationResult(
+                None,
+                HunkCountNormalizationDiagnostics(applied=False),
+                path_issue,
+            )
+        path = _strip_diff_prefix(new_path)
+        index += 1
+
+        if index >= len(lines):
+            return _hunk_count_normalization_error("missing_file_headers", path)
+        for metadata_line in lines[index:]:
+            if metadata_line.startswith("--- "):
+                break
+            if metadata_line.startswith("diff --git "):
+                return _hunk_count_normalization_error("missing_file_headers", path)
+            if _is_metadata(metadata_line):
+                index += 1
+                continue
+            return _hunk_count_normalization_error("unexpected_patch_metadata", path)
+
+        if index >= len(lines) or not lines[index].startswith("--- "):
+            return _hunk_count_normalization_error("missing_old_file_header", path)
+        old_file_path = lines[index][4:]
+        index += 1
+        if index >= len(lines) or not lines[index].startswith("+++ "):
+            return _hunk_count_normalization_error("missing_new_file_header", path)
+        new_file_path = lines[index][4:]
+        index += 1
+
+        path_issue = _validate_file_headers(
+            old_path,
+            new_path,
+            old_file_path,
+            new_file_path,
+        )
+        if path_issue is not None:
+            return HunkCountNormalizationResult(
+                None,
+                HunkCountNormalizationDiagnostics(applied=False),
+                path_issue,
+            )
+        operation = _classify_file_operation(old_file_path, new_file_path)
+        if isinstance(operation, PatchIssue):
+            return HunkCountNormalizationResult(
+                None,
+                HunkCountNormalizationDiagnostics(applied=False),
+                operation,
+            )
+
+        file_hunk_count = 0
+        while index < len(lines) and not lines[index].startswith("diff --git "):
+            if _is_metadata(lines[index]):
+                index += 1
+                continue
+            hunk_header_text = lines[index]
+            hunk_header = _HUNK_HEADER_RE.match(hunk_header_text)
+            if hunk_header is None:
+                return _hunk_count_normalization_error("malformed_hunk_header", path)
+            old_start = int(hunk_header.group("old_start"))
+            old_count = _range_count(hunk_header.group("old_count"))
+            new_start = int(hunk_header.group("new_start"))
+            new_count = _range_count(hunk_header.group("new_count"))
+            old_range_ok = old_start >= 1 or (old_start == 0 and old_count == 0)
+            new_range_ok = new_start >= 1 or (new_start == 0 and new_count == 0)
+            if not old_range_ok or not new_range_ok:
+                return _hunk_count_normalization_error("malformed_hunk_range", path)
+            hunk_index = index
+            index += 1
+            hunk_lines: list[PatchLine] = []
+            while index < len(lines):
+                line = lines[index]
+                if line.startswith("diff --git ") or _HUNK_HEADER_RE.match(line):
+                    break
+                if line.startswith("\\"):
+                    return _hunk_count_normalization_error(
+                        "unsupported_no_newline_marker",
+                        path,
+                    )
+                if not line:
+                    return _hunk_count_normalization_error("malformed_hunk_line", path)
+                marker = line[0]
+                if marker not in {" ", "-", "+"}:
+                    return _hunk_count_normalization_error("malformed_hunk_line", path)
+                hunk_lines.append(PatchLine(kind=marker, text=line[1:]))
+                index += 1
+            if not hunk_lines:
+                return _hunk_count_normalization_error("empty_hunk", path)
+            file_hunk_count += 1
+
+            context_count = sum(1 for line in hunk_lines if line.kind == " ")
+            removed_count = sum(1 for line in hunk_lines if line.kind == "-")
+            added_count = sum(1 for line in hunk_lines if line.kind == "+")
+            actual_old_count = context_count + removed_count
+            actual_new_count = context_count + added_count
+            if actual_old_count == old_count and actual_new_count == new_count:
+                continue
+
+            section = hunk_header.group("section") or ""
+            normalized_header = (
+                f"@@ -{old_start},{actual_old_count} "
+                f"+{new_start},{actual_new_count} @@{section}"
+            )
+            normalized_lines[hunk_index] = normalized_header
+            changes.append(
+                HunkCountNormalizationChange(
+                    path=path,
+                    original_hunk_header=hunk_header_text,
+                    normalized_hunk_header=normalized_header,
+                    declared_old_count=old_count,
+                    declared_new_count=new_count,
+                    actual_old_side_count=actual_old_count,
+                    actual_new_side_count=actual_new_count,
+                    actual_context_line_count=context_count,
+                    actual_removed_line_count=removed_count,
+                    actual_added_line_count=added_count,
+                )
+            )
+
+        if file_hunk_count == 0:
+            return _hunk_count_normalization_error("missing_hunks", path)
+
+    normalized_text = "\n".join(normalized_lines)
+    if had_trailing_newline:
+        normalized_text += "\n"
+    return HunkCountNormalizationResult(
+        normalized_text,
+        HunkCountNormalizationDiagnostics(
+            applied=bool(changes),
+            changes=tuple(changes),
+        ),
+    )
 
 
 def summarize_patch_text(text: str) -> PatchParseResult:
@@ -832,6 +1023,8 @@ def _hunk_accounting_error(
     context_count = sum(1 for line in hunk_lines if line.kind == " ")
     removed_count = sum(1 for line in hunk_lines if line.kind == "-")
     added_count = sum(1 for line in hunk_lines if line.kind == "+")
+    actual_old_count = context_count + removed_count
+    actual_new_count = context_count + added_count
     diagnostics = HunkAccountingDiagnostics(
         path=path,
         hunk_header=_truncate_diagnostic_text(hunk_header_text),
@@ -839,8 +1032,8 @@ def _hunk_accounting_error(
         declared_old_count=old_count,
         declared_new_start=new_start,
         declared_new_count=new_count,
-        actual_old_side_count=context_count + removed_count,
-        actual_new_side_count=context_count + added_count,
+        actual_old_side_count=actual_old_count,
+        actual_new_side_count=actual_new_count,
         actual_context_line_count=context_count,
         actual_removed_line_count=removed_count,
         actual_added_line_count=added_count,
@@ -849,6 +1042,11 @@ def _hunk_accounting_error(
         hunk_body_only_added_lines=bool(hunk_lines)
         and all(line.kind == "+" for line in hunk_lines),
         llm_correctable_in_principle=bool(hunk_lines),
+        message=(
+            "Hunk accounting mismatch only: declared old/new count is "
+            f"{old_count}/{new_count}, but hunk body implies "
+            f"{actual_old_count}/{actual_new_count}."
+        ),
     )
     return PatchParseResult(
         patch=None,
@@ -867,6 +1065,17 @@ def _truncate_diagnostic_text(text: str, limit: int = 160) -> str:
     if len(stripped) <= limit:
         return stripped
     return stripped[: limit - 3].rstrip() + "..."
+
+
+def _hunk_count_normalization_error(
+    reason: str,
+    path: str | None = None,
+) -> HunkCountNormalizationResult:
+    return HunkCountNormalizationResult(
+        None,
+        HunkCountNormalizationDiagnostics(applied=False),
+        PatchIssue(INVALID_PATCH_PROPOSAL, reason, path),
+    )
 
 
 def _structured_parse_error(reason: str) -> StructuredFilePatchParseResult:

@@ -19,6 +19,7 @@ from sfe.patching import (
     PHYSICAL_WRITE_FAILURE,
     apply_patch_to_workspace,
     apply_structured_file_patch,
+    normalize_unified_diff_hunk_counts,
     parse_unified_diff,
     parse_structured_file_patch_json,
     summarize_patch_text,
@@ -200,6 +201,177 @@ def test_parse_mixed_invalid_hunk_accounting_remains_rejected() -> None:
     assert diagnostics.hunk_body_only_added_lines is False
     assert diagnostics.actual_context_line_count == 1
     assert diagnostics.actual_added_line_count == 1
+
+
+def test_parse_hunk_accounting_diagnostic_reports_synthetic_message() -> None:
+    parsed = parse_unified_diff(
+        "\n".join(
+            [
+                "diff --git a/notes.txt b/notes.txt",
+                "--- a/notes.txt",
+                "+++ b/notes.txt",
+                "@@ -1,2 +1,2 @@",
+                "-old",
+                "+new",
+            ]
+        )
+    )
+
+    assert parsed.patch is None
+    assert parsed.issue is not None
+    diagnostics = parsed.issue.hunk_accounting
+    assert diagnostics is not None
+    assert diagnostics.declared_old_count == 2
+    assert diagnostics.declared_new_count == 2
+    assert diagnostics.actual_old_side_count == 1
+    assert diagnostics.actual_new_side_count == 1
+    assert diagnostics.actual_context_line_count == 0
+    assert diagnostics.actual_removed_line_count == 1
+    assert diagnostics.actual_added_line_count == 1
+    assert (
+        diagnostics.message
+        == "Hunk accounting mismatch only: declared old/new count is 2/2, but hunk body implies 1/1."
+    )
+
+
+def test_parse_hunk_count_too_small_diagnostic_counts_full_body() -> None:
+    parsed = parse_unified_diff(
+        "\n".join(
+            [
+                "diff --git a/notes.txt b/notes.txt",
+                "--- a/notes.txt",
+                "+++ b/notes.txt",
+                "@@ -1,1 +1,1 @@",
+                " keep",
+                "-old",
+                "+new",
+            ]
+        )
+    )
+
+    assert parsed.patch is None
+    assert parsed.issue is not None
+    diagnostics = parsed.issue.hunk_accounting
+    assert diagnostics is not None
+    assert diagnostics.declared_old_count == 1
+    assert diagnostics.declared_new_count == 1
+    assert diagnostics.actual_old_side_count == 2
+    assert diagnostics.actual_new_side_count == 2
+    assert diagnostics.actual_context_line_count == 1
+    assert diagnostics.actual_removed_line_count == 1
+    assert diagnostics.actual_added_line_count == 1
+
+
+def test_normalize_unified_diff_hunk_counts_leaves_valid_diff_unchanged() -> None:
+    text = _diff("notes.txt")
+
+    normalized = normalize_unified_diff_hunk_counts(text)
+
+    assert normalized.issue is None
+    assert normalized.normalized_text == text
+    assert normalized.diagnostics.applied is False
+    assert normalized.diagnostics.changes == ()
+
+
+def test_normalize_unified_diff_hunk_counts_rewrites_only_counts() -> None:
+    text = "\n".join(
+        [
+            "diff --git a/notes.txt b/notes.txt",
+            "--- a/notes.txt",
+            "+++ b/notes.txt",
+            "@@ -1,2 +1,2 @@",
+            "-old",
+            "+new",
+        ]
+    )
+
+    normalized = normalize_unified_diff_hunk_counts(text)
+
+    assert normalized.issue is None
+    assert normalized.normalized_text == "\n".join(
+        [
+            "diff --git a/notes.txt b/notes.txt",
+            "--- a/notes.txt",
+            "+++ b/notes.txt",
+            "@@ -1,1 +1,1 @@",
+            "-old",
+            "+new",
+        ]
+    )
+    assert normalized.diagnostics.applied is True
+    assert len(normalized.diagnostics.changes) == 1
+    change = normalized.diagnostics.changes[0]
+    assert change.path == "notes.txt"
+    assert change.original_hunk_header == "@@ -1,2 +1,2 @@"
+    assert change.normalized_hunk_header == "@@ -1,1 +1,1 @@"
+    assert change.declared_old_count == 2
+    assert change.declared_new_count == 2
+    assert change.actual_old_side_count == 1
+    assert change.actual_new_side_count == 1
+    parsed = parse_unified_diff(normalized.normalized_text)
+    assert parsed.issue is None
+    assert parsed.patch is not None
+
+
+def test_normalize_unified_diff_hunk_counts_rejects_invalid_file_headers() -> None:
+    normalized = normalize_unified_diff_hunk_counts(
+        "\n".join(
+            [
+                "diff --git a/notes.txt b/notes.txt",
+                "--- a/wrong.txt",
+                "+++ b/notes.txt",
+                "@@ -1,2 +1,2 @@",
+                "-old",
+                "+new",
+            ]
+        )
+    )
+
+    assert normalized.normalized_text is None
+    assert normalized.issue is not None
+    assert normalized.issue.reason == "path_header_mismatch"
+    assert normalized.diagnostics.applied is False
+
+
+def test_normalize_unified_diff_hunk_counts_rejects_invalid_path() -> None:
+    normalized = normalize_unified_diff_hunk_counts(
+        "\n".join(
+            [
+                "diff --git a/../outside.txt b/../outside.txt",
+                "--- a/../outside.txt",
+                "+++ b/../outside.txt",
+                "@@ -1,2 +1,2 @@",
+                "-old",
+                "+new",
+            ]
+        )
+    )
+
+    assert normalized.normalized_text is None
+    assert normalized.issue is not None
+    assert normalized.issue.reason == "path_outside_workspace"
+    assert normalized.diagnostics.applied is False
+
+
+def test_normalize_unified_diff_hunk_counts_rejects_malformed_hunk_line() -> None:
+    normalized = normalize_unified_diff_hunk_counts(
+        "\n".join(
+            [
+                "diff --git a/notes.txt b/notes.txt",
+                "--- a/notes.txt",
+                "+++ b/notes.txt",
+                "@@ -1,2 +1,2 @@",
+                "-old",
+                "not a hunk line",
+                "+new",
+            ]
+        )
+    )
+
+    assert normalized.normalized_text is None
+    assert normalized.issue is not None
+    assert normalized.issue.reason == "malformed_hunk_line"
+    assert normalized.diagnostics.applied is False
 
 
 def test_parser_accepts_metadata_without_policy_rejection() -> None:

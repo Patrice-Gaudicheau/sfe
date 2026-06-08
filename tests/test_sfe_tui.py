@@ -6099,10 +6099,14 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "+++ b/<relative-path>" in instruction
     assert "normal unified diff hunks" in instruction
     assert "Hunk header counts must exactly match the hunk body" in instruction
+    assert "old_count must equal the number of context lines plus removed lines" in instruction
+    assert "new_count must equal the number of context lines plus added lines" in instruction
     assert "@@ -0,0 +1,N @@" in instruction
     assert "N exactly equals the number of added + lines" in instruction
     assert "Every added content line must start with +" in instruction
     assert "Do not guess hunk counts" in instruction
+    assert "Recount the hunk body before writing the hunk header" in instruction
+    assert "Prefer small localized hunks when possible" in instruction
     assert "keep files smaller and hunks simpler" in instruction
     assert ".git, vendor, var, cache" in instruction
     assert "deletes" in instruction

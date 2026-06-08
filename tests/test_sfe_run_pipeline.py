@@ -1071,6 +1071,111 @@ def test_run_pipeline_rejects_hunk_accounting_without_second_pass(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_normalizes_hunk_counts_when_flag_enabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor(_invalid_new_file_hunk_count_diff())
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    diagnostics = result.patch_hunk_count_normalization
+    assert diagnostics is not None
+    assert diagnostics.applied is True
+    assert diagnostics.message == (
+        "Hunk count normalization applied: declared old/new count was 0/5, "
+        "but hunk body implies 0/3."
+    )
+    assert len(diagnostics.changes) == 1
+    assert diagnostics.changes[0].original_hunk_header == "@@ -0,0 +1,5 @@"
+    assert diagnostics.changes[0].normalized_hunk_header == "@@ -0,0 +1,3 @@"
+    rendered = render_run_result(result)
+    assert "SFE hunk count normalization" in rendered
+    assert "applied: yes" in rendered
+    assert "normalized hunk header: @@ -0,0 +1,3 @@" in rendered
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_normalized_hunk_still_fails_on_preimage_mismatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor(_invalid_context_modification_hunk_count_diff())
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "hunk_preimage_mismatch"
+    assert result.patch_generated is True
+    assert result.patch_applied is False
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    diagnostics = result.patch_hunk_count_normalization
+    assert diagnostics is not None
+    assert diagnostics.applied is True
+    assert diagnostics.changes[0].normalized_hunk_header == "@@ -1,1 +1,1 @@"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_normalized_unknown_modify_target_still_rejected(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    executor = FakeExecutor(_invalid_context_modification_hunk_count_diff("missing.txt"))
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_target_not_safe_create"
+    assert result.patch_applied is False
+    assert not (repo / "missing.txt").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_does_not_repair_json_or_path_validation_failures(
     tmp_path: Path,
 ) -> None:
@@ -1668,6 +1773,19 @@ def _valid_new_file_diff(path: str = "index.html") -> str:
             "+one",
             "+two",
             "+three",
+        ]
+    )
+
+
+def _invalid_context_modification_hunk_count_diff(path: str = "context.txt") -> str:
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            f"--- a/{path}",
+            f"+++ b/{path}",
+            "@@ -1,2 +1,2 @@",
+            "-different context",
+            "+new context",
         ]
     )
 

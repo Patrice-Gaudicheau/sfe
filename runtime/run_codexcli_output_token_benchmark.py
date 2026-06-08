@@ -68,6 +68,9 @@ PATCH_FORMAT_INSTRUCTIONS = (
     "- Keep hunks as small as possible and use minimal surrounding context.\n"
     "- Prefer one small hunk per localized edit.\n"
     "- Ensure every hunk header exactly matches the old and new line counts in the hunk body.\n"
+    "- For each hunk, old_count must equal context lines plus removed lines.\n"
+    "- For each hunk, new_count must equal context lines plus added lines.\n"
+    "- Recount the hunk body before writing the hunk header.\n"
     "- If uncertain about line counts, reduce surrounding context rather than inventing a larger hunk."
 )
 CSV_FIELDS = (
@@ -987,6 +990,7 @@ def patch_diagnostic_message(issue: PatchIssue) -> str:
                     f"{diagnostics.actual_old_side_count}/"
                     f"{diagnostics.actual_new_side_count}"
                 ),
+                diagnostics.message,
             ]
         )
     return "; ".join(parts)
@@ -1011,6 +1015,7 @@ def hunk_accounting_to_dict(diagnostics: Any) -> dict[str, Any] | None:
         "old_file_header_is_dev_null": diagnostics.old_file_header_is_dev_null,
         "hunk_body_only_added_lines": diagnostics.hunk_body_only_added_lines,
         "llm_correctable_in_principle": diagnostics.llm_correctable_in_principle,
+        "message": diagnostics.message,
     }
 
 

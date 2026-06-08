@@ -7,6 +7,7 @@ an isolated worktree, and return compact structured state.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -32,6 +33,7 @@ from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.patching import (
     HunkAccountingDiagnostics,
+    HunkCountNormalizationDiagnostics,
     MECHANICAL_GUARD_REJECTED,
     ParsedPatch,
     PatchApplyResult,
@@ -43,6 +45,7 @@ from sfe.patching import (
     generate_structured_file_patch_diff_preview,
     parse_structured_file_patch_json,
     parse_unified_diff,
+    normalize_unified_diff_hunk_counts,
     summarize_structured_file_patch,
     validate_patch_paths,
     validate_patch_targets,
@@ -126,6 +129,7 @@ class RunPatchProposal:
     summary: PatchSummary
     preview: str
     parse_status: str
+    hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -161,6 +165,7 @@ class RunResult:
     promoted_files: tuple[str, ...] = ()
     promotion_issue: RunIssue | None = None
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
+    patch_hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
 
 
 class GitWorkspacePreparer:
@@ -577,6 +582,7 @@ class RunPipeline:
             promotion_status=promotion_result.status,
             promotion_applied=True,
             promoted_files=promotion_result.promoted_files,
+            patch_hunk_count_normalization=proposal.hunk_count_normalization,
         )
 
     def _emit_progress(
@@ -712,6 +718,41 @@ class RunPipeline:
         raw_answer = result.answer or ""
         diff_parsed = parse_unified_diff(raw_answer)
         if diff_parsed.patch is None or diff_parsed.summary is None:
+            if _patch_hunk_count_normalization_enabled() and _is_hunk_accounting_issue(
+                diff_parsed.issue
+            ):
+                normalized = normalize_unified_diff_hunk_counts(raw_answer)
+                if normalized.issue is not None:
+                    return _run_issue_from_patch(
+                        normalized.issue,
+                        default_reason="patch_not_parseable",
+                    )
+                if normalized.normalized_text is not None and normalized.diagnostics.applied:
+                    normalized_parsed = parse_unified_diff(normalized.normalized_text)
+                    if (
+                        normalized_parsed.patch is not None
+                        and normalized_parsed.summary is not None
+                    ):
+                        validation = validate_patch_targets(
+                            workspace_root,
+                            normalized_parsed.patch,
+                        )
+                        if not validation.ok:
+                            return _run_issue_from_patch(
+                                validation.issue,
+                                default_reason="patch_not_applicable",
+                            )
+                        return RunPatchProposal(
+                            proposal=validation.patch or normalized_parsed.patch,
+                            summary=validation.summary or normalized_parsed.summary,
+                            preview=normalized.normalized_text,
+                            parse_status="unified_diff_hunk_counts_normalized",
+                            hunk_count_normalization=normalized.diagnostics,
+                        )
+                    return _run_issue_from_patch(
+                        normalized_parsed.issue,
+                        default_reason="patch_not_parseable",
+                    )
             return _run_issue_from_patch(
                 diff_parsed.issue,
                 default_reason="patch_not_parseable",
@@ -768,6 +809,7 @@ def _patch_failed_result(
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
+        patch_hunk_count_normalization=proposal.hunk_count_normalization,
     )
 
 
@@ -813,6 +855,7 @@ def _promotion_failed_result(
         promotion_applied=False,
         promoted_files=promotion_result.promoted_files if promotion_result else (),
         promotion_issue=promotion_result.issue if promotion_result else issue,
+        patch_hunk_count_normalization=proposal.hunk_count_normalization,
     )
 
 
@@ -878,6 +921,19 @@ def _executor_provider(result: ExecutionResult | None) -> str | None:
         return None
     provider = result.summary.get("executor_provider")
     return str(provider) if provider is not None else None
+
+
+def _is_hunk_accounting_issue(issue: PatchIssue | None) -> bool:
+    return (
+        issue is not None
+        and issue.category == "invalid_patch_proposal"
+        and issue.reason == "impossible_hunk_accounting"
+    )
+
+
+def _patch_hunk_count_normalization_enabled() -> bool:
+    value = os.getenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _estimated_reduction_label(result: ExecutionResult) -> str:
