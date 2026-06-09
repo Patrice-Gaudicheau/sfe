@@ -129,7 +129,7 @@ def _bindings() -> KeyBindings:
 
     @bindings.add("c-d")
     def submit(event) -> None:
-        event.current_buffer.validate_and_handle()
+        event.app.exit(exception=EOFError)
 
     @bindings.add("tab", filter=accept_autosuggestion_on_tab)
     def accept_autosuggestion(event) -> None:
@@ -163,13 +163,10 @@ class TerminalInput:
         if not is_interactive():
             try:
                 value = input()
-            except (EOFError, OSError):
+            except OSError:
                 return default
             return value if value else default
         if self._session is None:
             self._session = create_session()
-        try:
-            value = self._session.prompt(message=message, default=default)
-        except EOFError:
-            return default
+        value = self._session.prompt(message=message, default=default)
         return value if value is not None else default

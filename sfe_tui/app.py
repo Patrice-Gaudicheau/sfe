@@ -167,11 +167,18 @@ class SfeTuiApp:
         self.pending_patch: PendingPatchProposal | None = None
 
     def run(self) -> int:
-        if not self._select_workspace():
+        try:
+            workspace_selected = self._select_workspace()
+        except EOFError:
+            return 0
+        if not workspace_selected:
             return 1
         self.output(renderer.render_help())
         while True:
-            command = self.input_provider.prompt("sfe> ").strip()
+            try:
+                command = self.input_provider.prompt("sfe> ").strip()
+            except EOFError:
+                command = "/quit"
             if not command:
                 continue
             if self._handle_command(command):

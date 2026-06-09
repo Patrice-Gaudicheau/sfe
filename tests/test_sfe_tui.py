@@ -91,7 +91,7 @@ from sfe_tui.routers import (
 
 
 class FakeInput:
-    def __init__(self, values: list[str]) -> None:
+    def __init__(self, values: list[str | BaseException]) -> None:
         self.values = list(values)
         self.prompts: list[str] = []
 
@@ -100,6 +100,8 @@ class FakeInput:
         if not self.values:
             return default
         value = self.values.pop(0)
+        if isinstance(value, BaseException):
+            raise value
         return value if value else default
 
 
@@ -721,6 +723,29 @@ def test_workspace_root_remains_absolute_resolved_internally(tmp_path) -> None:
     assert app.run() == 0
     assert app.workspace_root == tmp_path.resolve()
     assert app.workspace_root.is_absolute()
+
+
+def test_eof_in_interactive_prompt_exits_like_quit(tmp_path) -> None:
+    eof_input = FakeInput(["", EOFError()])
+    eof_output: list[str] = []
+    eof_app = SfeTuiApp(
+        input_provider=eof_input,
+        output=eof_output.append,
+        cwd=tmp_path,
+    )
+
+    quit_input = FakeInput(["", "/quit"])
+    quit_output: list[str] = []
+    quit_app = SfeTuiApp(
+        input_provider=quit_input,
+        output=quit_output.append,
+        cwd=tmp_path,
+    )
+
+    assert eof_app.run() == 0
+    assert quit_app.run() == 0
+    assert eof_input.prompts == ["Workspace [current]: ", "sfe> "]
+    assert eof_output == quit_output
 
 
 def test_workspace_label_uses_full_path_with_home_shortening(
