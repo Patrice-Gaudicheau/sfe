@@ -287,3 +287,28 @@ boundary is proven:
 
 Future extensions must preserve the same principle: MCP adapts to SFE runtime
 behavior; it does not become a second SFE implementation.
+
+## Dogfooding V1 With A Real MCP Client
+
+Use the local stdio entry point:
+
+```bash
+sfe-mcp
+```
+
+Configure the MCP client to launch that command as a stdio MCP server. The v1
+dogfooding flow is:
+
+```text
+sfe_set_target_directory
+sfe_set_task
+sfe_run
+sfe_run_report
+sfe_workspace_status
+```
+
+Known v1 limitation: `sfe_run` is synchronous. Long runs may hit
+client-specific tool-call or MCP request timeouts. If real dogfooding shows
+that timeout behavior blocks practical use, a later milestone can consider an
+async start/poll shape. That should be driven by client evidence and should
+still keep SFE as the owner of the run pipeline.

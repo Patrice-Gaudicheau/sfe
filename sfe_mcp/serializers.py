@@ -12,6 +12,9 @@ from sfe.workspace_isolation import (
 )
 
 
+SESSION_ERROR_ISSUE_CATEGORY = "runtime_session"
+
+
 def safe_path_label(path: Path | None) -> str | None:
     if path is None:
         return None
@@ -88,11 +91,54 @@ def serialize_run_result(
         },
         "executor_provider": result.executor_provider,
         "warnings": list(result.warnings),
+        "action_hint": _run_action_hint(result),
         "progress": [serialize_progress_event(event) for event in progress_events],
     }
     if include_diagnostics:
         data["diagnostics"] = _serialize_run_diagnostics(result)
     return data
+
+
+def serialize_session_error(error_category: str | None) -> dict[str, Any]:
+    reason = error_category or "unknown_error"
+    return {
+        "ok": False,
+        "status": "failed",
+        "execution_mode": None,
+        "error_category": reason,
+        "issue": {
+            "category": SESSION_ERROR_ISSUE_CATEGORY,
+            "reason": reason,
+            "path": None,
+        },
+        "selected_source_refs": [],
+        "changed_files": [],
+        "modified_files": [],
+        "created_files": [],
+        "promoted_files": [],
+        "promotion": {
+            "status": "skipped",
+            "applied": False,
+            "issue": None,
+        },
+        "validation": {
+            "patch_summary": None,
+            "hunk_count_normalization_applied": None,
+        },
+        "workspace": {
+            "active_workspace_label": None,
+            "worktree_created": False,
+            "worktree_session_id": None,
+        },
+        "git": {
+            "auto_initialized": False,
+            "initial_commit_hash": None,
+            "init_warning": None,
+        },
+        "warnings": [],
+        "action_hint": _session_error_action_hint(reason),
+        "progress": [],
+    }
 
 
 def serialize_progress_event(event: RunProgressEvent) -> dict[str, Any]:
@@ -228,6 +274,33 @@ def _serialize_run_diagnostics(result: RunResult) -> dict[str, Any]:
             "estimated_reduction_pct": _estimated_reduction_pct(dry_run),
         },
     }
+
+
+def _run_action_hint(result: RunResult) -> str | None:
+    issue = result.issue
+    if issue is None:
+        return None
+    if issue.category == "patch_generation" and issue.reason == "invalid_response":
+        return "inspect_run_report_or_retry"
+    if issue.category == "context_discovery":
+        return "inspect_discovery_configuration_or_retry"
+    if issue.category == "routing":
+        return "refine_task_or_target_directory"
+    if issue.category == "promotion":
+        return "inspect_workspace_status_and_source_changes"
+    if issue.category == "unsupported_execution_mode":
+        return "use_another_local_surface_for_external_actions"
+    return "inspect_run_report"
+
+
+def _session_error_action_hint(reason: str) -> str:
+    hints = {
+        "workspace_not_selected": "call_sfe_set_target_directory",
+        "missing_task": "call_sfe_set_task",
+        "no_previous_run": "call_sfe_run_first",
+        "run_in_progress": "retry_sfe_run_after_current_run_finishes",
+    }
+    return hints.get(reason, "inspect_error_category")
 
 
 def _selected_token_estimate(result: object | None) -> int | None:

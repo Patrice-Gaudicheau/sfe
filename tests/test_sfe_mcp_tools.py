@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 
@@ -53,6 +54,16 @@ FORBIDDEN_TOOL_NAMES = {
     "shell",
     "run_shell",
     "benchmark",
+    "docker",
+    "http",
+    "openai_compatible_api",
+}
+
+FORBIDDEN_MCP_IMPORTS = {
+    "SfeTuiApp",
+    "sfe_tui.app",
+    "RunPipeline",
+    "RunRequest",
 }
 
 
@@ -151,6 +162,29 @@ def test_tool_registry_exposes_exactly_v1_tools() -> None:
     assert set(names).isdisjoint(FORBIDDEN_TOOL_NAMES)
 
 
+def test_mcp_package_does_not_import_tui_app_or_run_pipeline_primitives() -> None:
+    package_root = PROJECT_ROOT / "sfe_mcp"
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(package_root.glob("*.py"))
+    )
+
+    for forbidden in FORBIDDEN_MCP_IMPORTS:
+        assert forbidden not in source
+
+
+def test_mcp_package_has_no_direct_stdout_prints_and_uses_stdio_transport() -> None:
+    package_root = PROJECT_ROOT / "sfe_mcp"
+    sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(package_root.glob("*.py"))
+    }
+
+    assert all("print(" not in source for source in sources.values())
+    assert 'transport="stdio"' in sources["server.py"]
+    assert "http" not in sources["server.py"].lower()
+
+
 def test_each_tool_delegates_to_runtime_session() -> None:
     session = FakeRuntimeSession()
     handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
@@ -196,12 +230,37 @@ def test_run_without_target_or_task_failure_is_surfaced() -> None:
 
     result = handlers.sfe_run()
 
-    assert result == {
-        "ok": False,
-        "status": "failed",
-        "error_category": "workspace_not_selected",
-        "progress": [],
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["error_category"] == "workspace_not_selected"
+    assert result["issue"] == {
+        "category": "runtime_session",
+        "reason": "workspace_not_selected",
+        "path": None,
     }
+    assert result["action_hint"] == "call_sfe_set_target_directory"
+    assert result["execution_mode"] is None
+    assert result["selected_source_refs"] == []
+    assert result["changed_files"] == []
+    assert result["promotion"]["status"] == "skipped"
+    assert result["progress"] == []
+    assert session.calls == [("run", None)]
+
+
+def test_run_without_task_failure_is_surfaced_actionably() -> None:
+    session = FakeRuntimeSession()
+    session.run_result = SessionRunResult(
+        ok=False,
+        error_category="missing_task",
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run()
+
+    assert result["ok"] is False
+    assert result["error_category"] == "missing_task"
+    assert result["issue"]["reason"] == "missing_task"
+    assert result["action_hint"] == "call_sfe_set_task"
     assert session.calls == [("run", None)]
 
 
@@ -215,12 +274,56 @@ def test_run_report_without_previous_run_is_surfaced() -> None:
 
     result = handlers.sfe_run_report()
 
-    assert result == {
-        "ok": False,
-        "status": "failed",
-        "error_category": "no_previous_run",
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["error_category"] == "no_previous_run"
+    assert result["issue"] == {
+        "category": "runtime_session",
+        "reason": "no_previous_run",
+        "path": None,
     }
+    assert result["action_hint"] == "call_sfe_run_first"
+    assert result["progress"] == []
     assert session.calls == [("run_report", None)]
+
+
+def test_concurrent_run_is_rejected_with_structured_status() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingRuntimeSession(FakeRuntimeSession):
+        def run(self) -> SessionRunResult:
+            self.calls.append(("run", None))
+            entered.set()
+            release.wait(timeout=5)
+            return self.run_result
+
+    session = BlockingRuntimeSession()
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+    first_result: list[dict[str, object]] = []
+
+    thread = threading.Thread(
+        target=lambda: first_result.append(handlers.sfe_run()),
+        daemon=True,
+    )
+    thread.start()
+    assert entered.wait(timeout=5)
+
+    second_result = handlers.sfe_run()
+
+    release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert first_result and first_result[0]["ok"] is True
+    assert second_result["ok"] is False
+    assert second_result["error_category"] == "run_in_progress"
+    assert second_result["issue"] == {
+        "category": "runtime_session",
+        "reason": "run_in_progress",
+        "path": None,
+    }
+    assert second_result["action_hint"] == "retry_sfe_run_after_current_run_finishes"
+    assert session.calls == [("run", None)]
 
 
 def test_run_output_is_structured_and_omits_sensitive_payload_material() -> None:
@@ -246,6 +349,7 @@ def test_run_output_is_structured_and_omits_sensitive_payload_material() -> None
     assert "full prompt" not in rendered
     assert ".env" not in rendered
     assert "api_key" not in rendered.lower()
+    assert "provider_payload" not in rendered
     assert result["progress"] == [
         {
             "name": "run_started",
@@ -275,6 +379,7 @@ def test_failed_run_result_serializes_issue_category_and_reason() -> None:
         "reason": "invalid_response",
         "path": None,
     }
+    assert result["action_hint"] == "inspect_run_report_or_retry"
 
 
 def test_workspace_status_serializes_session_metadata_safely(tmp_path: Path) -> None:

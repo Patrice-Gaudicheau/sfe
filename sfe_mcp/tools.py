@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import threading
 from typing import Any
 
 from sfe.runtime_session import RuntimeSession
@@ -10,6 +11,7 @@ from sfe.runtime_session import RuntimeSession
 from .serializers import (
     safe_path_label,
     serialize_run_result,
+    serialize_session_error,
     serialize_workspace_status,
 )
 
@@ -26,6 +28,7 @@ V1_TOOL_NAMES = (
 class SfeMcpToolHandlers:
     def __init__(self, session: RuntimeSession) -> None:
         self.session = session
+        self._run_lock = threading.Lock()
 
     def registry(self) -> dict[str, Callable[..., dict[str, Any]]]:
         return {
@@ -55,28 +58,24 @@ class SfeMcpToolHandlers:
         }
 
     def sfe_run(self) -> dict[str, Any]:
-        result = self.session.run()
-        if result.run_result is None:
-            return {
-                "ok": False,
-                "status": "failed",
-                "error_category": result.error_category,
-                "progress": [],
-            }
-        return serialize_run_result(
-            result.run_result,
-            progress_events=result.progress_events,
-            include_diagnostics=False,
-        )
+        if not self._run_lock.acquire(blocking=False):
+            return serialize_session_error("run_in_progress")
+        try:
+            result = self.session.run()
+            if result.run_result is None:
+                return serialize_session_error(result.error_category)
+            return serialize_run_result(
+                result.run_result,
+                progress_events=result.progress_events,
+                include_diagnostics=False,
+            )
+        finally:
+            self._run_lock.release()
 
     def sfe_run_report(self) -> dict[str, Any]:
         result = self.session.run_report()
         if result.run_result is None:
-            return {
-                "ok": False,
-                "status": "failed",
-                "error_category": result.error_category,
-            }
+            return serialize_session_error(result.error_category)
         return serialize_run_result(
             result.run_result,
             progress_events=(),
