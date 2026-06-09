@@ -143,6 +143,7 @@ read as current top-level project status.
   older direct/tool-assisted/multi-step execution patterns.
 - [history/tui/tui_readonly_ask_milestone.md](history/tui/tui_readonly_ask_milestone.md)
 - [history/tui/tui_direct_backend_strategy.md](history/tui/tui_direct_backend_strategy.md)
+- [history/mcp/mcp_antigravity_dogfooding_001.md](history/mcp/mcp_antigravity_dogfooding_001.md)
 - [history/high_overlap/high_overlap_fixture_expansion_phase_close.md](history/high_overlap/high_overlap_fixture_expansion_phase_close.md)
 - [history/roadmaps/roadmap_after_structural_50k.md](history/roadmaps/roadmap_after_structural_50k.md)
 - [high_overlap_history.md](high_overlap_history.md): rollup for historical
