@@ -102,7 +102,8 @@ are not benchmark output and do not run baseline-versus-spatial comparisons.
 The currently validated TUI commands are:
 
 - `/help`
-- `/help-advanced`
+- `/?`
+- `/advanced`
 - `/directory`
 - `/status`
 - `/task`
@@ -126,8 +127,9 @@ The currently validated TUI commands are:
 
 `/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`,
 `/worktree-diff`, `/review-worktree`, `/auto-patch`, `/auto-worktree`, and
-`/files` are advanced/debug or legacy compatibility commands, not the
-recommended user flow.
+`/files` remain executable advanced/debug or legacy compatibility commands, not
+the recommended user flow. They are intentionally omitted from the simplified
+default `/help` output.
 
 `/dry-run` uses the local provider-free `local_lexical_preview` router. It is
 deterministic and useful for previewing selected segment ids, token estimates,

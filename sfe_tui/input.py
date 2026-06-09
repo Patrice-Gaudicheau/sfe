@@ -17,6 +17,8 @@ from prompt_toolkit.key_binding import KeyBindings
 
 SLASH_COMMANDS = (
     "/help",
+    "/?",
+    "/advanced",
     "/help-advanced",
     "/directory",
     "/status",

@@ -42,17 +42,12 @@ def render_help() -> str:
     return "\n".join(
         [
             "SFE TUI commands:",
-            "  /help              Show this help",
-            "  /help-advanced     Show advanced/debug commands",
-            "  /directory         Show selected workspace directory",
+            "  /help, /?          Show this help",
             "  /status            Show current TUI state",
             "  /task <text>       Set the current task",
             "  /run               Resolve the task and show concise output",
-            "  /run-report        Show diagnostics for the previous run without re-running",
-            "  /context           Show selected context metadata",
-            "  /ask               Ask a read-only question using selected context",
-            "  /workspace-status  Show original/isolated workspace state",
             "  /reset             Clear task, context, discovery, and routing; preserve workspace",
+            "  /advanced          Show advanced diagnostic commands",
             "  /quit, /exit       Exit",
         ]
     )
@@ -61,21 +56,12 @@ def render_help() -> str:
 def render_advanced_help() -> str:
     return "\n".join(
         [
-            "SFE TUI advanced/debug commands:",
-            "  /run-debug         Run the task and show full diagnostics",
+            "SFE TUI advanced commands:",
+            "  /directory         Show selected workspace directory",
             "  /run-report        Show diagnostics for the previous run without re-running",
-            "  /discover          Discover workspace context for the current task",
-            "  /dry-run           Build the SFE contract and show safe counts",
-            "  /patch             Propose a patch without applying it",
-            "  /apply-patch       Apply latest pending patch proposal",
-            "  /isolate           Create and switch to an isolated Git worktree",
-            "  /worktree-diff     Show isolated worktree status and diff",
-            "  /review-worktree   Ask router for OK_PROMOTE or KO_BLOCK",
-            "  /cleanup-worktree  Remove the active SFE-created worktree",
-            "  /gc-worktrees      Report SFE-created worktrees; add --clean to remove clean ones",
-            "  /auto-patch        Legacy: run discover, patch, and router-reviewed apply",
-            "  /auto-worktree     Legacy: isolate, patch, apply, diff, and router-review",
-            "  /files <paths...>  Replace context manually for debug/design",
+            "  /context           Show selected context metadata",
+            "  /ask               Ask a read-only question using selected context",
+            "  /workspace-status  Show original/isolated workspace state",
         ]
     )
 

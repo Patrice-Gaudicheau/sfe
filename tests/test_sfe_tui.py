@@ -113,6 +113,8 @@ def slash_command_completions(text: str) -> list[str]:
 
 def test_slash_command_completer_matches_command_prefixes() -> None:
     assert slash_command_completions("/he") == ["/help", "/help-advanced"]
+    assert slash_command_completions("/?") == ["/?"]
+    assert slash_command_completions("/ad") == ["/advanced"]
     assert slash_command_completions("/help-a") == ["/help-advanced"]
     assert slash_command_completions("/run-d") == ["/run-debug"]
     assert slash_command_completions("/run-r") == ["/run-report"]
@@ -1166,7 +1168,7 @@ def test_renderer_can_render_help_and_dry_run_summary(tmp_path) -> None:
     )
     result = DirectBackend().dry_run(contract)
 
-    assert "/dry-run" in render_advanced_help()
+    assert "/context" in render_advanced_help()
     assert "/run" in render_help()
     summary = render_dry_run_summary(contract, result)
     assert "SFE dry-run summary" in summary
@@ -1465,19 +1467,47 @@ def test_help_does_not_advertise_backend_switching() -> None:
     rendered = render_help()
     advanced = render_advanced_help()
     help_lines = rendered.splitlines()
+    advanced_lines = advanced.splitlines()
+    expected_help = "\n".join(
+        [
+            "SFE TUI commands:",
+            "  /help, /?          Show this help",
+            "  /status            Show current TUI state",
+            "  /task <text>       Set the current task",
+            "  /run               Resolve the task and show concise output",
+            "  /reset             Clear task, context, discovery, and routing; preserve workspace",
+            "  /advanced          Show advanced diagnostic commands",
+            "  /quit, /exit       Exit",
+        ]
+    )
+    expected_advanced = "\n".join(
+        [
+            "SFE TUI advanced commands:",
+            "  /directory         Show selected workspace directory",
+            "  /run-report        Show diagnostics for the previous run without re-running",
+            "  /context           Show selected context metadata",
+            "  /ask               Ask a read-only question using selected context",
+            "  /workspace-status  Show original/isolated workspace state",
+        ]
+    )
 
-    assert "/help-advanced" in rendered
+    assert rendered == expected_help
+    assert advanced == expected_advanced
+    assert "SFE TUI commands:" in rendered
+    assert "  /help, /?          Show this help" in rendered
+    assert "  /advanced          Show advanced diagnostic commands" in rendered
+    assert "/help-advanced" not in rendered
     assert "/help advanced" not in rendered
-    assert "/directory" in rendered
+    assert "/directory" not in rendered
     assert "/pwd" not in rendered
     assert "/status" in rendered
-    assert "/context" in rendered
+    assert "/context" not in rendered
     assert "/run" in rendered
     assert "/run-debug" not in rendered
-    assert "/run-report" in rendered
+    assert "/run-report" not in rendered
     assert "/run_debug" not in rendered
     assert "Resolve the task and show concise output" in rendered
-    assert "Show diagnostics for the previous run without re-running" in rendered
+    assert "Show diagnostics for the previous run without re-running" not in rendered
     assert not any(line.strip().startswith("/discover") for line in help_lines)
     assert not any(line.strip().startswith("/dry-run") for line in help_lines)
     assert not any(line.strip().startswith("/patch") for line in help_lines)
@@ -1488,38 +1518,75 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert not any(line.strip().startswith("/auto-patch") for line in help_lines)
     assert not any(line.strip().startswith("/auto-worktree") for line in help_lines)
     assert not any(line.strip().startswith("/files") for line in help_lines)
-    assert "/ask" in rendered
+    assert "/ask" not in rendered
     assert "/reset" in rendered
     assert "files or directories" not in rendered
     assert "Add context" not in rendered
     assert "Clear task, context, discovery, and routing; preserve workspace" in rendered
     assert "/backend" not in rendered
-    assert rendered.index("/directory") < rendered.index("/status")
+    assert rendered.index("/help, /?") < rendered.index("/status")
     assert rendered.index("/task <text>") < rendered.index("/run")
-    assert rendered.index("/run") < rendered.index("/context")
-    assert rendered.index("/context") < rendered.index("/ask")
+    assert rendered.index("/reset") < rendered.index("/advanced")
+    assert rendered.index("/advanced") < rendered.index("/quit, /exit")
 
-    assert "SFE TUI advanced/debug commands:" in advanced
-    assert "/run-debug" in advanced
+    assert "SFE TUI advanced commands:" in advanced
+    assert "/directory" in advanced
     assert "/run-report" in advanced
+    assert "/context" in advanced
+    assert "/ask" in advanced
+    assert "/workspace-status" in advanced
+    assert "/help-advanced" not in advanced
+    assert "/advanced" not in advanced
+    assert "/run-debug" not in advanced
     assert "/run_debug" not in advanced
-    assert "Run the task and show full diagnostics" in advanced
     assert "Show diagnostics for the previous run without re-running" in advanced
-    assert "/discover" in advanced
-    assert "/dry-run" in advanced
-    assert "/patch" in advanced
-    assert "/apply-patch" in advanced
-    assert "/isolate" in advanced
-    assert "/worktree-diff" in advanced
-    assert "/review-worktree" in advanced
-    assert "/cleanup-worktree" in advanced
-    assert "/gc-worktrees" in advanced
-    assert "Legacy: run discover, patch, and router-reviewed apply" in advanced
-    assert "Legacy: isolate, patch, apply, diff, and router-review" in advanced
-    assert "/files <paths...>  Replace context manually for debug/design" in advanced
+    assert not any(line.strip().startswith("/discover") for line in advanced_lines)
+    assert not any(line.strip().startswith("/dry-run") for line in advanced_lines)
+    assert not any(line.strip().startswith("/patch") for line in advanced_lines)
+    assert not any(line.strip().startswith("/apply-patch") for line in advanced_lines)
+    assert not any(line.strip().startswith("/isolate") for line in advanced_lines)
+    assert not any(line.strip().startswith("/worktree-diff") for line in advanced_lines)
+    assert not any(line.strip().startswith("/review-worktree") for line in advanced_lines)
+    assert not any(line.strip().startswith("/cleanup-worktree") for line in advanced_lines)
+    assert not any(line.strip().startswith("/gc-worktrees") for line in advanced_lines)
+    assert not any(line.strip().startswith("/auto-patch") for line in advanced_lines)
+    assert not any(line.strip().startswith("/auto-worktree") for line in advanced_lines)
+    assert not any(line.strip().startswith("/files") for line in advanced_lines)
 
 
-def test_help_advanced_command_renders_debug_help(tmp_path) -> None:
+def test_advanced_command_renders_diagnostic_help(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/advanced", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE TUI advanced commands:" in rendered
+    assert "/directory" in rendered
+    assert "/workspace-status" in rendered
+    assert "/help-advanced" not in rendered
+
+
+def test_question_mark_command_renders_default_help(tmp_path) -> None:
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(["", "/?", "/quit"]),
+        output=output.append,
+        cwd=tmp_path,
+    )
+
+    assert app.run() == 0
+    rendered = "\n".join(output)
+    assert "SFE TUI commands:" in rendered
+    assert "/help, /?" in rendered
+    assert "/advanced" in rendered
+    assert "/run-report" not in rendered
+
+
+def test_help_advanced_command_remains_deprecated_alias(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
         input_provider=FakeInput(["", "/help-advanced", "/quit"]),
@@ -1529,9 +1596,9 @@ def test_help_advanced_command_renders_debug_help(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "SFE TUI advanced/debug commands:" in rendered
-    assert "/discover" in rendered
-    assert "/auto-worktree" in rendered
+    assert "SFE TUI advanced commands:" in rendered
+    assert "/directory" in rendered
+    assert "/help-advanced" not in rendered
 
 
 def test_help_advanced_argument_remains_discreet_alias(tmp_path) -> None:
@@ -1544,8 +1611,8 @@ def test_help_advanced_argument_remains_discreet_alias(tmp_path) -> None:
 
     assert app.run() == 0
     rendered = "\n".join(output)
-    assert "SFE TUI advanced/debug commands:" in rendered
-    assert "/discover" in rendered
+    assert "SFE TUI advanced commands:" in rendered
+    assert "/directory" in rendered
 
 
 def test_task_without_text_is_actionable_error_and_preserves_existing_task(
@@ -2732,11 +2799,11 @@ def test_patch_does_not_modify_files(tmp_path) -> None:
     assert "no files were modified" in rendered
 
 
-def test_help_includes_apply_patch_command() -> None:
+def test_advanced_help_hides_apply_patch_maintenance_command() -> None:
     rendered = render_advanced_help()
 
-    assert "/apply-patch" in rendered
-    assert "Apply latest pending patch proposal" in rendered
+    assert "/apply-patch" not in rendered
+    assert "Apply latest pending patch proposal" not in rendered
 
 
 def test_apply_patch_without_pending_patch_reports_actionable_error(tmp_path) -> None:
