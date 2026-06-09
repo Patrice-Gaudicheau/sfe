@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -25,6 +26,7 @@ DEFAULT_ROUTER_MODEL = "gpt-5.4"
 DEFAULT_EXECUTOR_MODEL = "gpt-5.4"
 DEFAULT_TIMEOUT = 300
 DEFAULT_SANDBOX = "read-only"
+CODEXCLI_EXECUTABLE_ENV = "SFE_CODEXCLI_EXECUTABLE"
 
 
 class CodexCLITimeoutError(TimeoutError):
@@ -41,6 +43,7 @@ class CodexCLIProvider:
         idle_timeout: float | None = None,
         sandbox: str | None = None,
         reasoning_effort: str | None = None,
+        executable: str | Path | None = None,
     ) -> None:
         self.cwd = Path(cwd or os.getcwd())
         timeout_value = timeout if timeout is not None else DEFAULT_TIMEOUT
@@ -55,16 +58,17 @@ class CodexCLIProvider:
             raise ValueError("CodexCLI idle timeout must be greater than 0.")
         self.sandbox = sandbox or os.getenv("SFE_CODEXCLI_SANDBOX") or DEFAULT_SANDBOX
         self.reasoning_effort = _clean_env_value(reasoning_effort)
+        self.executable = _clean_env_value(str(executable)) if executable else None
 
     def health(self) -> dict[str, Any]:
         """Return whether the codex executable is available."""
-        from shutil import which
-
-        executable = which("codex")
+        executable, source = resolve_codex_executable(self.executable)
         return {
             "ok": executable is not None,
             "provider": PROVIDER_NAME,
             "executable": executable or "",
+            "executable_source": source,
+            "reason": None if executable is not None else "codex_executable_not_found",
         }
 
     def chat(
@@ -88,6 +92,7 @@ class CodexCLIProvider:
             model=model,
             sandbox=self.sandbox,
             reasoning_effort=self.reasoning_effort,
+            executable=resolve_codex_executable(self.executable)[0] or "codex",
         )
         supervisor = ProviderCallSupervisor(
             provider=PROVIDER_NAME,
@@ -255,10 +260,11 @@ def build_codex_exec_command(
     model: str,
     sandbox: str = DEFAULT_SANDBOX,
     reasoning_effort: str | None = None,
+    executable: str = "codex",
 ) -> list[str]:
     """Build the non-interactive Codex command used by the benchmark adapter."""
     command = [
-        "codex",
+        executable,
         "exec",
         "--sandbox",
         sandbox,
@@ -292,6 +298,57 @@ def build_codex_resume_command(model: str, session_id: str) -> list[str]:
         command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     command.extend([normalized_session_id, "-"])
     return command
+
+
+def resolve_codex_executable(
+    configured_executable: str | None = None,
+) -> tuple[str | None, str]:
+    explicit = _clean_env_value(configured_executable) or _clean_env_value(
+        os.getenv(CODEXCLI_EXECUTABLE_ENV)
+    )
+    if explicit:
+        explicit_path = Path(explicit).expanduser()
+        if explicit_path.is_file() and os.access(explicit_path, os.X_OK):
+            return str(explicit_path), "configured"
+        resolved = shutil.which(explicit)
+        if resolved:
+            return resolved, "configured"
+        return None, "configured_missing"
+
+    path_executable = shutil.which("codex")
+    if path_executable:
+        return path_executable, "path"
+
+    for candidate in _codex_executable_candidates():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate), _safe_candidate_source(candidate)
+    return None, "not_found"
+
+
+def _codex_executable_candidates() -> tuple[Path, ...]:
+    candidates: list[Path] = [
+        Path.home() / ".codex" / "bin" / "wsl" / "codex",
+    ]
+    users_root = Path("/mnt/c/Users")
+    if users_root.exists():
+        candidates.extend(users_root.glob("*/.codex/bin/wsl/codex"))
+    return tuple(candidates)
+
+
+def _safe_candidate_source(candidate: Path) -> str:
+    if _is_relative_to(candidate, Path.home()):
+        return "home_codex_wsl"
+    if _is_relative_to(candidate, Path("/mnt/c/Users")):
+        return "windows_codex_wsl"
+    return "candidate"
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def _resolve_reasoning_effort(reasoning_effort: str | None = None) -> str | None:

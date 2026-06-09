@@ -25,13 +25,23 @@ from sfe.execution_mode_router import (
 
 
 class FakeCodexCLIProvider:
-    def __init__(self, content: str = "", *, ok: bool = True, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        content: str = "",
+        *,
+        ok: bool = True,
+        error: Exception | None = None,
+        health: dict[str, object] | None = None,
+    ) -> None:
         self.content = content
         self.ok = ok
         self.error = error
+        self.health_result = health
         self.calls: list[dict[str, object]] = []
 
     def health(self) -> dict[str, object]:
+        if self.health_result is not None:
+            return self.health_result
         return {"ok": self.ok}
 
     def chat(self, messages: list[dict[str, str]], **kwargs: object) -> dict[str, object]:
@@ -268,6 +278,27 @@ def test_execution_mode_router_codexcli_unavailable_fails_safely() -> None:
         router.decide(task="Explain this project.")
 
     assert exc_info.value.category == "execution_mode_router_not_configured"
+    assert not provider.calls
+
+
+def test_execution_mode_router_codexcli_missing_executable_reason_is_actionable() -> None:
+    provider = FakeCodexCLIProvider(
+        health={
+            "ok": False,
+            "reason": "codex_executable_not_found",
+            "executable_source": "not_found",
+        },
+    )
+    router = create_configured_execution_mode_router(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    with pytest.raises(ExecutionModeRouterError) as exc_info:
+        router.decide(task="Explain this project.")
+
+    assert exc_info.value.category == "execution_mode_router_not_configured"
+    assert exc_info.value.reason == "CodexCLI executable was not found"
     assert not provider.calls
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +21,7 @@ from providers.codexcli import (
     build_codex_resume_command,
     build_codex_exec_command,
     parse_codex_jsonl,
+    resolve_codex_executable,
 )
 from sfe.provider_progress import collect_progress_events
 
@@ -208,6 +210,56 @@ class CodexCLIProviderTests(unittest.TestCase):
             )
 
         self.assertIn('model_reasoning_effort="medium"', command)
+
+    def test_resolve_codex_executable_accepts_configured_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            executable = Path(tmpdir) / "codex"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+
+            resolved, source = resolve_codex_executable(str(executable))
+
+        self.assertEqual(resolved, str(executable))
+        self.assertEqual(source, "configured")
+
+    def test_health_falls_back_to_known_wsl_codex_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            executable = Path(tmpdir) / "codex"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+            with patch("providers.codexcli.shutil.which", return_value=None), patch(
+                "providers.codexcli._codex_executable_candidates",
+                return_value=(executable,),
+            ):
+                health = CodexCLIProvider().health()
+
+        self.assertTrue(health["ok"])
+        self.assertEqual(health["executable"], str(executable))
+        self.assertEqual(health["reason"], None)
+
+    def test_chat_uses_resolved_codex_executable_for_process_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            executable = Path(tmpdir) / "codex"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+            provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)
+            fake_process = FakeProcess(
+                stdout_lines=[
+                    '{"type":"thread.started","thread_id":"thread-1"}\n',
+                    '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n',
+                ],
+            )
+
+            with patch("providers.codexcli.shutil.which", return_value=None), patch(
+                "providers.codexcli._codex_executable_candidates",
+                return_value=(executable,),
+            ), patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+                response = provider.chat(
+                    [{"role": "user", "content": "hello"}],
+                    model="gpt-5.5",
+                )
+
+        self.assertEqual(response["codexcli"]["command"][0], str(executable))
 
     def test_build_resume_command_reads_prompt_from_stdin(self) -> None:
         with patch.dict(

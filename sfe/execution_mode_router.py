@@ -132,9 +132,13 @@ class ConfiguredLLMExecutionModeRouter:
     def decide(self, *, task: str) -> ExecutionModeDecision:
         health = self.provider.health()
         if not health.get("ok"):
+            reason = _provider_unavailable_reason(
+                health,
+                default="configured execution-mode router is not available",
+            )
             raise ExecutionModeRouterError(
                 "execution_mode_router_not_configured",
-                "configured execution-mode router is not available",
+                reason,
             )
         try:
             response = _call_provider_chat(
@@ -330,6 +334,18 @@ def build_execution_mode_prompt(*, task: str) -> str:
         "strict JSON only.\n\nExecution-mode routing payload JSON:\n"
         + json.dumps(payload, ensure_ascii=False, sort_keys=True)
     )
+
+
+def _provider_unavailable_reason(health: Any, *, default: str) -> str:
+    if not isinstance(health, dict):
+        return default
+    reason = health.get("reason")
+    if reason == "codex_executable_not_found":
+        source = health.get("executable_source")
+        if source == "configured_missing":
+            return "configured CodexCLI executable was not found"
+        return "CodexCLI executable was not found"
+    return default
 
 
 def parse_execution_mode_router_output(output: str) -> ExecutionModeDecision:
