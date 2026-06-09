@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import fnmatch
+import io
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import sfe.env as env_module
 from sfe.env import load_repo_env
 
 
@@ -42,6 +45,66 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(os.environ["OPENAI_API_KEY"], "existing-key")
 
         self.assertEqual(loaded, {})
+
+    def test_env_loader_uses_current_working_directory_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = Path(tmpdir)
+            env_path = cwd / ".env"
+            env_path.write_text("SFE_PROVIDER=ollama\n", encoding="utf-8")
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                with patch.dict(os.environ, {}, clear=True), patch.object(
+                    env_module,
+                    "DEFAULT_ENV_PATH",
+                    cwd / "missing.env",
+                ):
+                    loaded = load_repo_env()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(loaded, {"SFE_PROVIDER": "ollama"})
+
+    def test_env_loader_falls_back_to_project_env_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fallback_path = Path(tmpdir) / "project.env"
+            fallback_path.write_text("SFE_PROVIDER=codexcli\n", encoding="utf-8")
+            cwd = Path(tmpdir) / "cwd"
+            cwd.mkdir()
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                with patch.dict(os.environ, {}, clear=True), patch.object(
+                    env_module,
+                    "DEFAULT_ENV_PATH",
+                    fallback_path,
+                ):
+                    loaded = load_repo_env()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(loaded, {"SFE_PROVIDER": "codexcli"})
+
+    def test_env_loader_does_not_print_secret_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = Path(tmpdir)
+            env_path = cwd / ".env"
+            env_path.write_text("OPENAI_API_KEY=super-secret-value\n", encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(cwd)
+                with patch.dict(os.environ, {}, clear=True), redirect_stdout(
+                    stdout
+                ), redirect_stderr(stderr):
+                    loaded = load_repo_env()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(loaded, {"OPENAI_API_KEY": "super-secret-value"})
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_env_loader_ignores_comments_blank_lines_and_invalid_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

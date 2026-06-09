@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import threading
 import tomllib
@@ -189,6 +190,28 @@ def test_mcp_package_has_no_direct_stdout_prints_and_uses_stdio_transport() -> N
     assert all("print(" not in source for source in sources.values())
     assert 'transport="stdio"' in sources["server.py"]
     assert "http" not in sources["server.py"].lower()
+
+
+def test_mcp_main_loads_launch_env_before_starting_stdio(tmp_path, monkeypatch) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("SFE_PROVIDER=ollama\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SFE_PROVIDER", raising=False)
+
+    import sfe_mcp.__main__ as mcp_main
+    import sfe_mcp.server as mcp_server
+
+    observed_provider: list[str | None] = []
+
+    def fake_run_stdio() -> None:
+        observed_provider.append(os.environ.get("SFE_PROVIDER"))
+
+    monkeypatch.setattr(mcp_server, "run_stdio", fake_run_stdio)
+
+    result = mcp_main.main()
+
+    assert result == 0
+    assert observed_provider == ["ollama"]
 
 
 def test_packaging_includes_top_level_providers_package() -> None:

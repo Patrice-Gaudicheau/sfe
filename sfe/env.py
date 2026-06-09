@@ -11,10 +11,14 @@ DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
 
 def load_repo_env(path: str | Path | None = None) -> dict[str, str]:
-    """Load KEY=value pairs from .env without overriding existing environment."""
-    env_path = Path(path) if path is not None else DEFAULT_ENV_PATH
+    """Load KEY=value pairs from .env without overriding existing environment.
+
+    When no explicit path is supplied, SFE first checks the launch working
+    directory and then falls back to the installed project root.
+    """
+    env_path = _resolve_env_path(path)
     loaded: dict[str, str] = {}
-    if not env_path.exists():
+    if env_path is None or not env_path.exists():
         return loaded
 
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
@@ -27,6 +31,18 @@ def load_repo_env(path: str | Path | None = None) -> dict[str, str]:
         os.environ[key] = value
         loaded[key] = value
     return loaded
+
+
+def _resolve_env_path(path: str | Path | None = None) -> Path | None:
+    if path is not None:
+        return Path(path)
+
+    cwd_env_path = Path.cwd() / ".env"
+    if cwd_env_path.exists():
+        return cwd_env_path
+    if DEFAULT_ENV_PATH.exists():
+        return DEFAULT_ENV_PATH
+    return cwd_env_path
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
