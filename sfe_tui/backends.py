@@ -87,28 +87,10 @@ class DirectBackend:
         return _patch_result_from_executor_response(routed, executor_response)
 
 
-class ProxyBackend:
-    name = "proxy"
-
-    def dry_run(self, contract: SFEContract) -> ExecutionResult:
-        return _dry_run_result(self.name, contract, selector_mode="proxy_not_connected")
-
-    def console(self, contract: SFEContract) -> ExecutionResult:
-        raise NotImplementedError("Proxy backend console execution is not implemented yet.")
-
-    def run(self, contract: SFEContract) -> ExecutionResult:
-        raise NotImplementedError("Proxy backend execution is not implemented yet.")
-
-    def patch(self, contract: SFEContract) -> ExecutionResult:
-        raise NotImplementedError("Proxy backend patching is not implemented yet.")
-
-
 def backend_by_name(name: str) -> BackendAdapter:
     normalized = name.strip().lower()
     if normalized == "direct":
         return DirectBackend()
-    if normalized == "proxy":
-        return ProxyBackend()
     raise ValueError("unsupported_backend")
 
 

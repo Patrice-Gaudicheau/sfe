@@ -923,7 +923,6 @@ class OutputVariationBenchmarkTests(unittest.TestCase):
         self.assertIn("## Router Selection Note", markdown)
         self.assertIn(ROUTER_SELECTION_NOTE, markdown)
         self.assertIn("neutral SFE segment selector", markdown)
-        self.assertNotIn("proxy shadow-router", markdown)
         self.assertIn(
             "candidate_selected; known=True; usable=True; selected=payments-cache",
             markdown,

@@ -149,7 +149,7 @@ class LargeRealWorldOpenAISelectorExecutorSmokeTests(unittest.TestCase):
         executor_prompt = str(provider.calls[1]["messages"][0]["content"])
         self.assertIn("doc-gateway-architecture-current", executor_prompt)
         self.assertIn("doc-gateway-owner-decision-record", executor_prompt)
-        self.assertNotIn("doc-gateway-proxy-beta-archive", executor_prompt)
+        self.assertNotIn("doc-gateway-beta-archive", executor_prompt)
         self.assertNotIn("doc-gateway-glossary", executor_prompt)
 
     def test_executor_does_not_receive_oracle_ids_when_selector_fails(self) -> None:
@@ -342,7 +342,7 @@ class LargeRealWorldOpenAISelectorExecutorSmokeTests(unittest.TestCase):
     def test_executor_validation_failure_fails_honest_end_to_end_pass(self) -> None:
         selected = list(self.gateway_task.required_source_ids)
         payload = _expected_executor_payload(self.gateway_task)
-        payload["gateway_status"] = "transparent gateway proxy is live"
+        payload["gateway_status"] = "transparent gateway is live"
         provider = FakeProvider(selections=[selected], executor_payloads=[payload])
 
         run = execute_selector_executor_smoke(

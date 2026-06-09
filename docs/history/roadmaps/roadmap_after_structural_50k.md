@@ -2,10 +2,9 @@
 
 Status note: This is a historical roadmap from an earlier structural benchmark
 phase, preserved for audit/research continuity. Some items below have since
-been implemented or superseded by later provider, benchmark, and standby Proxy
-work. Current terminology treats the SFE Proxy as historical/standby
-infrastructure. Start with `../../../README.md`, `../../INDEX.md`, and the
-current TUI/architecture docs for the latest project state.
+been implemented or superseded by later provider and benchmark work. Start with
+`../../../README.md`, `../../INDEX.md`, and the current TUI/architecture docs
+for the latest project state.
 
 ## Current Status
 
@@ -147,104 +146,6 @@ The Phase 2 report should separate:
   behavior is clean.
 - Update documentation to distinguish single-block structural routing from
   multi-zone spatial composition.
-
-## Future Phase: Tool-Aware Proxy Routing
-
-A later proxy phase should extend SFE routing beyond passive memory/context
-selection. The core idea is that SFE should route capability exposure as well
-as context exposure.
-
-In proxy mode, a client or agent may have many tools or MCP servers available.
-The executor should not automatically receive every tool definition when only a
-small subset is relevant to the current request. A future router should be able
-to select relevant tool definitions for the current task, while the proxy keeps
-deterministic control over which tool calls are allowed.
-
-This should not treat tools as normal memory zones. The first contract should
-keep two separate channels:
-
-- `selected_zones` for passive context.
-- `selected_tools` for active capabilities.
-
-An early contract sketch could look like:
-
-```json
-{
-  "task_type": "coding",
-  "execution_mode": "tool_assisted",
-  "selected_zones": ["src_core", "tests_proxy"],
-  "selected_tools": ["github_search"],
-  "tool_policy": {
-    "allow_tool_calls": true,
-    "max_tool_calls": 3,
-    "requires_user_confirmation": false
-  }
-}
-```
-
-### Preferred First Architecture: Executor-Managed Tools
-
-The minimal and safer first step is executor-managed tools:
-
-- The router selects the relevant tools.
-- The proxy injects only those selected tool definitions into the executor
-  request.
-- The executor may produce normal tool calls.
-- The proxy intercepts and executes only allowed tool calls.
-- Tool results are returned to the executor through the usual tool-result path.
-
-This architecture keeps the router focused on selection rather than execution.
-It also gives the proxy a deterministic enforcement point: non-selected tool
-calls can be refused before anything external happens.
-
-### Deferred Option: Router-Managed Tools
-
-Router-managed tools should be deferred. In this option, the router calls tools
-before selecting context, and tool outputs may become new context zones for the
-executor.
-
-That is more complex and riskier than executor-managed tools. It introduces
-tool execution before context selection is complete, expands the audit surface,
-and can blur the boundary between routing and acting. If it is explored later,
-it should be treated as a possible external or on-demand module, not as part of
-the initial Tool-Aware Proxy Routing phase. A safer framing is dynamic reduction
-of the exposed capability surface, only if the tool-executing component is
-robustly isolated and auditable.
-
-### Security Framing
-
-Tool-aware routing should not be described as strong security by itself. It can
-reduce the exposed capability surface, but real safety still depends on
-deterministic proxy controls such as:
-
-- allowlists;
-- read-only defaults;
-- confirmation for destructive actions;
-- maximum tool call limits;
-- audit logs;
-- explicit refusal of non-selected tool calls.
-
-### Suggested Deterministic Benchmark
-
-A future deterministic benchmark could use:
-
-- 10 fake tools with long JSON schemas;
-- one or two tools required by the task;
-- a router that must select the correct tools;
-- an executor request that receives only selected tool schemas.
-
-Possible metrics:
-
-- tools exposed;
-- prompt tokens saved;
-- required tool selected;
-- irrelevant tool exposure;
-- hallucinated tool call;
-- missing required tool;
-- refusal of non-allowed tool calls.
-
-This phase should be framed as a roadmap idea, not a completed capability or a
-production security claim.
 
 ## Long-Term Research Direction: Context Routing Unit
 

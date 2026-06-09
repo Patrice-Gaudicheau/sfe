@@ -2,10 +2,8 @@
 
 Status note: This is a historical phase-close record preserved for
 audit/research continuity. High-overlap remains a useful benchmark family and
-methodology area, but it is not the whole current project status. Future-looking
-Gateway/Proxy wording below reflects the project state at the time; current
-terminology treats the SFE Proxy as standby experimental infrastructure. Start
-with `../../../README.md` and `../../INDEX.md` for the latest project overview.
+methodology area, but it is not the whole current project status. Start with
+`../../../README.md` and `../../INDEX.md` for the latest project overview.
 
 This internal note closes the high-overlap fixture-expansion phase for the
 three newer authority-gap fixtures. It records local methodology observations
@@ -42,8 +40,8 @@ The same local observations provide a limited non-regression signal: in these
 tested cases, routing through SFE with a small selector did not degrade answers
 that full-context execution also handled correctly. This is not a general
 non-regression guarantee and not a statistical claim. It is useful for Gateway
-or Proxy planning because pass-through and SFE-enabled routing need to avoid
-breaking requests that already work without SFE.
+planning because SFE-enabled routing needs to avoid breaking requests that
+already work without SFE.
 
 The useful result of this phase is that the fixture plumbing, strict validators,
 diagnostic bucketing, selector smokes, executor smokes, and comparison runners
@@ -56,12 +54,12 @@ and not evidence that SFE prevents contamination in general.
 
 Do not make these three fixtures more adversarial for now. Close the
 high-overlap fixture-expansion phase at the current level of coverage and move
-next toward Gateway or Proxy planning, where the work can be easier to integrate
-with request flows and local tooling.
+next toward integration planning, where the work can be easier to connect with
+request flows and local tooling.
 
 ## Suggested Next Phase
 
-The next phase should focus on Gateway or Proxy design. Topics to cover include:
+The next phase should focus on integration design. Topics to cover include:
 
 - activation threshold;
 - pass-through mode;

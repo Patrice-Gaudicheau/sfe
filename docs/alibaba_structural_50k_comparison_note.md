@@ -4,7 +4,7 @@ This note records one live Alibaba Model Studio structural 50k comparison. It
 is a single-run baseline-vs-spatial comparison, not a repeat campaign, not a
 statistical reliability result, and not production validation.
 
-No proxy files were modified. Alibaba Qwen thinking was disabled for the live
+Alibaba Qwen thinking was disabled for the live
 calls to keep token accounting usable and to avoid hidden reasoning-token
 inflation.
 

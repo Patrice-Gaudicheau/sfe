@@ -1,11 +1,8 @@
 # Large Real-World OpenAI Selector + Deterministic Executor
 
 Status note: This is a historical live-smoke record preserved for
-audit/research continuity. It predates later Proxy and provider work, so
-statements saying gateway/proxy behavior was not yet tested should be read as
-historical. Current terminology treats the SFE Proxy as standby experimental
-infrastructure. Start with `README.md` and `docs/INDEX.md` for the latest
-project overview.
+audit/research continuity. Start with `README.md` and `docs/INDEX.md` for the
+latest project overview.
 
 ## Scope
 
@@ -73,4 +70,4 @@ coverage while reducing context on this controlled benchmark.
 - Test OpenAI selector + OpenAI executor.
 - Compare router models and costs.
 - Add repeat-N stability reporting only if needed.
-- Later test gateway/proxy behavior.
+- Later test gateway behavior.

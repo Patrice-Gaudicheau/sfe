@@ -136,10 +136,10 @@ After a task is set, `/dry-run` requires `/discover` unless manual `/files`
 context exists. It makes zero provider calls.
 
 `/ask` uses `DirectBackend`, selected context, protected instructions, and the
-protected task to produce a read-only answer. It does not use the proxy, switch
-backends, write files, execute shell commands, or run an agent loop. After a
-task is set, `/ask` requires `/discover` unless manual `/files` context exists.
-It calls the configured executor only after local routing selected context.
+protected task to produce a read-only answer. It does not switch backends,
+write files, execute shell commands, or run an agent loop. After a task is set,
+`/ask` requires `/discover` unless manual `/files` context exists. It calls the
+configured executor only after local routing selected context.
 
 `/patch` is proposal-only. It asks the configured executor for structured
 full-file replacement proposals, stores them as pending state, and never writes
@@ -176,26 +176,7 @@ Setting `/task` invalidates previous discovery. `/reset` clears task, manual
 context, discovery state, latest routing/result, and skipped/rejected context
 state while preserving the selected workspace.
 
-## Standby Experimental And Compatibility Path
-
-The SFE proxy and Dockerized proxy path are in standby for current local TUI
-work. They remain useful infrastructure for:
-
-- OpenAI-compatible traffic compatibility;
-- safe observability in `shadow` mode;
-- controlled `dry_run_enabled` and `enabled` experiments;
-- CodexCLI stress tests;
-- `/v1/responses` request-shape and streaming experiments;
-- provider integration probes.
-
-The proxy is not the canonical current SFE user interface. CodexCLI through the
-proxy is useful for compatibility and stress testing, but realistic CodexCLI traffic can
-embed large or protected context inside client-specific request envelopes. SFE
-should not depend on reverse-engineering that traffic shape as its primary
-interface.
-
-Dockerized proxy operation is also standby infrastructure, not the recommended
-current user path.
+## Provider Selection
 
 Provider selection for SFE runtime roles can be split with
 `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and
@@ -203,9 +184,7 @@ Provider selection for SFE runtime roles can be split with
 `SFE_PROVIDER`; blank or absent role values fall back to `SFE_PROVIDER`, then
 the surface default. Discovery first checks `SFE_PROVIDER_DISCOVERY`, then
 falls back to `SFE_PROVIDER_ROUTER`, then `SFE_PROVIDER`, then the surface
-default. Standby proxy compatibility keeps its existing semantics and still
-accepts `SFE_PROXY_PROVIDER` as a legacy fallback, but new proxy configuration
-should use `SFE_PROVIDER`.
+default.
 
 CodexCLI is exposed on public SFE surfaces as `SFE_PROVIDER=codexcli` or through
 role-specific provider selection. `SFE_CODEXCLI_ROUTER_MODEL`,
@@ -232,15 +211,6 @@ SFE_CODEXCLI_DISCOVERY_MODEL="gpt-5.5"
 SFE_CODEXCLI_DISCOVERY_EFFORT="high"
 ```
 
-`ProxyBackend` may remain in the TUI codebase as an internal experimental stub,
-but it must not be exposed as a user-facing backend yet. The TUI should not
-offer backend switching until a concrete need is proven.
-
-Historical proxy milestone and mode notes remain useful audit records under
-`docs/history/proxy/`, but they should be read as standby experimental smoke
-and controlled-run history. They do not establish production reliability,
-general token savings, or broad provider behavior.
-
 ## What Remains Unproven
 
 Before making practical value claims, SFE still needs evidence that the
@@ -263,10 +233,9 @@ The minimum proof still missing includes:
 - stronger evidence for real Responses streaming context replacement before it
   is treated as generally usable;
 - clearer operational guidance for secrets, logs, provider limits, and local
-  proxy exposure.
+  deployment boundaries.
 
 The current status is therefore: SFE core plus the local TUI `DirectBackend`
 surface is the primary current direction; `workspace_write` is the accepted
-developer execution mode; proxy work is standby experimental compatibility and
-research infrastructure; practical value remains to be demonstrated with
+developer execution mode; practical value remains to be demonstrated with
 controlled, repeatable workflows.

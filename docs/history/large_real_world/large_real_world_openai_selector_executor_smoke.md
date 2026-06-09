@@ -1,11 +1,8 @@
 # Large Real-World OpenAI Selector + Executor Smoke
 
 Status note: This is a historical live-smoke record preserved for
-audit/research continuity. It predates later Proxy and provider work, so
-statements saying gateway/proxy behavior was not yet tested should be read as
-historical. Current terminology treats the SFE Proxy as standby experimental
-infrastructure. Start with `README.md` and `docs/INDEX.md` for the latest
-project overview.
+audit/research continuity. Start with `README.md` and `docs/INDEX.md` for the
+latest project overview.
 
 ## Scope
 
@@ -81,7 +78,7 @@ coverage while reducing prompt context.
   distractors.
 - No claim of broad real-world generalization.
 - No claim of production readiness.
-- No gateway/proxy behavior tested yet.
+- No gateway behavior tested yet.
 
 ## Next steps
 
@@ -89,6 +86,6 @@ coverage while reducing prompt context.
 - Add repeat-N reporting only if useful.
 - Compare router and executor model choices.
 - Test larger fixture sets.
-- Later test gateway/proxy behavior.
+- Later test gateway behavior.
 - Eventually compare full-context executor vs SFE-selected-context executor on
   cost, reliability, and validation quality.

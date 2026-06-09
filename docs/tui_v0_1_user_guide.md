@@ -3,10 +3,8 @@
 This guide documents the current local first-party SFE-aware TUI behavior.
 It is a prototype workflow guide, not a production-readiness claim.
 
-The current local user-facing path is the TUI with `DirectBackend`. The proxy
-and proxy-backed experiments are not the primary user path and are not required
-for this guide. For product-level terminology, see
-`sfe_product_doctrine.md`.
+The current local user-facing path is the TUI with `DirectBackend`. For
+product-level terminology, see `sfe_product_doctrine.md`.
 
 ## What The TUI Is
 
@@ -378,7 +376,6 @@ The current TUI behavior intentionally keeps these boundaries:
 - no shell execution;
 - no tool execution;
 - no backend switching;
-- no proxy in the current local TUI path;
 - discovery does not call providers, write files, or expose raw contents in
   diagnostics;
 - `/run` answers directly for `console_output` without Git preparation,
@@ -462,8 +459,6 @@ they do not change provider timeout behavior or add heartbeat logic.
   separate stable CLI/API integration for it yet.
 - There is no automatic merge, push, PR creation, arbitrary shell execution, or
   test/lint runner.
-- The proxy remains standby experimental compatibility and observability
-  infrastructure; it is not the canonical user path.
 - The current test suite validates expected behavior and safety boundaries, but
   it does not establish production reliability or general practical value.
 
@@ -505,5 +500,4 @@ Expected observations:
 - `/ask` requires a configured executor/provider and may report safe provider
   errors if the configured provider is unavailable;
 - with `SFE_PROVIDER=lemonade` and Lemonade reachable, `/ask` can complete
-  through `DirectBackend`;
-- no proxy is used.
+  through `DirectBackend`.

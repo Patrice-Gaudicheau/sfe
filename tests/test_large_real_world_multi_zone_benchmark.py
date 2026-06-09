@@ -84,7 +84,7 @@ class LargeRealWorldBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             {task.fixture_id for task in self.tasks},
             {
-                "large_real_world_gateway_proxy_integration_gate",
+                "large_real_world_gateway_integration_gate",
                 "large_real_world_benchmark_roadmap_gate",
             },
         )
@@ -113,7 +113,7 @@ class LargeRealWorldBenchmarkTests(unittest.TestCase):
     def test_fixture_themes_cover_required_scenarios(self) -> None:
         themes = {task.task_theme for task in self.tasks}
 
-        self.assertIn("gateway_proxy_integration_decision", themes)
+        self.assertIn("gateway_integration_decision", themes)
         self.assertIn("benchmark_result_roadmap_decision", themes)
 
     def test_no_single_source_contains_complete_final_answer(self) -> None:
@@ -217,8 +217,8 @@ class LargeRealWorldBenchmarkTests(unittest.TestCase):
 
     def test_obsolete_answer_is_rejected(self) -> None:
         obsolete_output = self.gateway_task.expected_answer.replace(
-            "gateway proxy is planned but not implemented",
-            "transparent gateway proxy shipped in beta",
+            "gateway integration is planned but not implemented",
+            "transparent gateway shipped in beta",
         )
         validation = validate_output(self.gateway_task, obsolete_output)
 
@@ -377,7 +377,7 @@ class LargeRealWorldBenchmarkTests(unittest.TestCase):
         self.assertIn("Fallback count:", markdown)
         self.assertIn("Token reduction target met: True", markdown)
         self.assertIn("Suppressed sources", markdown)
-        self.assertIn("large_real_world_gateway_proxy_integration_gate", markdown)
+        self.assertIn("large_real_world_gateway_integration_gate", markdown)
         self.assertIn("large_real_world_benchmark_roadmap_gate", markdown)
 
 
