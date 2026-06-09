@@ -545,9 +545,52 @@ def test_workspace_status_serializes_session_metadata_safely(tmp_path: Path) -> 
     assert result["isolated_session"]["session_id"] == "session-1"
     assert result["git_status"] == {
         "available": True,
+        "clean": False,
+        "changed_files_count": 1,
         "changed_files": ["context.txt"],
+        "repository_root_label": str(source),
         "source_branch": "main",
         "worktree_branch": "sfe/session-1",
+    }
+
+
+def test_workspace_status_serializes_original_git_repository_metadata_safely(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    session = FakeRuntimeSession()
+    session.workspace_status_result = RuntimeWorkspaceStatus(
+        workspace_root=source,
+        workspace_session=None,
+        status_result=WorkspaceStatusResult(
+            ok=True,
+            status=WorkspaceStatus(
+                git_status_porcelain="",
+                git_diff="",
+                changed_files=(),
+                source_path=source,
+                worktree_path=source,
+                source_branch="main",
+                worktree_branch="main",
+            ),
+        ),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_workspace_status()
+
+    assert result["ok"] is True
+    assert result["mode"] == "original"
+    assert result["isolated_session"] is None
+    assert result["git_status"] == {
+        "available": True,
+        "clean": True,
+        "changed_files_count": 0,
+        "changed_files": [],
+        "repository_root_label": str(source),
+        "source_branch": "main",
+        "worktree_branch": "main",
     }
 
 

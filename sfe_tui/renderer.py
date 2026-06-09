@@ -233,6 +233,24 @@ def render_workspace_mode_status(
     ]
     if workspace_session is None:
         lines.append("  isolated session: none")
+        if status_result is None:
+            return "\n".join(lines)
+        if not status_result.ok or status_result.status is None:
+            lines.extend(
+                [
+                    f"  status available: no",
+                    f"  error category: {_workspace_issue_category(status_result.issue)}",
+                    f"  reason: {_workspace_issue_reason(status_result.issue)}",
+                ]
+            )
+            return "\n".join(lines)
+        lines.extend(
+            [
+                "  status available: yes",
+                f"  changed files: {_format_string_list(list(status_result.status.changed_files))}",
+                f"  git status lines: {len(status_result.status.git_status_porcelain.splitlines())}",
+            ]
+        )
         return "\n".join(lines)
     lines.extend(
         [

@@ -169,7 +169,10 @@ def serialize_workspace_status(
         "git_status": (
             {
                 "available": True,
+                "clean": not bool(status.changed_files),
+                "changed_files_count": len(status.changed_files),
                 "changed_files": list(status.changed_files),
+                "repository_root_label": safe_path_label(status.source_path),
                 "source_branch": status.source_branch,
                 "worktree_branch": status.worktree_branch,
             }

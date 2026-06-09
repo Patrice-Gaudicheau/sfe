@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import sfe.runtime_session as runtime_session_module  # noqa: E402
 from sfe.execution_mode_router import (  # noqa: E402
     EXECUTION_MODE_CONSOLE_OUTPUT,
     ExecutionModeDecision,
@@ -86,6 +88,27 @@ def make_session(tmp_path: Path) -> tuple[RuntimeSession, FakeExecutionModeRoute
         execution_mode_router=router,
     )
     return session, router, executor
+
+
+def run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def init_git_repo(path: Path) -> Path:
+    path.mkdir()
+    assert run_git(path, "init", "-b", "main").returncode == 0
+    assert run_git(path, "config", "user.name", "SFE Test").returncode == 0
+    assert run_git(path, "config", "user.email", "sfe@example.invalid").returncode == 0
+    (path / "context.txt").write_text("old context\n", encoding="utf-8")
+    assert run_git(path, "add", "context.txt").returncode == 0
+    assert run_git(path, "commit", "-m", "initial").returncode == 0
+    return path
 
 
 def test_set_task_invalidates_same_transient_state_without_clearing_run_report(
@@ -176,6 +199,65 @@ def test_workspace_status_uses_current_workspace_session_metadata(tmp_path: Path
     assert result.workspace_session == workspace_session
     assert result.status_result == status_result
     assert manager.status_calls == [workspace_session]
+
+
+def test_workspace_status_reports_original_git_repository_state(tmp_path: Path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    session, _, _ = make_session(repo)
+    assert session.set_target_directory("").ok is True
+
+    result = session.workspace_status()
+
+    assert result.workspace_root == repo
+    assert result.workspace_session is None
+    assert result.status_result is not None
+    assert result.status_result.ok is True
+    assert result.status_result.status is not None
+    assert result.status_result.status.source_path == repo
+    assert result.status_result.status.worktree_path == repo
+    assert result.status_result.status.source_branch == "main"
+    assert result.status_result.status.worktree_branch == "main"
+    assert result.status_result.status.changed_files == ()
+    assert result.status_result.status.git_status_porcelain == ""
+
+
+def test_workspace_status_reports_original_git_repository_changes(tmp_path: Path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "context.txt").write_text("new context\n", encoding="utf-8")
+    session, _, _ = make_session(repo)
+    assert session.set_target_directory("").ok is True
+
+    result = session.workspace_status()
+
+    assert result.status_result is not None
+    assert result.status_result.ok is True
+    assert result.status_result.status is not None
+    assert result.status_result.status.changed_files == ("context.txt",)
+    assert result.status_result.status.git_status_porcelain.strip() == "M context.txt"
+
+
+def test_workspace_status_reports_original_git_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    def missing_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        del cwd, args
+        raise FileNotFoundError
+
+    monkeypatch.setattr(runtime_session_module, "_git", missing_git)
+    session, _, _ = make_session(workspace)
+    assert session.set_target_directory("").ok is True
+
+    result = session.workspace_status()
+
+    assert result.status_result is not None
+    assert result.status_result.ok is False
+    assert result.status_result.issue is not None
+    assert result.status_result.issue.category == "git_status"
+    assert result.status_result.issue.reason == "git_unavailable"
 
 
 def test_run_captures_structured_progress_events_without_tui_rendering(

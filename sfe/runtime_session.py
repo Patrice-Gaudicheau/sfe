@@ -7,6 +7,7 @@ creating another runtime path.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -25,8 +26,10 @@ from sfe.run_pipeline import (
     RunResult,
 )
 from sfe.workspace_isolation import (
+    WorkspaceIssue,
     WorkspaceManager,
     WorkspaceSession,
+    WorkspaceStatus,
     WorkspaceStatusResult,
 )
 
@@ -184,10 +187,90 @@ class RuntimeSession:
         status_result = (
             self.workspace_manager.status(self.workspace_session)
             if self.workspace_session is not None
-            else None
+            else original_workspace_status(self.workspace_root)
         )
         return RuntimeWorkspaceStatus(
             workspace_root=self.workspace_root,
             workspace_session=self.workspace_session,
             status_result=status_result,
         )
+
+
+def original_workspace_status(workspace_root: Path | None) -> WorkspaceStatusResult | None:
+    if workspace_root is None:
+        return None
+    workspace = workspace_root.expanduser().resolve()
+    try:
+        git_root = _git(workspace, "rev-parse", "--show-toplevel")
+    except FileNotFoundError:
+        return WorkspaceStatusResult(
+            ok=False,
+            issue=WorkspaceIssue("git_status", "git_unavailable"),
+        )
+    if git_root.returncode != 0:
+        return WorkspaceStatusResult(
+            ok=False,
+            issue=WorkspaceIssue("git_status", "not_a_git_repository"),
+        )
+    source_path = Path(git_root.stdout.strip()).resolve()
+    status_result = _git(source_path, "status", "--porcelain")
+    if status_result.returncode != 0:
+        return WorkspaceStatusResult(
+            ok=False,
+            issue=WorkspaceIssue("git_status", "git_status_failed"),
+        )
+    diff_result = _git(source_path, "diff", "--no-ext-diff")
+    if diff_result.returncode != 0:
+        return WorkspaceStatusResult(
+            ok=False,
+            issue=WorkspaceIssue("git_status", "git_diff_failed"),
+        )
+    branch = _current_branch(source_path)
+    return WorkspaceStatusResult(
+        ok=True,
+        status=WorkspaceStatus(
+            git_status_porcelain=status_result.stdout,
+            git_diff=diff_result.stdout,
+            changed_files=_changed_files_from_status(status_result.stdout),
+            source_path=source_path,
+            worktree_path=source_path,
+            source_branch=branch,
+            worktree_branch=branch,
+        ),
+    )
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _current_branch(git_root: Path) -> str:
+    branch = _git(git_root, "branch", "--show-current")
+    if branch.returncode == 0 and branch.stdout.strip():
+        return branch.stdout.strip()
+    sha = _git(git_root, "rev-parse", "--short", "HEAD")
+    if sha.returncode == 0 and sha.stdout.strip():
+        return f"HEAD-{sha.stdout.strip()}"
+    return "HEAD"
+
+
+def _changed_files_from_status(status_output: str) -> tuple[str, ...]:
+    files: list[str] = []
+    seen: set[str] = set()
+    for line in status_output.splitlines():
+        if len(line) < 4:
+            continue
+        path_text = line[3:]
+        if " -> " in path_text:
+            path_text = path_text.rsplit(" -> ", 1)[1]
+        path_text = path_text.strip()
+        if path_text and path_text not in seen:
+            seen.add(path_text)
+            files.append(path_text)
+    return tuple(files)
