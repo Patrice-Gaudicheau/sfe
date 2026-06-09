@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import tomllib
 from pathlib import Path
 
 
@@ -188,6 +189,15 @@ def test_mcp_package_has_no_direct_stdout_prints_and_uses_stdio_transport() -> N
     assert all("print(" not in source for source in sources.values())
     assert 'transport="stdio"' in sources["server.py"]
     assert "http" not in sources["server.py"].lower()
+
+
+def test_packaging_includes_top_level_providers_package() -> None:
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+
+    packages = set(pyproject["tool"]["setuptools"]["packages"])
+
+    assert "providers" in packages
+    assert (PROJECT_ROOT / "providers" / "__init__.py").is_file()
 
 
 def test_each_tool_delegates_to_runtime_session() -> None:
