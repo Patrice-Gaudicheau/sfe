@@ -21,7 +21,10 @@ general model-safety guarantees.
    architecture status for the SFE core, TUI, `/run`, and `workspace_write`.
 4. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): local TUI workflow and
    command reference.
-5. [execution_mode_router_contract.md](execution_mode_router_contract.md):
+5. [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
+   design boundary for the planned local MCP control surface over the same
+   runtime path as the TUI.
+6. [execution_mode_router_contract.md](execution_mode_router_contract.md):
    current `/run` execution-mode router contract.
 
 ## Current Architecture And Doctrine
@@ -32,6 +35,8 @@ general model-safety guarantees.
   architecture boundary and what remains unproven.
 - [execution_mode_router_contract.md](execution_mode_router_contract.md):
   current `console_output`, `workspace_write`, and `external_action` contract.
+- [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
+  planned local MCP control surface and TUI/MCP ISO runtime requirement.
 - [sfe_continuity_orientation_layer.md](sfe_continuity_orientation_layer.md):
   orientation vocabulary for tasks, workspaces, evidence, and continuity. It is
   not current user guidance.

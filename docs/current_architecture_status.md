@@ -9,6 +9,10 @@ For the current user-facing TUI workflow and command reference, see
 For the current product doctrine, see
 [sfe_product_doctrine.md](sfe_product_doctrine.md).
 
+For the planned local MCP control surface and the TUI/MCP ISO runtime
+requirement, see
+[sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md).
+
 ## Current Local User Path
 
 SFE core is the routing/context engine: routing, context selection, bounded
