@@ -1,8 +1,8 @@
 # SFE MCP Local Control Surface
 
-This note defines the intended local Model Context Protocol (`MCP`)
-integration for SFE. It is a design boundary for the next implementation
-milestone, not an implementation note and not a production-readiness claim.
+This note defines the local Model Context Protocol (`MCP`) integration for
+SFE. It is a design and v1 entry-point boundary, not a production-readiness
+claim.
 
 For the current local TUI workflow, see
 [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md). For the current architecture
@@ -13,6 +13,11 @@ status, see
 
 The MCP integration should expose SFE to local MCP clients as a small control
 surface over the same runtime path that the first-party TUI already uses.
+The v1 local stdio entry point is:
+
+```bash
+sfe-mcp
+```
 
 The user-facing goal is to let a local MCP client perform the same canonical
 flow as the TUI:
@@ -48,10 +53,8 @@ If a behavior is already exercised by `/run`, `/run-report`, or
 `/workspace-status`, the MCP version should call the same internal layer rather
 than duplicating command-specific logic.
 
-If the current TUI keeps too much session logic directly in `sfe_tui.app`, that
-logic should be extracted into a shared runtime/session module before the MCP
-implementation depends on it. That extraction is intentionally out of scope for
-this documentation milestone.
+Shared session logic lives in `sfe.runtime_session.RuntimeSession`. The MCP
+implementation depends on that shared layer rather than `sfe_tui.app`.
 
 ## TUI/MCP ISO Requirement
 
