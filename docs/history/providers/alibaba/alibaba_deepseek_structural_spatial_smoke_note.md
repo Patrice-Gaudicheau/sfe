@@ -5,7 +5,7 @@ structural 50k smoke test. It is not a full baseline-vs-spatial comparison, not
 a repeat campaign, and not statistical reliability evidence. No live
 full-context baseline was run.
 
-No proxy files were modified. Alibaba thinking was disabled through the
+Alibaba thinking was disabled through the
 benchmark provider configuration.
 
 ## Configuration

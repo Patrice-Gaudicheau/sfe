@@ -1,11 +1,8 @@
 # Large Real-World Benchmark Progression Summary
 
 Status note: This is a historical benchmark progression record preserved for
-audit/research continuity. It predates later Proxy and provider work, so
-statements saying gateway/proxy behavior was not yet tested should be read as
-historical. Current terminology treats the SFE Proxy as standby experimental
-infrastructure. Start with `README.md` and `docs/INDEX.md` for the latest
-project overview.
+audit/research continuity. Start with `README.md` and `docs/INDEX.md` for the
+latest project overview.
 
 ## Purpose
 
@@ -86,8 +83,8 @@ This benchmark sequence does not prove broad real-world generalization.
 
 It does not prove production readiness, statistical robustness, or reliable
 behavior on arbitrary repositories and arbitrary user data. It does not test
-gateway or proxy behavior yet. It also does not prove that all model choices
-will behave the same.
+gateway behavior yet. It also does not prove that all model choices will behave
+the same.
 
 More fixtures, harder distractors, broader task types, and repeated stability
 checks are still needed.
@@ -155,7 +152,7 @@ validator remains the authority for pass/fail.
 - Add repeat-N reporting only if useful.
 - Compare model choices and routing costs.
 - Compare full-context executor vs selected-context executor.
-- Later test gateway/proxy behavior.
+- Later test gateway behavior.
 
 ## Closing summary
 

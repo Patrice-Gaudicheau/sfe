@@ -6,7 +6,7 @@ selection from execution, bounds execution modes, validates results where
 possible, and records safe observability.
 
 The documentation is organized so current architecture, TUI usage, benchmark
-evidence, Proxy compatibility material, and historical notes are not confused.
+evidence, provider material, and historical notes are not confused.
 The repository does not claim production readiness, statistical reliability, or
 general model-safety guarantees.
 
@@ -14,12 +14,11 @@ general model-safety guarantees.
 
 1. [sfe_product_doctrine.md](sfe_product_doctrine.md): current doctrine and
    terminology. Read this first when interpreting the TUI, benchmarks,
-   patch/worktree mode, or Proxy material.
+   or patch/worktree mode.
 2. [README.md](../README.md): project purpose, benchmark snapshot, setup,
    provider support, and limitations.
 3. [current_architecture_status.md](current_architecture_status.md): current
-   non-proxy architecture status for the SFE core, TUI, `/run`, and
-   `workspace_write`.
+   architecture status for the SFE core, TUI, `/run`, and `workspace_write`.
 4. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): local TUI workflow and
    command reference.
 5. [execution_mode_router_contract.md](execution_mode_router_contract.md):
@@ -28,7 +27,7 @@ general model-safety guarantees.
 ## Current Architecture And Doctrine
 
 - [sfe_product_doctrine.md](sfe_product_doctrine.md): SFE core, TUI,
-  patch/worktree, benchmarks, future API, and Proxy boundaries.
+  patch/worktree, benchmarks, and future API boundaries.
 - [current_architecture_status.md](current_architecture_status.md): current
   architecture boundary and what remains unproven.
 - [execution_mode_router_contract.md](execution_mode_router_contract.md):
@@ -128,15 +127,6 @@ include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
 Generated local reports should stay outside tracked files, preferably under
 `/tmp`, unless a summarized documentation note is intentionally added.
 
-## Proxy And Compatibility Material
-
-The Docker Proxy and `sfe_proxy/` are standby compatibility and historical
-integration infrastructure. They are not the canonical current user path. For
-historical Proxy mode and milestone notes, start with:
-
-- [history/proxy/proxy_milestone_history.md](history/proxy/proxy_milestone_history.md)
-- [history/proxy/sfe_proxy_mode.md](history/proxy/sfe_proxy_mode.md)
-
 ## History
 
 Historical notes preserve experiments, smoke tests, milestones, and superseded
@@ -170,9 +160,6 @@ read as current top-level project status.
 - Diagnostic bucketing separates strict failures into field extraction,
   evidence reference, contamination indicator, provider, parse, fallback, and
   repair categories where the report exposes enough information.
-- Proxy mode is experimental integration infrastructure, not production
-  deployment guidance.
-
 The repository does not claim general robustness, production readiness,
 contamination prevention, or that selected context generally outperforms full
 context.

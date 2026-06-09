@@ -4,7 +4,7 @@ This note records a cautious Alibaba Model Studio DeepSeek smoke test for SFE
 benchmark use. It is not a full campaign, not a structural 50k run, and not a
 statistical reliability result.
 
-No proxy files were modified. Alibaba thinking was disabled through the
+Alibaba thinking was disabled through the
 benchmark provider configuration.
 
 ## Configuration

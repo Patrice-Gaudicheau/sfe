@@ -11,17 +11,14 @@ The SFE-aware TUI was selected as the first local user-facing path for SFE
 workflow development. The DirectBackend is the default and only exposed backend
 for the TUI for now.
 
-The existing SFE Proxy and CodexCLI path are standby compatibility and
-stress-test infrastructure. They should stay safe, observable, and
-fallback-oriented, but they are no longer the primary interface being optimized
-for SFE-aware context routing.
+CodexCLI remains a supported provider path, but it is no longer the primary
+interface being optimized for SFE-aware context routing.
 
 ## Rationale
 
-CodexCLI-compatible traffic is useful for exercising the proxy, but realistic
-CodexCLI requests can pack large context into protected developer-role payloads.
-The project should not keep reverse-engineering those payloads as the canonical
-SFE interface.
+Realistic CodexCLI requests can pack large context into protected
+developer-role payloads. The project should not treat those payload shapes as
+the canonical SFE interface.
 
 The first-party TUI can expose the SFE contract directly:
 
@@ -39,7 +36,6 @@ intention-aware SFE flow with `/run`.
 ## Current Backend Policy
 
 - DirectBackend is canonical for TUI v0/v1.
-- ProxyBackend may remain as an internal experimental stub.
 - The TUI should not expose backend switching yet.
 - No `/backend` command is planned until a concrete need is proven.
 - The local lexical preview is not an LLM router result and must be labeled as
@@ -76,11 +72,11 @@ routes explicit `context_segments` through `local_lexical_preview`, and sends
 only the selected context segments plus protected instructions and the protected
 task to the executor.
 
-This path may call the configured executor provider, but it does not use the
-proxy, write files, execute shell commands, expose backend switching, or run an
-agent loop. The assistant answer is displayed to the user; diagnostics remain
-sanitized to counts, opaque ids, token estimates, provider call count, and
-disabled capability flags.
+This path may call the configured executor provider, but it does not write
+files, execute shell commands, expose backend switching, or run an agent loop.
+The assistant answer is displayed to the user; diagnostics remain sanitized to
+counts, opaque ids, token estimates, provider call count, and disabled
+capability flags.
 
 The current primary task path is `/run`: the core execution-mode router first
 chooses `console_output`, `workspace_write`, or `external_action`.
@@ -104,4 +100,4 @@ The TUI should continue to avoid:
 - API key or header logging,
 - automatic writes,
 - shell command execution,
-- provider or proxy calls in dry-run preview mode.
+- provider calls in dry-run preview mode.

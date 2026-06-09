@@ -2,7 +2,7 @@
 
 This note defines the current product doctrine for Spatial Field Engine for
 Cognition (`SFE`). It is the short alignment document to read before
-interpreting the TUI, benchmarks, historical router concepts, or Proxy notes.
+interpreting the TUI, benchmarks, or historical router concepts.
 
 ## What SFE Is
 
@@ -27,9 +27,6 @@ mode, not the identity of the project.
 
 SFE is not a benchmark dashboard. Benchmarks remain separate from normal TUI
 usage.
-
-SFE is not the Docker Proxy. The Proxy is standby compatibility and historical
-integration infrastructure, not the current local access path.
 
 SFE does not claim to make models smarter. The current claim is narrower:
 selected context and explicit routing may reduce executor context and improve

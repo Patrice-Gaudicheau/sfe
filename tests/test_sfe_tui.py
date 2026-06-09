@@ -46,7 +46,6 @@ from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import (
     DirectBackend,
     MISSING_TASK,
-    ProxyBackend,
     backend_by_name,
 )
 from sfe_tui.executors import (
@@ -1096,7 +1095,6 @@ def test_dry_run_after_task_requires_discovery_without_manual_context(tmp_path) 
     )
     assert "SFE dry-run summary" not in rendered
     assert "calling provider" not in rendered
-    assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
 
@@ -1270,7 +1268,6 @@ def test_status_before_any_task_or_context_is_coherent(tmp_path) -> None:
     assert "shell enabled: no" in status_block
     assert "patch application: routed /run workspace_write or explicit /apply-patch" in status_block
     assert "/backend" not in status_block
-    assert "ProxyBackend" not in status_block
 
 
 def test_status_displays_resolved_provider_roles_for_explicit_split(
@@ -1461,7 +1458,6 @@ def test_status_reports_direct_backend_and_disabled_capabilities() -> None:
     assert "writes: routed /run workspace_write or explicit /apply-patch only" in rendered
     assert "shell enabled: no" in rendered
     assert "patch application: routed /run workspace_write or explicit /apply-patch" in rendered
-    assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
 
@@ -1496,7 +1492,6 @@ def test_help_does_not_advertise_backend_switching() -> None:
     assert "/reset" in rendered
     assert "files or directories" not in rendered
     assert "Add context" not in rendered
-    assert "ProxyBackend" not in rendered
     assert "Clear task, context, discovery, and routing; preserve workspace" in rendered
     assert "/backend" not in rendered
     assert rendered.index("/directory") < rendered.index("/status")
@@ -1590,7 +1585,7 @@ def test_unknown_command_suggests_help(tmp_path) -> None:
 def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
-        input_provider=FakeInput(["", "/backend proxy", "/quit"]),
+        input_provider=FakeInput(["", "/backend direct", "/quit"]),
         output=output.append,
         cwd=tmp_path,
     )
@@ -1599,7 +1594,6 @@ def test_unknown_backend_command_is_not_exposed(tmp_path) -> None:
     rendered = "\n".join(output)
     assert "Error: unknown_command" in rendered
     assert "use /help to list commands" in rendered
-    assert "proxy_not_connected" not in rendered
 
 
 def test_discover_without_task_reports_missing_task(tmp_path) -> None:
@@ -2259,12 +2253,11 @@ def test_render_context_summary_uses_latest_result_selection(tmp_path) -> None:
 
 def test_backend_adapters_can_be_selected_or_instantiated() -> None:
     direct = backend_by_name("direct")
-    proxy = backend_by_name("proxy")
 
     assert isinstance(direct, DirectBackend)
-    assert isinstance(proxy, ProxyBackend)
     assert DirectBackend().name == "direct"
-    assert ProxyBackend().name == "proxy"
+    with pytest.raises(ValueError, match="unsupported_backend"):
+        backend_by_name("unknown")
 
 
 def test_backend_dry_run_makes_no_provider_calls(tmp_path) -> None:
@@ -2278,7 +2271,6 @@ def test_backend_dry_run_makes_no_provider_calls(tmp_path) -> None:
     )
 
     assert DirectBackend().dry_run(contract).provider_calls_made == 0
-    assert ProxyBackend().dry_run(contract).provider_calls_made == 0
 
 
 def test_ask_requires_task(tmp_path) -> None:
@@ -2429,7 +2421,6 @@ def test_ask_renders_answer_and_sanitized_summary(tmp_path) -> None:
     assert "SECRET_FILE_CONTENT" not in diagnostics
     assert "Explain context" not in diagnostics
     assert str(tmp_path) not in diagnostics
-    assert "ProxyBackend" not in rendered
     assert "backend switching" not in rendered
 
 
@@ -2653,7 +2644,6 @@ def test_patch_renders_proposal_and_sanitized_summary(tmp_path) -> None:
     assert "provider payload" not in diagnostics.lower()
     assert "Authorization" not in diagnostics
     assert "API_KEY" not in diagnostics
-    assert "ProxyBackend" not in rendered
     assert "backend switching" not in rendered
 
 
@@ -6563,14 +6553,12 @@ def test_tui_executor_factory_reports_invalid_sfe_provider_safely() -> None:
     assert result.provider_calls_made == 0
 
 
-def test_tui_executor_factory_ignores_proxy_provider_legacy_variable() -> None:
+def test_tui_executor_factory_uses_default_provider_when_unset() -> None:
     openai_provider = FakeProvider()
-    lemonade_provider = FakeProvider()
     executor = create_tui_executor(
-        environ={"SFE_PROXY_PROVIDER": "lemonade"},
+        environ={},
         provider_factories={
             "openai": lambda: openai_provider,
-            "lemonade": lambda: lemonade_provider,
         },
     )
 
@@ -6581,7 +6569,6 @@ def test_tui_executor_factory_ignores_proxy_provider_legacy_variable() -> None:
     assert executor.provider_name == "openai"
     assert result.provider_name == "openai"
     assert openai_provider.calls
-    assert not lemonade_provider.calls
 
 
 def test_tui_dry_run_makes_no_provider_call_with_sfe_provider(tmp_path) -> None:
@@ -6648,7 +6635,7 @@ def test_tui_dry_run_makes_no_codexcli_provider_call(tmp_path) -> None:
     assert not provider.calls
 
 
-def test_tui_ask_uses_resolved_provider_without_proxy(tmp_path) -> None:
+def test_tui_ask_uses_resolved_provider(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("selected context", encoding="utf-8")
     provider = FakeProvider()
@@ -6672,11 +6659,10 @@ def test_tui_ask_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert "provider: lemonade" in rendered
     assert "SFE answer\nprovider answer" in rendered
     assert provider.calls
-    assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
 
-def test_tui_ask_uses_codexcli_read_only_provider_without_proxy(tmp_path) -> None:
+def test_tui_ask_uses_codexcli_read_only_provider(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("selected context", encoding="utf-8")
     provider = FakeProvider()
@@ -6701,7 +6687,6 @@ def test_tui_ask_uses_codexcli_read_only_provider_without_proxy(tmp_path) -> Non
     assert "SFE answer\nprovider answer" in rendered
     assert provider.calls
     assert provider.calls[0]["system_instruction"] == READ_ONLY_SYSTEM_INSTRUCTION
-    assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
 
@@ -6745,7 +6730,7 @@ def test_tui_ask_renders_safe_lemonade_failure_category(tmp_path) -> None:
     assert "http://" not in rendered
 
 
-def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
+def test_tui_patch_uses_resolved_provider(tmp_path) -> None:
     source = tmp_path / "context.txt"
     source.write_text("selected context", encoding="utf-8")
     provider = FakeProvider()
@@ -6771,7 +6756,6 @@ def test_tui_patch_uses_resolved_provider_without_proxy(tmp_path) -> None:
     assert provider.calls[0]["messages"][0]["role"] == "system"
     assert provider.calls[0]["messages"][0]["content"] == PATCH_SYSTEM_INSTRUCTION
     assert "system_instruction" not in provider.calls[0]
-    assert "ProxyBackend" not in rendered
     assert "/backend" not in rendered
 
 
@@ -7497,23 +7481,6 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
     assert str(tmp_path) not in rendered
 
 
-def test_proxy_backend_dry_run_remains_safe_and_does_not_call_proxy(tmp_path) -> None:
-    source = tmp_path / "context.txt"
-    source.write_text("safe context", encoding="utf-8")
-    contract = build_contract(
-        workspace_root=tmp_path,
-        task="Task.",
-        file_paths=[],
-        context_files=[load_context_file(tmp_path, "context.txt")],
-    )
-
-    result = ProxyBackend().dry_run(contract)
-
-    assert result.provider_calls_made == 0
-    assert result.summary["selector_mode"] == "proxy_not_connected"
-    assert result.contract.audit["selected_segment_ids"] == []
-
-
 def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
     note = (
         PROJECT_ROOT / "docs" / "history" / "tui" / "tui_direct_backend_strategy.md"
@@ -7523,14 +7490,10 @@ def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
 
     assert "DirectBackend is the default and only exposed backend" in note
     assert "No `/backend` command" in note
-    assert "CodexCLI path are standby compatibility" in note
-    assert "stress-test infrastructure" in note
-    assert "The project should not keep reverse-engineering those payloads" in note
     assert "Router integration comes before executor integration" in note
     assert "`local_lexical_preview`" in note
     assert "`/ask` is the first read-only executor phase" in note
-    assert "does not use" in note
-    assert "the proxy, write files, execute shell commands" in normalized_note
+    assert "write files, execute shell commands" in normalized_note
     assert "dry-run" in normalized_note
     assert "tui_direct_backend_strategy.md" in index
     milestone = (

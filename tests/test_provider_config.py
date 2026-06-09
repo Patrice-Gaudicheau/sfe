@@ -17,7 +17,6 @@ from sfe.provider_config import (
     resolve_sfe_discovery_provider,
     resolve_sfe_executor_provider,
     resolve_sfe_provider,
-    resolve_sfe_provider_with_legacy_fallback,
     resolve_sfe_router_provider,
 )
 
@@ -167,47 +166,6 @@ def test_unknown_role_provider_raises_clear_error() -> None:
         resolve_sfe_executor_provider({"SFE_PROVIDER_EXECUTOR": "bad-executor"})
     with pytest.raises(ValueError, match="Unsupported SFE provider"):
         resolve_sfe_discovery_provider({"SFE_PROVIDER_DISCOVERY": "bad-discovery"})
-
-
-def test_sfe_provider_takes_precedence_over_legacy_provider() -> None:
-    environ = {
-        "SFE_PROVIDER": "anthropic",
-        "SFE_PROXY_PROVIDER": "lemonade",
-    }
-
-    assert resolve_sfe_provider_with_legacy_fallback(environ) == "anthropic"
-
-
-def test_legacy_provider_fallback_used_when_sfe_provider_unset() -> None:
-    environ = {"SFE_PROXY_PROVIDER": "lemonade"}
-
-    assert resolve_sfe_provider_with_legacy_fallback(environ) == "lemonade"
-
-
-def test_legacy_provider_fallback_ignores_blank_sfe_provider() -> None:
-    environ = {
-        "SFE_PROVIDER": "",
-        "SFE_PROXY_PROVIDER": "alibaba-api",
-    }
-
-    assert resolve_sfe_provider_with_legacy_fallback(environ) == "alibaba"
-
-
-def test_legacy_provider_default_used_when_both_unset() -> None:
-    assert resolve_sfe_provider_with_legacy_fallback({}) == "openai-compatible"
-
-
-def test_custom_legacy_env_var_is_supported_without_wiring_behavior() -> None:
-    environ = {"OLD_PROVIDER": "openai-api"}
-
-    assert (
-        resolve_sfe_provider_with_legacy_fallback(
-            environ,
-            legacy_env_var="OLD_PROVIDER",
-            default="lemonade",
-        )
-        == "openai"
-    )
 
 
 def test_no_env_loading_required(tmp_path) -> None:

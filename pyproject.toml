@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["sfe", "cognitive_map", "sfe_proxy", "sfe_tui"]
+packages = ["sfe", "cognitive_map", "sfe_tui"]
 
 [tool.pytest.ini_options]
 addopts = "--capture=sys"

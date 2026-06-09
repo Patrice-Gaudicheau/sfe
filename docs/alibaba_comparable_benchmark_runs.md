@@ -2,7 +2,7 @@
 
 This note summarizes a limited Alibaba Model Studio replay of benchmark families that already have OpenAI or Anthropic coverage in the repository. It is a small comparability pass, not a statistical reliability benchmark and not a provider ranking.
 
-Alibaba calls used the benchmark-only provider path with Qwen thinking disabled. No proxy files were modified.
+Alibaba calls used the benchmark-only provider path with Qwen thinking disabled.
 
 ## Configuration
 

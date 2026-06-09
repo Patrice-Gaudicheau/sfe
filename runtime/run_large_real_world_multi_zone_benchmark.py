@@ -120,18 +120,18 @@ def _gateway_integration_task() -> LargeRealWorldTask:
     )
     expected_fields = {
         "current_runtime_mode": "library-only planner runtime",
-        "gateway_status": "gateway proxy is planned but not implemented",
+        "gateway_status": "gateway integration is planned but not implemented",
         "executor_context_boundary": "executor receives composed selected-source context only",
         "excluded_capability": "no automatic API-key brokering or transparent production traffic interception",
         "responsible_owner": "COMPONENT_OWNER_GATEWAY_BRIDGE",
         "next_step": "build deterministic gateway contract fixture before provider smoke",
     }
     return LargeRealWorldTask(
-        fixture_id="large_real_world_gateway_proxy_integration_gate",
-        task_theme="gateway_proxy_integration_decision",
+        fixture_id="large_real_world_gateway_integration_gate",
+        task_theme="gateway_integration_decision",
         question=(
             "Using the project integration notes, determine the current gateway "
-            "status, execution context boundary, excluded proxy capabilities, "
+            "status, execution context boundary, excluded gateway capabilities, "
             "responsible owner, and next engineering step."
         ),
         sources=(
@@ -141,7 +141,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                 "Gateway Architecture Current State",
                 (
                     "Current architecture status: SFE runs as a library-only planner "
-                    "runtime. The gateway proxy is planned but not implemented. The "
+                    "runtime. Gateway integration is planned but not implemented. The "
                     "note describes how future gateway work should preserve deterministic "
                     "selection records, but it does not identify the owner or define "
                     "excluded traffic interception behavior."
@@ -163,7 +163,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
             _source(
                 "doc-gateway-exclusions-current",
                 "exclusion_policy",
-                "Gateway Proxy Exclusions",
+                "Gateway Integration Exclusions",
                 (
                     "The current integration exclusions state: no automatic API-key "
                     "brokering or transparent production traffic interception. Gateway "
@@ -185,25 +185,25 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                 required=True,
             ),
             _source(
-                "doc-gateway-proxy-beta-archive",
+                "doc-gateway-beta-archive",
                 "obsolete_release_note",
-                "Archived Gateway Proxy Beta Note",
+                "Archived Gateway Beta Note",
                 _distractor_text(
-                    "An archived beta note says a transparent gateway proxy shipped in "
+                    "An archived beta note says a transparent gateway shipped in "
                     "an early branch and could intercept production traffic. It is "
                     "obsolete and superseded by the current architecture note, which "
-                    "keeps the runtime library-only and the proxy unimplemented."
+                    "keeps the runtime library-only and gateway integration unimplemented."
                 ),
                 distractor=True,
             ),
             _source(
                 "doc-gateway-glossary",
                 "glossary",
-                "Gateway and Proxy Glossary",
+                "Gateway Glossary",
                 _distractor_text(
-                    "The glossary defines gateway, proxy, route, context, executor, "
+                    "The glossary defines gateway, route, context, executor, "
                     "provider, and API-key terms. It contains correct vocabulary but "
-                    "does not decide whether the gateway proxy exists, what context the "
+                    "does not decide whether gateway integration exists, what context the "
                     "executor receives, or who owns the work."
                 ),
                 distractor=True,
@@ -216,7 +216,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                     "The local ingress note explains how maintainers run a temporary "
                     "test ingress for development. It mentions explicit credentials and "
                     "routing headers, but it is operational background and not an "
-                    "authority for SFE gateway proxy behavior."
+                    "authority for SFE gateway behavior."
                 ),
                 distractor=True,
             ),
@@ -226,7 +226,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                 "Gateway Roadmap Draft",
                 _distractor_text(
                     "A draft roadmap proposes jumping directly to provider smoke tests "
-                    "and hosted proxy trials. It omits the deterministic gateway "
+                    "and hosted gateway trials. It omits the deterministic gateway "
                     "contract fixture and is not the accepted owner decision record."
                 ),
                 distractor=True,
@@ -238,7 +238,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                 _distractor_text(
                     "Provider adapter notes discuss response parsing, token accounting, "
                     "timeouts, and model configuration. They are relevant to future "
-                    "provider smoke tests but do not authorize a gateway proxy or define "
+                    "provider smoke tests but do not authorize gateway interception or define "
                     "the selected-source executor boundary."
                 ),
                 distractor=True,
@@ -249,7 +249,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                 "Security Review Preparation",
                 _distractor_text(
                     "A security review preparation note lists questions about secrets, "
-                    "bearer tokens, audit logs, and proxy traffic. It is intentionally "
+                    "bearer tokens, audit logs, and ingress traffic. It is intentionally "
                     "pre-decisional and does not set the current gateway exclusions."
                 ),
                 distractor=True,
@@ -272,7 +272,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
                 _distractor_text(
                     "The metrics exporter plan proposes counters for selected sources, "
                     "suppressed sources, and token estimates. It is useful for reporting "
-                    "but does not define current runtime mode or proxy exclusions."
+                    "but does not define current runtime mode or integration exclusions."
                 ),
                 distractor=True,
             ),
@@ -301,7 +301,7 @@ def _gateway_integration_task() -> LargeRealWorldTask:
         ),
         required_source_ids=required_source_ids,
         distractor_source_ids=(
-            "doc-gateway-proxy-beta-archive",
+            "doc-gateway-beta-archive",
             "doc-gateway-glossary",
             "doc-local-ingress-ops-note",
             "doc-gateway-roadmap-draft",

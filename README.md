@@ -31,8 +31,7 @@ For the current product doctrine, start with
 `docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context
 engine; the TUI is the current local user-facing control surface; patch/worktree
 is the developer execution mode inside `workspace_write`; benchmarks are the
-experimental evidence and architectural feedback loop; the Proxy is standby
-compatibility infrastructure, not the current local access path.
+experimental evidence and architectural feedback loop.
 
 ## Core Engineering Signal
 
@@ -99,7 +98,7 @@ SFE may be commercially relevant when avoided context is large enough to
 amortize routing cost. Current areas of interest include:
 
 - API-heavy long-context workflows.
-- Provider integration and proxy research.
+- Provider integration research.
 - Token budget control and context exposure reduction.
 - Auditable routing decisions.
 - Authority conflicts between documents, versions, policies, or governance
@@ -215,8 +214,6 @@ At a high level, the current repository has these layers:
   OpenAI API, Alibaba/Qwen, and native Anthropic Messages API paths.
 - `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
 - `sfe_tui/`: current local user-facing TUI surface using `DirectBackend`.
-- `sfe_proxy/`: standby experimental OpenAI-compatible local proxy retained for
-  compatibility research, observability, and historical stress tests.
 
 SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `DirectBackend` and follows:
@@ -265,8 +262,7 @@ Separate router-review calls are used by the advanced `/apply-patch` and
 proofs and are not mandatory for `/run`. `/discover` does not write files, run
 shell commands, initialize Git, or expose raw file contents in diagnostics.
 `/dry-run` still makes zero provider calls. `/ask` calls the configured executor
-only after routing selected context. No proxy is used in the current local TUI
-path.
+only after routing selected context.
 
 Manual `/files` context loading remains available for debug/design work, but it
 is not the normal human-facing TUI workflow.
@@ -316,7 +312,7 @@ python -m pip install -e .
 
 Copy `.env.example` to `.env` for local provider configuration. `.env` is ignored and must not be committed.
 Use `SFE_PROVIDER` as the canonical provider selector for SFE surfaces,
-including the TUI and standby proxy compatibility path.
+including the TUI.
 For SFE runtime roles, `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`
 optionally override `SFE_PROVIDER`; when either is absent or blank, SFE falls
 back to `SFE_PROVIDER` and then the surface default. Discovery routing can be
@@ -328,8 +324,7 @@ surface default. Discovery model variables are provider-specific, for example
 model variables when absent. Google discovery uses `SFE_GOOGLE_DISCOVERY_MODEL`
 with `SFE_GOOGLE_MODEL` as its fallback. Ollama discovery uses
 `SFE_OLLAMA_DISCOVERY_MODEL` with `SFE_OLLAMA_ROUTER_MODEL` and
-`SFE_OLLAMA_MODEL` as fallbacks. The standby proxy keeps its existing provider
-semantics and does not use the role-specific selectors yet.
+`SFE_OLLAMA_MODEL` as fallbacks.
 
 ## Minimal Verification
 
@@ -343,9 +338,6 @@ pytest tests/test_sfe_tui.py -q
 pytest tests/test_large_contextual_benchmark.py -q
 python runtime/run_large_contextual_benchmark.py --dry-run --limit 1
 ```
-
-Proxy tests remain available for standby/historical compatibility work, but
-they are not the current user-facing smoke path.
 
 For the current repository-root read-only TUI smoke path:
 
@@ -370,8 +362,8 @@ Expected observations are modest: `/discover` reports safe candidate metadata
 and remains read-only, `/dry-run` reports `provider calls made: 0`, and `/ask`
 requires a configured provider. With `SFE_PROVIDER=lemonade` and Lemonade
 reachable, `/ask` can complete through `DirectBackend`. Provider errors should
-be reported safely if the configured provider is unavailable. No proxy is used.
-This read-only smoke uses advanced diagnostics; the canonical task path is
+be reported safely if the configured provider is unavailable. This read-only
+smoke uses advanced diagnostics; the canonical task path is
 `/task <question>` followed by `/run`.
 
 For a local Ollama read-only smoke, start Ollama, pull the configured model,
@@ -397,20 +389,15 @@ The current prototype has provider paths for OpenAI, Lemonade, Alibaba/Qwen,
 Anthropic, Google/Gemini, Ollama, and CodexCLI. They do not all have identical
 maturity or API shape.
 
-| Provider | Benchmark path | Standby proxy notes | Notes |
-| --- | --- | --- | --- |
-| OpenAI | `--executor openai-api` in large/contextual benchmarks and related OpenAI runners | Historical proxy support exists, but the proxy is not the current user path. | Uses OpenAI-compatible or direct OpenAI API configuration. Set `OPENAI_API_KEY`, `SFE_OPENAI_ROUTER_MODEL`, and `SFE_OPENAI_EXECUTOR_MODEL` for live benchmark runs. |
-| Lemonade | `--executor lemonade` and historical/local benchmark runners | Historical proxy support exists, but the proxy is not the current user path. | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
-| Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Historical proxy support exists, but the proxy is not the current user path. | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
-| Anthropic | `--executor anthropic` in large/contextual benchmarks | Historical proxy support exists, but the proxy is not the current user path. | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
-| Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Standby proxy can pass through the OpenAI-compatible endpoint, but the proxy is not the current user path. | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, `SFE_GOOGLE_DISCOVERY_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`; absent or blank discovery model falls back to `SFE_GOOGLE_MODEL`, then the Google default. |
-| Ollama | TUI/core provider roles and `runtime/run_ollama_smoke.py` | Proxy support is not the recommended path. Use the direct local provider. | Local Ollama HTTP API provider for capable local machines and experimentation. Configure `SFE_PROVIDER=ollama`, `SFE_OLLAMA_BASE_URL`, and `SFE_OLLAMA_MODEL`. Default local endpoint is `http://localhost:11434`; the smoke-test model is `qwen3.5:4b`. Pull the model before use. This is a compatibility feature, not a performance claim. |
-| CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Proxy notes remain historical/stress-test material, not the recommended CodexCLI path. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and `SFE_PROVIDER_EXECUTOR`. Model selection uses `SFE_CODEXCLI_ROUTER_MODEL`, `SFE_CODEXCLI_DISCOVERY_MODEL`, and `SFE_CODEXCLI_EXECUTOR_MODEL`; absent or blank discovery model falls back to the router model, then the CodexCLI router default. `SFE_CODEXCLI_ROUTER_EFFORT`, `SFE_CODEXCLI_DISCOVERY_EFFORT`, and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT` for their respective roles; absent or blank discovery effort falls back to router effort, then the legacy shared value. CodexCLI can route `/run`, select discovery files from the workspace map, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for discovery path validation, patch parsing, validation, worktree isolation, application, and rejection. |
-
-Proxy-specific variables remain in `.env.example` for historical and standby
-work, but the proxy is not the recommended active path for TUI V0.1. For the
-standby proxy, `SFE_PROVIDER` is the current provider selector;
-`SFE_PROXY_PROVIDER` is a legacy proxy-only fallback.
+| Provider | Benchmark path | Notes |
+| --- | --- | --- |
+| OpenAI | `--executor openai-api` in large/contextual benchmarks and related OpenAI runners | Uses OpenAI-compatible or direct OpenAI API configuration. Set `OPENAI_API_KEY`, `SFE_OPENAI_ROUTER_MODEL`, and `SFE_OPENAI_EXECUTOR_MODEL` for live benchmark runs. |
+| Lemonade | `--executor lemonade` and historical/local benchmark runners | Local OpenAI-compatible inference server path. Configure `SFE_LEMONADE_BASE_URL`, `SFE_ROUTER_MODEL`, and `SFE_EXECUTOR_MODEL` for local live runs. |
+| Alibaba/Qwen | `--executor alibaba-api` and `runtime/run_alibaba_smoke.py` | Uses Alibaba Model Studio / DashScope OpenAI-compatible Chat Completions. Configure `ALIBABA_API_KEY`, `ALIBABA_BASE_URL`, `SFE_ALIBABA_ROUTER_MODEL`, and `SFE_ALIBABA_EXECUTOR_MODEL` for benchmarks. Qwen thinking is disabled by default for benchmark token-accounting comparability. |
+| Anthropic | `--executor anthropic` in large/contextual benchmarks | Uses the native Anthropic Messages API path. Configure `ANTHROPIC_API_KEY`, `SFE_ANTHROPIC_ROUTER_MODEL`, and `SFE_ANTHROPIC_EXECUTOR_MODEL` for benchmarks. Large-context structural runs may require provider-call pacing because of input-token-per-minute limits. |
+| Google/Gemini | `--executor google` in large/contextual and effectiveness-style benchmark runners, plus `runtime/run_google_smoke.py` | Uses Gemini's OpenAI-compatible Chat Completions endpoint. Configure `GOOGLE_API_KEY`, `SFE_GOOGLE_MODEL`, `SFE_GOOGLE_DISCOVERY_MODEL`, and `SFE_GOOGLE_BASE_URL` for live runs. Default model is `gemini-2.5-flash-lite`; absent or blank discovery model falls back to `SFE_GOOGLE_MODEL`, then the Google default. |
+| Ollama | TUI/core provider roles and `runtime/run_ollama_smoke.py` | Local Ollama HTTP API provider for capable local machines and experimentation. Configure `SFE_PROVIDER=ollama`, `SFE_OLLAMA_BASE_URL`, and `SFE_OLLAMA_MODEL`. Default local endpoint is `http://localhost:11434`; the smoke-test model is `qwen3.5:4b`. Pull the model before use. This is a compatibility feature, not a performance claim. |
+| CodexCLI | Benchmark internals may use `openai-codexcli` through `providers.codexcli.PROVIDER_NAME`. | Public SFE surfaces can use `SFE_PROVIDER=codexcli` or split roles with `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and `SFE_PROVIDER_EXECUTOR`. Model selection uses `SFE_CODEXCLI_ROUTER_MODEL`, `SFE_CODEXCLI_DISCOVERY_MODEL`, and `SFE_CODEXCLI_EXECUTOR_MODEL`; absent or blank discovery model falls back to the router model, then the CodexCLI router default. `SFE_CODEXCLI_ROUTER_EFFORT`, `SFE_CODEXCLI_DISCOVERY_EFFORT`, and `SFE_CODEXCLI_EXECUTOR_EFFORT` override `SFE_CODEXCLI_REASONING_EFFORT` for their respective roles; absent or blank discovery effort falls back to router effort, then the legacy shared value. CodexCLI can route `/run`, select discovery files from the workspace map, answer TUI console/read-only requests, and propose DEV patches as text only. SFE remains responsible for discovery path validation, patch parsing, validation, worktree isolation, application, and rejection. |
 
 Full CodexCLI `/run` routing can be configured explicitly:
 
@@ -509,18 +496,6 @@ include `openai` even though they call OpenAI when the API key is present. Check
 
 Anthropic structural runs may require `--provider-call-delay-seconds` because
 provider input-token-per-minute limits can affect execution timing.
-
-## Proxy Standby Status
-
-The proxy and Dockerized proxy path are currently in standby. The canonical
-user-facing path is the SFE-aware TUI with `DirectBackend`; start with
-`docs/tui_v0_1_user_guide.md`.
-
-The proxy source code remains in `sfe_proxy/`, and historical proxy notes are
-kept under `docs/history/proxy/`. That material is retained for compatibility
-research, observability work, OpenAI-compatible request-shape experiments, and
-possible future development. It should not be read as the recommended active
-user workflow, production deployment guidance, or the canonical SFE interface.
 
 ## Benchmarks
 
@@ -668,7 +643,7 @@ model intelligence.
   write boundary and router-reviewed full-file replacement design, retained for
   compatibility rather than the primary `/run` workflow.
 - `docs/current_architecture_status.md`: current boundary between the SFE core,
-  local TUI surface, patch/worktree mode, and standby Proxy infrastructure.
+  local TUI surface, patch/worktree mode, and provider integration.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
 - `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
 - `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.
@@ -686,14 +661,6 @@ model intelligence.
   router contract.
 - `reports/technical_report_v0_1/`: earlier Cognitive Map technical report.
 - `sfe_white_paper.md`: original architecture proposal; more speculative than the current public README.
-
-## Proxy Standby Direction
-
-Future proxy work may resume later, but it is not part of the current V0.1
-user-facing path. Any future activation should stay narrow: better
-observability, clearer activation criteria, and safer provider-operation
-boundaries. The current proxy remains standby/experimental infrastructure for
-local integration research and controlled routing experiments.
 
 ## Limitations
 

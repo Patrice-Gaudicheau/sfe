@@ -8,7 +8,7 @@ This note summarizes the provider waiting model completed through commit
 SFE previously relied on provider-specific timeout environment variables as the
 main waiting contract. That model was too coarse for SFE because provider calls
 can be short, long-running, local, remote, streaming, non-streaming, benchmark
-driven, proxy driven, or structural. A fixed provider timeout does not describe
+driven, or structural. A fixed provider timeout does not describe
 whether a call is actually making progress.
 
 ## Core model
@@ -39,7 +39,7 @@ The first implementation does not add a full cancellation API. Some blocking
 worker paths can still rely on transport safeguards to unwind after idle
 supervision reports a stalled call.
 
-## Provider and proxy notes
+## Provider notes
 
 OpenAI, Anthropic, Alibaba/Qwen, Lemonade, and CodexCLI provider paths emit core
 progress events. Retry/backoff points emit progress metadata without pretending
@@ -51,12 +51,6 @@ reader threads start before stdin is written. If CodexCLI exits early and closes
 stdin, stderr is still drained, the process return code is still handled, and a
 clean provider failure is surfaced instead of a raw `BrokenPipeError`.
 
-The proxy records progress for upstream headers, chunks, and SSE lines without
-storing prompt bodies, authorization headers, API keys, or full payloads.
-Proxy-side progress storage is bounded per call: it keeps the first 100 events
-and the last 100 events, drops the middle events, and records truncation
-metadata including dropped event counts.
-
 ## Configuration cleanup
 
 The obsolete provider timeout environment variables were removed from public
@@ -66,7 +60,6 @@ configuration, examples, docs, tests, and runtime fallbacks:
 - `SFE_ANTHROPIC_API_TIMEOUT`
 - `SFE_LEMONADE_TIMEOUT_SECONDS`
 - `SFE_CODEXCLI_TIMEOUT`
-- `SFE_PROXY_SHADOW_ROUTER_TIMEOUT_SECONDS`
 
 Benchmark pacing, provider rate-limit controls, retry/backoff controls, idle
 supervision configuration, and internal transport safeguards remain preserved.
@@ -75,7 +68,7 @@ supervision configuration, and internal transport safeguards remain preserved.
 
 The final merge validation after timeout cleanup passed on `main`:
 
-- Focused provider/proxy/TUI/router/env tests: `468 passed`
+- Focused provider/TUI/router/env tests: `468 passed`
 - Full test suite: `1252 passed`
 - `python -m py_compile` on modified Python files: passed
 - `git diff --check`: passed

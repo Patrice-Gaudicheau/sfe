@@ -43,11 +43,9 @@ The default selection source is `fixture`. Fixture selection uses the
 task's deterministic `selected_block_ids` and keeps the dry-run tests stable.
 
 The optional `router` selection source uses the neutral SFE segment selector in
-`sfe.segment_selector`. The Proxy runtime is not required for this benchmark,
-and the benchmark does not depend on `sfe_proxy.shadow_router`. It also does not
-use the SFE run pipeline or workspace discovery. The benchmark still compares
-two executor modes only: full-context `baseline` and `selected` context from the
-chosen selection source.
+`sfe.segment_selector`. It does not use the SFE run pipeline or workspace
+discovery. The benchmark still compares two executor modes only: full-context
+`baseline` and `selected` context from the chosen selection source.
 
 In router mode, there is no fallback to fixture selection. If the router fails
 or returns no usable block IDs, the selected executor call is skipped and the

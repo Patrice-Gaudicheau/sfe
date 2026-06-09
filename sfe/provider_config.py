@@ -15,7 +15,6 @@ SFE_PROVIDER_ROUTER_ENV = "SFE_PROVIDER_ROUTER"
 SFE_PROVIDER_DISCOVERY_ENV = "SFE_PROVIDER_DISCOVERY"
 SFE_PROVIDER_EXECUTOR_ENV = "SFE_PROVIDER_EXECUTOR"
 DEFAULT_SFE_PROVIDER = "openai"
-DEFAULT_PROXY_STANDBY_PROVIDER = "openai-compatible"
 CODEXCLI_SFE_PROVIDER = "codexcli"
 OLLAMA_SFE_PROVIDER = "ollama"
 
@@ -96,22 +95,6 @@ def resolve_sfe_executor_provider(
         role_env_var=SFE_PROVIDER_EXECUTOR_ENV,
         default=default,
     )
-
-
-def resolve_sfe_provider_with_legacy_fallback(
-    environ: Mapping[str, str] | None = None,
-    legacy_env_var: str = "SFE_PROXY_PROVIDER",
-    default: str = DEFAULT_PROXY_STANDBY_PROVIDER,
-) -> str:
-    """Resolve SFE_PROVIDER, then a legacy provider variable, then a default."""
-    env = os.environ if environ is None else environ
-    provider = _env_value(env, SFE_PROVIDER_ENV)
-    if provider is not None:
-        return normalize_provider_name(provider)
-    legacy_provider = _env_value(env, legacy_env_var)
-    if legacy_provider is not None:
-        return normalize_provider_name(legacy_provider)
-    return normalize_provider_name(default)
 
 
 def _resolve_sfe_role_provider(

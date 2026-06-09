@@ -4,7 +4,7 @@ This note records one live Alibaba Model Studio DeepSeek structural 50k
 baseline-vs-spatial comparison. It is a single-run comparison, not a repeat
 campaign, not statistical reliability evidence, and not production validation.
 
-No proxy files were modified. Alibaba thinking was disabled through the
+Alibaba thinking was disabled through the
 benchmark provider configuration. Output repair was disabled.
 
 ## Configuration

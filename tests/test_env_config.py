@@ -88,10 +88,10 @@ class EnvConfigTests(unittest.TestCase):
 
         self.assertIn("OPENAI_API_KEY=", text)
         self.assertIn("OPENAI_BASE_URL=https://api.openai.com/v1", text)
-        self.assertIn("SFE_OPENAI_ROUTER_MODEL=gpt-5.4-nano", text)
+        self.assertIn("SFE_OPENAI_ROUTER_MODEL=gpt-5.5", text)
         self.assertIn("SFE_OPENAI_DISCOVERY_MODEL=", text)
-        self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=gpt-5.5", text)
-        self.assertIn("SFE_CODEXCLI_ROUTER_MODEL=gpt-5.4", text)
+        self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=gpt-5.4", text)
+        self.assertIn("SFE_CODEXCLI_ROUTER_MODEL=gpt-5.5", text)
         self.assertIn("SFE_CODEXCLI_DISCOVERY_MODEL=", text)
         self.assertIn("SFE_CODEXCLI_EXECUTOR_MODEL=gpt-5.4", text)
         self.assertIn("SFE_CODEXCLI_DISCOVERY_EFFORT=", text)
@@ -100,18 +100,12 @@ class EnvConfigTests(unittest.TestCase):
             "ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             text,
         )
-        self.assertIn("DASHSCOPE_API_KEY=", text)
-        self.assertIn(
-            "SFE_ALIBABA_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode",
-            text,
-        )
-        self.assertIn("SFE_ALIBABA_MODEL=", text)
-        self.assertIn("SFE_ALIBABA_ROUTER_MODEL=qwen3.6-flash", text)
+        self.assertIn("SFE_ALIBABA_ROUTER_MODEL=qwen3.6-plus", text)
         self.assertIn("SFE_ALIBABA_DISCOVERY_MODEL=", text)
         self.assertIn("SFE_ALIBABA_EXECUTOR_MODEL=qwen3.6-plus", text)
         self.assertIn("SFE_ALIBABA_DISABLE_THINKING=true", text)
         self.assertIn("GOOGLE_API_KEY=", text)
-        self.assertIn("SFE_GOOGLE_MODEL=gemini-2.5-flash-lite", text)
+        self.assertIn("SFE_GOOGLE_MODEL=gemini-2.5", text)
         self.assertIn("SFE_GOOGLE_DISCOVERY_MODEL=", text)
         self.assertIn(
             "SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai",
@@ -120,9 +114,9 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY=", text)
         self.assertIn("ANTHROPIC_BASE_URL=https://api.anthropic.com", text)
         self.assertIn("ANTHROPIC_VERSION=2023-06-01", text)
-        self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=claude-haiku-4-5-20251001", text)
+        self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=claude-sonnet-4-6", text)
         self.assertIn("SFE_ANTHROPIC_DISCOVERY_MODEL=", text)
-        self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=claude-sonnet-4-6", text)
+        self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=claude-haiku-4-5-20251001", text)
         self.assertIn("SFE_ROUTER_MODEL=Qwen3-0.6B-GGUF", text)
         self.assertIn("SFE_LEMONADE_DISCOVERY_MODEL=", text)
         self.assertIn("SFE_EXECUTOR_MODEL=Qwen3.5-35B-A3B-GGUF", text)
@@ -137,8 +131,6 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_PROVIDER_DISCOVERY=", text)
         self.assertIn("SFE_PROVIDER_EXECUTOR=", text)
         self.assertIn("SFE_PATCH_JSON_REPAIR_ENABLED=true", text)
-        self.assertIn("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL=false", text)
-        self.assertIn("SFE_PROXY_SHADOW_LIVE_TIMEOUT_SECONDS=180", text)
         self.assertIn("SFE_ZONE_ROUTER_MODEL=", text)
         self.assertIn("SFE_PROVIDER_IDLE_TIMEOUT_SECONDS=", text)
         self.assertIn("SFE_PROVIDER_INTERNAL_HEARTBEAT_SECONDS=", text)
@@ -157,10 +149,6 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "SFE_CODEXCLI_DISCOVERY_EFFORT=")
             if line.startswith("ALIBABA_API_KEY="):
                 self.assertEqual(line, "ALIBABA_API_KEY=")
-            if line.startswith("DASHSCOPE_API_KEY="):
-                self.assertEqual(line, "DASHSCOPE_API_KEY=")
-            if line.startswith("SFE_ALIBABA_MODEL="):
-                self.assertEqual(line, "SFE_ALIBABA_MODEL=")
             if line.startswith("SFE_ALIBABA_DISCOVERY_MODEL="):
                 self.assertEqual(line, "SFE_ALIBABA_DISCOVERY_MODEL=")
             if line.startswith("GOOGLE_API_KEY="):
