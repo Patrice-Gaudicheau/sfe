@@ -72,14 +72,28 @@ class EnvConfigTests(unittest.TestCase):
         env_example = PROJECT_ROOT / ".env.example"
         text = env_example.read_text(encoding="utf-8")
 
+        self.assertIn("Spatial Field Engine - Example configuration", text)
+        self.assertIn("choose one LLM provider below", text)
+        self.assertIn("Only one SFE_PROVIDER should be active at a time.", text)
+        for provider in (
+            "openai",
+            "anthropic",
+            "google",
+            "alibaba",
+            "codexcli",
+            "lemonade",
+            "ollama",
+        ):
+            self.assertIn(f"#SFE_PROVIDER={provider}", text)
+
         self.assertIn("OPENAI_API_KEY=", text)
-        self.assertIn("SFE_PROVIDER=openai", text)
-        self.assertIn("SFE_OPENAI_ROUTER_MODEL=", text)
+        self.assertIn("OPENAI_BASE_URL=https://api.openai.com/v1", text)
+        self.assertIn("SFE_OPENAI_ROUTER_MODEL=gpt-5.4-nano", text)
         self.assertIn("SFE_OPENAI_DISCOVERY_MODEL=", text)
-        self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=", text)
-        self.assertIn("SFE_CODEXCLI_ROUTER_MODEL=", text)
+        self.assertIn("SFE_OPENAI_EXECUTOR_MODEL=gpt-5.5", text)
+        self.assertIn("SFE_CODEXCLI_ROUTER_MODEL=gpt-5.4", text)
         self.assertIn("SFE_CODEXCLI_DISCOVERY_MODEL=", text)
-        self.assertIn("SFE_CODEXCLI_EXECUTOR_MODEL=", text)
+        self.assertIn("SFE_CODEXCLI_EXECUTOR_MODEL=gpt-5.4", text)
         self.assertIn("SFE_CODEXCLI_DISCOVERY_EFFORT=", text)
         self.assertIn("ALIBABA_API_KEY=", text)
         self.assertIn(
@@ -100,13 +114,15 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_GOOGLE_MODEL=gemini-2.5-flash-lite", text)
         self.assertIn("SFE_GOOGLE_DISCOVERY_MODEL=", text)
         self.assertIn(
-            "SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/",
+            "SFE_GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai",
             text,
         )
         self.assertIn("ANTHROPIC_API_KEY=", text)
-        self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=", text)
+        self.assertIn("ANTHROPIC_BASE_URL=https://api.anthropic.com", text)
+        self.assertIn("ANTHROPIC_VERSION=2023-06-01", text)
+        self.assertIn("SFE_ANTHROPIC_ROUTER_MODEL=claude-haiku-4-5-20251001", text)
         self.assertIn("SFE_ANTHROPIC_DISCOVERY_MODEL=", text)
-        self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=", text)
+        self.assertIn("SFE_ANTHROPIC_EXECUTOR_MODEL=claude-sonnet-4-6", text)
         self.assertIn("SFE_ROUTER_MODEL=Qwen3-0.6B-GGUF", text)
         self.assertIn("SFE_LEMONADE_DISCOVERY_MODEL=", text)
         self.assertIn("SFE_EXECUTOR_MODEL=Qwen3.5-35B-A3B-GGUF", text)
@@ -117,22 +133,26 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_OLLAMA_EXECUTOR_MODEL=", text)
         self.assertIn("SFE_OLLAMA_TIMEOUT_SECONDS=120", text)
         self.assertIn("SFE_OLLAMA_THINK=false", text)
+        self.assertIn("SFE_PROVIDER_ROUTER=", text)
+        self.assertIn("SFE_PROVIDER_DISCOVERY=", text)
+        self.assertIn("SFE_PROVIDER_EXECUTOR=", text)
+        self.assertIn("SFE_PATCH_JSON_REPAIR_ENABLED=true", text)
+        self.assertIn("SFE_PROXY_ENABLED_FALLBACK_TO_ORIGINAL=false", text)
+        self.assertIn("SFE_PROXY_SHADOW_LIVE_TIMEOUT_SECONDS=180", text)
+        self.assertIn("SFE_ZONE_ROUTER_MODEL=", text)
+        self.assertIn("SFE_PROVIDER_IDLE_TIMEOUT_SECONDS=", text)
+        self.assertIn("SFE_PROVIDER_INTERNAL_HEARTBEAT_SECONDS=", text)
+        self.assertIn("SFE_PATCH_NORMALIZE_HUNK_COUNTS=", text)
+        self.assertIn("SFE_LEMONADE_ROUTER_MODEL=", text)
+        self.assertIn("SFE_LEMONADE_EXECUTOR_MODEL=", text)
         self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{12,}")
         for line in text.splitlines():
             if line.startswith("OPENAI_API_KEY="):
                 self.assertEqual(line, "OPENAI_API_KEY=")
-            if line.startswith("SFE_OPENAI_ROUTER_MODEL="):
-                self.assertEqual(line, "SFE_OPENAI_ROUTER_MODEL=")
             if line.startswith("SFE_OPENAI_DISCOVERY_MODEL="):
                 self.assertEqual(line, "SFE_OPENAI_DISCOVERY_MODEL=")
-            if line.startswith("SFE_OPENAI_EXECUTOR_MODEL="):
-                self.assertEqual(line, "SFE_OPENAI_EXECUTOR_MODEL=")
-            if line.startswith("SFE_CODEXCLI_ROUTER_MODEL="):
-                self.assertEqual(line, "SFE_CODEXCLI_ROUTER_MODEL=")
             if line.startswith("SFE_CODEXCLI_DISCOVERY_MODEL="):
                 self.assertEqual(line, "SFE_CODEXCLI_DISCOVERY_MODEL=")
-            if line.startswith("SFE_CODEXCLI_EXECUTOR_MODEL="):
-                self.assertEqual(line, "SFE_CODEXCLI_EXECUTOR_MODEL=")
             if line.startswith("SFE_CODEXCLI_DISCOVERY_EFFORT="):
                 self.assertEqual(line, "SFE_CODEXCLI_DISCOVERY_EFFORT=")
             if line.startswith("ALIBABA_API_KEY="):
@@ -149,12 +169,8 @@ class EnvConfigTests(unittest.TestCase):
                 self.assertEqual(line, "SFE_GOOGLE_DISCOVERY_MODEL=")
             if line.startswith("ANTHROPIC_API_KEY="):
                 self.assertEqual(line, "ANTHROPIC_API_KEY=")
-            if line.startswith("SFE_ANTHROPIC_ROUTER_MODEL="):
-                self.assertEqual(line, "SFE_ANTHROPIC_ROUTER_MODEL=")
             if line.startswith("SFE_ANTHROPIC_DISCOVERY_MODEL="):
                 self.assertEqual(line, "SFE_ANTHROPIC_DISCOVERY_MODEL=")
-            if line.startswith("SFE_ANTHROPIC_EXECUTOR_MODEL="):
-                self.assertEqual(line, "SFE_ANTHROPIC_EXECUTOR_MODEL=")
             if line.startswith("SFE_LEMONADE_DISCOVERY_MODEL="):
                 self.assertEqual(line, "SFE_LEMONADE_DISCOVERY_MODEL=")
             if line.startswith("SFE_OLLAMA_ROUTER_MODEL="):
