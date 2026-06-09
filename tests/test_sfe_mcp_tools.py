@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import threading
 from pathlib import Path
@@ -36,6 +37,7 @@ from sfe.workspace_isolation import (  # noqa: E402
     WorkspaceStatus,
     WorkspaceStatusResult,
 )
+from sfe_mcp.progress import create_mcp_progress_callback  # noqa: E402
 from sfe_mcp.tools import SfeMcpToolHandlers, V1_TOOL_NAMES  # noqa: E402
 
 
@@ -104,8 +106,11 @@ class FakeRuntimeSession:
         self.calls.append(("set_task", task))
         return self.task_result
 
-    def run(self) -> SessionRunResult:
+    def run(self, progress_callback=None) -> SessionRunResult:
         self.calls.append(("run", None))
+        if progress_callback is not None:
+            for event in self.run_result.progress_events:
+                progress_callback(event)
         return self.run_result
 
     def run_report(self) -> RunReportResult:
@@ -292,7 +297,8 @@ def test_concurrent_run_is_rejected_with_structured_status() -> None:
     release = threading.Event()
 
     class BlockingRuntimeSession(FakeRuntimeSession):
-        def run(self) -> SessionRunResult:
+        def run(self, progress_callback=None) -> SessionRunResult:
+            del progress_callback
             self.calls.append(("run", None))
             entered.set()
             release.wait(timeout=5)
@@ -324,6 +330,113 @@ def test_concurrent_run_is_rejected_with_structured_status() -> None:
     }
     assert second_result["action_hint"] == "retry_sfe_run_after_current_run_finishes"
     assert session.calls == [("run", None)]
+
+
+def test_sfe_run_passes_progress_callback_to_runtime_session() -> None:
+    session = FakeRuntimeSession()
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+    progress_events = []
+
+    result = handlers.sfe_run(progress_events.append)
+
+    assert result["ok"] is True
+    assert [event.name for event in progress_events] == ["run_started"]
+    assert result["progress"] == [
+        {
+            "name": "run_started",
+            "message": "SFE: run started",
+            "metadata": {"candidate_count": 2},
+        }
+    ]
+
+
+def test_mcp_progress_callback_reports_safe_progress_messages() -> None:
+    class FakeContext:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str | None = None,
+        ) -> None:
+            self.calls.append(
+                {
+                    "progress": progress,
+                    "total": total,
+                    "message": message,
+                }
+            )
+
+    async def exercise() -> list[dict[str, object]]:
+        context = FakeContext()
+        loop = asyncio.get_running_loop()
+        callback = create_mcp_progress_callback(context, loop)  # type: ignore[arg-type]
+        await asyncio.to_thread(
+            callback,
+            RunProgressEvent(
+                "run_started",
+                "SFE: run started",
+                {"secret": "SECRET_FILE_CONTENT", "candidate_count": 2},
+            ),
+        )
+        await asyncio.sleep(0)
+        return context.calls
+
+    calls = asyncio.run(exercise())
+
+    assert calls == [
+        {
+            "progress": 1.0,
+            "total": None,
+            "message": "SFE: run started",
+        }
+    ]
+
+
+def test_mcp_progress_callback_sanitizes_non_sfe_messages() -> None:
+    class FakeContext:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str | None = None,
+        ) -> None:
+            self.calls.append(
+                {
+                    "progress": progress,
+                    "total": total,
+                    "message": message,
+                }
+            )
+
+    async def exercise() -> list[dict[str, object]]:
+        context = FakeContext()
+        loop = asyncio.get_running_loop()
+        callback = create_mcp_progress_callback(context, loop)  # type: ignore[arg-type]
+        callback(
+            RunProgressEvent(
+                "provider_detail",
+                "SECRET_FILE_CONTENT",
+                {"secret": "SECRET_FILE_CONTENT"},
+            )
+        )
+        await asyncio.sleep(0)
+        return context.calls
+
+    calls = asyncio.run(exercise())
+
+    assert calls == [
+        {
+            "progress": 1.0,
+            "total": None,
+            "message": "SFE: progress",
+        }
+    ]
 
 
 def test_run_output_is_structured_and_omits_sensitive_payload_material() -> None:

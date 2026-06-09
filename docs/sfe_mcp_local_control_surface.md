@@ -308,7 +308,9 @@ sfe_workspace_status
 ```
 
 Known v1 limitation: `sfe_run` is synchronous. Long runs may hit
-client-specific tool-call or MCP request timeouts. If real dogfooding shows
-that timeout behavior blocks practical use, a later milestone can consider an
-async start/poll shape. That should be driven by client evidence and should
-still keep SFE as the owner of the run pipeline.
+client-specific tool-call or MCP request timeouts. The MCP server bridges SFE's
+existing structured run progress events to MCP progress notifications when the
+client sends a progress token for the tool call. If real dogfooding shows that
+timeouts still block practical use, a later milestone can consider an async
+start/poll shape. That should be driven by client evidence and should still
+keep SFE as the owner of the run pipeline.

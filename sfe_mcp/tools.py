@@ -6,6 +6,7 @@ from collections.abc import Callable
 import threading
 from typing import Any
 
+from sfe.run_pipeline import RunProgressCallback
 from sfe.runtime_session import RuntimeSession
 
 from .serializers import (
@@ -57,11 +58,14 @@ class SfeMcpToolHandlers:
             "task_present": bool(result.task.strip()) if result.ok else False,
         }
 
-    def sfe_run(self) -> dict[str, Any]:
+    def sfe_run(
+        self,
+        progress_callback: RunProgressCallback | None = None,
+    ) -> dict[str, Any]:
         if not self._run_lock.acquire(blocking=False):
             return serialize_session_error("run_in_progress")
         try:
-            result = self.session.run()
+            result = self.session.run(progress_callback=progress_callback)
             if result.run_result is None:
                 return serialize_session_error(result.error_category)
             return serialize_run_result(

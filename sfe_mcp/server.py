@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from sfe.runtime_session import RuntimeSession
 from sfe_tui.backends import backend_by_name
 
+from .progress import create_mcp_progress_callback
 from .tools import SfeMcpToolHandlers, create_tool_handlers
 
 
@@ -40,9 +42,14 @@ def register_tools(server: FastMCP, handlers: SfeMcpToolHandlers) -> None:
         return registry["sfe_set_task"](task)
 
     @server.tool(name="sfe_run")
-    def sfe_run() -> dict[str, object]:
+    async def sfe_run(ctx: Context) -> dict[str, object]:
         """Run the current SFE task through RuntimeSession."""
-        return registry["sfe_run"]()
+        loop = asyncio.get_running_loop()
+        progress_callback = create_mcp_progress_callback(ctx, loop)
+        return await asyncio.to_thread(
+            registry["sfe_run"],
+            progress_callback,
+        )
 
     @server.tool(name="sfe_run_report")
     def sfe_run_report() -> dict[str, object]:
