@@ -99,9 +99,12 @@ class RuntimeSession:
 
     def set_target_directory(self, path: str) -> TargetDirectoryResult:
         try:
-            self.workspace_root = resolve_workspace(path, self.cwd)
+            workspace_root = resolve_workspace(path, self.cwd)
         except ValueError as exc:
             return TargetDirectoryResult(ok=False, error_category=str(exc))
+        if self.workspace_root != workspace_root:
+            self._reset_target_bound_state()
+        self.workspace_root = workspace_root
         return TargetDirectoryResult(ok=True, workspace_root=self.workspace_root)
 
     def set_task(self, task: str) -> TaskSetResult:
@@ -117,6 +120,13 @@ class RuntimeSession:
         self.discovery_result = None
         self.task = ""
         self.latest_result = None
+
+    def _reset_target_bound_state(self) -> None:
+        self.workspace_session = None
+        self.discovery_result = None
+        self.latest_result = None
+        self.last_run_result = None
+        self.last_progress_events = ()
 
     def run(
         self,

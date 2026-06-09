@@ -45,6 +45,7 @@ from sfe.runtime_session import (
     TargetDirectoryResult,
     TaskSetResult,
 )
+from sfe.workspace_isolation import WorkspaceSession
 from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairResult,
@@ -767,6 +768,46 @@ def test_startup_rejects_file_path_as_workspace(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="workspace_not_directory"):
         resolve_workspace(str(file_path), tmp_path)
+
+
+def test_reselecting_workspace_clears_target_bound_tui_and_runtime_state(
+    tmp_path,
+) -> None:
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    stale_worktree = tmp_path / "workspace-a-worktree"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    stale_worktree.mkdir()
+    app = SfeTuiApp(
+        input_provider=FakeInput([str(workspace_a), str(workspace_b)]),
+        output=lambda _: None,
+        cwd=tmp_path,
+    )
+    assert app._select_workspace() is True
+    app.workspace_root = stale_worktree
+    app.workspace_session = WorkspaceSession(
+        session_id="stale-session",
+        source_path=workspace_a,
+        source_git_root=workspace_a,
+        worktree_path=stale_worktree,
+        source_branch="main",
+        worktree_branch="sfe/stale",
+        backend_name="fake",
+    )
+    app.context_files = [object()]  # type: ignore[list-item]
+    app.pending_patch = object()  # type: ignore[assignment]
+    app.latest_result = object()  # type: ignore[assignment]
+    app.last_run_result = object()  # type: ignore[assignment]
+
+    assert app._select_workspace() is True
+
+    assert app.workspace_root == workspace_b.resolve()
+    assert app.workspace_session is None
+    assert app.context_files == []
+    assert app.pending_patch is None
+    assert app.latest_result is None
+    assert app.last_run_result is None
 
 
 def test_directory_reports_selected_workspace_safely(tmp_path) -> None:

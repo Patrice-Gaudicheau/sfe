@@ -16,6 +16,7 @@ from sfe.execution_mode_router import (  # noqa: E402
     EXECUTION_MODE_CONSOLE_OUTPUT,
     ExecutionModeDecision,
 )
+from sfe.run_pipeline import RunResult  # noqa: E402
 from sfe.runtime_session import RuntimeSession  # noqa: E402
 from sfe.workspace_isolation import (  # noqa: E402
     WorkspaceSession,
@@ -258,6 +259,119 @@ def test_workspace_status_reports_original_git_unavailable(
     assert result.status_result.issue is not None
     assert result.status_result.issue.category == "git_status"
     assert result.status_result.issue.reason == "git_unavailable"
+
+
+def test_target_directory_change_clears_stale_workspace_session_and_run_state(
+    tmp_path: Path,
+) -> None:
+    repo_a = init_git_repo(tmp_path / "repo-a")
+    repo_b = init_git_repo(tmp_path / "repo-b")
+    stale_worktree = tmp_path / "repo-a-worktree"
+    stale_worktree.mkdir()
+    status_result = WorkspaceStatusResult(
+        ok=True,
+        status=WorkspaceStatus(
+            git_status_porcelain=" M hello.py",
+            git_diff="diff --git a/hello.py b/hello.py",
+            changed_files=("hello.py",),
+            source_path=repo_a,
+            worktree_path=stale_worktree,
+            source_branch="main",
+            worktree_branch="sfe/stale",
+        ),
+    )
+    manager = RecordingWorkspaceManager(status_result)
+    session = RuntimeSession(
+        backend=DirectBackend(executor=FakeExecutor()),
+        cwd=tmp_path,
+        workspace_manager=manager,  # type: ignore[arg-type]
+    )
+    assert session.set_target_directory(str(repo_a)).ok is True
+    stale_session = WorkspaceSession(
+        session_id="stale-session",
+        source_path=repo_a,
+        source_git_root=repo_a,
+        worktree_path=stale_worktree,
+        source_branch="main",
+        worktree_branch="sfe/stale",
+        backend_name="fake",
+    )
+    session.workspace_root = stale_worktree
+    session.workspace_session = stale_session
+    session.discovery_result = object()  # type: ignore[assignment]
+    session.latest_result = object()  # type: ignore[assignment]
+    session.last_run_result = object()  # type: ignore[assignment]
+    session.last_progress_events = (object(),)  # type: ignore[assignment]
+
+    result = session.set_target_directory(str(repo_b))
+
+    assert result.ok is True
+    assert result.workspace_root == repo_b
+    assert session.workspace_root == repo_b
+    assert session.workspace_session is None
+    assert session.discovery_result is None
+    assert session.latest_result is None
+    assert session.last_run_result is None
+    assert session.last_progress_events == ()
+
+    status = session.workspace_status()
+
+    assert status.workspace_root == repo_b
+    assert status.workspace_session is None
+    assert status.status_result is not None
+    assert status.status_result.ok is True
+    assert status.status_result.status is not None
+    assert status.status_result.status.source_path == repo_b
+    assert status.status_result.status.worktree_path == repo_b
+    assert manager.status_calls == []
+
+
+def test_run_after_target_change_does_not_use_previous_worktree_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_a = init_git_repo(tmp_path / "repo-a")
+    repo_b = init_git_repo(tmp_path / "repo-b")
+    stale_worktree = tmp_path / "repo-a-worktree"
+    stale_worktree.mkdir()
+    session, _, _ = make_session(tmp_path)
+    assert session.set_target_directory(str(repo_a)).ok is True
+    session.workspace_root = stale_worktree
+    session.workspace_session = WorkspaceSession(
+        session_id="stale-session",
+        source_path=repo_a,
+        source_git_root=repo_a,
+        worktree_path=stale_worktree,
+        source_branch="main",
+        worktree_branch="sfe/stale",
+        backend_name="fake",
+    )
+    assert session.set_target_directory(str(repo_b)).ok is True
+    assert session.set_task("Answer from target B").ok is True
+    captured_requests = []
+
+    class FakeRunPipeline:
+        def __init__(self, **kwargs: object) -> None:
+            del kwargs
+
+        def run(self, request) -> RunResult:
+            captured_requests.append(request)
+            return RunResult(
+                status="completed",
+                active_workspace=request.workspace_root,
+                console_output="ok",
+            )
+
+    monkeypatch.setattr(runtime_session_module, "RunPipeline", FakeRunPipeline)
+
+    result = session.run()
+
+    assert result.ok is True
+    assert len(captured_requests) == 1
+    assert captured_requests[0].workspace_root == repo_b
+    assert captured_requests[0].workspace_session is None
+    assert session.workspace_root == repo_b
+    assert session.workspace_session is None
 
 
 def test_run_captures_structured_progress_events_without_tui_rendering(

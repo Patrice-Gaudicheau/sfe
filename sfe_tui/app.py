@@ -239,12 +239,16 @@ class SfeTuiApp:
             "Workspace [current]: ",
             default="",
         )
+        previous_workspace = self.workspace_root
         result = self.runtime_session.set_target_directory(raw)
         if not result.ok:
             self.output(
                 renderer.render_error(result.error_category or "workspace_not_found")
             )
             return False
+        if previous_workspace != self.workspace_root:
+            self.context_files = []
+            self._clear_pending_patch()
         self.output(renderer.render_workspace_selected(self.workspace_root, self.cwd))
         return True
 
