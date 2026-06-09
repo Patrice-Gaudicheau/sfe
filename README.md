@@ -13,6 +13,13 @@ long-context workflows and need token-budget control, authority governance, and
 auditable context selection. SFE may be useful when avoided context is large
 enough to amortize routing overhead.
 
+SFE's role separation also makes cost control a model-allocation problem, not
+only a prompt-compression problem. It can reduce input-token exposure by
+selecting a smaller executor context, and it can reduce output-token cost in
+dollar terms when the final answer or patch is produced by a cheaper or more
+specialized executor model. This is a pricing and provider-choice claim, not a
+claim that the executor necessarily emits fewer output tokens.
+
 In protocol-aligned controlled observations on 50k+ structural-tier tasks, SFE
 measured 84.08% router-inclusive token reduction with OpenAI, 83.63% with
 Anthropic, and 83.57% in a single-run Alibaba/Qwen structural comparison. These
@@ -52,6 +59,14 @@ Long-context LLM calls can waste budget by repeatedly sending irrelevant,
 obsolete, partial, or non-authoritative context. SFE explores whether context
 exposure can be reduced before execution while keeping source selection
 auditable.
+
+The same architecture can spend reasoning budget where it is most strategic:
+on routing and context selection. Once the executor context is clean and
+bounded, execution can often be delegated to a smaller, cheaper, or more
+code-specialized model, subject to task difficulty and provider support. SFE
+therefore attacks cost on two axes: input-token exposure reduction through
+selected context, and output-token dollar-cost reduction through executor
+model/provider choice.
 
 The repository preserves full-context baseline comparisons, selected-context
 executor runs, selector-only checks, and selected-vs-full comparisons. The
@@ -106,6 +121,26 @@ amortize routing cost. Current areas of interest include:
 - Provider-routing and context-budget policies.
 - Enterprise assistant workflows where full-context prompting is expensive or
   hard to audit.
+
+## Router/Executor Model Separation
+
+SFE treats Discoverer, Router, and Executor as separate runtime roles rather
+than assuming that every step must use one provider or one model. The Router is
+the role where strong reasoning is usually most valuable, because a bad routing
+or context-selection decision can dominate the rest of the run. The Discoverer
+may not need to be as strong as the Router, depending on workspace structure,
+metadata quality, and task type. The Executor can often be smaller, cheaper, or
+more code-specialized when SFE has already narrowed the context to the files or
+sources most likely to matter.
+
+Router and Executor therefore do not need to share a provider. For example,
+OpenAI can be configured for routing while Qwen, Ollama, Lemonade, CodexCLI, or
+another supported specialized provider is configured for execution.
+OpenAI-compatible providers such as DeepSeek may also fit this role when
+supported by the local configuration. This cross-provider role split is a
+distinctive architectural advantage relative to many LLM workflow tools that
+bind selection and execution to one model path. It remains a design capability,
+not a guarantee that every smaller executor model will preserve task quality.
 
 ## The Amortization Hypothesis
 
@@ -325,6 +360,11 @@ model variables when absent. Google discovery uses `SFE_GOOGLE_DISCOVERY_MODEL`
 with `SFE_GOOGLE_MODEL` as its fallback. Ollama discovery uses
 `SFE_OLLAMA_DISCOVERY_MODEL` with `SFE_OLLAMA_ROUTER_MODEL` and
 `SFE_OLLAMA_MODEL` as fallbacks.
+
+This role-level provider configuration is what enables Router/Executor model
+separation: a strong router can be paired with a cheaper or more specialized
+executor when the selected context is narrow enough and the configured provider
+supports the required task.
 
 ## Minimal Verification
 
@@ -682,7 +722,10 @@ model intelligence.
 - SFE can introduce selection-induced errors if the selector chooses the wrong
   source or filters out required context.
 - Router overhead can erase gains on short or simple prompts.
-- Dollar savings depend on provider pricing, model choice, input/output mix,
-  cache policy, batch policy, and deployment policy.
+- Output-token savings are dollar-cost savings from executor model/provider
+  choice, not guaranteed output-token count reduction.
+- Dollar savings depend on provider pricing, selected models, output size,
+  input/output mix, cache policy, batch policy, workload shape, and deployment
+  policy.
 - Broad production workloads, tool-using agents, multi-tenant systems, and
   long-running real user traffic are not validated yet.
