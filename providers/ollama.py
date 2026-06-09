@@ -19,6 +19,7 @@ PROVIDER_NAME = "ollama"
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen3.5:4b"
 DEFAULT_TIMEOUT = 120
+DEFAULT_THINK = False
 
 
 class OllamaProviderError(RuntimeError):
@@ -37,11 +38,13 @@ class OllamaProvider:
         self,
         base_url: str | None = None,
         timeout: float | None = None,
+        think: bool | str | None = None,
     ) -> None:
         self.base_url = (
             base_url or os.getenv("SFE_OLLAMA_BASE_URL") or DEFAULT_BASE_URL
         ).rstrip("/")
         self.timeout = _resolve_timeout(timeout)
+        self.think = _resolve_think(think)
 
     def health(self) -> dict[str, Any]:
         """Check whether the Ollama server responds to the tags endpoint."""
@@ -117,6 +120,7 @@ class OllamaProvider:
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                think=self.think,
             )
             raw_response = self._request("POST", "/api/chat", payload, supervisor)
             normalized = normalize_ollama_chat_response(raw_response)
@@ -228,16 +232,20 @@ def build_ollama_chat_payload(
     model: str,
     max_tokens: int,
     temperature: float | None,
+    think: bool | str | None = DEFAULT_THINK,
 ) -> dict[str, Any]:
     options: dict[str, Any] = {"num_predict": int(max_tokens)}
     if temperature is not None:
         options["temperature"] = float(temperature)
-    return {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": False,
         "options": options,
     }
+    if think is not None:
+        payload["think"] = think
+    return payload
 
 
 def normalize_ollama_chat_response(response: dict[str, Any]) -> dict[str, Any]:
@@ -291,6 +299,22 @@ def _resolve_timeout(timeout: float | None) -> float:
     if parsed_timeout <= 0:
         raise ValueError("Ollama timeout must be greater than 0.")
     return parsed_timeout
+
+
+def _resolve_think(value: bool | str | None) -> bool | str | None:
+    if value is not None:
+        return value
+    raw_value = os.getenv("SFE_OLLAMA_THINK")
+    if raw_value is None or raw_value.strip() == "":
+        return DEFAULT_THINK
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    if normalized in {"high", "medium", "low"}:
+        return normalized
+    raise ValueError("SFE_OLLAMA_THINK must be true, false, high, medium, or low.")
 
 
 def _http_error_category(exc: urllib.error.HTTPError, details: str) -> str:

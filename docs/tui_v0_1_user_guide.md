@@ -53,12 +53,15 @@ ollama pull qwen3.5:4b
 SFE_PROVIDER=ollama
 SFE_OLLAMA_BASE_URL=http://localhost:11434
 SFE_OLLAMA_MODEL=qwen3.5:4b
+SFE_OLLAMA_THINK=false
 ```
 
 `SFE_OLLAMA_ROUTER_MODEL`, `SFE_OLLAMA_DISCOVERY_MODEL`, and
 `SFE_OLLAMA_EXECUTOR_MODEL` can override the shared model for specific TUI
-roles. Ollama support is intended for local experimentation on capable
-machines, not as a claim that local models outperform cloud providers.
+roles. `SFE_OLLAMA_THINK=false` is the default for SFE Ollama calls so
+reasoning-capable local models spend output tokens on the requested router or
+executor response. Ollama support is intended for local experimentation on
+capable machines, not as a claim that local models outperform cloud providers.
 
 At startup, select a workspace or accept the current directory. The TUI displays
 workspace paths using safe relative labels where possible.

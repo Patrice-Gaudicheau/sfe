@@ -80,12 +80,26 @@ class ExecutionModeDecision:
     provider_name: str | None = None
     model: str | None = None
     provider_calls_made: int = 0
+    invalid_response_preview: str | None = None
 
 
 class ExecutionModeRouterError(RuntimeError):
-    def __init__(self, category: str, reason: str) -> None:
+    def __init__(
+        self,
+        category: str,
+        reason: str,
+        *,
+        provider_name: str | None = None,
+        model: str | None = None,
+        provider_calls_made: int = 0,
+        invalid_response_preview: str | None = None,
+    ) -> None:
         self.category = category
         self.reason = reason
+        self.provider_name = provider_name
+        self.model = model
+        self.provider_calls_made = provider_calls_made
+        self.invalid_response_preview = invalid_response_preview
         super().__init__(reason)
 
 
@@ -154,11 +168,17 @@ class ConfiguredLLMExecutionModeRouter:
             raise ExecutionModeRouterError(
                 f"execution_mode_router_{exc.error_category}",
                 "configured execution-mode router provider failed",
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
             ) from exc
         except OllamaProviderError as exc:
             raise ExecutionModeRouterError(
                 f"execution_mode_router_{exc.error_category}",
                 "configured execution-mode router provider failed",
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
             ) from exc
         except Exception as exc:
             raise ExecutionModeRouterError(
@@ -166,7 +186,18 @@ class ConfiguredLLMExecutionModeRouter:
                 "configured execution-mode router provider failed",
             ) from exc
 
-        parsed = parse_execution_mode_router_output(_extract_answer(response))
+        output = _extract_answer(response)
+        try:
+            parsed = parse_execution_mode_router_output(output)
+        except ExecutionModeRouterError as exc:
+            raise ExecutionModeRouterError(
+                exc.category,
+                exc.reason,
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
+                invalid_response_preview=_safe_invalid_response_preview(output),
+            ) from exc
         return ExecutionModeDecision(
             execution_mode=parsed.execution_mode,
             reason=parsed.reason,
@@ -302,22 +333,43 @@ def build_execution_mode_prompt(*, task: str) -> str:
 
 
 def parse_execution_mode_router_output(output: str) -> ExecutionModeDecision:
-    try:
-        parsed = json.loads(_strip_json_fence(output))
-    except json.JSONDecodeError as exc:
-        raise ExecutionModeRouterError(
-            "invalid_execution_mode_router_response",
-            "execution-mode router did not return valid JSON",
-        ) from exc
+    parse_errors: list[ExecutionModeRouterError] = []
+    for candidate in _json_object_candidates(output):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        try:
+            return _parse_execution_mode_router_object(parsed)
+        except ExecutionModeRouterError as exc:
+            parse_errors.append(exc)
+
+    plain_mode = _parse_plain_execution_mode(output)
+    if plain_mode is not None:
+        return ExecutionModeDecision(
+            execution_mode=plain_mode,
+            reason="execution-mode router returned a plain mode name",
+            confidence=None,
+        )
+
+    if parse_errors:
+        raise parse_errors[-1]
+    raise ExecutionModeRouterError(
+        "invalid_execution_mode_router_response",
+        "execution-mode router did not return valid JSON",
+    )
+
+
+def _parse_execution_mode_router_object(parsed: Any) -> ExecutionModeDecision:
     if not isinstance(parsed, dict):
         raise ExecutionModeRouterError(
             "invalid_execution_mode_router_response",
             "execution-mode router JSON was not an object",
         )
-    execution_mode = str(parsed.get("execution_mode") or "")
+    execution_mode = _normalize_execution_mode(parsed.get("execution_mode"))
     reason = str(parsed.get("reason") or "").strip()
     confidence = parsed.get("confidence")
-    if execution_mode not in EXECUTION_MODES:
+    if execution_mode is None:
         raise ExecutionModeRouterError(
             "invalid_execution_mode_router_response",
             "execution-mode router execution_mode was invalid",
@@ -344,6 +396,84 @@ def parse_execution_mode_router_output(output: str) -> ExecutionModeDecision:
         reason=reason,
         confidence=confidence,
     )
+
+
+def _json_object_candidates(output: str) -> list[str]:
+    text = _strip_json_fence(output)
+    candidates = [text]
+    candidates.extend(_balanced_json_objects(text))
+    unique: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        stripped = candidate.strip()
+        if stripped and stripped not in seen:
+            unique.append(stripped)
+            seen.add(stripped)
+    return unique
+
+
+def _balanced_json_objects(text: str) -> list[str]:
+    objects: list[str] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+        if char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                objects.append(text[start : index + 1])
+                start = None
+    return objects
+
+
+def _parse_plain_execution_mode(output: str) -> str | None:
+    normalized = output.strip().strip("`'\"").strip().lower().replace("-", "_")
+    return _normalize_execution_mode(normalized)
+
+
+def _normalize_execution_mode(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "read_only": EXECUTION_MODE_CONSOLE_OUTPUT,
+        "readonly": EXECUTION_MODE_CONSOLE_OUTPUT,
+        "ask": EXECUTION_MODE_CONSOLE_OUTPUT,
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in EXECUTION_MODES:
+        return normalized
+    return None
+
+
+def _safe_invalid_response_preview(output: str, limit: int = 240) -> str:
+    preview = " ".join(output.replace("\x00", "").split())
+    preview = _redact_secret_like(preview)
+    if len(preview) > limit:
+        return preview[: limit - 3] + "..."
+    return preview
+
+
+def _redact_secret_like(text: str) -> str:
+    lowered = text.lower()
+    if "sk-" in lowered or "api_key" in lowered or "authorization" in lowered:
+        return "[redacted]"
+    return text
 
 
 def _call_provider_chat(

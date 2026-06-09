@@ -53,6 +53,7 @@ def test_ollama_provider_builds_expected_chat_payload() -> None:
         "messages": [{"role": "user", "content": "Return OK."}],
         "stream": False,
         "options": {"num_predict": 8, "temperature": 0.0},
+        "think": False,
     }
 
 
@@ -105,6 +106,7 @@ def test_ollama_chat_validates_requested_model_before_completion(monkeypatch) ->
             payload = json.loads(request.data.decode("utf-8"))
             assert payload["model"] == "qwen3.5:4b"
             assert payload["stream"] is False
+            assert payload["think"] is False
             assert payload["messages"][0] == {
                 "role": "system",
                 "content": "System.",

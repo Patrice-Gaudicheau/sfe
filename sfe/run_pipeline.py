@@ -271,9 +271,23 @@ class RunPipeline:
                 task=request.task,
             )
         except ExecutionModeRouterError as exc:
+            provider_name = exc.provider_name or getattr(
+                self.execution_mode_router,
+                "provider_name",
+                None,
+            )
+            model = exc.model or getattr(self.execution_mode_router, "model", None)
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=RunIssue("execution_mode_routing", exc.category),
+                execution_mode_decision=ExecutionModeDecision(
+                    execution_mode="unknown",
+                    reason=exc.reason,
+                    provider_name=provider_name,
+                    model=model,
+                    provider_calls_made=exc.provider_calls_made,
+                    invalid_response_preview=exc.invalid_response_preview,
+                ),
                 warnings=_base_warnings(),
             )
         self._emit_progress(

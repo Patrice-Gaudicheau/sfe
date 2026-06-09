@@ -422,6 +422,14 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
         f"  warnings: {_format_string_list(list(result.warnings))}",
     ]
+    if (
+        execution_mode_decision is not None
+        and execution_mode_decision.invalid_response_preview
+    ):
+        lines.append(
+            "  execution-mode router invalid response preview: "
+            + execution_mode_decision.invalid_response_preview
+        )
     if result.promotion_issue is not None:
         lines.extend(
             [

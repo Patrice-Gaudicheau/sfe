@@ -11,21 +11,34 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from providers.ollama import OllamaProviderError
 from sfe.discovery_router import create_configured_discovery_router
-from sfe.execution_mode_router import create_configured_execution_mode_router
+from sfe.execution_mode_router import (
+    EXECUTION_MODE_CONSOLE_OUTPUT,
+    create_configured_execution_mode_router,
+)
 from sfe.router_review import create_configured_router_json_reviewer
+from sfe.run_pipeline import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED, RunPipeline, RunRequest
 from sfe.segment_selector import (
     CandidateSegment,
     SegmentSelectionInput,
     create_configured_segment_selector,
 )
+from sfe_tui.backends import DirectBackend
 from sfe_tui.executors import READ_ONLY_SYSTEM_INSTRUCTION, create_tui_executor
 from sfe_tui.patch_json_repair import create_tui_patch_json_repairer
+from sfe_tui.renderer import render_run_result_debug
 
 
 class FakeProvider:
-    def __init__(self, content: str = "provider answer") -> None:
+    def __init__(
+        self,
+        content: str = "provider answer",
+        *,
+        error: Exception | None = None,
+    ) -> None:
         self.content = content
+        self.error = error
         self.calls: list[dict[str, object]] = []
 
     def health(self) -> dict[str, object]:
@@ -33,6 +46,8 @@ class FakeProvider:
 
     def chat(self, messages: list[dict[str, str]], **kwargs: object) -> dict[str, object]:
         self.calls.append({"messages": messages, **kwargs})
+        if self.error is not None:
+            raise self.error
         return {"choices": [{"message": {"content": self.content}}]}
 
 
@@ -149,6 +164,163 @@ def test_ollama_execution_mode_router_accepts_run_routing_provider() -> None:
     assert decision.model == "ollama-shared"
     assert decision.execution_mode == "workspace_write"
     assert provider.calls[0]["model"] == "ollama-shared"
+
+
+def test_ollama_execution_mode_router_recovers_json_wrapped_in_prose() -> None:
+    provider = FakeProvider(
+        'Here is the routing decision:\n```json\n'
+        '{"execution_mode":"console_output","reason":"The task asks a factual question."}'
+        "\n```"
+    )
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "ollama",
+            "SFE_OLLAMA_MODEL": "qwen3.5:4b",
+        },
+        provider_factories={"ollama": lambda: provider},
+    )
+
+    decision = router.decide(task="Qui est Victor Hugo ?")
+
+    assert decision.provider_name == "ollama"
+    assert decision.model == "qwen3.5:4b"
+    assert decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
+    assert decision.provider_calls_made == 1
+
+
+def test_ollama_execution_mode_router_accepts_plain_read_only_alias() -> None:
+    provider = FakeProvider("read_only")
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "ollama",
+            "SFE_OLLAMA_MODEL": "qwen3.5:4b",
+        },
+        provider_factories={"ollama": lambda: provider},
+    )
+
+    decision = router.decide(task="Qui est Victor Hugo ?")
+
+    assert decision.provider_name == "ollama"
+    assert decision.model == "qwen3.5:4b"
+    assert decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
+    assert decision.reason == "execution-mode router returned a plain mode name"
+
+
+def test_ollama_run_plain_read_only_reaches_console_executor(tmp_path: Path) -> None:
+    router_provider = FakeProvider("read_only")
+    executor_provider = FakeProvider("Victor Hugo est un écrivain français.")
+    environ = {
+        "SFE_PROVIDER": "ollama",
+        "SFE_OLLAMA_MODEL": "qwen3.5:4b",
+    }
+    router = create_configured_execution_mode_router(
+        environ=environ,
+        provider_factories={"ollama": lambda: router_provider},
+    )
+    executor = create_tui_executor(
+        environ=environ,
+        provider_factories={"ollama": lambda: executor_provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        execution_mode_router=router,
+    ).run(
+        RunRequest(
+            workspace_root=tmp_path,
+            task="Qui est Victor Hugo ?",
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.execution_mode_decision is not None
+    assert result.execution_mode_decision.provider_name == "ollama"
+    assert result.execution_mode_decision.model == "qwen3.5:4b"
+    assert result.execution_mode_decision.execution_mode == EXECUTION_MODE_CONSOLE_OUTPUT
+    assert result.executor_provider == "ollama"
+    assert result.console_output == "Victor Hugo est un écrivain français."
+    assert router_provider.calls[0]["model"] == "qwen3.5:4b"
+    assert executor_provider.calls[0]["model"] == "qwen3.5:4b"
+
+
+def test_ollama_execution_mode_invalid_response_keeps_provider_diagnostics(
+    tmp_path: Path,
+) -> None:
+    router_provider = FakeProvider("Victor Hugo est un écrivain français.")
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "ollama",
+            "SFE_OLLAMA_MODEL": "qwen3.5:4b",
+        },
+        provider_factories={"ollama": lambda: router_provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(),
+        execution_mode_router=router,
+    ).run(
+        RunRequest(
+            workspace_root=tmp_path,
+            task="Qui est Victor Hugo ?",
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "execution_mode_routing"
+    assert result.issue.reason == "invalid_execution_mode_router_response"
+    assert result.execution_mode_decision is not None
+    assert result.execution_mode_decision.provider_name == "ollama"
+    assert result.execution_mode_decision.model == "qwen3.5:4b"
+    assert result.execution_mode_decision.provider_calls_made == 1
+    assert (
+        result.execution_mode_decision.invalid_response_preview
+        == "Victor Hugo est un écrivain français."
+    )
+    rendered = render_run_result_debug(result)
+    assert "execution-mode router provider: ollama" in rendered
+    assert "execution-mode router model: qwen3.5:4b" in rendered
+    assert "execution-mode router calls made: 1" in rendered
+    assert (
+        "execution-mode router invalid response preview: "
+        "Victor Hugo est un écrivain français."
+    ) in rendered
+
+
+def test_ollama_execution_mode_provider_error_keeps_provider_diagnostics(
+    tmp_path: Path,
+) -> None:
+    router_provider = FakeProvider(
+        error=OllamaProviderError(
+            "invalid_response",
+            "Ollama chat response content was empty.",
+        )
+    )
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "ollama",
+            "SFE_OLLAMA_MODEL": "qwen3.5:4b",
+        },
+        provider_factories={"ollama": lambda: router_provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(),
+        execution_mode_router=router,
+    ).run(
+        RunRequest(
+            workspace_root=tmp_path,
+            task="Qui est Victor Hugo ?",
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "execution_mode_router_invalid_response"
+    assert result.execution_mode_decision is not None
+    assert result.execution_mode_decision.provider_name == "ollama"
+    assert result.execution_mode_decision.model == "qwen3.5:4b"
+    assert result.execution_mode_decision.provider_calls_made == 1
 
 
 def test_ollama_patch_json_repair_uses_shared_model() -> None:

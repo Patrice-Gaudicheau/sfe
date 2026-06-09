@@ -431,12 +431,15 @@ Ollama can be selected for all TUI/core provider roles:
 SFE_PROVIDER=ollama
 SFE_OLLAMA_BASE_URL=http://localhost:11434
 SFE_OLLAMA_MODEL=qwen3.5:4b
+SFE_OLLAMA_THINK=false
 ```
 
 Optional role model overrides are `SFE_OLLAMA_ROUTER_MODEL`,
 `SFE_OLLAMA_DISCOVERY_MODEL`, and `SFE_OLLAMA_EXECUTOR_MODEL`. The selected
 model must already be available locally, for example with
-`ollama pull qwen3.5:4b`. The optional live smoke is:
+`ollama pull qwen3.5:4b`. `SFE_OLLAMA_THINK=false` is the default for SFE
+Ollama calls so reasoning-capable local models spend their output budget on the
+requested router or executor response. The optional live smoke is:
 
 ```bash
 SFE_OLLAMA_LIVE_SMOKE=1 SFE_OLLAMA_MODEL=qwen3.5:4b pytest tests/test_ollama_smoke.py -q

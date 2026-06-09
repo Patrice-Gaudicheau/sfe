@@ -116,6 +116,7 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_OLLAMA_DISCOVERY_MODEL=", text)
         self.assertIn("SFE_OLLAMA_EXECUTOR_MODEL=", text)
         self.assertIn("SFE_OLLAMA_TIMEOUT_SECONDS=120", text)
+        self.assertIn("SFE_OLLAMA_THINK=false", text)
         self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{12,}")
         for line in text.splitlines():
             if line.startswith("OPENAI_API_KEY="):
