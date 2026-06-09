@@ -38,6 +38,13 @@ from sfe.execution_mode_router import (
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
 )
+from sfe.runtime_session import (
+    RunReportResult,
+    RuntimeWorkspaceStatus,
+    SessionRunResult,
+    TargetDirectoryResult,
+    TaskSetResult,
+)
 from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
     PatchJsonRepairResult,
@@ -71,6 +78,7 @@ from sfe_tui.patch_review import (
     _build_review_prompt,
 )
 from sfe.workspace_review import WorkspaceReviewDecision
+from sfe.run_pipeline import RunResult
 from sfe_tui.renderer import (
     color_sfe_output,
     render_advanced_help,
@@ -231,6 +239,83 @@ class RecordingActivityFactory:
         indicator = RecordingActivityIndicator(self.events)
         self.instances.append(indicator)
         return indicator
+
+
+class RecordingRuntimeSession:
+    def __init__(self, workspace: Path) -> None:
+        self.workspace_root: Path | None = workspace
+        self.workspace_session = None
+        self.discovery_result = None
+        self.task = ""
+        self.latest_result = None
+        self.last_run_result = RunResult(
+            status="completed",
+            execution_mode_decision=ExecutionModeDecision(
+                execution_mode=EXECUTION_MODE_CONSOLE_OUTPUT,
+                reason="recorded",
+                provider_name="recording-router",
+                model="recording-model",
+                provider_calls_made=1,
+            ),
+            console_output="recorded answer",
+        )
+        self.set_target_directory_calls: list[str] = []
+        self.set_task_calls: list[str] = []
+        self.run_calls = 0
+        self.run_report_calls = 0
+        self.workspace_status_calls = 0
+        self.reset_calls = 0
+
+    def set_target_directory(self, path: str) -> TargetDirectoryResult:
+        self.set_target_directory_calls.append(path)
+        return TargetDirectoryResult(ok=True, workspace_root=self.workspace_root)
+
+    def set_task(self, task: str) -> TaskSetResult:
+        self.set_task_calls.append(task)
+        self.task = task.strip()
+        return TaskSetResult(ok=True, task=self.task)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+        self.task = ""
+
+    def run(self, **kwargs: object) -> SessionRunResult:
+        self.run_calls += 1
+        before_execute = kwargs.get("before_execute")
+        after_execute = kwargs.get("after_execute")
+        if callable(before_execute):
+            before_execute()
+        if callable(after_execute):
+            after_execute()
+        return SessionRunResult(
+            ok=True,
+            run_result=RunResult(
+                status="completed",
+                execution_mode_decision=ExecutionModeDecision(
+                    execution_mode=EXECUTION_MODE_CONSOLE_OUTPUT,
+                    reason="recorded",
+                    provider_name="recording-router",
+                    model="recording-model",
+                    provider_calls_made=1,
+                ),
+                console_output="recorded answer",
+            ),
+        )
+
+    def run_error_category(self) -> str | None:
+        return None
+
+    def run_report(self) -> RunReportResult:
+        self.run_report_calls += 1
+        return RunReportResult(ok=True, run_result=self.last_run_result)
+
+    def workspace_status(self) -> RuntimeWorkspaceStatus:
+        self.workspace_status_calls += 1
+        return RuntimeWorkspaceStatus(
+            workspace_root=self.workspace_root,
+            workspace_session=self.workspace_session,
+            status_result=None,
+        )
 
 
 class EventRecordingExecutor(FakeExecutor):
@@ -4193,6 +4278,38 @@ def test_tui_run_report_before_any_run_renders_clear_message(tmp_path) -> None:
     assert router.calls == []
     assert executor.console_calls == []
     assert executor.patch_calls == []
+
+
+def test_tui_primary_session_handlers_delegate_to_runtime_session(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime_session = RecordingRuntimeSession(workspace)
+    output: list[str] = []
+    activity_events: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=workspace,
+        backend=DirectBackend(executor=FakeExecutor()),
+        runtime_session=runtime_session,  # type: ignore[arg-type]
+        activity_indicator_factory=RecordingActivityFactory(activity_events),
+    )
+
+    assert app._select_workspace() is True
+    app._handle_command("/task Use shared session")
+    app._handle_workspace_status()
+    assert app._handle_run_report() is True
+    assert app._handle_run() is True
+    app._handle_reset()
+
+    assert runtime_session.set_target_directory_calls == [""]
+    assert runtime_session.set_task_calls == ["Use shared session"]
+    assert runtime_session.workspace_status_calls == 1
+    assert runtime_session.run_report_calls == 1
+    assert runtime_session.run_calls == 1
+    assert runtime_session.reset_calls == 1
+    assert activity_events == ["activity:start", "activity:stop"]
+    assert "recorded answer" in output
 
 
 def test_tui_run_report_after_console_run_does_not_execute_again(tmp_path) -> None:

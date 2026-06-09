@@ -28,7 +28,7 @@ from sfe.patching import (
     validate_patch_paths,
     validate_patch_targets,
 )
-from sfe.run_pipeline import RunPipeline, RunRequest, RunResult
+from sfe.run_pipeline import RunResult
 from sfe.env import load_repo_env
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.workspace_isolation import (
@@ -47,7 +47,6 @@ from sfe.contracts import (
     SFEContract,
     build_contract,
     load_context_file,
-    resolve_workspace,
 )
 from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
@@ -58,6 +57,7 @@ from sfe.provider_config import (
     resolve_sfe_executor_provider,
     resolve_sfe_router_provider,
 )
+from sfe.runtime_session import RuntimeSession
 
 from .backends import (
     BackendAdapter,
@@ -135,6 +135,7 @@ class SfeTuiApp:
         patch_reviewer: PatchReviewer | None = None,
         workspace_manager: WorkspaceManager | None = None,
         workspace_reviewer: WorkspaceReviewer | None = None,
+        runtime_session: RuntimeSession | None = None,
         color_enabled: bool | None = None,
         activity_indicator_factory: ActivityIndicatorFactory | None = None,
     ) -> None:
@@ -151,20 +152,69 @@ class SfeTuiApp:
         self.patch_json_repairer = patch_json_repairer or create_tui_patch_json_repairer()
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
+        self.runtime_session = runtime_session or RuntimeSession(
+            backend=self.backend,
+            cwd=self.cwd,
+            workspace_manager=self.workspace_manager,
+            discovery_router=self.discovery_router,
+            execution_mode_router=self.execution_mode_router,
+        )
         self.workspace_reviewer = workspace_reviewer or create_workspace_reviewer()
         self.activity_indicator_factory = (
             activity_indicator_factory
             if activity_indicator_factory is not None
             else TerminalActivityIndicator
         )
-        self.workspace_root: Path | None = None
-        self.workspace_session: WorkspaceSession | None = None
         self.context_files: list[ContextLoadResult] = []
-        self.discovery_result: DiscoveryResult | None = None
-        self.task = ""
-        self.latest_result: ExecutionResult | None = None
-        self.last_run_result: RunResult | None = None
         self.pending_patch: PendingPatchProposal | None = None
+
+    @property
+    def workspace_root(self) -> Path | None:
+        return self.runtime_session.workspace_root
+
+    @workspace_root.setter
+    def workspace_root(self, value: Path | None) -> None:
+        self.runtime_session.workspace_root = value
+
+    @property
+    def workspace_session(self) -> WorkspaceSession | None:
+        return self.runtime_session.workspace_session
+
+    @workspace_session.setter
+    def workspace_session(self, value: WorkspaceSession | None) -> None:
+        self.runtime_session.workspace_session = value
+
+    @property
+    def discovery_result(self) -> DiscoveryResult | None:
+        return self.runtime_session.discovery_result
+
+    @discovery_result.setter
+    def discovery_result(self, value: DiscoveryResult | None) -> None:
+        self.runtime_session.discovery_result = value
+
+    @property
+    def task(self) -> str:
+        return self.runtime_session.task
+
+    @task.setter
+    def task(self, value: str) -> None:
+        self.runtime_session.task = value
+
+    @property
+    def latest_result(self) -> ExecutionResult | None:
+        return self.runtime_session.latest_result
+
+    @latest_result.setter
+    def latest_result(self, value: ExecutionResult | None) -> None:
+        self.runtime_session.latest_result = value
+
+    @property
+    def last_run_result(self) -> RunResult | None:
+        return self.runtime_session.last_run_result
+
+    @last_run_result.setter
+    def last_run_result(self, value: RunResult | None) -> None:
+        self.runtime_session.last_run_result = value
 
     def run(self) -> int:
         try:
@@ -189,10 +239,11 @@ class SfeTuiApp:
             "Workspace [current]: ",
             default="",
         )
-        try:
-            self.workspace_root = resolve_workspace(raw, self.cwd)
-        except ValueError as exc:
-            self.output(renderer.render_error(str(exc)))
+        result = self.runtime_session.set_target_directory(raw)
+        if not result.ok:
+            self.output(
+                renderer.render_error(result.error_category or "workspace_not_found")
+            )
             return False
         self.output(renderer.render_workspace_selected(self.workspace_root, self.cwd))
         return True
@@ -268,13 +319,10 @@ class SfeTuiApp:
             self._handle_files(rest)
             return False
         if name == "/task":
-            task = rest.strip()
-            if not task:
-                self.output(renderer.render_error("missing_task"))
+            result = self.runtime_session.set_task(rest)
+            if not result.ok:
+                self.output(renderer.render_error(result.error_category or "missing_task"))
                 return False
-            self.task = task
-            self.discovery_result = None
-            self.latest_result = None
             self._clear_pending_patch()
             self.output(renderer.render_task_set())
             return False
@@ -370,9 +418,7 @@ class SfeTuiApp:
 
     def _handle_reset(self) -> None:
         self.context_files = []
-        self.discovery_result = None
-        self.task = ""
-        self.latest_result = None
+        self.runtime_session.reset()
         self._clear_pending_patch()
         self.output(renderer.render_reset())
 
@@ -407,16 +453,12 @@ class SfeTuiApp:
         return True
 
     def _handle_workspace_status(self) -> None:
-        status_result = (
-            self.workspace_manager.status(self.workspace_session)
-            if self.workspace_session is not None
-            else None
-        )
+        status = self.runtime_session.workspace_status()
         self.output(
             renderer.render_workspace_mode_status(
-                workspace_root=self.workspace_root,
-                workspace_session=self.workspace_session,
-                status_result=status_result,
+                workspace_root=status.workspace_root,
+                workspace_session=status.workspace_session,
+                status_result=status.status_result,
                 launch_cwd=self.cwd,
             )
         )
@@ -699,40 +741,25 @@ class SfeTuiApp:
         return pending_patch is not None
 
     def _handle_run(self, *, debug: bool = False) -> bool:
-        if self.workspace_root is None:
-            self.output(renderer.render_error("workspace_not_selected"))
+        error_category = self.runtime_session.run_error_category()
+        if error_category is not None:
+            self.output(renderer.render_error(error_category))
             return False
-        if not self.task.strip():
-            self.output(renderer.render_error("missing_task"))
-            return False
-        pipeline = RunPipeline(
-            backend=self.backend,
-            workspace_manager=self.workspace_manager,
-            discovery_router=self.discovery_router,
-            execution_mode_router=self.execution_mode_router,
+        activity = self.activity_indicator_factory()
+        session_result = self.runtime_session.run(
             progress_callback=lambda event: self.output(
                 renderer.render_run_progress_event(event)
             ),
+            before_execute=activity.start,
+            after_execute=activity.stop,
         )
-        activity = self.activity_indicator_factory()
-        activity.start()
-        try:
-            result = pipeline.run(
-                RunRequest(
-                    workspace_root=self.workspace_root,
-                    task=self.task,
-                    workspace_session=self.workspace_session,
-                )
-            )
-        finally:
-            activity.stop()
-        self.last_run_result = result
-        if result.workspace_session is not None:
-            self.workspace_session = result.workspace_session
-        if result.active_workspace is not None:
-            self.workspace_root = result.active_workspace
-        self.discovery_result = result.discovery_result
-        self.latest_result = result.patch_result or result.dry_run_result
+        if session_result.error_category is not None:
+            self.output(renderer.render_error(session_result.error_category))
+            return False
+        result = session_result.run_result
+        if result is None:
+            self.output(renderer.render_error("run_result_missing"))
+            return False
         self._clear_pending_patch()
         if debug:
             self.output(renderer.render_run_result_debug(result, launch_cwd=self.cwd))
@@ -741,12 +768,13 @@ class SfeTuiApp:
         return result.status == "completed"
 
     def _handle_run_report(self) -> bool:
-        if self.last_run_result is None:
+        result = self.runtime_session.run_report()
+        if not result.ok or result.run_result is None:
             self.output("No previous run result available.")
             return False
         self.output(
             renderer.render_run_result_debug(
-                self.last_run_result,
+                result.run_result,
                 launch_cwd=self.cwd,
             )
         )
