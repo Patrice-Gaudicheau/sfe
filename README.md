@@ -234,7 +234,7 @@ or lint, require diff inspection, require human approval, or require router
 review. `external_action` is recognized as outside-workspace work, but is not
 implemented yet and fails cleanly. Historical and debug commands such as
 `/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
-`/review-worktree` remain available through `/help-advanced`.
+`/review-worktree` remain available, but are hidden from the default help.
 
 SFE's current product doctrine is intentionally narrow: it is a context routing
 and token reduction layer. It is meant to send the executor less context, but

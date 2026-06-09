@@ -76,29 +76,27 @@ The normal first path is short:
 Useful optional follow-ups:
 
 ```text
+/advanced
 /run-report
 /context
-/discover
-/dry-run
 ```
 
-`/run-report` inspects the last run without running it again. `/context`,
-`/discover`, and `/dry-run` are inspection and diagnostic tools; they are not
-required for the normal `/task` -> `/run` path.
+`/advanced` shows the lower-level diagnostic commands. `/run-report` inspects
+the last run without running it again. `/context` shows selected context
+metadata. These commands are not required for the normal `/task` -> `/run`
+path.
 
-Advanced patch, worktree, cleanup, and maintenance commands remain available
-but are not the normal first path:
+Lower-level diagnostics are available but are not the normal first path:
 
 ```text
-/help-advanced
+/advanced
 ```
 
 ## Command Reference
 
 ### Primary Path
 
-- `/help`: show concise command help.
-- `/directory`: show the selected workspace using safe display conventions.
+- `/help` and `/?`: show concise command help.
 - `/status`: show current TUI state, latest result metadata, and write/shell
   boundaries.
 - `/task <text>`: store the current task. Empty tasks are rejected.
@@ -110,14 +108,16 @@ but are not the normal first path:
   initialize a local repository snapshot first; it does not create a remote,
   push, run syntax checks, run tests or lint, require diff inspection, require
   human approval, or require router review.
-- `/run-report`: show diagnostics for the previous `/run` or `/run-debug`
-  result without relaunching execution and without replaying progress events.
 - `/reset`: clear task, context, latest routing/result, and skipped/rejected
   context and discovery state; preserve the selected workspace.
+- `/advanced`: show lower-level diagnostic commands.
 - `/quit` and `/exit`: exit the TUI.
 
-### Optional Inspection
+### Advanced Diagnostics
 
+- `/directory`: show the selected workspace using safe display conventions.
+- `/run-report`: show diagnostics for the previous `/run` or `/run-debug`
+  result without relaunching execution and without replaying progress events.
 - `/context`: show loaded context segment count, opaque ids, safe source refs,
   approximate sizes/tokens, latest selected ids, and skipped/rejected metadata.
 - `/ask`: send selected context plus protected task/instructions to the
@@ -125,8 +125,6 @@ but are not the normal first path:
 - `/workspace-status`: show whether the active workspace is the original
   workspace or an isolated worktree, plus worktree metadata and git status when
   available.
-- `/help-advanced`: show advanced/debug and maintenance commands retained for
-  compatibility.
 
 ### Advanced And Maintenance
 
@@ -199,10 +197,9 @@ live baseline-versus-spatial comparison. `/run-report` displays the latest
 stored run diagnostics and does not relaunch `/run` or duplicate progress
 events.
 
-Advanced and maintenance commands remain available through `/help-advanced` and
-are summarized in the command reference above. Setting a new `/task` invalidates
-any previous discovery result. Run `/discover` again before `/dry-run`, `/ask`,
-or `/patch` unless you are using manual `/files` context.
+Advanced diagnostics are available through `/advanced`. Setting a new `/task`
+invalidates any previous discovery result. Run `/discover` again before
+`/dry-run`, `/ask`, or `/patch` unless you are using manual `/files` context.
 
 ## Discovery
 

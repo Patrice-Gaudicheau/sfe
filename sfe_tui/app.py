@@ -202,13 +202,13 @@ class SfeTuiApp:
 
     def _handle_command(self, command: str) -> bool:
         name, _, rest = command.partition(" ")
-        if name == "/help":
+        if name in {"/help", "/?"}:
             if rest.strip() == "advanced":
                 self.output(renderer.render_advanced_help())
             else:
                 self.output(renderer.render_help())
             return False
-        if name == "/help-advanced":
+        if name in {"/advanced", "/help-advanced"}:
             self.output(renderer.render_advanced_help())
             return False
         if name in {"/quit", "/exit"}:
