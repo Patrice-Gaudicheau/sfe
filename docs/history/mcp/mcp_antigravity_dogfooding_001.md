@@ -221,6 +221,49 @@ Final diff summary:
 This validated a coordinated two-file modification through the real
 Antigravity -> SFE MCP -> RuntimeSession -> RunPipeline -> CodexCLI path.
 
+## Test 010 Refactor After Diff Segment Extraction
+
+Dogfooding later retried the function-refactor scenario after safe Git diff
+segment extraction was added.
+
+Target:
+
+```text
+/home/patrice/Projets/00_Tests/SFE-playground/test_010_refactor_function_after_diff_segment_extraction
+```
+
+Task:
+
+```text
+Rename add_numbers to sum_numbers and update imports, usages, and tests.
+```
+
+Observed result:
+
+| Field | Value |
+| --- | --- |
+| `status` | `completed` |
+| `execution_mode` | `workspace_write` |
+| `selected_source_refs` | `["app.py", "math_utils.py", "test_app.py"]` |
+| `changed_files` | `["app.py", "math_utils.py", "test_app.py"]` |
+| `modified_files` | `["app.py", "math_utils.py", "test_app.py"]` |
+| `promoted_files` | `["app.py", "math_utils.py", "test_app.py"]` |
+| `patch_generated` | `true` |
+| `patch_applied` | `true` |
+| `promotion.status` | `applied` |
+| `executor_provider` | `codexcli` |
+| patch summary | 3 files, 3 hunks, 6 lines added, 6 lines removed |
+
+Final verification:
+
+- `math_utils.py` renamed `add_numbers` to `sum_numbers`.
+- `app.py` imports and uses `sum_numbers`.
+- `test_app.py` imports `sum_numbers` and `test_sum_numbers` passes.
+- `python3 -m pytest -q` reported 2 passed.
+
+This confirms that safe Git diff segment extraction fixed the previous
+refactor failure without weakening patch validation.
+
 ## Issues Found During Dogfooding
 
 Several operational issues were discovered and fixed before the successful
