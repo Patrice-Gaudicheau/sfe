@@ -95,9 +95,11 @@ class FakeChatProvider:
         self,
         *,
         answer: str | None = None,
+        response: dict[str, object] | None = None,
         error: Exception | None = None,
     ) -> None:
         self.answer = "provider answer" if answer is None else answer
+        self.response = response
         self.error = error
         self.calls: list[dict[str, object]] = []
 
@@ -108,6 +110,8 @@ class FakeChatProvider:
         self.calls.append({"messages": messages, **kwargs})
         if self.error is not None:
             raise self.error
+        if self.response is not None:
+            return self.response
         return {"choices": [{"message": {"content": self.answer}}]}
 
 
@@ -1550,6 +1554,91 @@ def test_run_pipeline_codexcli_prose_only_patch_fails_without_mutation(
     assert result.patch_applied is False
     assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
     assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_codexcli_empty_patch_response_keeps_files_unchanged(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    provider = FakeChatProvider(
+        response={
+            "choices": [{"message": {"content": ""}}],
+            "codexcli": {
+                "provider": "openai-codexcli",
+                "model": "gpt-5.5",
+                "returncode": 0,
+                "stdout_length": 0,
+                "stderr_length": 0,
+                "stderr_present": False,
+                "parser_diagnostics": {
+                    "stdout_length": 0,
+                    "jsonl_line_count": 0,
+                    "parsed_event_count": 0,
+                    "invalid_json_line_count": 0,
+                    "event_type_counts": {},
+                    "agent_message_count": 0,
+                    "final_content_present": False,
+                    "thread_id_present": False,
+                    "usage_present": False,
+                },
+                "command": ["codex", "exec", "--json"],
+            },
+        }
+    )
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "patch_generation"
+    assert result.issue.reason == "invalid_response"
+    assert result.executor_provider == "codexcli"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+    assert result.patch_result is not None
+    diagnostics = result.patch_result.summary["executor_response_diagnostics"]
+    assert isinstance(diagnostics, dict)
+    assert diagnostics["message_content_length"] == 0
+    assert diagnostics["provider_diagnostics"] == {
+        "provider": "openai-codexcli",
+        "model": "gpt-5.5",
+        "returncode": 0,
+        "stdout_length": 0,
+        "stderr_length": 0,
+        "stderr_present": False,
+        "parser_diagnostics": {
+            "stdout_length": 0,
+            "jsonl_line_count": 0,
+            "parsed_event_count": 0,
+            "invalid_json_line_count": 0,
+            "event_type_counts": {},
+            "agent_message_count": 0,
+            "final_content_present": False,
+            "thread_id_present": False,
+            "usage_present": False,
+        },
+    }
+    assert "command" not in diagnostics["provider_diagnostics"]
+    assert provider.calls[0]["system_instruction"] == PATCH_SYSTEM_INSTRUCTION
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

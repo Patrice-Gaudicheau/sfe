@@ -130,6 +130,7 @@ class CodexCLIProvider:
         parsed = parse_codex_jsonl(stdout)
         content = parsed["content"]
         usage = parsed["usage"]
+        parser_diagnostics = parsed["diagnostics"]
         supervisor.complete({"latency_ms": latency_ms, "returncode": returncode})
         return {
             "choices": [{"message": {"content": content}}],
@@ -142,6 +143,11 @@ class CodexCLIProvider:
                 "command": command,
                 "max_tokens_requested": max_tokens,
                 "temperature_requested": temperature,
+                "returncode": returncode,
+                "stdout_length": len(stdout),
+                "stderr_length": len(stderr),
+                "stderr_present": bool(stderr),
+                "parser_diagnostics": parser_diagnostics,
             },
         }
 
@@ -367,36 +373,68 @@ def parse_codex_jsonl(stdout: str) -> dict[str, Any]:
     """Extract final visible answer, thread id, and token usage from Codex JSONL."""
     thread_id = None
     content_parts: list[str] = []
+    stdout_lines = stdout.splitlines()
+    parsed_event_count = 0
+    invalid_json_line_count = 0
+    event_type_counts: dict[str, int] = {}
+    agent_message_count = 0
+    usage_present = False
     usage: dict[str, int | None] = {
         "prompt_tokens": None,
         "completion_tokens": None,
         "total_tokens": None,
     }
 
-    for line in stdout.splitlines():
+    for line in stdout_lines:
         if not line.strip():
             continue
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
+            invalid_json_line_count += 1
+            continue
+        if not isinstance(event, dict):
+            parsed_event_count += 1
+            event_type_counts["<non_object>"] = (
+                event_type_counts.get("<non_object>", 0) + 1
+            )
             continue
 
+        parsed_event_count += 1
         event_type = event.get("type")
+        event_type_label = str(event_type or "<missing>")
+        event_type_counts[event_type_label] = (
+            event_type_counts.get(event_type_label, 0) + 1
+        )
         if event_type == "thread.started":
             thread_id = event.get("thread_id", thread_id)
         elif event_type == "item.completed":
             item = event.get("item", {})
             if isinstance(item, dict) and item.get("type") == "agent_message":
+                agent_message_count += 1
                 text = str(item.get("text") or "").strip()
                 if text:
                     content_parts.append(text)
         elif event_type == "turn.completed":
+            usage_present = isinstance(event.get("usage"), dict)
             usage = _normalize_usage(event.get("usage"))
 
+    content = "\n".join(content_parts).strip()
     return {
-        "content": "\n".join(content_parts).strip(),
+        "content": content,
         "thread_id": thread_id,
         "usage": usage,
+        "diagnostics": {
+            "stdout_length": len(stdout),
+            "jsonl_line_count": len(stdout_lines),
+            "parsed_event_count": parsed_event_count,
+            "invalid_json_line_count": invalid_json_line_count,
+            "event_type_counts": event_type_counts,
+            "agent_message_count": agent_message_count,
+            "final_content_present": bool(content),
+            "thread_id_present": thread_id is not None,
+            "usage_present": usage_present,
+        },
     }
 
 

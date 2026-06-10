@@ -14,6 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from sfe.contracts import SFEContract  # noqa: E402
+from sfe.execution_backend import ExecutionResult  # noqa: E402
 from sfe.execution_mode_router import (  # noqa: E402
     EXECUTION_MODE_CONSOLE_OUTPUT,
     EXECUTION_MODE_WORKSPACE_WRITE,
@@ -130,6 +132,7 @@ def make_run_result(
     status: str = RUN_STATUS_COMPLETED,
     issue: RunIssue | None = None,
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
+    patch_result: ExecutionResult | None = None,
 ) -> RunResult:
     return RunResult(
         status=status,
@@ -160,6 +163,7 @@ def make_run_result(
         promotion_applied=True,
         promoted_files=("context.txt", "created.txt"),
         patch_proposal_diagnostics=patch_proposal_diagnostics,
+        patch_result=patch_result,
     )
 
 
@@ -681,6 +685,108 @@ def test_run_report_serializes_safe_patch_proposal_diagnostics() -> None:
     rendered = repr(result)
     assert "SECRET_FILE_CONTENT" not in rendered
     assert "first_non_empty_line" not in rendered
+
+
+def test_run_report_serializes_safe_executor_response_diagnostics() -> None:
+    patch_result = ExecutionResult(
+        backend="direct",
+        status="patch_failed",
+        provider_calls_made=1,
+        summary={
+            "executor_provider": "codexcli",
+            "executor_response_diagnostics": {
+                "provider_name": "codexcli",
+                "response_object_type": "dict",
+                "top_level_keys": ("choices", "codexcli"),
+                "choices_exists": True,
+                "choices_count": 1,
+                "first_choice_keys": ("message",),
+                "finish_reason": None,
+                "message_keys": ("content",),
+                "message_content_exists": True,
+                "message_content_type": "str",
+                "message_content_length": 0,
+                "output_text_exists": False,
+                "output_text_type": None,
+                "output_text_length": None,
+                "error_exists": False,
+                "error_type": None,
+                "error_keys": (),
+                "status_exists": False,
+                "status_type": None,
+                "stdout": "SECRET stdout payload",
+                "stderr": "SECRET stderr payload",
+                "provider_diagnostics": {
+                    "provider": "openai-codexcli",
+                    "model": "gpt-5.5",
+                    "returncode": 0,
+                    "stdout_length": 0,
+                    "stderr_length": 21,
+                    "stderr_present": True,
+                    "stderr": "SECRET stderr payload",
+                    "parser_diagnostics": {
+                        "stdout_length": 0,
+                        "jsonl_line_count": 0,
+                        "parsed_event_count": 0,
+                        "invalid_json_line_count": 0,
+                        "event_type_counts": {},
+                        "agent_message_count": 0,
+                        "final_content_present": False,
+                        "thread_id_present": False,
+                        "usage_present": False,
+                    },
+                },
+            },
+        },
+        contract=SFEContract(
+            instructions=[],
+            task=None,
+            context_segments=[],
+            protected_segments=[],
+        ),
+        answer=None,
+        error_category="invalid_response",
+    )
+    session = FakeRuntimeSession()
+    session.report_result = RunReportResult(
+        ok=True,
+        run_result=make_run_result(
+            status=RUN_STATUS_FAILED,
+            issue=RunIssue("patch_generation", "invalid_response"),
+            patch_result=patch_result,
+        ),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run_report()
+
+    diagnostics = result["diagnostics"]["executor_response_diagnostics"]
+    assert diagnostics["provider_name"] == "codexcli"
+    assert diagnostics["message_content_length"] == 0
+    assert diagnostics["provider_diagnostics"] == {
+        "provider": "openai-codexcli",
+        "model": "gpt-5.5",
+        "returncode": 0,
+        "stdout_length": 0,
+        "stderr_length": 21,
+        "stderr_present": True,
+        "parser_diagnostics": {
+            "stdout_length": 0,
+            "jsonl_line_count": 0,
+            "parsed_event_count": 0,
+            "invalid_json_line_count": 0,
+            "agent_message_count": 0,
+            "final_content_present": False,
+            "thread_id_present": False,
+            "usage_present": False,
+            "event_type_counts": {},
+        },
+    }
+    rendered = repr(result)
+    assert "SECRET stdout payload" not in rendered
+    assert "SECRET stderr payload" not in rendered
+    assert "Protected instructions:" not in rendered
+    assert "User task:" not in rendered
 
 
 def test_console_output_run_is_serialized_without_workspace_write_fields() -> None:

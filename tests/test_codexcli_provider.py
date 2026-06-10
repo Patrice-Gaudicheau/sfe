@@ -317,15 +317,14 @@ class CodexCLIProviderTests(unittest.TestCase):
             build_codex_resume_command("gpt-5.5", " ")
 
     def test_parse_jsonl_extracts_visible_answer_thread_and_usage(self) -> None:
-        parsed = parse_codex_jsonl(
-            "\n".join(
-                [
-                    '{"type":"thread.started","thread_id":"thread-1"}',
-                    '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
-                    '{"type":"turn.completed","usage":{"input_tokens":7,"output_tokens":3}}',
-                ]
-            )
+        stdout = "\n".join(
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
+                '{"type":"turn.completed","usage":{"input_tokens":7,"output_tokens":3}}',
+            ]
         )
+        parsed = parse_codex_jsonl(stdout)
 
         self.assertEqual(parsed["content"], "Done.")
         self.assertEqual(parsed["thread_id"], "thread-1")
@@ -333,6 +332,73 @@ class CodexCLIProviderTests(unittest.TestCase):
             parsed["usage"],
             {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
         )
+        self.assertEqual(
+            parsed["diagnostics"],
+            {
+                "stdout_length": len(stdout),
+                "jsonl_line_count": 3,
+                "parsed_event_count": 3,
+                "invalid_json_line_count": 0,
+                "event_type_counts": {
+                    "thread.started": 1,
+                    "item.completed": 1,
+                    "turn.completed": 1,
+                },
+                "agent_message_count": 1,
+                "final_content_present": True,
+                "thread_id_present": True,
+                "usage_present": True,
+            },
+        )
+
+    def test_parse_jsonl_reports_empty_stdout_diagnostics(self) -> None:
+        parsed = parse_codex_jsonl("")
+
+        self.assertEqual(parsed["content"], "")
+        self.assertEqual(parsed["thread_id"], None)
+        self.assertEqual(
+            parsed["usage"],
+            {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None},
+        )
+        self.assertEqual(
+            parsed["diagnostics"],
+            {
+                "stdout_length": 0,
+                "jsonl_line_count": 0,
+                "parsed_event_count": 0,
+                "invalid_json_line_count": 0,
+                "event_type_counts": {},
+                "agent_message_count": 0,
+                "final_content_present": False,
+                "thread_id_present": False,
+                "usage_present": False,
+            },
+        )
+
+    def test_parse_jsonl_reports_events_without_agent_message(self) -> None:
+        parsed = parse_codex_jsonl(
+            "\n".join(
+                [
+                    '{"type":"thread.started","thread_id":"thread-1"}',
+                    '{"type":"item.completed","item":{"type":"tool_call","text":"ignored"}}',
+                    '{"type":"turn.completed","usage":{"input_tokens":7,"output_tokens":3}}',
+                    "not json",
+                ]
+            )
+        )
+
+        self.assertEqual(parsed["content"], "")
+        self.assertEqual(parsed["thread_id"], "thread-1")
+        self.assertEqual(parsed["diagnostics"]["parsed_event_count"], 3)
+        self.assertEqual(parsed["diagnostics"]["invalid_json_line_count"], 1)
+        self.assertEqual(
+            parsed["diagnostics"]["event_type_counts"],
+            {"thread.started": 1, "item.completed": 1, "turn.completed": 1},
+        )
+        self.assertEqual(parsed["diagnostics"]["agent_message_count"], 0)
+        self.assertEqual(parsed["diagnostics"]["final_content_present"], False)
+        self.assertEqual(parsed["diagnostics"]["thread_id_present"], True)
+        self.assertEqual(parsed["diagnostics"]["usage_present"], True)
 
     def test_parse_jsonl_accepts_openai_style_usage_keys(self) -> None:
         parsed = parse_codex_jsonl(
@@ -420,6 +486,47 @@ class CodexCLIProviderTests(unittest.TestCase):
             'model_reasoning_effort="high"',
             response["codexcli"]["command"],
         )
+
+    def test_chat_records_empty_stdout_exit_zero_diagnostics(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)
+        fake_process = FakeProcess(stdout_lines=[])
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+            response = provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+            )
+
+        metadata = response["codexcli"]
+        self.assertEqual(response["choices"][0]["message"]["content"], "")
+        self.assertEqual(metadata["returncode"], 0)
+        self.assertEqual(metadata["stdout_length"], 0)
+        self.assertEqual(metadata["stderr_length"], 0)
+        self.assertEqual(metadata["stderr_present"], False)
+        self.assertEqual(metadata["parser_diagnostics"]["parsed_event_count"], 0)
+        self.assertEqual(metadata["parser_diagnostics"]["final_content_present"], False)
+
+    def test_chat_records_stderr_presence_without_stderr_text(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=1)
+        fake_process = FakeProcess(
+            stdout_lines=[
+                '{"type":"thread.started","thread_id":"thread-1"}\n',
+                '{"type":"item.completed","item":{"type":"agent_message","text":""}}\n',
+            ],
+            stderr_text="SECRET stderr details",
+        )
+
+        with patch("providers.codexcli.subprocess.Popen", return_value=fake_process):
+            response = provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+            )
+
+        metadata = response["codexcli"]
+        self.assertEqual(response["choices"][0]["message"]["content"], "")
+        self.assertEqual(metadata["stderr_length"], len("SECRET stderr details"))
+        self.assertEqual(metadata["stderr_present"], True)
+        self.assertNotIn("SECRET stderr details", str(metadata))
 
     def test_chat_wires_timeout_into_supervisor_and_start_metadata(self) -> None:
         created: dict[str, object] = {}

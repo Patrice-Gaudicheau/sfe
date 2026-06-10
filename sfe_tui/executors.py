@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Protocol
 
 from providers.alibaba import (
     DEFAULT_EXECUTOR_MODEL as DEFAULT_ALIBABA_EXECUTOR_MODEL,
@@ -666,7 +667,77 @@ def build_response_shape_diagnostics(
         status = response.get("status")
         diagnostics["status_exists"] = status is not None
         diagnostics["status_type"] = type(status).__name__ if status is not None else None
+        codexcli = response.get("codexcli")
+        if isinstance(codexcli, dict):
+            diagnostics["provider_diagnostics"] = _safe_codexcli_diagnostics(codexcli)
     return diagnostics
+
+
+def _safe_codexcli_diagnostics(codexcli: Mapping[object, object]) -> dict[str, object]:
+    parser_diagnostics = codexcli.get("parser_diagnostics")
+    return {
+        "provider": _safe_optional_scalar(codexcli.get("provider")),
+        "model": _safe_optional_scalar(codexcli.get("model")),
+        "returncode": _safe_int(codexcli.get("returncode")),
+        "stdout_length": _safe_int(codexcli.get("stdout_length")),
+        "stderr_length": _safe_int(codexcli.get("stderr_length")),
+        "stderr_present": _safe_bool(codexcli.get("stderr_present")),
+        "parser_diagnostics": (
+            _safe_codexcli_parser_diagnostics(parser_diagnostics)
+            if isinstance(parser_diagnostics, Mapping)
+            else None
+        ),
+    }
+
+
+def _safe_codexcli_parser_diagnostics(
+    diagnostics: Mapping[object, object],
+) -> dict[str, object]:
+    return {
+        "stdout_length": _safe_int(diagnostics.get("stdout_length")),
+        "jsonl_line_count": _safe_int(diagnostics.get("jsonl_line_count")),
+        "parsed_event_count": _safe_int(diagnostics.get("parsed_event_count")),
+        "invalid_json_line_count": _safe_int(
+            diagnostics.get("invalid_json_line_count")
+        ),
+        "event_type_counts": _safe_event_type_counts(
+            diagnostics.get("event_type_counts")
+        ),
+        "agent_message_count": _safe_int(diagnostics.get("agent_message_count")),
+        "final_content_present": _safe_bool(diagnostics.get("final_content_present")),
+        "thread_id_present": _safe_bool(diagnostics.get("thread_id_present")),
+        "usage_present": _safe_bool(diagnostics.get("usage_present")),
+    }
+
+
+def _safe_event_type_counts(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    counts: dict[str, int] = {}
+    for key, count in list(value.items())[:40]:
+        safe_key = _safe_key(key)
+        safe_count = _safe_int(count)
+        if safe_count is not None:
+            counts[safe_key] = safe_count
+    return counts
+
+
+def _safe_optional_scalar(value: object) -> str | None:
+    if value is None:
+        return None
+    return _safe_scalar(value)
+
+
+def _safe_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _safe_bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
 
 
 def _safe_keys(value: Mapping[object, object]) -> tuple[str, ...]:

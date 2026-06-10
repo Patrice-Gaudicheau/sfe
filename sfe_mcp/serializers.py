@@ -277,7 +277,112 @@ def _serialize_run_diagnostics(result: RunResult) -> dict[str, Any]:
             "estimated_reduction_pct": _estimated_reduction_pct(dry_run),
         },
         "patch_proposal": _serialize_patch_proposal_diagnostics(result),
+        "executor_response_diagnostics": _serialize_executor_response_diagnostics(
+            result
+        ),
     }
+
+
+def _serialize_executor_response_diagnostics(
+    result: RunResult,
+) -> dict[str, Any] | None:
+    patch_result = result.patch_result
+    if patch_result is None:
+        return None
+    diagnostics = patch_result.summary.get("executor_response_diagnostics")
+    if not isinstance(diagnostics, dict):
+        return None
+    serialized: dict[str, Any] = {}
+    for key in (
+        "provider_name",
+        "response_object_type",
+        "top_level_keys",
+        "choices_exists",
+        "choices_count",
+        "first_choice_keys",
+        "finish_reason",
+        "message_keys",
+        "message_content_exists",
+        "message_content_type",
+        "message_content_length",
+        "output_text_exists",
+        "output_text_type",
+        "output_text_length",
+        "error_exists",
+        "error_type",
+        "error_keys",
+        "status_exists",
+        "status_type",
+    ):
+        if key in diagnostics:
+            serialized[key] = _safe_diagnostic_value(diagnostics[key])
+    provider_diagnostics = diagnostics.get("provider_diagnostics")
+    if isinstance(provider_diagnostics, dict):
+        serialized["provider_diagnostics"] = _serialize_provider_diagnostics(
+            provider_diagnostics
+        )
+    return serialized
+
+
+def _serialize_provider_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    serialized: dict[str, Any] = {}
+    for key in (
+        "provider",
+        "model",
+        "returncode",
+        "stdout_length",
+        "stderr_length",
+        "stderr_present",
+    ):
+        if key in diagnostics:
+            serialized[key] = _safe_diagnostic_value(diagnostics[key])
+    parser_diagnostics = diagnostics.get("parser_diagnostics")
+    if isinstance(parser_diagnostics, dict):
+        serialized["parser_diagnostics"] = _serialize_parser_diagnostics(
+            parser_diagnostics
+        )
+    return serialized
+
+
+def _serialize_parser_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    serialized: dict[str, Any] = {}
+    for key in (
+        "stdout_length",
+        "jsonl_line_count",
+        "parsed_event_count",
+        "invalid_json_line_count",
+        "agent_message_count",
+        "final_content_present",
+        "thread_id_present",
+        "usage_present",
+    ):
+        if key in diagnostics:
+            serialized[key] = _safe_diagnostic_value(diagnostics[key])
+    event_type_counts = diagnostics.get("event_type_counts")
+    if isinstance(event_type_counts, dict):
+        serialized["event_type_counts"] = {
+            str(key): value
+            for key, value in event_type_counts.items()
+            if isinstance(key, str) and isinstance(value, int)
+        }
+    return serialized
+
+
+def _safe_diagnostic_value(value: Any) -> Any:
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, str):
+        return _redact_diagnostic_string(value)
+    if isinstance(value, tuple | list):
+        return [_safe_diagnostic_value(item) for item in value[:40]]
+    return None
+
+
+def _redact_diagnostic_string(value: str) -> str:
+    lowered = value.lower()
+    if "sk-" in lowered or "api_key" in lowered or "authorization" in lowered:
+        return "[redacted]"
+    return value if len(value) <= 120 else value[:117] + "..."
 
 
 def _serialize_patch_proposal_diagnostics(result: RunResult) -> dict[str, Any] | None:
