@@ -276,6 +276,28 @@ def _serialize_run_diagnostics(result: RunResult) -> dict[str, Any]:
             "selected_token_estimate": _selected_token_estimate(dry_run),
             "estimated_reduction_pct": _estimated_reduction_pct(dry_run),
         },
+        "patch_proposal": _serialize_patch_proposal_diagnostics(result),
+    }
+
+
+def _serialize_patch_proposal_diagnostics(result: RunResult) -> dict[str, Any] | None:
+    diagnostics = result.patch_proposal_diagnostics
+    if diagnostics is None:
+        return None
+    return {
+        "raw_output_length": diagnostics.raw_output_length,
+        "is_empty": diagnostics.is_empty,
+        "starts_with_markdown_fence": diagnostics.starts_with_markdown_fence,
+        "contains_fenced_diff": diagnostics.contains_fenced_diff,
+        "contains_diff_git_header": diagnostics.contains_diff_git_header,
+        "contains_old_file_header": diagnostics.contains_old_file_header,
+        "contains_new_file_header": diagnostics.contains_new_file_header,
+        "contains_hunk_header": diagnostics.contains_hunk_header,
+        "looks_like_json": diagnostics.looks_like_json,
+        "mentions_selected_paths": list(diagnostics.mentions_selected_paths),
+        "looks_like_plain_text_or_markdown": (
+            diagnostics.looks_like_plain_text_or_markdown
+        ),
     }
 
 

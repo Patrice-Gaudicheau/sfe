@@ -28,6 +28,7 @@ SUPPORTED_STRUCTURED_ACTIONS = frozenset(
 )
 
 _DIFF_HEADER_RE = re.compile(r"^diff --git (a/[^ ]+) (b/[^ ]+)$")
+_FENCED_BLOCK_RE = re.compile(r"```[^\n`]*\n(?P<body>.*?)\n?```", re.DOTALL)
 _HUNK_HEADER_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
     r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@(?P<section> .*)?$"
@@ -358,6 +359,23 @@ def parse_unified_diff(text: str) -> PatchParseResult:
         return _parse_error("empty_patch")
     patch = ParsedPatch(files=tuple(files))
     return PatchParseResult(patch=patch, issue=None, summary=summarize_patch(patch))
+
+
+def extract_single_fenced_git_diff(text: str) -> str | None:
+    """Extract one fenced Git diff when there is no surrounding prose."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    matches = list(_FENCED_BLOCK_RE.finditer(stripped))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    if stripped[: match.start()].strip() or stripped[match.end() :].strip():
+        return None
+    body = match.group("body").strip()
+    if not body.startswith("diff --git "):
+        return None
+    return body
 
 
 def normalize_unified_diff_hunk_counts(text: str) -> HunkCountNormalizationResult:

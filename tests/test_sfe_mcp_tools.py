@@ -20,6 +20,7 @@ from sfe.execution_mode_router import (  # noqa: E402
     ExecutionModeDecision,
 )
 from sfe.patching import PatchSummary  # noqa: E402
+from sfe.patch_proposal_diagnostics import PatchProposalDiagnostics  # noqa: E402
 from sfe.run_pipeline import (  # noqa: E402
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
@@ -128,6 +129,7 @@ def make_run_result(
     *,
     status: str = RUN_STATUS_COMPLETED,
     issue: RunIssue | None = None,
+    patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
 ) -> RunResult:
     return RunResult(
         status=status,
@@ -157,6 +159,7 @@ def make_run_result(
         promotion_status="applied",
         promotion_applied=True,
         promoted_files=("context.txt", "created.txt"),
+        patch_proposal_diagnostics=patch_proposal_diagnostics,
     )
 
 
@@ -627,6 +630,57 @@ def test_run_report_includes_diagnostics_without_rerun() -> None:
     assert result["diagnostics"]["execution_mode_router"]["provider"] == "fake-router"
     assert result["progress"] == []
     assert session.calls == [("run_report", None)]
+
+
+def test_run_report_serializes_safe_patch_proposal_diagnostics() -> None:
+    session = FakeRuntimeSession()
+    session.report_result = RunReportResult(
+        ok=True,
+        run_result=make_run_result(
+            status=RUN_STATUS_FAILED,
+            issue=RunIssue("invalid_patch_proposal", "missing_diff_header"),
+            patch_proposal_diagnostics=PatchProposalDiagnostics(
+                raw_output_length=142,
+                is_empty=False,
+                first_non_empty_line="SECRET_FILE_CONTENT",
+                starts_with_markdown_fence=True,
+                contains_fenced_diff=True,
+                contains_diff_git_header=False,
+                contains_old_file_header=True,
+                contains_new_file_header=True,
+                contains_hunk_header=True,
+                looks_like_json=False,
+                mentions_selected_paths=("app.py",),
+                looks_like_plain_text_or_markdown=False,
+            ),
+        ),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run_report()
+
+    assert result["ok"] is False
+    assert result["issue"] == {
+        "category": "invalid_patch_proposal",
+        "reason": "missing_diff_header",
+        "path": None,
+    }
+    assert result["diagnostics"]["patch_proposal"] == {
+        "raw_output_length": 142,
+        "is_empty": False,
+        "starts_with_markdown_fence": True,
+        "contains_fenced_diff": True,
+        "contains_diff_git_header": False,
+        "contains_old_file_header": True,
+        "contains_new_file_header": True,
+        "contains_hunk_header": True,
+        "looks_like_json": False,
+        "mentions_selected_paths": ["app.py"],
+        "looks_like_plain_text_or_markdown": False,
+    }
+    rendered = repr(result)
+    assert "SECRET_FILE_CONTENT" not in rendered
+    assert "first_non_empty_line" not in rendered
 
 
 def test_console_output_run_is_serialized_without_workspace_write_fields() -> None:

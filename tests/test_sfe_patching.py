@@ -19,6 +19,7 @@ from sfe.patching import (
     PHYSICAL_WRITE_FAILURE,
     apply_patch_to_workspace,
     apply_structured_file_patch,
+    extract_single_fenced_git_diff,
     normalize_unified_diff_hunk_counts,
     parse_unified_diff,
     parse_structured_file_patch_json,
@@ -39,6 +40,23 @@ def _diff(path: str, old: str = "old", new: str = "new") -> str:
             f"-{old}",
             f"+{new}",
         ]
+    )
+
+
+def test_extract_single_fenced_git_diff_accepts_only_unambiguous_git_diff() -> None:
+    diff = _diff("context.txt")
+    generic_diff = "```diff\n--- a/context.txt\n+++ b/context.txt\n```"
+
+    assert extract_single_fenced_git_diff(f"```diff\n{diff}\n```") == diff
+    assert extract_single_fenced_git_diff(f"```\n{diff}\n```") == diff
+    assert (
+        extract_single_fenced_git_diff(f"Here is the diff:\n```diff\n{diff}\n```")
+        is None
+    )
+    assert extract_single_fenced_git_diff(generic_diff) is None
+    assert (
+        extract_single_fenced_git_diff(f"```diff\n{diff}\n```\n```text\nextra\n```")
+        is None
     )
 
 

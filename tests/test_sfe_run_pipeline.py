@@ -992,6 +992,67 @@ def test_run_pipeline_reports_fenced_diff_patch_proposal_diagnostics(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_accepts_single_fenced_git_diff_patch_proposal(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = f"```diff\n{_valid_new_file_diff()}\n```"
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("index.html",)
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_ambiguous_multiple_fenced_patch_blocks(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        f"```diff\n{_valid_new_file_diff()}\n```\n"
+        f"```diff\n{_valid_new_file_diff('two.html')}\n```"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    assert result.patch_applied is False
+    assert not (repo / "index.html").exists()
+    assert not (repo / "two.html").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_reports_json_looking_patch_proposal_diagnostics(
     tmp_path: Path,
 ) -> None:
@@ -1241,6 +1302,46 @@ def test_run_pipeline_valid_unified_diff_applies_without_repair_metadata(
     assert result.patch_applied is True
     assert result.promoted_files == ("index.html",)
     assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_valid_multi_file_unified_diff_still_applies(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "app.py").write_text('GREETING = "Hello"\n', encoding="utf-8")
+    (repo / "test_app.py").write_text(
+        'from app import GREETING\n\n\ndef test_greeting():\n    assert GREETING == "Hello"\n',
+        encoding="utf-8",
+    )
+    _git(repo, "add", "app.py", "test_app.py")
+    _git(repo, "commit", "-m", "add app and test")
+    manager = _manager()
+    executor = FakeExecutor(_valid_two_file_modify_diff())
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=executor,
+        discovery_router=FakeDiscoveryRouter(("app.py", "test_app.py")),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update greeting and test",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.modified_paths == ("app.py", "test_app.py")
+    assert result.promoted_files == ("app.py", "test_app.py")
+    assert (repo / "app.py").read_text(encoding="utf-8") == 'GREETING = "Hello from SFE"\n'
+    assert 'assert GREETING == "Hello from SFE"' in (
+        repo / "test_app.py"
+    ).read_text(encoding="utf-8")
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -1775,6 +1876,29 @@ def _valid_new_file_diff(path: str = "index.html") -> str:
             "+one",
             "+two",
             "+three",
+        ]
+    )
+
+
+def _valid_two_file_modify_diff() -> str:
+    return "\n".join(
+        [
+            "diff --git a/app.py b/app.py",
+            "--- a/app.py",
+            "+++ b/app.py",
+            "@@ -1,1 +1,1 @@",
+            '-GREETING = "Hello"',
+            '+GREETING = "Hello from SFE"',
+            "diff --git a/test_app.py b/test_app.py",
+            "--- a/test_app.py",
+            "+++ b/test_app.py",
+            "@@ -1,5 +1,5 @@",
+            " from app import GREETING",
+            " ",
+            " ",
+            " def test_greeting():",
+            '-    assert GREETING == "Hello"',
+            '+    assert GREETING == "Hello from SFE"',
         ]
     )
 

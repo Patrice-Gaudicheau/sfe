@@ -46,6 +46,7 @@ from sfe.patching import (
     parse_structured_file_patch_json,
     parse_unified_diff,
     normalize_unified_diff_hunk_counts,
+    extract_single_fenced_git_diff,
     summarize_structured_file_patch,
     validate_patch_paths,
     validate_patch_targets,
@@ -730,12 +731,24 @@ class RunPipeline:
         result: ExecutionResult,
     ) -> RunPatchProposal | RunIssue:
         raw_answer = result.answer or ""
-        diff_parsed = parse_unified_diff(raw_answer)
+        diff_text = raw_answer
+        parse_status = "unified_diff"
+        diff_parsed = parse_unified_diff(diff_text)
+        if (
+            diff_parsed.patch is None
+            and diff_parsed.issue is not None
+            and diff_parsed.issue.reason == "missing_diff_header"
+        ):
+            fenced_diff = extract_single_fenced_git_diff(raw_answer)
+            if fenced_diff is not None:
+                diff_text = fenced_diff
+                parse_status = "fenced_unified_diff"
+                diff_parsed = parse_unified_diff(diff_text)
         if diff_parsed.patch is None or diff_parsed.summary is None:
             if _patch_hunk_count_normalization_enabled() and _is_hunk_accounting_issue(
                 diff_parsed.issue
             ):
-                normalized = normalize_unified_diff_hunk_counts(raw_answer)
+                normalized = normalize_unified_diff_hunk_counts(diff_text)
                 if normalized.issue is not None:
                     return _run_issue_from_patch(
                         normalized.issue,
@@ -777,8 +790,8 @@ class RunPipeline:
         return RunPatchProposal(
             proposal=validation.patch or diff_parsed.patch,
             summary=validation.summary or diff_parsed.summary,
-            preview=raw_answer,
-            parse_status="unified_diff",
+            preview=diff_text,
+            parse_status=parse_status,
         )
 
 def _apply_run_patch(
