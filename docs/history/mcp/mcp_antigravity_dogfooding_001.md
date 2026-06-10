@@ -176,6 +176,51 @@ This is expected for the current runtime: SFE promoted the created file into the
 target repository, but it did not stage it. Staging files is not part of the
 current MCP v1 workflow.
 
+## Test 005 Two-Files Patch
+
+Dogfooding then used:
+
+```text
+/home/patrice/Projets/00_Tests/SFE-playground/test_005_two_files_patch
+```
+
+The purpose was to verify that SFE MCP can modify two related files in one
+`workspace_write` run. The initial repository contained:
+
+- `app.py`;
+- `test_app.py`;
+- `README.md`.
+
+Task:
+
+```text
+Change the greeting format from "Hello, NAME" to "Hello from SFE, NAME" and update both app.py and test_app.py accordingly.
+```
+
+Observed result:
+
+| Field | Value |
+| --- | --- |
+| `status` | `completed` |
+| `execution_mode` | `workspace_write` |
+| `changed_files` | `["app.py", "test_app.py"]` |
+| `patch_generated` | `true` |
+| `patch_applied` | `true` |
+| `promotion.status` | `applied` |
+| `executor_provider` | `codexcli` |
+
+Diagnostics confirmed CodexCLI usage with model `gpt-5.5`. Twelve progress
+events were observed, ending with `promotion_completed`.
+
+Final diff summary:
+
+- `app.py` changed the greeting implementation.
+- `test_app.py` updated the expected assertion.
+- `python3 -m pytest -q` passed with 1 test.
+
+This validated a coordinated two-file modification through the real
+Antigravity -> SFE MCP -> RuntimeSession -> RunPipeline -> CodexCLI path.
+
 ## Issues Found During Dogfooding
 
 Several operational issues were discovered and fixed before the successful
