@@ -90,6 +90,92 @@ sfe_workspace_status
 The successful run used the shared SFE runtime path rather than a separate MCP
 execution pipeline.
 
+## Target-Switch Regression And Retest
+
+After the successful `test_002_basic_patch` run, a follow-up dogfooding case
+switched the MCP session target to a different repository:
+
+```text
+/home/patrice/Projets/00_Tests/SFE-playground/test_003_create_file
+```
+
+The intended task was to create `greet.py`.
+
+### Test 003 Failure
+
+Test 003 exposed a RuntimeSession state leakage bug. After calling
+`sfe_set_target_directory` for `test_003_create_file`, the workspace status was
+internally inconsistent:
+
+- the active workspace label pointed to `test_003_create_file`;
+- `isolated_session` still pointed to the previous
+  `test_002_basic_patch` repository and worktree;
+- `git_status` still described the previous `test_002_basic_patch` repository
+  and its changed `hello.py`.
+
+The consequence was serious: `sfe_run` wrote `greet.py` into the stale
+`test_002_basic_patch` SFE worktree instead of the new `test_003_create_file`
+target.
+
+The fix was committed as:
+
+```text
+ea8a37027dbf0a6bd2b5613343159b399b252da7
+Reset SFE session state on target directory change
+```
+
+The fix resets target-bound RuntimeSession state when the selected target
+directory changes, including stale isolated worktree session metadata, latest
+run/report source data, discovery/latest result state, and captured progress
+events. This prevents `workspace_status` from combining a new target with an old
+isolated session and prevents a later run from reusing the previous target's
+worktree.
+
+### Test 004 Success
+
+After the target-switch fix, Antigravity dogfooding used a fresh target:
+
+```text
+/home/patrice/Projets/00_Tests/SFE-playground/test_004_create_file_after_session_reset
+```
+
+Initial `sfe_workspace_status` for this target reported:
+
+- mode: `original`;
+- `isolated_session`: `null`;
+- `git_status.clean`: `true`;
+- repository root label pointing to `test_004_create_file_after_session_reset`.
+
+The run completed successfully:
+
+| Field | Value |
+| --- | --- |
+| `status` | `completed` |
+| `execution_mode` | `workspace_write` |
+| `created_files` | `["greet.py"]` |
+| `promoted_files` | `["greet.py"]` |
+| `patch_generated` | `true` |
+| `patch_applied` | `true` |
+| `promotion.status` | `applied` |
+| `executor_provider` | `codexcli` |
+
+Final `greet.py` content:
+
+```python
+def greet(name):
+    return "Hello, " + name
+```
+
+The target repository's Git status showed:
+
+```text
+?? greet.py
+```
+
+This is expected for the current runtime: SFE promoted the created file into the
+target repository, but it did not stage it. Staging files is not part of the
+current MCP v1 workflow.
+
 ## Issues Found During Dogfooding
 
 Several operational issues were discovered and fixed before the successful
