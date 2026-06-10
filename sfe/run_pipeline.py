@@ -46,6 +46,7 @@ from sfe.patching import (
     parse_structured_file_patch_json,
     parse_unified_diff,
     normalize_unified_diff_hunk_counts,
+    extract_first_parseable_git_diff_segment,
     extract_single_fenced_git_diff,
     summarize_structured_file_patch,
     validate_patch_paths,
@@ -744,6 +745,12 @@ class RunPipeline:
                 diff_text = fenced_diff
                 parse_status = "fenced_unified_diff"
                 diff_parsed = parse_unified_diff(diff_text)
+            else:
+                extracted_diff = extract_first_parseable_git_diff_segment(raw_answer)
+                if extracted_diff is not None:
+                    diff_text = extracted_diff
+                    parse_status = "extracted_unified_diff"
+                    diff_parsed = parse_unified_diff(diff_text)
         if diff_parsed.patch is None or diff_parsed.summary is None:
             if _patch_hunk_count_normalization_enabled() and _is_hunk_accounting_issue(
                 diff_parsed.issue

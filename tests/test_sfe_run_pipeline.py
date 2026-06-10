@@ -1025,6 +1025,35 @@ def test_run_pipeline_accepts_single_fenced_git_diff_patch_proposal(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_accepts_preamble_git_diff_patch_proposal(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = f"Here is the patch:\n{_valid_new_file_diff()}"
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("index.html",)
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_rejects_ambiguous_multiple_fenced_patch_blocks(
     tmp_path: Path,
 ) -> None:
@@ -1053,6 +1082,66 @@ def test_run_pipeline_rejects_ambiguous_multiple_fenced_patch_blocks(
     assert result.patch_applied is False
     assert not (repo / "index.html").exists()
     assert not (repo / "two.html").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_ambiguous_multiple_preamble_patch_regions(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        f"Here is the first patch:\n{_valid_new_file_diff()}\n"
+        f"Here is another patch:\n{_valid_new_file_diff('two.html')}"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    assert result.patch_applied is False
+    assert not (repo / "index.html").exists()
+    assert not (repo / "two.html").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_preamble_git_diff_with_unsafe_path(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = f"Here is the patch:\n{_valid_new_file_diff('../outside.txt')}"
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context with an unsafe file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.patch_applied is False
+    assert not (tmp_path / "outside.txt").exists()
+    assert not (repo / "outside.txt").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 

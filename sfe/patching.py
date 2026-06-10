@@ -378,6 +378,69 @@ def extract_single_fenced_git_diff(text: str) -> str | None:
     return body
 
 
+def extract_first_parseable_git_diff_segment(text: str) -> str | None:
+    """Extract the first strict Git diff segment when prose surrounds it.
+
+    The returned segment must parse through ``parse_unified_diff`` as-is. This
+    helper does not repair, normalize, or infer patch content.
+    """
+    lines = text.splitlines()
+    start_index = _first_git_diff_line_index(lines)
+    if start_index is None:
+        return None
+    if _contains_fence_marker(lines[:start_index]):
+        return None
+
+    suffix_lines = lines[start_index:]
+    suffix = "\n".join(suffix_lines)
+    if _parse_unified_diff_ok(suffix):
+        return suffix
+
+    for end_index in range(len(suffix_lines) - 1, 0, -1):
+        candidate = "\n".join(suffix_lines[:end_index])
+        if not _parse_unified_diff_ok(candidate):
+            continue
+        trailing_lines = suffix_lines[end_index:]
+        if _safe_trailing_text_after_diff(trailing_lines):
+            return candidate
+        return None
+    return None
+
+
+def _first_git_diff_line_index(lines: list[str]) -> int | None:
+    for index, line in enumerate(lines):
+        if line.startswith("diff --git "):
+            return index
+    return None
+
+
+def _parse_unified_diff_ok(text: str) -> bool:
+    parsed = parse_unified_diff(text)
+    return parsed.patch is not None and parsed.summary is not None
+
+
+def _safe_trailing_text_after_diff(lines: list[str]) -> bool:
+    non_empty = [line for line in lines if line.strip()]
+    if not non_empty:
+        return True
+    if _contains_fence_marker(non_empty):
+        return False
+    return not any(_looks_like_patch_line(line) for line in non_empty)
+
+
+def _contains_fence_marker(lines: list[str]) -> bool:
+    return any(line.strip().startswith("```") for line in lines)
+
+
+def _looks_like_patch_line(line: str) -> bool:
+    return (
+        line.startswith("diff --git ")
+        or line.startswith("--- ")
+        or line.startswith("+++ ")
+        or line.startswith("@@")
+    )
+
+
 def normalize_unified_diff_hunk_counts(text: str) -> HunkCountNormalizationResult:
     """Normalize only hunk old/new counts derived from hunk bodies.
 
