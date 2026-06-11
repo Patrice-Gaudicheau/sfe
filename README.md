@@ -710,6 +710,8 @@ model intelligence.
   compatibility rather than the primary `/run` workflow.
 - `docs/current_architecture_status.md`: current boundary between the SFE core,
   local TUI surface, patch/worktree mode, and provider integration.
+- `docs/workspace_write_multipass.md`: multi-pass `workspace_write` mode for
+  large scaffold generation, including configuration and report fields.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
 - `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
 - `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.

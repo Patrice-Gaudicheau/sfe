@@ -28,6 +28,8 @@ general model-safety guarantees.
    for Antigravity and Codex App.
 7. [execution_mode_router_contract.md](execution_mode_router_contract.md):
    current `/run` execution-mode router contract.
+8. [workspace_write_multipass.md](workspace_write_multipass.md): current
+   multi-pass behavior for large `workspace_write` scaffolds.
 
 ## Current Architecture And Doctrine
 
@@ -37,6 +39,9 @@ general model-safety guarantees.
   architecture boundary and what remains unproven.
 - [execution_mode_router_contract.md](execution_mode_router_contract.md):
   current `console_output`, `workspace_write`, and `external_action` contract.
+- [workspace_write_multipass.md](workspace_write_multipass.md): how
+  multi-pass `workspace_write` planning, batch validation, promotion, and
+  reports work.
 - [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
   planned local MCP control surface and TUI/MCP ISO runtime requirement.
 - [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): current local STDIO MCP
