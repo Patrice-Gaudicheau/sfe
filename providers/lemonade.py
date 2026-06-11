@@ -80,12 +80,16 @@ class LemonadeProvider:
         temperature: float = 0.2,
         chat_template_kwargs: dict | None = None,
         progress_sink: ProviderProgressSink | None = None,
+        idle_timeout_seconds: float | None = None,
+        provider_role: str | None = None,
     ) -> dict:
         """Send a chat completion request to POST /v1/chat/completions."""
         supervisor = ProviderCallSupervisor(
             provider="lemonade",
             model=model,
+            role=provider_role,
             progress_sink=progress_sink,
+            idle_timeout_seconds=idle_timeout_seconds,
         )
         supervisor.start(
             {

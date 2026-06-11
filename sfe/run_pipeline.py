@@ -31,6 +31,19 @@ from sfe.execution_mode_router import (
 )
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.git_worktree_backend import GitWorktreeBackend
+from sfe.multipass import (
+    MultiPassBatch,
+    MultiPassBatchResult,
+    MultiPassConfig,
+    MultiPassIssue,
+    MultiPassRunSummary,
+    parse_multipass_plan_json,
+    provider_diagnostics_from_execution_summary,
+    resolve_multipass_config,
+    should_use_multipass,
+    validate_multipass_plan,
+    validate_patch_paths_in_batch,
+)
 from sfe.patching import (
     HunkAccountingDiagnostics,
     HunkCountNormalizationDiagnostics,
@@ -168,6 +181,7 @@ class RunResult:
     promotion_issue: RunIssue | None = None
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
     patch_hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
+    multi_pass_summary: MultiPassRunSummary | None = None
 
 
 class GitWorkspacePreparer:
@@ -413,7 +427,13 @@ class RunPipeline:
             f"SFE: estimated token reduction: {estimated_reduction}",
             estimated_token_reduction=estimated_reduction,
         )
-        if dry_run_result.contract.context_segments and not selected_ids:
+        multipass_config = resolve_multipass_config()
+        multipass_requested = should_use_multipass(request.task, multipass_config)
+        if (
+            dry_run_result.contract.context_segments
+            and not selected_ids
+            and not multipass_requested
+        ):
             return RunResult(
                 status=RUN_STATUS_FAILED,
                 issue=RunIssue("routing", "no_selected_context"),
@@ -428,6 +448,21 @@ class RunPipeline:
                 git_auto_init=git_preparation.auto_initialized,
                 git_initial_commit_hash=git_preparation.initial_commit_hash,
                 git_init_warning=git_preparation.warning,
+            )
+
+        if multipass_requested:
+            return self._run_workspace_write_multipass(
+                request=request,
+                execution_mode_decision=execution_mode_decision,
+                git_preparation=git_preparation,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                contract=contract,
+                config=multipass_config,
             )
 
         self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
@@ -599,6 +634,474 @@ class RunPipeline:
             promotion_applied=True,
             promoted_files=promotion_result.promoted_files,
             patch_hunk_count_normalization=proposal.hunk_count_normalization,
+        )
+
+    def _run_workspace_write_multipass(
+        self,
+        *,
+        request: RunRequest,
+        execution_mode_decision: ExecutionModeDecision,
+        git_preparation: GitPreparationResult,
+        session: WorkspaceSession,
+        active_workspace: Path,
+        worktree_created: bool,
+        discovery_result: DiscoveryResult,
+        dry_run_result: ExecutionResult,
+        selected_source_refs: tuple[str, ...],
+        contract: object,
+        config: MultiPassConfig,
+    ) -> RunResult:
+        self._emit_progress(
+            "multi_pass_planning_started",
+            "SFE: multi-pass planning started",
+        )
+        plan_result = self.backend.plan_multipass(  # type: ignore[arg-type]
+            contract,
+            config=config,
+        )
+        if not plan_result.answer:
+            issue = RunIssue(
+                "multi_pass_planning",
+                plan_result.error_category or "invalid_response",
+            )
+            summary = _build_multi_pass_summary(
+                status="failed",
+                failed_issue=_multi_pass_issue_from_run_issue(issue),
+            )
+            return _multipass_run_result(
+                status=RUN_STATUS_FAILED,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=plan_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                multi_pass_summary=summary,
+            )
+
+        parsed_plan = parse_multipass_plan_json(plan_result.answer)
+        if isinstance(parsed_plan, MultiPassIssue):
+            issue = _run_issue_from_multipass(parsed_plan)
+            summary = _build_multi_pass_summary(
+                status="failed",
+                failed_issue=parsed_plan,
+            )
+            return _multipass_run_result(
+                status=RUN_STATUS_FAILED,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=plan_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                multi_pass_summary=summary,
+            )
+        plan_issue = validate_multipass_plan(parsed_plan, config)
+        if plan_issue is not None:
+            issue = _run_issue_from_multipass(plan_issue)
+            summary = _build_multi_pass_summary(
+                status="failed",
+                project_summary=parsed_plan.project_summary,
+                passes_total=len(parsed_plan.batches),
+                failed_issue=plan_issue,
+            )
+            return _multipass_run_result(
+                status=RUN_STATUS_FAILED,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=plan_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                multi_pass_summary=summary,
+            )
+
+        self._emit_progress(
+            "multi_pass_plan_completed",
+            f"SFE: multi-pass plan completed: {len(parsed_plan.batches)} passes",
+            multi_pass_total=len(parsed_plan.batches),
+        )
+        pass_results: list[MultiPassBatchResult] = []
+        completed_summaries: list[PatchSummary] = []
+        all_promoted_files: list[str] = []
+        completed_files: list[str] = []
+        latest_patch_result: ExecutionResult | None = None
+        latest_hunk_normalization: HunkCountNormalizationDiagnostics | None = None
+
+        for index, batch in enumerate(parsed_plan.batches, start=1):
+            self._emit_progress(
+                "multi_pass_pass_started",
+                f"SFE: multi-pass pass {index}/{len(parsed_plan.batches)} started",
+                multi_pass_index=index,
+                multi_pass_total=len(parsed_plan.batches),
+                multi_pass_id=batch.id,
+            )
+            patch_result = self.backend.patch_multipass_batch(
+                contract,  # type: ignore[arg-type]
+                plan=parsed_plan,
+                batch=batch,
+                completed_files=tuple(completed_files),
+            )
+            latest_patch_result = patch_result
+            provider_diagnostics = provider_diagnostics_from_execution_summary(
+                patch_result.summary
+            )
+            if not patch_result.answer:
+                issue = RunIssue(
+                    "patch_generation",
+                    patch_result.error_category or "invalid_response",
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                )
+
+            proposal = self._parse_patch_response(active_workspace, patch_result)
+            if isinstance(proposal, RunIssue):
+                pass_issue = _multi_pass_issue_from_run_issue(proposal, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                diagnostics = None
+                if proposal.category == "invalid_patch_proposal":
+                    diagnostics = build_patch_proposal_diagnostics(
+                        patch_result.answer or "",
+                        selected_source_refs=selected_source_refs,
+                    )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=proposal,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                    patch_proposal_diagnostics=diagnostics,
+                )
+
+            guard_issue = validate_patch_paths(active_workspace, proposal.paths)
+            if guard_issue is not None:
+                issue = _run_issue_from_patch(
+                    guard_issue,
+                    default_reason="patch_not_applicable",
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                )
+
+            scope_issue = validate_patch_paths_in_batch(proposal.paths, batch)
+            if scope_issue is not None:
+                issue = _run_issue_from_multipass(scope_issue)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=scope_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=scope_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                )
+
+            promotion_baseline = _capture_promotion_baseline(
+                session,
+                active_workspace,
+                proposal.summary.paths,
+            )
+            if promotion_baseline.issue is not None:
+                issue = promotion_baseline.issue
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                )
+
+            apply_result = _apply_run_patch(active_workspace, proposal.proposal)
+            if not apply_result.applied:
+                issue = _run_issue_from_patch(
+                    apply_result.issue,
+                    default_reason="patch_not_applicable",
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                )
+
+            patch_summary = apply_result.summary or proposal.summary
+            promotion_result = _promote_run_changes(promotion_baseline)
+            if promotion_result.status != "applied":
+                issue = promotion_result.issue or RunIssue(
+                    "promotion",
+                    "promotion_not_applied",
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                    promotion_status=promotion_result.status,
+                    promotion_issue=promotion_result.issue,
+                )
+
+            latest_hunk_normalization = proposal.hunk_count_normalization
+            completed_summaries.append(patch_summary)
+            completed_files.extend(promotion_result.promoted_files)
+            all_promoted_files.extend(promotion_result.promoted_files)
+            pass_results.append(
+                MultiPassBatchResult(
+                    pass_id=batch.id,
+                    title=batch.title,
+                    status="completed",
+                    allowed_files=batch.allowed_files,
+                    created_files=patch_summary.created_paths,
+                    promoted_files=promotion_result.promoted_files,
+                    patch_paths=patch_summary.paths,
+                    provider_diagnostics=provider_diagnostics,
+                )
+            )
+            self._emit_progress(
+                "multi_pass_pass_completed",
+                f"SFE: multi-pass pass {index}/{len(parsed_plan.batches)} completed",
+                multi_pass_index=index,
+                multi_pass_total=len(parsed_plan.batches),
+                multi_pass_id=batch.id,
+                promoted_file_count=len(promotion_result.promoted_files),
+            )
+
+        aggregate_summary = _combine_patch_summaries(tuple(completed_summaries))
+        multi_pass_summary = _build_multi_pass_summary(
+            status="completed",
+            project_summary=parsed_plan.project_summary,
+            passes_total=len(parsed_plan.batches),
+            pass_results=tuple(pass_results),
+            all_promoted_files=tuple(all_promoted_files),
+        )
+        self._emit_progress(
+            "promotion_completed",
+            "SFE: promotion completed",
+            promoted_file_count=len(all_promoted_files),
+        )
+        return RunResult(
+            status=RUN_STATUS_COMPLETED,
+            execution_mode_decision=execution_mode_decision,
+            workspace_session=session,
+            active_workspace=active_workspace,
+            worktree_created=worktree_created,
+            discovery_result=discovery_result,
+            dry_run_result=dry_run_result,
+            patch_result=latest_patch_result or plan_result,
+            patch_generated=True,
+            patch_applied=True,
+            patch_summary=aggregate_summary,
+            changed_files=aggregate_summary.paths if aggregate_summary else (),
+            selected_source_refs=selected_source_refs,
+            executor_provider=_executor_provider(latest_patch_result or plan_result),
+            warnings=_warnings_for_summary(aggregate_summary),
+            git_auto_init=git_preparation.auto_initialized,
+            git_initial_commit_hash=git_preparation.initial_commit_hash,
+            git_init_warning=git_preparation.warning,
+            promotion_status="applied",
+            promotion_applied=True,
+            promoted_files=tuple(all_promoted_files),
+            patch_hunk_count_normalization=latest_hunk_normalization,
+            multi_pass_summary=multi_pass_summary,
         )
 
     def _emit_progress(
@@ -893,6 +1396,55 @@ def _promotion_failed_result(
     )
 
 
+def _multipass_run_result(
+    *,
+    status: str,
+    issue: RunIssue | None,
+    execution_mode_decision: ExecutionModeDecision,
+    session: WorkspaceSession,
+    active_workspace: Path,
+    worktree_created: bool,
+    discovery_result: DiscoveryResult,
+    dry_run_result: ExecutionResult,
+    patch_result: ExecutionResult | None,
+    selected_source_refs: tuple[str, ...],
+    git_preparation: GitPreparationResult,
+    multi_pass_summary: MultiPassRunSummary,
+    patch_summary: PatchSummary | None = None,
+    promoted_files: tuple[str, ...] = (),
+    patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
+    promotion_status: str = "skipped",
+    promotion_issue: RunIssue | None = None,
+) -> RunResult:
+    return RunResult(
+        status=status,
+        issue=issue,
+        execution_mode_decision=execution_mode_decision,
+        workspace_session=session,
+        active_workspace=active_workspace,
+        worktree_created=worktree_created,
+        discovery_result=discovery_result,
+        dry_run_result=dry_run_result,
+        patch_result=patch_result,
+        patch_generated=patch_summary is not None,
+        patch_applied=False,
+        patch_summary=patch_summary,
+        changed_files=patch_summary.paths if patch_summary is not None else (),
+        selected_source_refs=selected_source_refs,
+        executor_provider=_executor_provider(patch_result),
+        warnings=_warnings_for_summary(patch_summary),
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
+        promotion_status=promotion_status,
+        promotion_applied=False,
+        promoted_files=promoted_files,
+        promotion_issue=promotion_issue,
+        patch_proposal_diagnostics=patch_proposal_diagnostics,
+        multi_pass_summary=multi_pass_summary,
+    )
+
+
 def _failed(category: str, reason: str) -> RunResult:
     return RunResult(
         status=RUN_STATUS_FAILED,
@@ -928,6 +1480,112 @@ def _run_issue_from_patch(
         return RunIssue("patch", default_reason)
     category = issue.category or MECHANICAL_GUARD_REJECTED
     return RunIssue(category, issue.reason, issue.path, issue.hunk_accounting)
+
+
+def _run_issue_from_multipass(issue: MultiPassIssue) -> RunIssue:
+    return RunIssue(issue.category, issue.reason, issue.path)
+
+
+def _multi_pass_issue_from_run_issue(
+    issue: RunIssue,
+    *,
+    pass_id: str | None = None,
+) -> MultiPassIssue:
+    return MultiPassIssue(
+        category=issue.category,
+        reason=issue.reason,
+        path=issue.path,
+        pass_id=pass_id,
+    )
+
+
+def _failed_batch_result(
+    batch: MultiPassBatch,
+    *,
+    issue: MultiPassIssue,
+    provider_diagnostics: dict[str, object] | None,
+) -> MultiPassBatchResult:
+    return MultiPassBatchResult(
+        pass_id=batch.id,
+        title=batch.title,
+        status="failed",
+        allowed_files=batch.allowed_files,
+        provider_diagnostics=provider_diagnostics,
+        issue=issue,
+    )
+
+
+def _build_multi_pass_summary(
+    *,
+    status: str,
+    project_summary: str | None = None,
+    passes_total: int = 0,
+    pass_results: tuple[MultiPassBatchResult, ...] = (),
+    failed_issue: MultiPassIssue | None = None,
+    all_promoted_files: tuple[str, ...] = (),
+    safe_resume_possible: bool = False,
+) -> MultiPassRunSummary:
+    created_by_pass = {
+        result.pass_id: result.created_files
+        for result in pass_results
+        if result.created_files
+    }
+    promoted_by_pass = {
+        result.pass_id: result.promoted_files
+        for result in pass_results
+        if result.promoted_files
+    }
+    return MultiPassRunSummary(
+        enabled=True,
+        status=status,
+        project_summary=project_summary,
+        passes_total=passes_total,
+        passes_completed=sum(1 for result in pass_results if result.status == "completed"),
+        failed_pass_id=failed_issue.pass_id if failed_issue is not None else None,
+        failed_pass_issue=failed_issue,
+        created_files_by_pass=created_by_pass,
+        promoted_files_by_pass=promoted_by_pass,
+        all_promoted_files=all_promoted_files,
+        safe_resume_possible=safe_resume_possible,
+        pass_results=pass_results,
+    )
+
+
+def _combine_patch_summaries(
+    summaries: tuple[PatchSummary, ...],
+) -> PatchSummary | None:
+    if not summaries:
+        return None
+    return PatchSummary(
+        paths=_dedupe_paths(path for summary in summaries for path in summary.paths),
+        file_count=len(_dedupe_paths(path for summary in summaries for path in summary.paths)),
+        hunk_count=sum(summary.hunk_count for summary in summaries),
+        lines_added=sum(summary.lines_added for summary in summaries),
+        lines_removed=sum(summary.lines_removed for summary in summaries),
+        modified_paths=_dedupe_paths(
+            path for summary in summaries for path in summary.modified_paths
+        ),
+        created_paths=_dedupe_paths(
+            path for summary in summaries for path in summary.created_paths
+        ),
+        refused_paths=_dedupe_paths(
+            path for summary in summaries for path in summary.refused_paths
+        ),
+        refused_reasons=tuple(
+            reason for summary in summaries for reason in summary.refused_reasons
+        ),
+    )
+
+
+def _dedupe_paths(paths: object) -> tuple[str, ...]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for path in paths:  # type: ignore[not-an-iterable]
+        if not isinstance(path, str) or path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return tuple(deduped)
 
 
 def _active_path_for_session(session: WorkspaceSession) -> Path:

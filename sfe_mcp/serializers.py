@@ -67,6 +67,7 @@ def serialize_run_result(
             "applied": result.promotion_applied,
             "issue": _serialize_promotion_issue(result),
         },
+        **_serialize_multi_pass_top_level(result),
         "validation": {
             "patch_summary": _serialize_patch_summary(result),
             "hunk_count_normalization_applied": (
@@ -121,6 +122,17 @@ def serialize_session_error(error_category: str | None) -> dict[str, Any]:
             "applied": False,
             "issue": None,
         },
+        "multi_pass": False,
+        "multi_pass_status": None,
+        "passes_total": 0,
+        "passes_completed": 0,
+        "failed_pass_id": None,
+        "failed_pass_issue": None,
+        "created_files_by_pass": {},
+        "promoted_files_by_pass": {},
+        "all_promoted_files": [],
+        "safe_resume_possible": False,
+        "multi_pass_passes": [],
         "validation": {
             "patch_summary": None,
             "hunk_count_normalization_applied": None,
@@ -227,6 +239,74 @@ def _serialize_promotion_issue(result: RunResult) -> dict[str, Any] | None:
     }
 
 
+def _serialize_multi_pass_top_level(result: RunResult) -> dict[str, Any]:
+    summary = result.multi_pass_summary
+    if summary is None:
+        return {
+            "multi_pass": False,
+            "multi_pass_status": None,
+            "passes_total": 0,
+            "passes_completed": 0,
+            "failed_pass_id": None,
+            "failed_pass_issue": None,
+            "created_files_by_pass": {},
+            "promoted_files_by_pass": {},
+            "all_promoted_files": [],
+            "safe_resume_possible": False,
+            "multi_pass_passes": [],
+        }
+    return {
+        "multi_pass": summary.enabled,
+        "multi_pass_status": summary.status,
+        "passes_total": summary.passes_total,
+        "passes_completed": summary.passes_completed,
+        "failed_pass_id": summary.failed_pass_id,
+        "failed_pass_issue": _serialize_multi_pass_issue(summary.failed_pass_issue),
+        "created_files_by_pass": {
+            key: list(value)
+            for key, value in (summary.created_files_by_pass or {}).items()
+        },
+        "promoted_files_by_pass": {
+            key: list(value)
+            for key, value in (summary.promoted_files_by_pass or {}).items()
+        },
+        "all_promoted_files": list(summary.all_promoted_files),
+        "safe_resume_possible": summary.safe_resume_possible,
+        "multi_pass_project_summary": summary.project_summary,
+        "multi_pass_passes": [
+            {
+                "id": result.pass_id,
+                "title": result.title,
+                "status": result.status,
+                "allowed_files": list(result.allowed_files),
+                "created_files": list(result.created_files),
+                "promoted_files": list(result.promoted_files),
+                "patch_paths": list(result.patch_paths),
+                "issue": _serialize_multi_pass_issue(result.issue),
+                "provider_diagnostics": (
+                    _serialize_executor_response_diagnostics_mapping(
+                        result.provider_diagnostics
+                    )
+                    if result.provider_diagnostics is not None
+                    else None
+                ),
+            }
+            for result in summary.pass_results
+        ],
+    }
+
+
+def _serialize_multi_pass_issue(issue: object | None) -> dict[str, Any] | None:
+    if issue is None:
+        return None
+    return {
+        "category": getattr(issue, "category", None),
+        "reason": getattr(issue, "reason", None),
+        "path": getattr(issue, "path", None),
+        "pass_id": getattr(issue, "pass_id", None),
+    }
+
+
 def _serialize_run_diagnostics(result: RunResult) -> dict[str, Any]:
     discovery = result.discovery_result
     dry_run = result.dry_run_result
@@ -292,6 +372,12 @@ def _serialize_executor_response_diagnostics(
     diagnostics = patch_result.summary.get("executor_response_diagnostics")
     if not isinstance(diagnostics, dict):
         return None
+    return _serialize_executor_response_diagnostics_mapping(diagnostics)
+
+
+def _serialize_executor_response_diagnostics_mapping(
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
     serialized: dict[str, Any] = {}
     for key in (
         "provider_name",
@@ -320,6 +406,11 @@ def _serialize_executor_response_diagnostics(
     if isinstance(provider_diagnostics, dict):
         serialized["provider_diagnostics"] = _serialize_provider_diagnostics(
             provider_diagnostics
+        )
+    timeout_diagnostics = diagnostics.get("provider_timeout_diagnostics")
+    if isinstance(timeout_diagnostics, dict):
+        serialized["provider_timeout_diagnostics"] = (
+            _serialize_provider_timeout_diagnostics(timeout_diagnostics)
         )
     return serialized
 
@@ -365,6 +456,28 @@ def _serialize_parser_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]
             for key, value in event_type_counts.items()
             if isinstance(key, str) and isinstance(value, int)
         }
+    return serialized
+
+
+def _serialize_provider_timeout_diagnostics(
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    serialized: dict[str, Any] = {}
+    for key in (
+        "provider",
+        "model",
+        "role",
+        "call_id",
+        "timeout_kind",
+        "idle_timeout_seconds",
+        "elapsed_seconds",
+        "provider_output_seen",
+        "provider_stdout_chunk_count",
+        "last_provider_event_kind",
+        "last_provider_event_elapsed_seconds",
+    ):
+        if key in diagnostics:
+            serialized[key] = _safe_diagnostic_value(diagnostics[key])
     return serialized
 
 
@@ -497,5 +610,8 @@ def _safe_progress_metadata(metadata: dict[str, object]) -> dict[str, object]:
         "patch_file_count",
         "patch_hunk_count",
         "promoted_file_count",
+        "multi_pass_index",
+        "multi_pass_total",
+        "multi_pass_id",
     }
     return {key: value for key, value in metadata.items() if key in allowed_keys}

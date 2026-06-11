@@ -21,6 +21,11 @@ from sfe.execution_mode_router import (  # noqa: E402
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
 )
+from sfe.multipass import (  # noqa: E402
+    MultiPassBatchResult,
+    MultiPassIssue,
+    MultiPassRunSummary,
+)
 from sfe.patching import PatchSummary  # noqa: E402
 from sfe.patch_proposal_diagnostics import PatchProposalDiagnostics  # noqa: E402
 from sfe.run_pipeline import (  # noqa: E402
@@ -133,6 +138,7 @@ def make_run_result(
     issue: RunIssue | None = None,
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
     patch_result: ExecutionResult | None = None,
+    multi_pass_summary: MultiPassRunSummary | None = None,
 ) -> RunResult:
     return RunResult(
         status=status,
@@ -164,6 +170,7 @@ def make_run_result(
         promoted_files=("context.txt", "created.txt"),
         patch_proposal_diagnostics=patch_proposal_diagnostics,
         patch_result=patch_result,
+        multi_pass_summary=multi_pass_summary,
     )
 
 
@@ -816,6 +823,165 @@ def test_run_report_serializes_safe_executor_response_diagnostics() -> None:
     assert "SECRET stderr payload" not in rendered
     assert "Protected instructions:" not in rendered
     assert "User task:" not in rendered
+
+
+def test_run_report_serializes_provider_timeout_diagnostics() -> None:
+    patch_result = ExecutionResult(
+        backend="direct",
+        status="patch_failed",
+        provider_calls_made=1,
+        summary={
+            "executor_provider": "codexcli",
+            "executor_response_diagnostics": {
+                "provider_name": "codexcli",
+                "error_type": "ProviderCallIdleTimeoutError",
+                "provider_timeout_diagnostics": {
+                    "provider": "openai-codexcli",
+                    "model": "gpt-5.4",
+                    "role": "executor",
+                    "call_id": "call-123",
+                    "timeout_kind": "idle",
+                    "idle_timeout_seconds": 900,
+                    "elapsed_seconds": 901.5,
+                    "provider_output_seen": False,
+                    "provider_stdout_chunk_count": 0,
+                    "last_provider_event_kind": None,
+                    "last_provider_event_elapsed_seconds": None,
+                    "raw_stdout": "SECRET stdout",
+                },
+            },
+        },
+        contract=SFEContract(
+            instructions=[],
+            task=None,
+            context_segments=[],
+            protected_segments=[],
+        ),
+        answer=None,
+        error_category="provider_idle_timeout",
+    )
+    session = FakeRuntimeSession()
+    session.report_result = RunReportResult(
+        ok=True,
+        run_result=make_run_result(
+            status=RUN_STATUS_FAILED,
+            issue=RunIssue("patch_generation", "provider_idle_timeout"),
+            patch_result=patch_result,
+        ),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run_report()
+
+    diagnostics = result["diagnostics"]["executor_response_diagnostics"]
+    timeout_diagnostics = diagnostics["provider_timeout_diagnostics"]
+    assert timeout_diagnostics == {
+        "provider": "openai-codexcli",
+        "model": "gpt-5.4",
+        "role": "executor",
+        "call_id": "call-123",
+        "timeout_kind": "idle",
+        "idle_timeout_seconds": 900,
+        "elapsed_seconds": 901.5,
+        "provider_output_seen": False,
+        "provider_stdout_chunk_count": 0,
+        "last_provider_event_kind": None,
+        "last_provider_event_elapsed_seconds": None,
+    }
+    assert "SECRET stdout" not in repr(result)
+
+
+def test_run_report_serializes_multipass_summary_and_pass_diagnostics() -> None:
+    timeout_diagnostics = {
+        "provider_name": "codexcli",
+        "error_type": "ProviderCallIdleTimeoutError",
+        "provider_timeout_diagnostics": {
+            "provider": "openai-codexcli",
+            "model": "gpt-5.4",
+            "role": "executor",
+            "call_id": "call-123",
+            "timeout_kind": "idle",
+            "idle_timeout_seconds": 900,
+            "elapsed_seconds": 901.5,
+            "provider_output_seen": False,
+            "provider_stdout_chunk_count": 0,
+            "last_provider_event_kind": None,
+            "last_provider_event_elapsed_seconds": None,
+            "raw_stdout": "SECRET stdout",
+        },
+    }
+    summary = MultiPassRunSummary(
+        enabled=True,
+        status="failed",
+        project_summary="Mock scaffold",
+        passes_total=2,
+        passes_completed=1,
+        failed_pass_id="templates",
+        failed_pass_issue=MultiPassIssue(
+            "patch_generation",
+            "provider_idle_timeout",
+            pass_id="templates",
+        ),
+        created_files_by_pass={"foundation": ("composer.json",)},
+        promoted_files_by_pass={"foundation": ("composer.json",)},
+        all_promoted_files=("composer.json",),
+        safe_resume_possible=True,
+        pass_results=(
+            MultiPassBatchResult(
+                pass_id="foundation",
+                title="Foundation",
+                status="completed",
+                allowed_files=("composer.json",),
+                created_files=("composer.json",),
+                promoted_files=("composer.json",),
+                patch_paths=("composer.json",),
+            ),
+            MultiPassBatchResult(
+                pass_id="templates",
+                title="Templates",
+                status="failed",
+                allowed_files=("templates/base.html.twig",),
+                provider_diagnostics=timeout_diagnostics,
+                issue=MultiPassIssue(
+                    "patch_generation",
+                    "provider_idle_timeout",
+                    pass_id="templates",
+                ),
+            ),
+        ),
+    )
+    session = FakeRuntimeSession()
+    session.report_result = RunReportResult(
+        ok=True,
+        run_result=make_run_result(
+            status=RUN_STATUS_FAILED,
+            issue=RunIssue("patch_generation", "provider_idle_timeout"),
+            multi_pass_summary=summary,
+        ),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run_report()
+
+    assert result["multi_pass"] is True
+    assert result["multi_pass_status"] == "failed"
+    assert result["passes_total"] == 2
+    assert result["passes_completed"] == 1
+    assert result["failed_pass_id"] == "templates"
+    assert result["failed_pass_issue"] == {
+        "category": "patch_generation",
+        "reason": "provider_idle_timeout",
+        "path": None,
+        "pass_id": "templates",
+    }
+    assert result["created_files_by_pass"] == {"foundation": ["composer.json"]}
+    assert result["promoted_files_by_pass"] == {"foundation": ["composer.json"]}
+    assert result["all_promoted_files"] == ["composer.json"]
+    assert result["safe_resume_possible"] is True
+    assert result["multi_pass_passes"][1]["provider_diagnostics"][
+        "provider_timeout_diagnostics"
+    ]["provider"] == "openai-codexcli"
+    assert "SECRET stdout" not in repr(result)
 
 
 def test_console_output_run_is_serialized_without_workspace_write_fields() -> None:

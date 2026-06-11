@@ -77,6 +77,8 @@ class AlibabaAPIProvider:
         temperature: float | None = None,
         system_instruction: str | None = None,
         progress_sink: ProviderProgressSink | None = None,
+        idle_timeout_seconds: float | None = None,
+        provider_role: str | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """Send one OpenAI-compatible Chat Completions request."""
@@ -87,7 +89,9 @@ class AlibabaAPIProvider:
         supervisor = ProviderCallSupervisor(
             provider=PROVIDER_NAME,
             model=model,
+            role=provider_role,
             progress_sink=progress_sink,
+            idle_timeout_seconds=idle_timeout_seconds,
         )
         supervisor.start(
             {

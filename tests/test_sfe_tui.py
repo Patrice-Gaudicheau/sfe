@@ -38,6 +38,7 @@ from sfe.execution_mode_router import (
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
 )
+from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.runtime_session import (
     RunReportResult,
     RuntimeWorkspaceStatus,
@@ -190,6 +191,8 @@ class FakeExecutor:
         self,
         response: ExecutorResponse | None = None,
         patch_response: ExecutorResponse | None = None,
+        multipass_plan_response: ExecutorResponse | None = None,
+        multipass_patch_responses: list[ExecutorResponse] | None = None,
     ) -> None:
         self.response = response or ExecutorResponse(
             answer="mock answer",
@@ -201,9 +204,12 @@ class FakeExecutor:
             error_category=None,
             provider_calls_made=1,
         )
+        self.multipass_plan_response = multipass_plan_response
+        self.multipass_patch_responses = list(multipass_patch_responses or [])
         self.calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
         self.console_calls: list[dict[str, object]] = []
+        self.multipass_plan_calls: list[dict[str, object]] = []
 
     def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.console_calls.append(executor_payload)
@@ -215,7 +221,18 @@ class FakeExecutor:
 
     def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.patch_calls.append(executor_payload)
+        if executor_payload.get("multi_pass"):
+            return self.multipass_patch_responses.pop(0)
         return self.patch_response
+
+    def plan_multipass(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        self.multipass_plan_calls.append(executor_payload)
+        return self.multipass_plan_response or ExecutorResponse(
+            None,
+            "invalid_response",
+            1,
+            provider_name="fake-executor",
+        )
 
 
 class RecordingActivityIndicator:
@@ -4603,6 +4620,82 @@ def test_tui_run_report_after_workspace_write_run_does_not_execute_again(tmp_pat
     assert cleanup.cleaned is True
 
 
+def test_tui_run_report_displays_multipass_summary(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        multipass_plan_response=ExecutorResponse(
+            answer=json.dumps(
+                {
+                    "project_summary": "Mock app",
+                    "batches": [
+                        {
+                            "id": "foundation",
+                            "title": "Foundation",
+                            "goal": "Create composer file",
+                            "allowed_files": ["composer.json"],
+                            "depends_on": [],
+                            "validation_notes": [],
+                        },
+                        {
+                            "id": "public",
+                            "title": "Public",
+                            "goal": "Create public index",
+                            "allowed_files": ["public/index.php"],
+                            "depends_on": ["foundation"],
+                            "validation_notes": [],
+                        },
+                    ],
+                }
+            ),
+            error_category=None,
+            provider_calls_made=1,
+            provider_name="fake-executor",
+        ),
+        multipass_patch_responses=[
+            ExecutorResponse(
+                answer=valid_create_diff("composer.json", "{}"),
+                error_category=None,
+                provider_calls_made=1,
+                provider_name="fake-executor",
+            ),
+            ExecutorResponse(
+                answer=valid_create_diff("public/index.php", "<?php"),
+                error_category=None,
+                provider_calls_made=1,
+                provider_name="fake-executor",
+            ),
+        ],
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Create two file app", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    report_output = output[-1]
+    assert "multi-pass: yes" in report_output
+    assert "SFE multi-pass" in report_output
+    assert "status: completed" in report_output
+    assert "passes completed: 2/2" in report_output
+    assert "pass 1/2 id: foundation" in report_output
+    assert "pass 1 promoted files: composer.json" in report_output
+    assert "pass 2/2 id: public" in report_output
+    assert "pass 2 promoted files: public/index.php" in report_output
+    assert len(executor.multipass_plan_calls) == 1
+    assert len(executor.patch_calls) == 2
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
 def test_tui_run_debug_workspace_write_renders_full_report(tmp_path) -> None:
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor()
@@ -4802,6 +4895,64 @@ def test_tui_run_report_displays_safe_invalid_response_shape_diagnostics(
     assert "executor response status type: str" in report_output
     assert "sk-SECRET" not in report_output
     assert "empty_content" not in report_output
+    assert "Protected instructions:" not in report_output
+    assert "User task:" not in report_output
+    assert "Selected context:" not in report_output
+    assert app.workspace_session is not None
+    cleanup = app.workspace_manager.cleanup(app.workspace_session)
+    assert cleanup.cleaned is True
+
+
+def test_tui_run_report_displays_provider_timeout_diagnostics(tmp_path) -> None:
+    repo = init_git_repo(tmp_path / "repo")
+    executor = FakeExecutor(
+        patch_response=ExecutorResponse(
+            answer=None,
+            error_category="provider_idle_timeout",
+            provider_calls_made=1,
+            provider_name="codexcli",
+            response_diagnostics={
+                "provider_name": "codexcli",
+                "error_type": "ProviderCallIdleTimeoutError",
+                "provider_timeout_diagnostics": {
+                    "provider": "openai-codexcli",
+                    "model": "gpt-5.4",
+                    "role": "executor",
+                    "timeout_kind": "idle",
+                    "idle_timeout_seconds": 900,
+                    "elapsed_seconds": 901.5,
+                    "provider_output_seen": True,
+                    "provider_stdout_chunk_count": 2,
+                    "last_provider_event_kind": "provider_chunk",
+                    "last_provider_event_elapsed_seconds": 125.25,
+                },
+            },
+        )
+    )
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput(
+            ["", "/task Patch old context", "/run", "/run-report", "/quit"]
+        ),
+        output=output.append,
+        cwd=repo,
+        backend=DirectBackend(executor=executor),
+        discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+    )
+
+    assert app.run() == 0
+    report_output = output[-1]
+    assert "issue reason: provider_idle_timeout" in report_output
+    assert "SFE provider timeout diagnostics" in report_output
+    assert "provider: openai-codexcli" in report_output
+    assert "model: gpt-5.4" in report_output
+    assert "role: executor" in report_output
+    assert "timeout kind: idle" in report_output
+    assert "idle timeout seconds: 900" in report_output
+    assert "provider output seen: yes" in report_output
+    assert "provider stdout chunks: 2" in report_output
+    assert "last provider event: provider_chunk" in report_output
     assert "Protected instructions:" not in report_output
     assert "User task:" not in report_output
     assert "Selected context:" not in report_output
@@ -6378,6 +6529,26 @@ def test_build_user_prompt_marks_empty_selected_context_as_none() -> None:
     assert "Selected context:\nnone" in prompt
 
 
+def test_build_user_prompt_includes_multipass_plan_limits() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(id="task_current", text="Create project"),
+            "selected_context_segments": [],
+            "multi_pass": {
+                "mode": "plan",
+                "max_passes": 8,
+                "max_files_per_pass": 10,
+            },
+        }
+    )
+
+    assert "Multi-pass planning request:" in prompt
+    assert "Maximum passes allowed: 8" in prompt
+    assert "Maximum files allowed per batch: 10" in prompt
+    assert "Every batch MUST keep allowed_files at or below the maximum" in prompt
+
+
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
@@ -6671,6 +6842,65 @@ def test_tui_codexcli_executor_effort_falls_back_to_legacy() -> None:
     assert getattr(executor, "provider").reasoning_effort == "medium"
 
 
+def test_tui_codexcli_executor_uses_codexcli_executor_idle_timeout() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS": "900",
+            "SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS": "600",
+            "SFE_PROVIDER_IDLE_TIMEOUT_SECONDS": "300",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["idle_timeout_seconds"] == 900
+    assert provider.calls[0]["provider_role"] == "executor"
+
+
+def test_tui_executor_idle_timeout_falls_back_to_generic_executor_timeout() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER_EXECUTOR": "openai",
+            "SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS": "620",
+            "SFE_PROVIDER_IDLE_TIMEOUT_SECONDS": "300",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["idle_timeout_seconds"] == 620
+    assert provider.calls[0]["provider_role"] == "executor"
+
+
+def test_tui_executor_idle_timeout_falls_back_to_global_timeout() -> None:
+    provider = FakeProvider()
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER_EXECUTOR": "openai",
+            "SFE_PROVIDER_IDLE_TIMEOUT_SECONDS": "410",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+
+    result = executor.execute(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer == "provider answer"
+    assert provider.calls[0]["idle_timeout_seconds"] == 410
+
+
 def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
     provider = FakeProvider()
     executor = create_tui_executor(
@@ -6687,6 +6917,51 @@ def test_tui_codexcli_executor_uses_codexcli_default_executor_model() -> None:
 
     assert result.answer == "provider answer"
     assert provider.calls[0]["model"] == "gpt-5.4"
+
+
+def test_tui_codexcli_idle_timeout_diagnostics_are_attached_to_executor_response() -> None:
+    error = ProviderCallIdleTimeoutError(
+        provider="openai-codexcli",
+        model="gpt-5.4",
+        call_id="call-123",
+        idle_timeout_seconds=900,
+        diagnostics={
+            "provider": "openai-codexcli",
+            "model": "gpt-5.4",
+            "role": "executor",
+            "timeout_kind": "idle",
+            "idle_timeout_seconds": 900,
+            "elapsed_seconds": 901.5,
+            "provider_output_seen": False,
+            "provider_stdout_chunk_count": 0,
+            "last_provider_event_kind": None,
+            "last_provider_event_elapsed_seconds": None,
+        },
+    )
+    provider = FakeProvider(error=error)
+    executor = create_tui_executor(
+        environ={
+            "SFE_PROVIDER": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS": "900",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = executor.propose_patch(
+        {"instructions": [], "task": None, "selected_context_segments": []}
+    )
+
+    assert result.answer is None
+    assert result.error_category == "provider_idle_timeout"
+    assert result.response_diagnostics is not None
+    timeout_diagnostics = result.response_diagnostics["provider_timeout_diagnostics"]
+    assert isinstance(timeout_diagnostics, dict)
+    assert timeout_diagnostics["provider"] == "openai-codexcli"
+    assert timeout_diagnostics["model"] == "gpt-5.4"
+    assert timeout_diagnostics["role"] == "executor"
+    assert timeout_diagnostics["timeout_kind"] == "idle"
+    assert timeout_diagnostics["idle_timeout_seconds"] == 900
+    assert timeout_diagnostics["provider_output_seen"] is False
 
 
 def test_tui_codexcli_console_uses_console_instruction() -> None:

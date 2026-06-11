@@ -88,6 +88,26 @@ def test_parse_execution_mode_router_rejects_invalid_json() -> None:
     assert exc_info.value.category == "invalid_execution_mode_router_response"
 
 
+def test_execution_mode_router_does_not_receive_executor_idle_timeout() -> None:
+    provider = FakeCodexCLIProvider(
+        '{"execution_mode":"workspace_write","reason":"The task edits files."}'
+    )
+    router = create_configured_execution_mode_router(
+        environ={
+            "SFE_PROVIDER_ROUTER": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS": "900",
+            "SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS": "600",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    decision = router.decide(task="Create files")
+
+    assert decision.execution_mode == EXECUTION_MODE_WORKSPACE_WRITE
+    assert "idle_timeout_seconds" not in provider.calls[0]
+    assert "provider_role" not in provider.calls[0]
+
+
 def test_parse_execution_mode_router_rejects_invalid_execution_mode() -> None:
     with pytest.raises(ExecutionModeRouterError) as exc_info:
         parse_execution_mode_router_output(

@@ -449,6 +449,32 @@ SFE_CODEXCLI_DISCOVERY_MODEL="gpt-5.5"
 SFE_CODEXCLI_DISCOVERY_EFFORT="high"
 ```
 
+For long patch-generation tasks, especially scaffold-style workspace writes,
+the executor can use a longer idle supervision window without changing router or
+discovery behavior:
+
+```env
+SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS=900
+```
+
+This falls back to `SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS`, then
+`SFE_PROVIDER_IDLE_TIMEOUT_SECONDS`, then the built-in provider idle default.
+The setting only keeps a silent provider call alive longer; it does not make
+large monolithic scaffolds mechanically safer. Prefer smaller tasks or explicit
+batches when asking SFE to create many files at once.
+
+Large `workspace_write` scaffold tasks can also use core multi-pass execution.
+`SFE_WORKSPACE_WRITE_MULTIPASS=auto` enables a cautious heuristic for large
+project/scaffold requests, `true` forces multi-pass for validation or testing,
+and `false` preserves single-pass behavior. Multi-pass asks the executor for a
+strict JSON batch plan, then applies and promotes each batch separately with an
+explicit `allowed_files` list. The v1 guardrails reject invalid plans, batches
+that exceed `SFE_MULTIPASS_MAX_PASSES` (default `10`) or
+`SFE_MULTIPASS_MAX_FILES_PER_PASS` (default `10`), and patches that touch files
+outside the current batch. This improves large scaffold reliability but does
+not implement automatic resume after a failed pass; the run report indicates
+whether a manual resume is plausible.
+
 Google/Gemini discovery can be selected with `SFE_PROVIDER_DISCOVERY=google`
 and optionally `SFE_GOOGLE_DISCOVERY_MODEL=<model-id>`.
 

@@ -23,7 +23,7 @@ from providers.codexcli import (
     parse_codex_jsonl,
     resolve_codex_executable,
 )
-from sfe.provider_progress import collect_progress_events
+from sfe.provider_progress import ProviderCallIdleTimeoutError, collect_progress_events
 
 
 class FakeStdin:
@@ -599,6 +599,29 @@ class CodexCLIProviderTests(unittest.TestCase):
         self.assertEqual(created["idle_timeout_seconds"], 7.0)
         self.assertEqual(created["start_metadata"]["idle_timeout_seconds"], 7.0)
 
+    def test_chat_extends_total_timeout_to_idle_timeout(self) -> None:
+        captured: dict[str, object] = {}
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=12, idle_timeout=90)
+        stdout = (
+            '{"type":"thread.started","thread_id":"thread-1"}\n'
+            '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}\n'
+        )
+
+        def fake_run_codex_process(**kwargs: object) -> tuple[str, str, int]:
+            captured["timeout_seconds"] = kwargs["timeout_seconds"]
+            return stdout, "", 0
+
+        with patch(
+            "providers.codexcli._run_codex_process",
+            side_effect=fake_run_codex_process,
+        ):
+            provider.chat(
+                [{"role": "user", "content": "hello"}],
+                model="gpt-5.5",
+            )
+
+        self.assertEqual(captured["timeout_seconds"], 90.0)
+
     def test_chat_uses_shared_idle_timeout_when_not_explicit(self) -> None:
         created: dict[str, object] = {}
 
@@ -730,8 +753,8 @@ class CodexCLIProviderTests(unittest.TestCase):
         self.assertTrue(fake_process.killed)
         self.assertEqual(supervisor.idle_checks, 0)
 
-    def test_chat_reports_total_timeout_as_clear_provider_error(self) -> None:
-        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=0.015, idle_timeout=30)
+    def test_chat_reports_no_output_stall_as_idle_timeout(self) -> None:
+        provider = CodexCLIProvider(cwd=PROJECT_ROOT, timeout=0.015)
         fake_process = FakeNeverExitsProcess(stdout_lines=[], returncode=0)
         events, sink = collect_progress_events()
 
@@ -739,7 +762,10 @@ class CodexCLIProviderTests(unittest.TestCase):
             "providers.codexcli.time.monotonic",
             AdvancingClock(step=0.01),
         ):
-            with self.assertRaisesRegex(CodexCLITimeoutError, "CodexCLI exceeded total timeout"):
+            with self.assertRaisesRegex(
+                ProviderCallIdleTimeoutError,
+                "without admissible progress",
+            ):
                 provider.chat(
                     [{"role": "user", "content": "hello"}],
                     model="gpt-5.5",

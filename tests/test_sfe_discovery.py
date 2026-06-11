@@ -136,6 +136,30 @@ def test_configured_discovery_router_uses_discovery_provider_override_only() -> 
     assert execution_router.model == "codexcli-execution-router-model"
 
 
+def test_discovery_router_does_not_receive_executor_idle_timeout() -> None:
+    provider = FakeProvider(
+        '{"files_to_inspect":["context.txt"],"reason":"Inspect context."}'
+    )
+    router = create_configured_discovery_router(
+        environ={
+            "SFE_PROVIDER_DISCOVERY": "codexcli",
+            "SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS": "900",
+            "SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS": "600",
+        },
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    selection = router.select_files(
+        task="Patch context",
+        workspace_map=[{"path": "context.txt"}],
+        max_files=1,
+    )
+
+    assert selection.files_to_inspect == ("context.txt",)
+    assert "idle_timeout_seconds" not in provider.calls[0]
+    assert "provider_role" not in provider.calls[0]
+
+
 def test_openai_discovery_model_overrides_openai_router_model() -> None:
     provider = FakeProvider()
     router = create_configured_discovery_router(

@@ -79,6 +79,8 @@ class CodexCLIProvider:
         temperature: float = 0.2,
         progress_sink: ProviderProgressSink | None = None,
         system_instruction: str | None = None,
+        idle_timeout_seconds: float | None = None,
+        provider_role: str | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """Run Codex CLI and normalize JSONL events to a chat-completion shape.
@@ -97,8 +99,13 @@ class CodexCLIProvider:
         supervisor = ProviderCallSupervisor(
             provider=PROVIDER_NAME,
             model=model,
+            role=provider_role,
             progress_sink=progress_sink,
-            idle_timeout_seconds=self.idle_timeout,
+            idle_timeout_seconds=(
+                idle_timeout_seconds
+                if idle_timeout_seconds is not None
+                else self.idle_timeout
+            ),
         )
         supervisor.start(
             {
@@ -115,7 +122,7 @@ class CodexCLIProvider:
                 cwd=self.cwd,
                 prompt=prompt,
                 supervisor=supervisor,
-                timeout_seconds=self.timeout,
+                timeout_seconds=max(self.timeout, supervisor.idle_timeout_seconds),
             )
         except Exception as exc:
             supervisor.fail({"error_type": type(exc).__name__})

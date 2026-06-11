@@ -104,6 +104,65 @@ def test_real_provider_progress_resets_idle_supervision() -> None:
     assert events[-1].kind == "idle_timeout"
 
 
+def test_idle_timeout_error_reports_no_provider_output_diagnostics() -> None:
+    events, sink = collect_progress_events()
+    clock = FakeClock()
+    supervisor = ProviderCallSupervisor(
+        provider="openai-codexcli",
+        model="gpt-test",
+        role="executor",
+        progress_sink=sink,
+        idle_timeout_seconds=5,
+        clock=clock,
+    )
+
+    supervisor.start()
+    clock.advance(6)
+
+    with pytest.raises(ProviderCallIdleTimeoutError) as exc_info:
+        supervisor.check_idle()
+
+    diagnostics = exc_info.value.diagnostics
+    assert diagnostics["provider"] == "openai-codexcli"
+    assert diagnostics["model"] == "gpt-test"
+    assert diagnostics["role"] == "executor"
+    assert diagnostics["timeout_kind"] == "idle"
+    assert diagnostics["idle_timeout_seconds"] == 5
+    assert diagnostics["elapsed_seconds"] == 6
+    assert diagnostics["provider_output_seen"] is False
+    assert diagnostics["provider_stdout_chunk_count"] == 0
+    assert diagnostics["last_provider_event_kind"] is None
+    assert diagnostics["last_provider_event_elapsed_seconds"] is None
+    assert events[-1].kind == "idle_timeout"
+
+
+def test_idle_timeout_error_reports_prior_provider_chunk_diagnostics() -> None:
+    clock = FakeClock()
+    supervisor = ProviderCallSupervisor(
+        provider="openai-codexcli",
+        model="gpt-test",
+        role="executor",
+        idle_timeout_seconds=5,
+        clock=clock,
+    )
+
+    supervisor.start()
+    clock.advance(2)
+    supervisor.emit("provider_chunk", source="codexcli_jsonl", real_provider_signal=True)
+    clock.advance(6)
+
+    with pytest.raises(ProviderCallIdleTimeoutError) as exc_info:
+        supervisor.check_idle()
+
+    diagnostics = exc_info.value.diagnostics
+    assert diagnostics["timeout_kind"] == "idle"
+    assert diagnostics["elapsed_seconds"] == 8
+    assert diagnostics["provider_output_seen"] is True
+    assert diagnostics["provider_stdout_chunk_count"] == 1
+    assert diagnostics["last_provider_event_kind"] == "provider_chunk"
+    assert diagnostics["last_provider_event_elapsed_seconds"] == 2
+
+
 def test_run_blocking_emits_internal_wait_then_stalls() -> None:
     events, sink = collect_progress_events()
     supervisor = ProviderCallSupervisor(

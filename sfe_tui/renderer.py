@@ -332,6 +332,7 @@ def render_run_result_normal(result: RunResult) -> str:
         "SFE run",
         f"  status: {result.status}",
         f"  execution mode: {_display_value(execution_mode)}",
+        f"  multi-pass: {_yes_no(result.multi_pass_summary is not None and result.multi_pass_summary.enabled)}",
         f"  promoted files: {_format_string_list(list(result.promoted_files))}",
         f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
         f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
@@ -419,6 +420,7 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         f"  executor provider: {_display_value(result.executor_provider)}",
         f"  patch generated: {_yes_no(result.patch_generated)}",
         f"  patch applied: {_yes_no(result.patch_applied)}",
+        f"  multi-pass: {_yes_no(result.multi_pass_summary is not None and result.multi_pass_summary.enabled)}",
         f"  promotion: {result.promotion_status}",
         f"  promoted files: {_format_string_list(list(result.promoted_files))}",
         f"  changed files: {_format_string_list(list(result.changed_files))}",
@@ -443,6 +445,8 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         )
         if result.promotion_issue.path is not None:
             lines.append(f"  promotion issue path: {result.promotion_issue.path}")
+    if result.multi_pass_summary is not None:
+        lines.extend(_render_multi_pass_summary(result.multi_pass_summary))
     if issue is not None:
         lines.extend(
             [
@@ -536,6 +540,71 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
     return "\n".join(lines)
 
 
+def _render_multi_pass_summary(summary: object) -> list[str]:
+    pass_results = tuple(getattr(summary, "pass_results", ()) or ())
+    lines = [
+        "SFE multi-pass",
+        f"  status: {_display_value(getattr(summary, 'status', None))}",
+        f"  project summary: {_display_value(getattr(summary, 'project_summary', None))}",
+        f"  passes completed: {getattr(summary, 'passes_completed', 0)}/{getattr(summary, 'passes_total', 0)}",
+        f"  failed pass id: {_display_value(getattr(summary, 'failed_pass_id', None))}",
+        "  safe resume possible: "
+        f"{_yes_no(bool(getattr(summary, 'safe_resume_possible', False)))}",
+        "  all promoted files: "
+        f"{_format_string_list(list(getattr(summary, 'all_promoted_files', ()) or ())) }",
+    ]
+    failed_issue = getattr(summary, "failed_pass_issue", None)
+    if failed_issue is not None:
+        lines.extend(
+            [
+                "  failed pass issue category: "
+                f"{_display_value(getattr(failed_issue, 'category', None))}",
+                "  failed pass issue reason: "
+                f"{_display_value(getattr(failed_issue, 'reason', None))}",
+            ]
+        )
+        if getattr(failed_issue, "path", None) is not None:
+            lines.append(
+                "  failed pass issue path: "
+                f"{_display_value(getattr(failed_issue, 'path', None))}"
+            )
+    for index, pass_result in enumerate(pass_results, start=1):
+        lines.extend(
+            [
+                f"  pass {index}/{getattr(summary, 'passes_total', 0)} id: {_display_value(getattr(pass_result, 'pass_id', None))}",
+                f"  pass {index} title: {_display_value(getattr(pass_result, 'title', None))}",
+                f"  pass {index} status: {_display_value(getattr(pass_result, 'status', None))}",
+                "  pass "
+                f"{index} allowed files: {_format_string_list(list(getattr(pass_result, 'allowed_files', ()) or ())) }",
+                "  pass "
+                f"{index} promoted files: {_format_string_list(list(getattr(pass_result, 'promoted_files', ()) or ())) }",
+                "  pass "
+                f"{index} created files: {_format_string_list(list(getattr(pass_result, 'created_files', ()) or ())) }",
+            ]
+        )
+        issue = getattr(pass_result, "issue", None)
+        if issue is not None:
+            lines.extend(
+                [
+                    "  pass "
+                    f"{index} issue category: {_display_value(getattr(issue, 'category', None))}",
+                    "  pass "
+                    f"{index} issue reason: {_display_value(getattr(issue, 'reason', None))}",
+                ]
+            )
+            if getattr(issue, "path", None) is not None:
+                lines.append(
+                    "  pass "
+                    f"{index} issue path: {_display_value(getattr(issue, 'path', None))}"
+                )
+        diagnostics = getattr(pass_result, "provider_diagnostics", None)
+        if isinstance(diagnostics, dict):
+            timeout_diagnostics = diagnostics.get("provider_timeout_diagnostics")
+            if isinstance(timeout_diagnostics, dict):
+                lines.extend(_render_provider_timeout_diagnostics(timeout_diagnostics))
+    return lines
+
+
 def _render_hunk_accounting_diagnostics(diagnostics: object) -> list[str]:
     lines = [
         "SFE hunk accounting diagnostics",
@@ -610,7 +679,15 @@ def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | Non
 def _render_executor_response_diagnostics(
     diagnostics: dict[str, object],
 ) -> list[str]:
-    return [
+    timeout_diagnostics = diagnostics.get("provider_timeout_diagnostics")
+    if isinstance(timeout_diagnostics, dict) and "response_object_type" not in diagnostics:
+        return [
+            "SFE executor response diagnostics",
+            f"  executor response provider: {_display_value(diagnostics.get('provider_name'))}",
+            f"  executor response error type: {_display_value(diagnostics.get('error_type'))}",
+            *_render_provider_timeout_diagnostics(timeout_diagnostics),
+        ]
+    lines = [
         "SFE executor response diagnostics",
         f"  executor response provider: {_display_value(diagnostics.get('provider_name'))}",
         "  executor response object type: "
@@ -646,6 +723,32 @@ def _render_executor_response_diagnostics(
         "  executor response status exists: "
         f"{_display_bool(diagnostics.get('status_exists'))}",
         f"  executor response status type: {_display_value(diagnostics.get('status_type'))}",
+    ]
+    if isinstance(timeout_diagnostics, dict):
+        lines.extend(_render_provider_timeout_diagnostics(timeout_diagnostics))
+    return lines
+
+
+def _render_provider_timeout_diagnostics(
+    diagnostics: dict[str, object],
+) -> list[str]:
+    return [
+        "SFE provider timeout diagnostics",
+        f"  provider: {_display_value(diagnostics.get('provider'))}",
+        f"  model: {_display_value(diagnostics.get('model'))}",
+        f"  role: {_display_value(diagnostics.get('role'))}",
+        f"  timeout kind: {_display_value(diagnostics.get('timeout_kind'))}",
+        "  idle timeout seconds: "
+        f"{_display_value(diagnostics.get('idle_timeout_seconds'))}",
+        f"  elapsed seconds: {_display_value(diagnostics.get('elapsed_seconds'))}",
+        "  provider output seen: "
+        f"{_display_bool(diagnostics.get('provider_output_seen'))}",
+        "  provider stdout chunks: "
+        f"{_display_value(diagnostics.get('provider_stdout_chunk_count'))}",
+        "  last provider event: "
+        f"{_display_value(diagnostics.get('last_provider_event_kind'))}",
+        "  last provider event elapsed seconds: "
+        f"{_display_value(diagnostics.get('last_provider_event_elapsed_seconds'))}",
     ]
 
 

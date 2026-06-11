@@ -41,7 +41,10 @@ from providers.openai_api import (
     OpenAIAPIError,
     OpenAIAPIProvider,
 )
-from sfe.provider_progress import ProviderCallIdleTimeoutError
+from sfe.provider_progress import (
+    ProviderCallIdleTimeoutError,
+    resolve_provider_idle_timeout_seconds,
+)
 from sfe.provider_config import (
     CODEXCLI_SFE_PROVIDER,
     OLLAMA_SFE_PROVIDER,
@@ -51,6 +54,7 @@ from sfe.provider_config import (
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
 DEFAULT_PATCH_OUTPUT_TOKENS = 12000
+DEFAULT_MULTIPASS_PLAN_OUTPUT_TOKENS = 4000
 DEFAULT_LEMONADE_EXECUTOR_MODEL = "Qwen3.5-35B-A3B-GGUF"
 READ_ONLY_SYSTEM_INSTRUCTION = (
     "You are the read-only SFE TUI executor. Answer only from the selected "
@@ -95,6 +99,15 @@ PATCH_SYSTEM_INSTRUCTION = (
     "renames, mode-only changes, binary patches, or symlink changes. If no safe "
     "unified diff can be proposed, return no text."
 )
+MULTIPASS_PLAN_SYSTEM_INSTRUCTION = (
+    "You are the SFE multi-pass planner for large workspace_write tasks. Return "
+    "only one strict JSON object. Do not return Markdown, code fences, prose, "
+    "or a patch. The object must contain project_summary and batches. Each "
+    "batch must contain id, title, goal, allowed_files, depends_on, and "
+    "validation_notes. Keep batches small and coherent. Use relative file paths "
+    "only. Do not include files under .git, .sfe-worktrees, vendor, var, cache, "
+    "node_modules, or generated/sensitive directories."
+)
 
 
 @dataclass(frozen=True)
@@ -118,6 +131,9 @@ class ReadOnlyExecutor(Protocol):
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         ...
 
+    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        ...
+
 
 class DirectProviderReadOnlyExecutor:
     """Small direct read-only executor for selected TUI context."""
@@ -134,6 +150,9 @@ class DirectProviderReadOnlyExecutor:
         provider_error_classifier: Callable[[Exception], str | None] | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         max_patch_output_tokens: int = DEFAULT_PATCH_OUTPUT_TOKENS,
+        max_multipass_plan_output_tokens: int = DEFAULT_MULTIPASS_PLAN_OUTPUT_TOKENS,
+        provider_idle_timeout_seconds: float | None = None,
+        multipass_planner_model: str | None = None,
     ) -> None:
         self.provider = provider
         self.provider_name = provider_name
@@ -144,6 +163,9 @@ class DirectProviderReadOnlyExecutor:
         self.provider_error_classifier = provider_error_classifier
         self.max_output_tokens = max_output_tokens
         self.max_patch_output_tokens = max_patch_output_tokens
+        self.max_multipass_plan_output_tokens = max_multipass_plan_output_tokens
+        self.provider_idle_timeout_seconds = provider_idle_timeout_seconds
+        self.multipass_planner_model = multipass_planner_model
 
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return self._execute_with_instruction(
@@ -166,12 +188,21 @@ class DirectProviderReadOnlyExecutor:
             max_tokens=self.max_patch_output_tokens,
         )
 
+    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return self._execute_with_instruction(
+            executor_payload,
+            system_instruction=MULTIPASS_PLAN_SYSTEM_INSTRUCTION,
+            max_tokens=self.max_multipass_plan_output_tokens,
+            model=self.multipass_planner_model or self.model,
+        )
+
     def _execute_with_instruction(
         self,
         executor_payload: dict[str, Any],
         *,
         system_instruction: str,
         max_tokens: int,
+        model: str | None = None,
         user_prompt: str | None = None,
     ) -> ExecutorResponse:
         health = self.provider.health()
@@ -187,9 +218,11 @@ class DirectProviderReadOnlyExecutor:
                 provider=self.provider,
                 call_style=self.call_style,
                 user_prompt=user_prompt or _build_user_prompt(executor_payload),
-                model=self.model,
+                model=model or self.model,
                 max_tokens=max_tokens,
                 system_instruction=system_instruction,
+                idle_timeout_seconds=self.provider_idle_timeout_seconds,
+                provider_role="executor",
             )
         except self.missing_key_errors:
             return ExecutorResponse(
@@ -198,12 +231,19 @@ class DirectProviderReadOnlyExecutor:
                 provider_calls_made=0,
                 provider_name=self.provider_name,
             )
-        except ProviderCallIdleTimeoutError:
+        except ProviderCallIdleTimeoutError as exc:
             return ExecutorResponse(
                 answer=None,
                 error_category="provider_idle_timeout",
                 provider_calls_made=1,
                 provider_name=self.provider_name,
+                response_diagnostics=_provider_timeout_response_diagnostics(
+                    exc,
+                    provider_name=self.provider_name,
+                    model=model or self.model,
+                    role="executor",
+                    idle_timeout_seconds=self.provider_idle_timeout_seconds,
+                ),
             )
         except TimeoutError:
             return ExecutorResponse(
@@ -277,6 +317,15 @@ class OpenAIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
             provider_error_types=(OpenAIAPIError,),
             max_output_tokens=max_output_tokens,
             max_patch_output_tokens=max_patch_output_tokens,
+            multipass_planner_model=_first_env_value(
+                environ,
+                ("SFE_MULTIPASS_PLANNER_MODEL",),
+            ),
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
 
 
@@ -309,6 +358,15 @@ class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
             call_style="system_instruction",
             max_output_tokens=max_output_tokens,
             max_patch_output_tokens=DEFAULT_PATCH_OUTPUT_TOKENS,
+            multipass_planner_model=_first_env_value(
+                environ,
+                ("SFE_MULTIPASS_PLANNER_MODEL",),
+            ),
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
 
 
@@ -326,6 +384,9 @@ class ProviderConfigurationErrorExecutor:
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _configuration_error_response(self.provider_name)
 
+    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return _configuration_error_response(self.provider_name)
+
 
 class UnsupportedProviderExecutor:
     """Executor that reports a valid provider not yet supported by the TUI."""
@@ -340,6 +401,9 @@ class UnsupportedProviderExecutor:
         return _unsupported_provider_response(self.provider_name)
 
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
+        return _unsupported_provider_response(self.provider_name)
+
+    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _unsupported_provider_response(self.provider_name)
 
 
@@ -395,6 +459,11 @@ def create_tui_executor(
             ),
             call_style="system_message",
             provider_error_classifier=_classify_lemonade_error,
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
     if provider_name == "alibaba":
         return DirectProviderReadOnlyExecutor(
@@ -407,6 +476,11 @@ def create_tui_executor(
             call_style="system_message",
             missing_key_errors=(MissingAlibabaAPIKeyError,),
             provider_error_types=(AlibabaAPIError,),
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
     if provider_name == "anthropic":
         return DirectProviderReadOnlyExecutor(
@@ -419,6 +493,11 @@ def create_tui_executor(
             call_style="system_instruction",
             missing_key_errors=(MissingAnthropicAPIKeyError,),
             provider_error_types=(AnthropicAPIError,),
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
     if provider_name == "google":
         return DirectProviderReadOnlyExecutor(
@@ -431,6 +510,11 @@ def create_tui_executor(
             call_style="system_message",
             missing_key_errors=(MissingGoogleAPIKeyError,),
             provider_error_types=(GoogleAPIError,),
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
     if provider_name == OLLAMA_SFE_PROVIDER:
         return DirectProviderReadOnlyExecutor(
@@ -445,6 +529,11 @@ def create_tui_executor(
             ),
             call_style="system_message",
             provider_error_classifier=_classify_ollama_error,
+            provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
+                role="executor",
+                provider_name=provider_name,
+                environ=environ,
+            ),
         )
     return UnsupportedProviderExecutor(provider_name)
 
@@ -497,6 +586,8 @@ def _call_provider_chat(
     model: str,
     max_tokens: int,
     system_instruction: str,
+    idle_timeout_seconds: float | None,
+    provider_role: str,
 ) -> dict[str, Any]:
     if call_style == "system_message":
         return provider.chat(
@@ -507,6 +598,8 @@ def _call_provider_chat(
             model=model,
             max_tokens=max_tokens,
             temperature=None,
+            idle_timeout_seconds=idle_timeout_seconds,
+            provider_role=provider_role,
         )
     return provider.chat(
         [{"role": "user", "content": user_prompt}],
@@ -514,6 +607,8 @@ def _call_provider_chat(
         max_tokens=max_tokens,
         temperature=None,
         system_instruction=system_instruction,
+        idle_timeout_seconds=idle_timeout_seconds,
+        provider_role=provider_role,
     )
 
 
@@ -542,6 +637,31 @@ def _classify_provider_error(
     if classifier is None:
         return "provider_error"
     return classifier(exc) or "provider_error"
+
+
+def _provider_timeout_response_diagnostics(
+    exc: ProviderCallIdleTimeoutError,
+    *,
+    provider_name: str | None,
+    model: str | None,
+    role: str,
+    idle_timeout_seconds: float | None,
+) -> dict[str, object]:
+    diagnostics = dict(getattr(exc, "diagnostics", {}) or {})
+    diagnostics.setdefault("provider", getattr(exc, "provider", provider_name))
+    diagnostics.setdefault("model", getattr(exc, "model", model))
+    diagnostics.setdefault("role", role)
+    diagnostics.setdefault("call_id", getattr(exc, "call_id", None))
+    diagnostics.setdefault(
+        "idle_timeout_seconds",
+        getattr(exc, "idle_timeout_seconds", idle_timeout_seconds),
+    )
+    diagnostics.setdefault("timeout_kind", "idle")
+    return {
+        "provider_name": provider_name,
+        "error_type": type(exc).__name__,
+        "provider_timeout_diagnostics": diagnostics,
+    }
 
 
 def _classify_lemonade_error(exc: Exception) -> str | None:
@@ -582,15 +702,74 @@ def _build_user_prompt(executor_payload: dict[str, Any]) -> str:
         if getattr(segment, "text", "")
     ]
     context_text = "\n\n".join(context_parts) if context_parts else "none"
+    multi_pass_text = _build_multi_pass_prompt_section(
+        executor_payload.get("multi_pass")
+    )
     return "\n\n".join(
         part
         for part in (
             "Protected instructions:\n" + instruction_text,
             "User task:\n" + task_text,
+            multi_pass_text,
             "Selected context:\n" + context_text,
         )
         if part.strip()
     )
+
+
+def _build_multi_pass_prompt_section(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    mode = value.get("mode")
+    if mode == "plan":
+        max_passes = value.get("max_passes")
+        max_files_per_pass = value.get("max_files_per_pass")
+        return "\n".join(
+            [
+                "Multi-pass planning request:",
+                f"Maximum passes allowed: {max_passes or 'unspecified'}",
+                "Maximum files allowed per batch: "
+                f"{max_files_per_pass or 'unspecified'}",
+                "Every batch MUST keep allowed_files at or below the maximum "
+                "files per batch. Split foundation, config, source, templates, "
+                "assets, and tests into separate batches when needed.",
+                "Return exactly one JSON object with this shape:",
+                '{"project_summary":"...","batches":[{"id":"foundation",'
+                '"title":"Foundation","goal":"...","allowed_files":["path"],'
+                '"depends_on":[],"validation_notes":["note"]}]}',
+                "Use explicit allowed_files for every file the batch may create "
+                "or modify.",
+            ]
+        )
+    if mode == "batch":
+        allowed_files = _format_prompt_list(value.get("allowed_files"))
+        completed_files = _format_prompt_list(value.get("completed_files"))
+        validation_notes = _format_prompt_list(value.get("validation_notes"))
+        return "\n".join(
+            [
+                "Multi-pass batch constraints:",
+                f"Project summary: {value.get('project_summary') or ''}",
+                f"Batch id: {value.get('batch_id') or ''}",
+                f"Batch title: {value.get('batch_title') or ''}",
+                f"Batch goal: {value.get('batch_goal') or ''}",
+                "Allowed files for this batch:",
+                allowed_files or "- none",
+                "Already completed/promoted files:",
+                completed_files or "- none",
+                "Validation notes:",
+                validation_notes or "- none",
+                "Return a strict git diff for this batch only. Do not create, "
+                "modify, delete, rename, or mention patch entries for files "
+                "outside the allowed files list.",
+            ]
+        )
+    return ""
+
+
+def _format_prompt_list(value: object) -> str:
+    if not isinstance(value, tuple | list):
+        return ""
+    return "\n".join(f"- {item}" for item in value if isinstance(item, str))
 
 
 def _extract_answer(response: object) -> str:
