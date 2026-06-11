@@ -84,7 +84,11 @@ PATCH_SYSTEM_INSTRUCTION = (
     "counts. Recount the hunk body before writing the hunk header. Prefer small "
     "localized hunks when possible. For new files, use @@ -0,0 +1,N @@ where N "
     "exactly equals the number of added + lines in that hunk. Every added "
-    "content line must start with +. If unsure, keep files smaller and hunks "
+    "content line must start with +. Do not claim to inspect, read, or rely on "
+    "workspace files unless they appear in Selected context. If Selected context "
+    "is none and the task asks for a path, treat that path as absent and create "
+    "it as a new file; do not emit a modification hunk for an absent file. If "
+    "unsure, keep files smaller and hunks "
     "simpler. Include normal unified diff hunks for every changed file. Do not "
     "create files under .git, vendor, var, cache, "
     "node_modules, or generated/sensitive directories. Do not propose deletes, "
@@ -577,12 +581,13 @@ def _build_user_prompt(executor_payload: dict[str, Any]) -> str:
         for segment in selected_segments
         if getattr(segment, "text", "")
     ]
+    context_text = "\n\n".join(context_parts) if context_parts else "none"
     return "\n\n".join(
         part
         for part in (
             "Protected instructions:\n" + instruction_text,
             "User task:\n" + task_text,
-            "Selected context:\n" + "\n\n".join(context_parts),
+            "Selected context:\n" + context_text,
         )
         if part.strip()
     )

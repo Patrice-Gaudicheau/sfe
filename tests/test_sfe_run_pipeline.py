@@ -1025,6 +1025,35 @@ def test_run_pipeline_accepts_single_fenced_git_diff_patch_proposal(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_accepts_fenced_git_diff_with_surrounding_prose(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = f"Here is the patch:\n```diff\n{_valid_new_file_diff()}\n```\nPatch complete."
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("index.html",)
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_accepts_preamble_git_diff_patch_proposal(
     tmp_path: Path,
 ) -> None:
@@ -1050,6 +1079,49 @@ def test_run_pipeline_accepts_preamble_git_diff_patch_proposal(
     assert result.patch_summary.created_paths == ("index.html",)
     assert result.promoted_files == ("index.html",)
     assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_accepts_preamble_multi_file_minisite_git_diff(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = f"Here is the patch:\n\n{_valid_minisite_diff()}\n\nPatch complete."
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create a small static minisite",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == (
+        "index.html",
+        "style.css",
+        "script.js",
+        "README.md",
+    )
+    assert result.promoted_files == (
+        "index.html",
+        "style.css",
+        "script.js",
+        "README.md",
+    )
+    index_html = (repo / "index.html").read_text(encoding="utf-8")
+    assert index_html.startswith("<!doctype html>")
+    assert (repo / "style.css").read_text(encoding="utf-8").startswith(":root")
+    assert (repo / "script.js").read_text(encoding="utf-8").startswith("const")
+    assert (repo / "README.md").read_text(encoding="utf-8").startswith("# Mini Site")
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1114,6 +1186,49 @@ def test_run_pipeline_rejects_ambiguous_multiple_preamble_patch_regions(
     assert result.patch_applied is False
     assert not (repo / "index.html").exists()
     assert not (repo / "two.html").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_reports_failed_extraction_attempts_for_malformed_preamble_diff(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = f"Here is the patch:\n{_invalid_new_file_hunk_count_diff()}"
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "missing_diff_header"
+    diagnostics = result.patch_proposal_diagnostics
+    assert diagnostics is not None
+    assert diagnostics.contains_diff_git_header is True
+    assert diagnostics.has_preamble_before_diff is True
+    assert diagnostics.strict_parse_succeeded is False
+    assert diagnostics.strict_parse_issue_reason == "missing_diff_header"
+    assert diagnostics.fenced_extraction_attempted is True
+    assert diagnostics.fenced_extraction_succeeded is False
+    assert diagnostics.raw_segment_extraction_attempted is True
+    assert diagnostics.raw_segment_extraction_succeeded is False
+    assert diagnostics.raw_segment_candidate_started is True
+    assert diagnostics.raw_segment_parse_issue_reason == "impossible_hunk_accounting"
+    assert diagnostics.raw_segment_extraction_failure_reason == "no_parseable_raw_segment"
+    assert diagnostics.final_extraction_succeeded is False
+    assert diagnostics.final_parse_issue_reason == "impossible_hunk_accounting"
+    assert result.patch_applied is False
+    assert not (repo / "index.html").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -2054,6 +2169,76 @@ def _valid_new_file_diff(path: str = "index.html") -> str:
             "+one",
             "+two",
             "+three",
+        ]
+    )
+
+
+def _valid_minisite_diff() -> str:
+    files = {
+        "index.html": "\n".join(
+            [
+                "<!doctype html>",
+                '<html lang="en">',
+                "<head>",
+                '  <meta charset="utf-8">',
+                "  <title>Mini Site</title>",
+                '  <link rel="stylesheet" href="style.css">',
+                "</head>",
+                "<body>",
+                "  <main>",
+                "    <h1>Mini Site</h1>",
+                "    <button id=\"action\">Start</button>",
+                "  </main>",
+                '  <script src="script.js"></script>',
+                "</body>",
+                "</html>",
+            ]
+        ),
+        "style.css": "\n".join(
+            [
+                ":root {",
+                "  color-scheme: light;",
+                "}",
+                "body {",
+                "  font-family: system-ui, sans-serif;",
+                "}",
+                "button {",
+                "  cursor: pointer;",
+                "}",
+            ]
+        ),
+        "script.js": "\n".join(
+            [
+                'const button = document.querySelector("#action");',
+                'button?.addEventListener("click", () => {',
+                '  button.textContent = "Ready";',
+                "});",
+            ]
+        ),
+        "README.md": "\n".join(
+            [
+                "# Mini Site",
+                "",
+                "Open `index.html` in a browser.",
+            ]
+        ),
+    }
+    return "\n".join(
+        _valid_new_file_diff_with_content(path, content)
+        for path, content in files.items()
+    )
+
+
+def _valid_new_file_diff_with_content(path: str, content: str) -> str:
+    lines = content.splitlines()
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "new file mode 100644",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            f"@@ -0,0 +1,{len(lines)} @@",
+            *(f"+{line}" for line in lines),
         ]
     )
 

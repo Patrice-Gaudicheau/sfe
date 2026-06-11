@@ -397,6 +397,13 @@ def _serialize_patch_proposal_diagnostics(result: RunResult) -> dict[str, Any] |
         "contains_diff_git_header": diagnostics.contains_diff_git_header,
         "starts_with_diff_git": diagnostics.starts_with_diff_git,
         "diff_git_header_offset": diagnostics.diff_git_header_offset,
+        "first_diff_git_header_offset": diagnostics.first_diff_git_header_offset,
+        "first_diff_git_header_line_index": (
+            diagnostics.first_diff_git_header_line_index
+        ),
+        "diff_git_header_context_preview": list(
+            diagnostics.diff_git_header_context_preview
+        ),
         "has_preamble_before_diff": diagnostics.has_preamble_before_diff,
         "preamble_line_count": diagnostics.preamble_line_count,
         "has_trailing_text_after_diff": diagnostics.has_trailing_text_after_diff,
@@ -408,6 +415,23 @@ def _serialize_patch_proposal_diagnostics(result: RunResult) -> dict[str, Any] |
         "looks_like_plain_text_or_markdown": (
             diagnostics.looks_like_plain_text_or_markdown
         ),
+        "strict_parse_succeeded": diagnostics.strict_parse_succeeded,
+        "strict_parse_issue_reason": diagnostics.strict_parse_issue_reason,
+        "fenced_extraction_attempted": diagnostics.fenced_extraction_attempted,
+        "fenced_extraction_succeeded": diagnostics.fenced_extraction_succeeded,
+        "fenced_extraction_failure_reason": (
+            diagnostics.fenced_extraction_failure_reason
+        ),
+        "raw_segment_extraction_attempted": diagnostics.raw_segment_extraction_attempted,
+        "raw_segment_extraction_succeeded": diagnostics.raw_segment_extraction_succeeded,
+        "raw_segment_candidate_started": diagnostics.raw_segment_candidate_started,
+        "raw_segment_candidate_line_count": diagnostics.raw_segment_candidate_line_count,
+        "raw_segment_parse_issue_reason": diagnostics.raw_segment_parse_issue_reason,
+        "raw_segment_extraction_failure_reason": (
+            diagnostics.raw_segment_extraction_failure_reason
+        ),
+        "final_extraction_succeeded": diagnostics.final_extraction_succeeded,
+        "final_parse_issue_reason": diagnostics.final_parse_issue_reason,
     }
 
 

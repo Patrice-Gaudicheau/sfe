@@ -362,7 +362,7 @@ def parse_unified_diff(text: str) -> PatchParseResult:
 
 
 def extract_single_fenced_git_diff(text: str) -> str | None:
-    """Extract one fenced Git diff when there is no surrounding prose."""
+    """Extract one unambiguous fenced Git diff, allowing surrounding prose."""
     stripped = text.strip()
     if not stripped:
         return None
@@ -370,10 +370,10 @@ def extract_single_fenced_git_diff(text: str) -> str | None:
     if len(matches) != 1:
         return None
     match = matches[0]
-    if stripped[: match.start()].strip() or stripped[match.end() :].strip():
-        return None
     body = match.group("body").strip()
     if not body.startswith("diff --git "):
+        return None
+    if not _parse_unified_diff_ok(body):
         return None
     return body
 
@@ -384,11 +384,13 @@ def extract_first_parseable_git_diff_segment(text: str) -> str | None:
     The returned segment must parse through ``parse_unified_diff`` as-is. This
     helper does not repair, normalize, or infer patch content.
     """
+    fenced_diff = extract_single_fenced_git_diff(text)
+    if fenced_diff is not None:
+        return fenced_diff
+
     lines = text.splitlines()
     start_index = _first_git_diff_line_index(lines)
     if start_index is None:
-        return None
-    if _contains_fence_marker(lines[:start_index]):
         return None
 
     suffix_lines = lines[start_index:]
@@ -1224,7 +1226,7 @@ def _is_safe_implicit_create_patch(file_patch: ParsedFilePatch) -> bool:
     if not file_patch.hunks:
         return False
     for hunk in file_patch.hunks:
-        if hunk.old_start != 0 or hunk.old_count != 0:
+        if hunk.old_start not in {0, 1} or hunk.old_count != 0:
             return False
         if any(line.kind != "+" for line in hunk.lines):
             return False

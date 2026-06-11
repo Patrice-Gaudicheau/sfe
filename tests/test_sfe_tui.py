@@ -64,6 +64,7 @@ from sfe_tui.executors import (
     OpenAIReadOnlyExecutor,
     PATCH_SYSTEM_INSTRUCTION,
     READ_ONLY_SYSTEM_INSTRUCTION,
+    _build_user_prompt,
     create_tui_executor,
 )
 from sfe_tui.input import (
@@ -6345,6 +6346,10 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "@@ -0,0 +1,N @@" in instruction
     assert "N exactly equals the number of added + lines" in instruction
     assert "Every added content line must start with +" in instruction
+    assert "Do not claim to inspect, read, or rely on workspace files" in instruction
+    assert "unless they appear in Selected context" in instruction
+    assert "treat that path as absent and create it as a new file" in instruction
+    assert "do not emit a modification hunk for an absent file" in instruction
     assert "Do not guess hunk counts" in instruction
     assert "Recount the hunk body before writing the hunk header" in instruction
     assert "Prefer small localized hunks when possible" in instruction
@@ -6358,6 +6363,20 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "If no safe unified diff can be proposed, return no text" in instruction
     assert "Return only one strict JSON object" not in instruction
     assert '"edits"' not in instruction
+
+
+def test_build_user_prompt_marks_empty_selected_context_as_none() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(id="task_current", text="Create README.md"),
+            "selected_context_segments": [],
+        }
+    )
+
+    assert "User task:\nCreate README.md" in prompt
+    assert "Selected context:\nnone" in prompt
+
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
     provider = FakeProvider()

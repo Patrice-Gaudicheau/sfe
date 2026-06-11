@@ -478,9 +478,39 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
                 f"{_yes_no(diagnostics.contains_fenced_diff)}",
                 "  patch proposal contains diff header: "
                 f"{_yes_no(diagnostics.contains_diff_git_header)}",
+                "  patch proposal first diff header offset: "
+                f"{_display_value(diagnostics.first_diff_git_header_offset)}",
+                "  patch proposal first diff header line: "
+                f"{_display_value(diagnostics.first_diff_git_header_line_index)}",
                 f"  patch proposal contains file headers: {_yes_no(file_headers)}",
                 "  patch proposal contains hunk header: "
                 f"{_yes_no(diagnostics.contains_hunk_header)}",
+                "  patch proposal strict parse succeeded: "
+                f"{_yes_no(diagnostics.strict_parse_succeeded)}",
+                "  patch proposal strict parse issue: "
+                f"{_display_value(diagnostics.strict_parse_issue_reason)}",
+                "  patch proposal fenced extraction attempted: "
+                f"{_yes_no(diagnostics.fenced_extraction_attempted)}",
+                "  patch proposal fenced extraction succeeded: "
+                f"{_yes_no(diagnostics.fenced_extraction_succeeded)}",
+                "  patch proposal fenced extraction failure: "
+                f"{_display_value(diagnostics.fenced_extraction_failure_reason)}",
+                "  patch proposal raw segment extraction attempted: "
+                f"{_yes_no(diagnostics.raw_segment_extraction_attempted)}",
+                "  patch proposal raw segment extraction succeeded: "
+                f"{_yes_no(diagnostics.raw_segment_extraction_succeeded)}",
+                "  patch proposal raw segment candidate started: "
+                f"{_yes_no(diagnostics.raw_segment_candidate_started)}",
+                "  patch proposal raw segment candidate lines: "
+                f"{_display_value(diagnostics.raw_segment_candidate_line_count)}",
+                "  patch proposal raw segment parse issue: "
+                f"{_display_value(diagnostics.raw_segment_parse_issue_reason)}",
+                "  patch proposal raw segment extraction failure: "
+                f"{_display_value(diagnostics.raw_segment_extraction_failure_reason)}",
+                "  patch proposal final extraction succeeded: "
+                f"{_yes_no(diagnostics.final_extraction_succeeded)}",
+                "  patch proposal final parse issue: "
+                f"{_display_value(diagnostics.final_parse_issue_reason)}",
                 "  patch proposal looks like JSON: "
                 f"{_yes_no(diagnostics.looks_like_json)}",
                 "  patch proposal mentions selected paths: "

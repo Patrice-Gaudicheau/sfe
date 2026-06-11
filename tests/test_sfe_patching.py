@@ -53,13 +53,34 @@ def test_extract_single_fenced_git_diff_accepts_only_unambiguous_git_diff() -> N
     assert extract_single_fenced_git_diff(f"```\n{diff}\n```") == diff
     assert (
         extract_single_fenced_git_diff(f"Here is the diff:\n```diff\n{diff}\n```")
-        is None
+        == diff
+    )
+    assert (
+        extract_single_fenced_git_diff(
+            f"Here is the diff:\n```diff\n{diff}\n```\nPatch complete."
+        )
+        == diff
     )
     assert extract_single_fenced_git_diff(generic_diff) is None
     assert (
         extract_single_fenced_git_diff(f"```diff\n{diff}\n```\n```text\nextra\n```")
         is None
     )
+
+
+def test_extract_single_fenced_git_diff_rejects_malformed_patch() -> None:
+    invalid_hunk_diff = "\n".join(
+        [
+            "diff --git a/context.txt b/context.txt",
+            "--- a/context.txt",
+            "+++ b/context.txt",
+            "@@ -1,1 +1,2 @@",
+            "-old",
+            "+new",
+        ]
+    )
+
+    assert extract_single_fenced_git_diff(f"```diff\n{invalid_hunk_diff}\n```") is None
 
 
 def test_extract_first_parseable_git_diff_segment_accepts_preamble_diff() -> None:
@@ -76,10 +97,25 @@ def test_extract_first_parseable_git_diff_segment_accepts_safe_trailing_text() -
     assert extract_first_parseable_git_diff_segment(raw_output) == diff
 
 
+def test_extract_first_parseable_git_diff_segment_accepts_fenced_diff_with_prose() -> None:
+    diff = _diff("context.txt")
+    raw_output = f"Here is the patch:\n```diff\n{diff}\n```\nPatch complete."
+
+    assert extract_first_parseable_git_diff_segment(raw_output) == diff
+
+
 def test_extract_first_parseable_git_diff_segment_rejects_ambiguous_regions() -> None:
     first_diff = _diff("context.txt")
     second_diff = _diff("notes.txt")
     raw_output = f"Here is the first patch:\n{first_diff}\nAnd another:\n{second_diff}"
+
+    assert extract_first_parseable_git_diff_segment(raw_output) is None
+
+
+def test_extract_first_parseable_git_diff_segment_rejects_multiple_fenced_diffs() -> None:
+    first_diff = _diff("context.txt")
+    second_diff = _diff("notes.txt")
+    raw_output = f"```diff\n{first_diff}\n```\n```diff\n{second_diff}\n```"
 
     assert extract_first_parseable_git_diff_segment(raw_output) is None
 
@@ -103,6 +139,12 @@ def test_extract_first_parseable_git_diff_segment_rejects_invalid_shapes() -> No
         extract_first_parseable_git_diff_segment(f"Patch:\n{invalid_hunk_diff}")
         is None
     )
+    assert (
+        extract_first_parseable_git_diff_segment(
+            f"Here is the patch:\n```diff\n{invalid_hunk_diff}\n```"
+        )
+        is None
+    )
 
 
 def test_patch_proposal_diagnostics_report_preamble_diff_shape() -> None:
@@ -114,9 +156,34 @@ def test_patch_proposal_diagnostics_report_preamble_diff_shape() -> None:
     assert diagnostics.contains_diff_git_header is True
     assert diagnostics.starts_with_diff_git is False
     assert diagnostics.diff_git_header_offset == raw_output.index("diff --git ")
+    assert diagnostics.first_diff_git_header_offset == raw_output.index("diff --git ")
+    assert diagnostics.first_diff_git_header_line_index == 2
+    assert diagnostics.diff_git_header_context_preview == (
+        "1: 'Here is the patch:'",
+        "2: ''",
+        "3: 'diff --git a/context.txt b/context.txt'",
+        "4: '--- a/context.txt'",
+        "5: '+++ b/context.txt'",
+        "6: '@@ -1,1 +1,1 @@'",
+        "7: '-old'",
+        "8: '+new'",
+    )
     assert diagnostics.has_preamble_before_diff is True
     assert diagnostics.preamble_line_count == 1
     assert diagnostics.has_trailing_text_after_diff is False
+    assert diagnostics.strict_parse_succeeded is False
+    assert diagnostics.strict_parse_issue_reason == "missing_diff_header"
+    assert diagnostics.fenced_extraction_attempted is True
+    assert diagnostics.fenced_extraction_succeeded is False
+    assert diagnostics.fenced_extraction_failure_reason == "no_fenced_block"
+    assert diagnostics.raw_segment_extraction_attempted is True
+    assert diagnostics.raw_segment_extraction_succeeded is True
+    assert diagnostics.raw_segment_candidate_started is True
+    assert diagnostics.raw_segment_candidate_line_count == 6
+    assert diagnostics.raw_segment_parse_issue_reason is None
+    assert diagnostics.raw_segment_extraction_failure_reason is None
+    assert diagnostics.final_extraction_succeeded is True
+    assert diagnostics.final_parse_issue_reason is None
 
 
 def test_patch_proposal_diagnostics_report_safe_trailing_text() -> None:
@@ -128,6 +195,68 @@ def test_patch_proposal_diagnostics_report_safe_trailing_text() -> None:
     assert diagnostics.contains_diff_git_header is True
     assert diagnostics.has_preamble_before_diff is True
     assert diagnostics.has_trailing_text_after_diff is True
+    assert diagnostics.raw_segment_extraction_succeeded is True
+    assert diagnostics.final_extraction_succeeded is True
+
+
+def test_patch_proposal_diagnostics_report_raw_segment_parse_failure() -> None:
+    invalid_hunk_diff = "\n".join(
+        [
+            "diff --git a/context.txt b/context.txt",
+            "--- a/context.txt",
+            "+++ b/context.txt",
+            "@@ -1,1 +1,2 @@",
+            "-old",
+            "+new",
+        ]
+    )
+    raw_output = f"Here is the patch:\n{invalid_hunk_diff}"
+
+    diagnostics = build_patch_proposal_diagnostics(raw_output)
+
+    assert diagnostics.contains_diff_git_header is True
+    assert diagnostics.raw_segment_candidate_started is True
+    assert diagnostics.raw_segment_candidate_line_count == 6
+    assert diagnostics.raw_segment_extraction_succeeded is False
+    assert diagnostics.raw_segment_parse_issue_reason == "impossible_hunk_accounting"
+    assert diagnostics.raw_segment_extraction_failure_reason == "no_parseable_raw_segment"
+    assert diagnostics.final_extraction_succeeded is False
+    assert diagnostics.final_parse_issue_reason == "impossible_hunk_accounting"
+
+
+def test_patch_proposal_diagnostics_preview_is_limited_and_redacted() -> None:
+    diff = "\n".join(
+        [
+            "diff --git a/secrets.txt b/secrets.txt",
+            "new file mode 100644",
+            "--- /dev/null",
+            "+++ b/secrets.txt",
+            "@@ -0,0 +1,12 @@",
+            "+one",
+            "+two",
+            "+sk-SECRET",
+            "+four",
+            "+five",
+            "+six",
+            "+seven",
+            "+eight",
+            "+nine",
+            "+ten",
+            "+eleven",
+            "+twelve",
+        ]
+    )
+    raw_output = f"alpha\nbeta\ngamma\ndelta\n{diff}\ntrailing"
+
+    diagnostics = build_patch_proposal_diagnostics(raw_output)
+
+    assert len(diagnostics.diff_git_header_context_preview) == 14
+    assert diagnostics.diff_git_header_context_preview[0] == "2: 'beta'"
+    assert diagnostics.diff_git_header_context_preview[3] == (
+        "5: 'diff --git a/secrets.txt b/secrets.txt'"
+    )
+    assert any("'[redacted]'" in line for line in diagnostics.diff_git_header_context_preview)
+    assert "trailing" not in "\n".join(diagnostics.diff_git_header_context_preview)
 
 
 def test_patch_proposal_diagnostics_report_raw_diff_shape() -> None:
@@ -138,9 +267,13 @@ def test_patch_proposal_diagnostics_report_raw_diff_shape() -> None:
     assert diagnostics.contains_diff_git_header is True
     assert diagnostics.starts_with_diff_git is True
     assert diagnostics.diff_git_header_offset == 0
+    assert diagnostics.first_diff_git_header_offset == 0
+    assert diagnostics.first_diff_git_header_line_index == 0
     assert diagnostics.has_preamble_before_diff is False
     assert diagnostics.preamble_line_count == 0
     assert diagnostics.has_trailing_text_after_diff is False
+    assert diagnostics.strict_parse_succeeded is True
+    assert diagnostics.final_extraction_succeeded is True
 
 
 def test_patch_proposal_diagnostics_report_prose_only_shape() -> None:
@@ -149,6 +282,9 @@ def test_patch_proposal_diagnostics_report_prose_only_shape() -> None:
     assert diagnostics.contains_diff_git_header is False
     assert diagnostics.starts_with_diff_git is False
     assert diagnostics.diff_git_header_offset is None
+    assert diagnostics.first_diff_git_header_offset is None
+    assert diagnostics.first_diff_git_header_line_index is None
+    assert diagnostics.diff_git_header_context_preview == ()
     assert diagnostics.has_preamble_before_diff is False
     assert diagnostics.preamble_line_count == 0
     assert diagnostics.has_trailing_text_after_diff is None
@@ -654,6 +790,35 @@ def test_implicit_create_on_missing_target_is_classified_create(tmp_path) -> Non
     assert apply_result.applied is True
     assert apply_result.summary is not None
     assert apply_result.summary.created_paths == ("new.txt",)
+    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello\nworld\n"
+
+
+def test_implicit_create_with_one_based_empty_old_range_is_classified_create(
+    tmp_path,
+) -> None:
+    patch = _parse_ok(
+        "\n".join(
+            [
+                "diff --git a/new.txt b/new.txt",
+                "--- a/new.txt",
+                "+++ b/new.txt",
+                "@@ -1,0 +1,2 @@",
+                "+hello",
+                "+world",
+            ]
+        )
+    )
+
+    result = validate_patch_targets(tmp_path, patch)
+
+    assert result.ok is True
+    assert result.patch is not None
+    assert result.patch.files[0].operation == PATCH_OPERATION_CREATE
+    assert result.summary is not None
+    assert result.summary.created_paths == ("new.txt",)
+
+    apply_result = apply_patch_to_workspace(tmp_path, patch)
+    assert apply_result.applied is True
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello\nworld\n"
 
 
