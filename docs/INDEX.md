@@ -24,7 +24,9 @@ general model-safety guarantees.
 5. [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
    design boundary for the planned local MCP control surface over the same
    runtime path as the TUI.
-6. [execution_mode_router_contract.md](execution_mode_router_contract.md):
+6. [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): local MCP client setup
+   for Antigravity and Codex App.
+7. [execution_mode_router_contract.md](execution_mode_router_contract.md):
    current `/run` execution-mode router contract.
 
 ## Current Architecture And Doctrine
@@ -37,6 +39,8 @@ general model-safety guarantees.
   current `console_output`, `workspace_write`, and `external_action` contract.
 - [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
   planned local MCP control surface and TUI/MCP ISO runtime requirement.
+- [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): current local STDIO MCP
+  setup for Antigravity and Codex App.
 - [sfe_continuity_orientation_layer.md](sfe_continuity_orientation_layer.md):
   orientation vocabulary for tasks, workspaces, evidence, and continuity. It is
   not current user guidance.
