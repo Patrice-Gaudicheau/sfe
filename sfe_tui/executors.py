@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from providers.alibaba import (
@@ -74,8 +75,9 @@ PATCH_SYSTEM_INSTRUCTION = (
     "header like diff --git a/<relative-path> b/<relative-path>; do not start "
     "with {, [, text, or Markdown. Do not return JSON. Do not return an edits "
     "array. Do not return Markdown. Do not wrap the patch in a code fence. Do "
-    "not explain the patch. Do not include a file manifest or any prose before "
-    "or after the diff. All paths must be relative to the workspace and use "
+    "not explain the patch. Do not modify files, run commands, or use tools; "
+    "generate a patch proposal only. Do not include a file manifest or any prose "
+    "before or after the diff. All paths must be relative to the workspace and use "
     "a/<relative-path> and b/<relative-path> diff paths. For a new file, use "
     "a complete Git-style new-file unified diff that still starts with "
     "diff --git a/<relative-path> b/<relative-path>; do not start the response "
@@ -85,7 +87,9 @@ PATCH_SYSTEM_INSTRUCTION = (
     "number of context lines plus removed lines. For each hunk, new_count must "
     "equal the number of context lines plus added lines. Do not guess hunk "
     "counts. Recount the hunk body before writing the hunk header. Prefer small "
-    "localized hunks when possible. For new files, use @@ -0,0 +1,N @@ where N "
+    "localized hunks when possible, except when later full-file replacement "
+    "guidance marks a small fully provided file as eligible or strongly "
+    "preferred. For new files, use @@ -0,0 +1,N @@ where N "
     "exactly equals the number of added + lines in that hunk. Every added "
     "content line must start with +. Do not claim to inspect, read, or rely on "
     "workspace files unless they appear in Selected context. If Selected context "
@@ -196,6 +200,7 @@ class DirectProviderReadOnlyExecutor:
                 system_instruction=system_instruction,
                 idle_timeout_seconds=self.provider_idle_timeout_seconds,
                 provider_role="executor",
+                executor_cwd=_executor_working_directory(executor_payload),
             )
         except self.missing_key_errors:
             return ExecutorResponse(
@@ -261,6 +266,10 @@ class DirectProviderReadOnlyExecutor:
             error_category=None,
             provider_calls_made=1,
             provider_name=self.provider_name,
+            response_diagnostics=_successful_response_diagnostics(
+                response,
+                provider_name=self.provider_name,
+            ),
         )
 
 
@@ -547,7 +556,11 @@ def _call_provider_chat(
     system_instruction: str,
     idle_timeout_seconds: float | None,
     provider_role: str,
+    executor_cwd: Path | None = None,
 ) -> dict[str, Any]:
+    codex_kwargs: dict[str, object] = {}
+    if executor_cwd is not None and isinstance(provider, CodexCLIProvider):
+        codex_kwargs["cwd"] = executor_cwd
     if call_style == "system_message":
         return provider.chat(
             [
@@ -559,6 +572,7 @@ def _call_provider_chat(
             temperature=None,
             idle_timeout_seconds=idle_timeout_seconds,
             provider_role=provider_role,
+            **codex_kwargs,
         )
     return provider.chat(
         [{"role": "user", "content": user_prompt}],
@@ -568,7 +582,52 @@ def _call_provider_chat(
         system_instruction=system_instruction,
         idle_timeout_seconds=idle_timeout_seconds,
         provider_role=provider_role,
+        **codex_kwargs,
     )
+
+
+def _executor_working_directory(executor_payload: dict[str, Any]) -> Path | None:
+    value = executor_payload.get("executor_working_directory")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return Path(value).expanduser().resolve()
+
+
+def _successful_response_diagnostics(
+    response: object,
+    *,
+    provider_name: str | None,
+) -> dict[str, object] | None:
+    if not isinstance(response, Mapping):
+        return None
+    codexcli = response.get("codexcli")
+    if not isinstance(codexcli, Mapping):
+        return None
+    provider_diagnostics: dict[str, object] = {
+        key: codexcli[key]
+        for key in (
+            "provider",
+            "model",
+            "latency_ms",
+            "thread_id",
+            "command",
+            "cwd",
+            "max_tokens_requested",
+            "temperature_requested",
+            "returncode",
+            "stdout_length",
+            "stderr_length",
+            "stderr_present",
+        )
+        if key in codexcli
+    }
+    parser_diagnostics = codexcli.get("parser_diagnostics")
+    if isinstance(parser_diagnostics, Mapping):
+        provider_diagnostics["parser_diagnostics"] = dict(parser_diagnostics)
+    return {
+        "provider_name": provider_name,
+        "provider_diagnostics": provider_diagnostics,
+    }
 
 
 def _configuration_error_response(provider_name: str) -> ExecutorResponse:
@@ -664,12 +723,16 @@ def _build_user_prompt(executor_payload: dict[str, Any]) -> str:
     multi_pass_text = _build_multi_pass_prompt_section(
         executor_payload.get("multi_pass")
     )
+    full_file_replacement_text = _format_full_file_replacement_guidance(
+        executor_payload.get("full_file_replacement_guidance")
+    )
     return "\n\n".join(
         part
         for part in (
             "Protected instructions:\n" + instruction_text,
             "User task:\n" + task_text,
             multi_pass_text,
+            full_file_replacement_text,
             "Selected context:\n" + context_text,
         )
         if part.strip()
@@ -684,6 +747,12 @@ def _build_multi_pass_prompt_section(value: object) -> str:
         allowed_files = _format_prompt_list(value.get("allowed_files"))
         completed_files = _format_prompt_list(value.get("completed_files"))
         validation_notes = _format_prompt_list(value.get("validation_notes"))
+        current_file_context = _format_current_file_context(
+            value.get("current_allowed_file_context")
+        )
+        full_file_guidance = _format_full_file_replacement_guidance(
+            value.get("full_file_replacement_guidance")
+        )
         return "\n".join(
             [
                 "Multi-pass batch constraints:",
@@ -695,6 +764,9 @@ def _build_multi_pass_prompt_section(value: object) -> str:
                 allowed_files or "- none",
                 "Already completed/promoted files:",
                 completed_files or "- none",
+                "Current workspace state for allowed files:",
+                current_file_context or "- none",
+                full_file_guidance,
                 "Validation notes:",
                 validation_notes or "- none",
                 "Return a strict git diff for this batch only. Do not create, "
@@ -709,6 +781,117 @@ def _format_prompt_list(value: object) -> str:
     if not isinstance(value, tuple | list):
         return ""
     return "\n".join(f"- {item}" for item in value if isinstance(item, str))
+
+
+def _format_current_file_context(value: object) -> str:
+    if not isinstance(value, tuple | list):
+        return ""
+    parts: list[str] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        path = item.get("path")
+        text = item.get("text")
+        if not isinstance(path, str) or not isinstance(text, str):
+            continue
+        bounded_text = text if len(text) <= 4000 else text[:4000] + "\n[truncated]"
+        parts.append(f"- {path} exists with current content:\n{bounded_text}")
+    return "\n".join(parts)
+
+
+def _format_full_file_replacement_guidance(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    eligible = value.get("eligible_files")
+    if not isinstance(eligible, tuple | list) or not eligible:
+        return ""
+    documentation = value.get("documentation_files")
+    documentation_files = {
+        path for path in documentation if isinstance(path, str)
+    } if isinstance(documentation, tuple | list) else set()
+    source = value.get("source_files")
+    source_files = {
+        path for path in source if isinstance(path, str)
+    } if isinstance(source, tuple | list) else set()
+    template = value.get("template_files")
+    template_files = {
+        path for path in template if isinstance(path, str)
+    } if isinstance(template, tuple | list) else set()
+    sizes = value.get("file_sizes")
+    size_map = sizes if isinstance(sizes, Mapping) else {}
+    max_bytes = value.get("max_bytes")
+    lines = [
+        "Full-file replacement preferred files:",
+    ]
+    for path in eligible:
+        if not isinstance(path, str):
+            continue
+        size = size_map.get(path)
+        size_label = f", {size} bytes" if isinstance(size, int) else ""
+        lines.append(f"- {path} (full current content provided{size_label})")
+    if documentation_files:
+        lines.extend(
+            [
+                "Documentation full-file replacement strong preference:",
+                *[f"- {path}" for path in eligible if path in documentation_files],
+                "For documentation files listed here, use a full-file replacement "
+                "when changing the file. Documentation is often structurally "
+                "rewritten, and partial hunks are fragile.",
+            ]
+        )
+    if source_files:
+        lines.extend(
+            [
+                "Source full-file replacement strong preference:",
+                *[f"- {path}" for path in eligible if path in source_files],
+                "For eligible source and test files listed here, strongly prefer a "
+                "full-file replacement for non-trivial edits.",
+                "If you modify one of these listed source files in a way that "
+                "changes imports, attributes, constructor arguments, method "
+                "signatures, routing, dependencies, query behavior, form fields, "
+                "validation, or tests, the expected artifact is a full-file "
+                "replacement hunk starting at line 1 and covering the current file.",
+                "This is especially important for controllers, entities, services, "
+                "repositories, forms, and tests because related imports, methods, "
+                "attributes, and constructor dependencies often need coherent updates.",
+                "When modifying an eligible PHP controller, entity, service, "
+                "repository, form, or test file, output the complete new file "
+                "content for that path unless the edit is truly tiny and local.",
+                "For controller-service-integration work, eligible controller "
+                "files should use full-file replacement unless the only change is "
+                "a truly tiny local edit.",
+            ]
+        )
+    if template_files:
+        lines.extend(
+            [
+                "Template full-file replacement strong preference:",
+                *[f"- {path}" for path in eligible if path in template_files],
+                "For eligible Twig templates listed here, strongly prefer a "
+                "full-file replacement for non-trivial template edits.",
+                "Template changes often restructure blocks, loops, forms, "
+                "partials, routes, and CSS classes, so partial hunks are fragile.",
+                "When modifying an eligible templates/**/*.twig file, output the "
+                "complete new template content for that path unless the edit is "
+                "truly tiny and local.",
+                "Do not emit approximate partial hunks for non-trivial edits to "
+                "eligible Twig templates.",
+            ]
+        )
+    lines.extend(
+        [
+            "For files listed above, prefer replacing the full file content when "
+            "making non-trivial edits.",
+            "Do not emit partial hunks for non-trivial edits to these files.",
+            "Do not emit approximate partial hunks for these files.",
+            "Reserve partial hunks for large files or truly tiny local edits.",
+            "If changing one of these files, output the complete new file content "
+            "for that path in the unified diff hunk.",
+            "Keep the path unchanged and do not include unrelated files.",
+            f"Eligibility threshold: {max_bytes} bytes.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _extract_answer(response: object) -> str:

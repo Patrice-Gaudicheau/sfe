@@ -12,14 +12,14 @@ from typing import Any
 
 
 DEFAULT_MULTIPASS_MODE = "auto"
-DEFAULT_MULTIPASS_MAX_PASSES = 10
+DEFAULT_MULTIPASS_MAX_PASSES: int | None = None
 DEFAULT_MULTIPASS_MAX_FILES_PER_PASS = 10
 
 
 @dataclass(frozen=True)
 class MultiPassConfig:
     mode: str = DEFAULT_MULTIPASS_MODE
-    max_passes: int = DEFAULT_MULTIPASS_MAX_PASSES
+    max_passes: int | None = DEFAULT_MULTIPASS_MAX_PASSES
     max_files_per_pass: int = DEFAULT_MULTIPASS_MAX_FILES_PER_PASS
 
     @property
@@ -53,6 +53,7 @@ class MultiPassIssue:
     reason: str
     path: str | None = None
     pass_id: str | None = None
+    diagnostics: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,10 @@ class MultiPassBatchResult:
     promoted_files: tuple[str, ...] = ()
     patch_paths: tuple[str, ...] = ()
     provider_diagnostics: dict[str, object] | None = None
+    fallback_diagnostics: dict[str, object] | None = None
+    full_content_provided_files: tuple[str, ...] = ()
+    full_file_replacement_eligible_files: tuple[str, ...] = ()
+    full_file_replacement_used_files: tuple[str, ...] = ()
     issue: MultiPassIssue | None = None
 
 
@@ -90,9 +95,8 @@ def resolve_multipass_config(
     env = os.environ if environ is None else environ
     return MultiPassConfig(
         mode=_resolve_mode(env.get("SFE_WORKSPACE_WRITE_MULTIPASS")),
-        max_passes=_resolve_positive_int(
+        max_passes=_resolve_max_passes(
             env.get("SFE_MULTIPASS_MAX_PASSES"),
-            DEFAULT_MULTIPASS_MAX_PASSES,
         ),
         max_files_per_pass=_resolve_positive_int(
             env.get("SFE_MULTIPASS_MAX_FILES_PER_PASS"),
@@ -175,7 +179,7 @@ def validate_multipass_plan(
     plan: MultiPassPlan,
     config: MultiPassConfig,
 ) -> MultiPassIssue | None:
-    if len(plan.batches) > config.max_passes:
+    if config.max_passes is not None and len(plan.batches) > config.max_passes:
         return MultiPassIssue("multi_pass_planning", "too_many_passes")
     seen_ids: set[str] = set()
     for batch in plan.batches:
@@ -276,6 +280,19 @@ def _resolve_mode(value: str | None) -> str:
     if normalized in {"0", "false", "no", "off", "disabled"}:
         return "false"
     return "auto"
+
+
+def _resolve_max_passes(value: str | None) -> int | None:
+    if value is None or not value.strip():
+        return DEFAULT_MULTIPASS_MAX_PASSES
+    normalized = value.strip().lower()
+    if normalized == "auto":
+        return None
+    try:
+        parsed = int(normalized)
+    except ValueError:
+        return DEFAULT_MULTIPASS_MAX_PASSES
+    return parsed if parsed > 0 else DEFAULT_MULTIPASS_MAX_PASSES
 
 
 def _resolve_positive_int(value: str | None, default: int) -> int:

@@ -275,6 +275,11 @@ def build_contract(
     protected_segments: list[ProtectedText] = []
     metadata = {
         "workspace_root_present": workspace_root is not None,
+        "workspace_root": (
+            str(workspace_root.expanduser().resolve())
+            if workspace_root is not None
+            else None
+        ),
         "context_segment_count": len(context_segments),
         "protected_segment_count": len(protected_segments),
         "protected_instruction_count": len(instruction_items),

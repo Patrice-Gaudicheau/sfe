@@ -470,7 +470,8 @@ and `false` preserves single-pass behavior. Multi-pass asks the Router for a
 strict JSON batch plan, validates that plan before execution, then asks the
 Executor to generate one patch per validated batch with an explicit
 `allowed_files` list. The v1 guardrails reject invalid plans, batches that
-exceed `SFE_MULTIPASS_MAX_PASSES` (default `10`) or
+exceed a numeric `SFE_MULTIPASS_MAX_PASSES` cap when configured (`auto` by
+default) or
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` (default `10`), and patches that touch files
 outside the current batch. This improves large scaffold reliability but does
 not implement automatic resume after a failed pass; the run report indicates
@@ -480,6 +481,13 @@ whether a manual resume is plausible.
 uses the configured Router provider/model, such as `SFE_PROVIDER_ROUTER`,
 `SFE_OPENAI_ROUTER_MODEL`, `SFE_CODEXCLI_ROUTER_MODEL`, or another supported
 Router model variable.
+
+`SFE_FULL_FILE_REPLACEMENT_REVIEW=auto` enables an optional LLM-reviewed
+full-file replacement fallback for `hunk_preimage_mismatch` failures in
+multi-pass runs. The fallback first checks deterministic invariants, then asks
+the configured Router provider/model only to approve or reject the proposed
+replacement. The reviewer is not asked to repair or rewrite patches. `false`
+disables the fallback, and `true` is currently equivalent to `auto`.
 
 Google/Gemini discovery can be selected with `SFE_PROVIDER_DISCOVERY=google`
 and optionally `SFE_GOOGLE_DISCOVERY_MODEL=<model-id>`.

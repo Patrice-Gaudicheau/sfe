@@ -81,6 +81,7 @@ class CodexCLIProvider:
         system_instruction: str | None = None,
         idle_timeout_seconds: float | None = None,
         provider_role: str | None = None,
+        cwd: str | Path | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """Run Codex CLI and normalize JSONL events to a chat-completion shape.
@@ -96,6 +97,7 @@ class CodexCLIProvider:
             reasoning_effort=self.reasoning_effort,
             executable=resolve_codex_executable(self.executable)[0] or "codex",
         )
+        effective_cwd = Path(cwd).expanduser().resolve() if cwd is not None else self.cwd
         supervisor = ProviderCallSupervisor(
             provider=PROVIDER_NAME,
             model=model,
@@ -110,7 +112,7 @@ class CodexCLIProvider:
         supervisor.start(
             {
                 "command": command,
-                "cwd": str(self.cwd),
+                "cwd": str(effective_cwd),
                 "max_tokens_requested": max_tokens,
                 "idle_timeout_seconds": supervisor.idle_timeout_seconds,
             }
@@ -119,7 +121,7 @@ class CodexCLIProvider:
         try:
             stdout, stderr, returncode = _run_codex_process(
                 command=command,
-                cwd=self.cwd,
+                cwd=effective_cwd,
                 prompt=prompt,
                 supervisor=supervisor,
                 timeout_seconds=max(self.timeout, supervisor.idle_timeout_seconds),
@@ -148,6 +150,7 @@ class CodexCLIProvider:
                 "latency_ms": latency_ms,
                 "thread_id": parsed["thread_id"],
                 "command": command,
+                "cwd": str(effective_cwd),
                 "max_tokens_requested": max_tokens,
                 "temperature_requested": temperature,
                 "returncode": returncode,

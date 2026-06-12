@@ -349,6 +349,51 @@ def test_google_discovery_model_falls_back_to_google_shared_model() -> None:
     assert router.model == "google-shared-model"
 
 
+def test_discovery_augments_existing_symfony_completion_with_anchor_files(tmp_path) -> None:
+    _write(tmp_path / "composer.json", '{"require":{"symfony/framework-bundle":"^7.0"}}\n')
+    _write(tmp_path / "README.md", "# Todo List\n")
+    _write(tmp_path / ".env.example", "APP_ENV=dev\n")
+    _write(tmp_path / "bin" / "console", "#!/usr/bin/env php\n")
+    _write(tmp_path / "config" / "packages" / "framework.yaml", "framework: {}\n")
+    _write(tmp_path / "src" / "Controller" / "TodoController.php", "<?php\n")
+    _write(tmp_path / "src" / "Entity" / "Todo.php", "<?php\n")
+    _write(tmp_path / "src" / "Form" / "TodoType.php", "<?php\n")
+    _write(tmp_path / "src" / "Repository" / "TodoRepository.php", "<?php\n")
+    _write(tmp_path / "templates" / "todo" / "index.html.twig", "{{ todos }}\n")
+    _write(tmp_path / "migrations" / "Version20260101000000.php", "<?php\n")
+    _write(tmp_path / "tests" / "TodoTest.php", "<?php\n")
+    router = FakeDiscoveryRouter(files_to_inspect=("templates/todo/index.html.twig",))
+
+    result = discover_workspace_context(
+        workspace_root=tmp_path,
+        task=(
+            "Continue and complete the existing Symfony Todo List application. "
+            "Inspect existing files first and reuse the current Symfony project structure."
+        ),
+        router=router,
+    )
+
+    refs = _refs(result)
+    assert refs[0] == "composer.json"
+    assert "templates/todo/index.html.twig" in refs
+    for expected in (
+        "composer.json",
+        "README.md",
+        ".env.example",
+        "bin/console",
+        "config/packages/framework.yaml",
+        "src/Controller/TodoController.php",
+        "src/Entity/Todo.php",
+        "src/Form/TodoType.php",
+        "src/Repository/TodoRepository.php",
+        "migrations/Version20260101000000.php",
+        "tests/TodoTest.php",
+    ):
+        assert expected in refs
+    assert len(refs) <= DiscoveryPolicy().max_candidates
+    assert result.candidates[0].reasons == ("existing_symfony_anchor",)
+
+
 def test_codexcli_discovery_selects_files_with_fake_response(
     tmp_path,
 ) -> None:

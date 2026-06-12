@@ -14,6 +14,7 @@ import pytest
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
+import providers.codexcli as codexcli_module
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -6567,6 +6568,7 @@ def test_patch_system_instruction_requires_unified_diff_only() -> None:
     assert "binary patches" in instruction
     assert "symlink changes" in instruction
     assert "If no safe unified diff can be proposed, return no text" in instruction
+    assert "except when later full-file replacement guidance marks" in instruction
     assert "Return only one strict JSON object" not in instruction
     assert '"edits"' not in instruction
 
@@ -6609,6 +6611,153 @@ def test_build_user_prompt_includes_only_multipass_batch_constraints() -> None:
     assert "Return a strict git diff for this batch only" in prompt
     assert "Multi-pass planning request:" not in prompt
     assert "Return exactly one JSON object" not in prompt
+
+
+def test_build_user_prompt_includes_source_guidance_in_controller_service_pass() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(
+                id="task_current",
+                text="Integrate controller with service layer",
+            ),
+            "selected_context_segments": [],
+            "multi_pass": {
+                "mode": "batch",
+                "project_summary": "Symfony Todo List",
+                "batch_id": "controller-service-integration",
+                "batch_title": "Controller Service Integration",
+                "batch_goal": "Wire controllers to repositories and stats service",
+                "allowed_files": ("src/Controller/TodoController.php",),
+                "completed_files": ("src/Entity/Todo.php",),
+                "current_allowed_file_context": (
+                    {
+                        "path": "src/Controller/TodoController.php",
+                        "text": "<?php\nfinal class TodoController {}\n",
+                    },
+                ),
+                "full_file_replacement_guidance": {
+                    "max_bytes": 64000,
+                    "full_content_provided_files": (
+                        "src/Controller/TodoController.php",
+                    ),
+                    "eligible_files": ("src/Controller/TodoController.php",),
+                    "source_files": ("src/Controller/TodoController.php",),
+                    "documentation_files": (),
+                    "large_files": (),
+                    "file_sizes": {"src/Controller/TodoController.php": 4200},
+                },
+                "validation_notes": (),
+            },
+        }
+    )
+
+    assert "Batch id: controller-service-integration" in prompt
+    assert "Source full-file replacement strong preference:" in prompt
+    assert "- src/Controller/TodoController.php" in prompt
+    assert "When modifying an eligible PHP controller" in prompt
+    assert "the expected artifact is a full-file replacement hunk starting at line 1" in prompt
+    assert "For controller-service-integration work" in prompt
+    assert "Reserve partial hunks for large files or truly tiny local edits." in prompt
+
+
+def test_build_user_prompt_includes_template_full_file_guidance() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(id="task_current", text="Update Twig templates"),
+            "selected_context_segments": [],
+            "full_file_replacement_guidance": {
+                "max_bytes": 64000,
+                "full_content_provided_files": (
+                    "templates/dashboard/index.html.twig",
+                ),
+                "eligible_files": ("templates/dashboard/index.html.twig",),
+                "template_files": ("templates/dashboard/index.html.twig",),
+                "source_files": (),
+                "documentation_files": (),
+                "large_files": (),
+                "file_sizes": {"templates/dashboard/index.html.twig": 1800},
+            },
+        }
+    )
+
+    assert "Template full-file replacement strong preference:" in prompt
+    assert "- templates/dashboard/index.html.twig" in prompt
+    assert "strongly prefer a full-file replacement for non-trivial template edits" in prompt
+    assert "templates/**/*.twig" in prompt
+    assert "Do not emit approximate partial hunks for non-trivial edits to eligible Twig templates." in prompt
+
+
+def test_build_user_prompt_includes_full_file_replacement_guidance_for_eligible_files() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(id="task_current", text="Update Todo entity"),
+            "selected_context_segments": [],
+            "full_file_replacement_guidance": {
+                "max_bytes": 64000,
+                "full_content_provided_files": (
+                    "src/Entity/Todo.php",
+                    "src/Controller/TodoController.php",
+                    "README.md",
+                ),
+                "eligible_files": (
+                    "src/Entity/Todo.php",
+                    "src/Controller/TodoController.php",
+                    "README.md",
+                ),
+                "documentation_files": ("README.md",),
+                "source_files": (
+                    "src/Entity/Todo.php",
+                    "src/Controller/TodoController.php",
+                ),
+                "large_files": (),
+                "file_sizes": {
+                    "src/Entity/Todo.php": 1200,
+                    "src/Controller/TodoController.php": 4200,
+                    "README.md": 900,
+                },
+            },
+        }
+    )
+
+    assert "Full-file replacement preferred files:" in prompt
+    assert "- src/Entity/Todo.php (full current content provided, 1200 bytes)" in prompt
+    assert (
+        "- src/Controller/TodoController.php (full current content provided, 4200 bytes)"
+        in prompt
+    )
+    assert "- README.md (full current content provided, 900 bytes)" in prompt
+    assert "Documentation full-file replacement strong preference:" in prompt
+    assert "Documentation is often structurally rewritten" in prompt
+    assert "Source full-file replacement strong preference:" in prompt
+    assert "- src/Controller/TodoController.php" in prompt
+    assert "controllers, entities, services, repositories, forms, and tests" in prompt
+    assert "the expected artifact is a full-file replacement hunk starting at line 1" in prompt
+    assert "output the complete new file content" in prompt
+    assert "Do not emit approximate partial hunks for these files." in prompt
+    assert "Do not emit partial hunks for non-trivial edits" in prompt
+    assert "output the complete new file content for that path" in prompt
+
+
+def test_build_user_prompt_omits_full_file_replacement_guidance_without_eligible_files() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(id="task_current", text="Update large file"),
+            "selected_context_segments": [],
+            "full_file_replacement_guidance": {
+                "max_bytes": 64000,
+                "full_content_provided_files": ("large.txt",),
+                "eligible_files": (),
+                "large_files": ("large.txt",),
+                "file_sizes": {"large.txt": 70000},
+            },
+        }
+    )
+
+    assert "Full-file replacement preferred files:" not in prompt
 
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:
@@ -7024,6 +7173,63 @@ def test_tui_codexcli_idle_timeout_diagnostics_are_attached_to_executor_response
     assert timeout_diagnostics["timeout_kind"] == "idle"
     assert timeout_diagnostics["idle_timeout_seconds"] == 900
     assert timeout_diagnostics["provider_output_seen"] is False
+
+
+def test_tui_codexcli_executor_uses_payload_working_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    default_cwd = tmp_path / "default"
+    isolated_cwd = tmp_path / "isolated"
+    default_cwd.mkdir()
+    isolated_cwd.mkdir()
+    captured: dict[str, object] = {}
+
+    def fake_run_codex_process(**kwargs: object) -> tuple[str, str, int]:
+        captured.update(kwargs)
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "agent_message",
+                            "text": "diff --git a/context.txt b/context.txt",
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {}}),
+            ]
+        )
+        return stdout, "", 0
+
+    monkeypatch.setattr(codexcli_module, "_run_codex_process", fake_run_codex_process)
+    provider = codexcli_module.CodexCLIProvider(
+        cwd=default_cwd,
+        executable=sys.executable,
+    )
+    executor = create_tui_executor(
+        environ={"SFE_PROVIDER": "codexcli"},
+        provider_factories={"codexcli": lambda: provider},
+    )
+
+    result = executor.propose_patch(
+        {
+            "instructions": [],
+            "task": None,
+            "selected_context_segments": [],
+            "executor_working_directory": str(isolated_cwd),
+        }
+    )
+
+    assert result.answer == "diff --git a/context.txt b/context.txt"
+    assert captured["cwd"] == isolated_cwd.resolve()
+    assert captured["cwd"] != default_cwd.resolve()
+    assert result.response_diagnostics is not None
+    provider_diagnostics = result.response_diagnostics["provider_diagnostics"]
+    assert isinstance(provider_diagnostics, dict)
+    assert provider_diagnostics["cwd"] == str(isolated_cwd.resolve())
 
 
 def test_tui_codexcli_console_uses_console_instruction() -> None:
@@ -7575,6 +7781,45 @@ def test_local_segment_router_boosts_source_ref_relevance() -> None:
     assert result.selected_segment_ids[0] == "ctx_router"
     assert result.score_categories_by_segment_id["ctx_router"] == "medium"
     assert result.score_categories_by_segment_id["ctx_notes"] == "low"
+
+
+def test_local_segment_router_expands_existing_symfony_completion_context() -> None:
+    segments = [
+        ContextSegment(
+            id=f"ctx_{index}",
+            source_ref=source_ref,
+            text=f"Symfony Todo application context {source_ref}",
+            approx_size=40,
+            approx_tokens=10,
+        )
+        for index, source_ref in enumerate(
+            [
+                "composer.json",
+                "bin/console",
+                "config/bundles.php",
+                "config/packages/framework.yaml",
+                "src/Controller/TodoController.php",
+                "src/Entity/Todo.php",
+                "src/Form/TodoType.php",
+                "src/Repository/TodoRepository.php",
+                "templates/todo/index.html.twig",
+                "templates/todo/show.html.twig",
+                "migrations/Version20260101000000.php",
+                "tests/Controller/TodoControllerTest.php",
+                "README.md",
+                "public/index.php",
+            ]
+        )
+    ]
+
+    result = LocalSegmentRouter().route(
+        "Continue and complete the existing Symfony Todo List application.",
+        segments,
+    )
+
+    assert result.selected_segment_count == 12
+    assert "ctx_0" in result.selected_segment_ids
+    assert "ctx_2" in result.selected_segment_ids
 
 
 def test_local_segment_router_source_ref_match_requires_non_empty_context() -> None:

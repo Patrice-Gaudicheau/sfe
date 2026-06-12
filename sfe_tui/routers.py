@@ -12,6 +12,7 @@ LOCAL_LEXICAL_PREVIEW_MODE = "local_lexical_preview"
 NO_MATCHING_CONTEXT_TERMS = "no_matching_context_terms"
 NO_REDUCIBLE_CONTEXT_SEGMENTS = "no_reducible_context_segments"
 MAX_LOCAL_ROUTER_SEGMENTS = 3
+MAX_EXISTING_SYMFONY_ROUTER_SEGMENTS = 12
 SOURCE_REF_MATCH_WEIGHT = 3
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -94,6 +95,7 @@ class LocalSegmentRouter:
             score_categories_by_segment_id[segment.id] = score_category
             scored.append((score, index, segment))
 
+        max_segments = _max_selected_segments(task, eligible)
         selected = [
             segment
             for score, _index, segment in sorted(
@@ -101,7 +103,7 @@ class LocalSegmentRouter:
                 key=lambda item: (-item[0], item[1]),
             )
             if score > 0
-        ][:MAX_LOCAL_ROUTER_SEGMENTS]
+        ][:max_segments]
         input_tokens = sum(segment.approx_tokens for segment in context_segments)
         selected_tokens = sum(segment.approx_tokens for segment in selected)
         fallback_reason = _fallback_reason(eligible=eligible, selected=selected)
@@ -146,6 +148,23 @@ def _normalize_token(token: str) -> str:
     if token.endswith("s") and len(token) > 3:
         return token[:-1]
     return token
+
+
+def _max_selected_segments(task: str, eligible: list[ContextSegment]) -> int:
+    normalized = task.lower()
+    existing_terms = ("existing", "current", "continue", "complete", "finish", "reuse")
+    project_terms = ("symfony", "php application", "php app", "todo")
+    if any(term in normalized for term in existing_terms) and any(
+        term in normalized for term in project_terms
+    ):
+        refs = {segment.source_ref for segment in eligible}
+        if "composer.json" in refs and (
+            "bin/console" in refs
+            or any(ref.startswith("config/") for ref in refs)
+            or any(ref.startswith("src/") for ref in refs)
+        ):
+            return MAX_EXISTING_SYMFONY_ROUTER_SEGMENTS
+    return MAX_LOCAL_ROUTER_SEGMENTS
 
 
 def _score_category(score: int) -> str:

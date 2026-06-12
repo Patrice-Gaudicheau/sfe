@@ -30,8 +30,10 @@ The core flow is:
 5. For each validated batch, the Executor produces one strict git diff.
 6. SFE rejects patches that touch files outside that batch's `allowed_files`.
 7. SFE parses and validates the patch using the normal strict patch machinery.
-8. SFE applies and promotes the batch before moving to the next batch.
-9. MCP and TUI reports expose one consolidated run result.
+8. SFE applies and promotes the batch.
+9. SFE refreshes lightweight workspace state so later batches can see files
+   created or modified by earlier batches.
+10. MCP and TUI reports expose one consolidated run result.
 
 The JSON plan is not repaired by another LLM. Patch parsing remains strict; the
 multi-pass path does not relax `parse_unified_diff`.
@@ -40,7 +42,7 @@ multi-pass path does not relax `parse_unified_diff`.
 
 ```env
 SFE_WORKSPACE_WRITE_MULTIPASS=auto
-SFE_MULTIPASS_MAX_PASSES=10
+SFE_MULTIPASS_MAX_PASSES=auto
 SFE_MULTIPASS_MAX_FILES_PER_PASS=10
 ```
 
@@ -50,11 +52,23 @@ SFE_MULTIPASS_MAX_FILES_PER_PASS=10
 - `true`: force multi-pass, useful for validation and heavy scaffolds.
 - `false`: keep normal single-pass behavior.
 
-`SFE_MULTIPASS_MAX_PASSES` limits the number of batches in the plan. The default
-is `10`, chosen after live Symfony-style scaffold validation.
+`SFE_MULTIPASS_MAX_PASSES` accepts `auto` or a positive integer. The default is
+`auto`, which lets the Router choose the pass count during multi-pass planning.
+Use a numeric value such as `5`, `10`, or `15` to enforce a maximum.
 
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` limits each batch's `allowed_files`. The
 default is `10`.
+
+`SFE_FULL_FILE_REPLACEMENT_REVIEW` controls the optional LLM-reviewed full-file
+replacement fallback after `hunk_preimage_mismatch`:
+
+- `false`: never use the reviewer fallback.
+- `auto`: use it only when deterministic invariants pass.
+- `true`: currently equivalent to `auto`.
+
+The reviewer receives the task, target path, pass details, current file content,
+proposed replacement content, and related selected paths. It returns strict JSON
+approval metadata only; it must not rewrite or repair patches.
 
 `SFE_MULTIPASS_PLANNER_MODEL` is deprecated and ignored. Existing `.env` files
 containing it still load, but the value no longer influences planning. Configure
@@ -76,6 +90,8 @@ such as `SFE_PROVIDER_ROUTER`, `SFE_OPENAI_ROUTER_MODEL`,
   plausible.
 - `promoted_files_by_pass`: files promoted by each batch.
 - `all_promoted_files`: consolidated promoted file list.
+- `fallback_diagnostics`: per-pass metadata when the LLM-reviewed full-file
+  replacement fallback was used successfully.
 
 Provider timeout diagnostics are also attached per pass when a timeout happens
 during batch generation.

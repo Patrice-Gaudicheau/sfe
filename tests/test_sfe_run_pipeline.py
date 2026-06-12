@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.codexcli import CodexCLITimeoutError
+from sfe.contracts import build_contract
 from sfe.discovery import discover_workspace_context
 from sfe.discovery_router import (
     DiscoveryRouterError,
@@ -28,13 +29,21 @@ from sfe.execution_mode_router import (
     create_configured_execution_mode_router,
 )
 from sfe.git_worktree_backend import GitWorktreeBackend
+from sfe.full_file_replacement_review import (
+    FullFileReplacementReviewDecision,
+    FullFileReplacementReviewRequest,
+    parse_full_file_replacement_review_json,
+)
 from sfe.multipass import (
+    MultiPassBatch,
     MultiPassConfig,
     MultiPassIssue,
     MultiPassPlan,
     parse_multipass_plan_json,
 )
 from sfe.multipass_planner import MultiPassPlannerResponse
+from sfe.patching import PatchApplyResult, PatchIssue
+import sfe.run_pipeline as run_pipeline_module
 from sfe.run_pipeline import (
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
@@ -161,6 +170,34 @@ class FakeMultiPassPlanner:
             model=self.model,
             provider_calls_made=1,
         )
+
+
+class FakeFullFileReplacementReviewer:
+    provider_name = "fake-reviewer"
+    model = "fake-reviewer-model"
+
+    def __init__(
+        self,
+        decision: FullFileReplacementReviewDecision | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.decision = decision or FullFileReplacementReviewDecision(
+            approve=True,
+            risk_level="low",
+            reason="replacement is coherent",
+        )
+        self.error = error
+        self.calls: list[FullFileReplacementReviewRequest] = []
+
+    def review(
+        self,
+        request: FullFileReplacementReviewRequest,
+    ) -> FullFileReplacementReviewDecision:
+        self.calls.append(request)
+        if self.error is not None:
+            raise self.error
+        return self.decision
 
 
 class FakeChatProvider:
@@ -2019,6 +2056,10 @@ def test_run_pipeline_small_workspace_write_stays_single_pass(
     assert planner.calls == []
     assert len(executor.patch_calls) == 1
     assert executor.patch_calls[0].get("multi_pass") is None
+    executor_cwd = Path(str(executor.patch_calls[0]["executor_working_directory"]))
+    assert result.active_workspace is not None
+    assert executor_cwd == result.active_workspace
+    assert executor_cwd != repo
     assert result.promoted_files == ("index.html",)
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -2075,6 +2116,1206 @@ def test_run_pipeline_forced_multipass_promotes_each_batch(
     assert not hasattr(executor, "plan_multipass")
     assert len(executor.patch_calls) == 2
     assert executor.patch_calls[0]["multi_pass"]["allowed_files"] == ("index.html",)
+    assert result.active_workspace is not None
+    assert all(
+        Path(str(call["executor_working_directory"])) == result.active_workspace
+        for call in executor.patch_calls
+    )
+    assert all(
+        Path(str(call["executor_working_directory"])) != repo
+        for call in executor.patch_calls
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_refreshes_state_for_later_updates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    events: list[RunProgressEvent] = []
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "readme_create": ["README.md"],
+                "readme_update": ["README.md"],
+            }
+        )
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            _valid_new_file_diff_with_content("README.md", "# Todo List\n"),
+            _valid_new_file_diff_with_content(
+                "README.md",
+                "# Todo List\n\nSecond pass details\n",
+            ),
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        progress_callback=events.append,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create a Symfony Todo List app and document it",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert (repo / "README.md").read_text(encoding="utf-8") == (
+        "# Todo List\n\nSecond pass details\n"
+    )
+    assert len(executor.patch_calls) == 2
+    assert result.active_workspace is not None
+    assert all(
+        Path(str(call["executor_working_directory"])) == result.active_workspace
+        for call in executor.patch_calls
+    )
+    second_batch = executor.patch_calls[1]["multi_pass"]
+    assert second_batch["completed_files"] == ("README.md",)
+    assert second_batch["current_allowed_file_context"] == (
+        {"path": "README.md", "text": "# Todo List\n"},
+    )
+    assert second_batch["full_file_replacement_guidance"]["eligible_files"] == (
+        "README.md",
+    )
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.pass_results[1].created_files == ()
+    assert result.multi_pass_summary.pass_results[1].patch_paths == ("README.md",)
+    assert result.multi_pass_summary.pass_results[1].full_content_provided_files == (
+        "README.md",
+    )
+    assert result.multi_pass_summary.pass_results[1].full_file_replacement_eligible_files == (
+        "README.md",
+    )
+    refresh_events = [
+        event for event in events if event.name == "multi_pass_workspace_state_refreshed"
+    ]
+    assert len(refresh_events) == 2
+    names = [event.name for event in events]
+    plan_completed_index = names.index("multi_pass_plan_completed")
+    first_pass_started_index = names.index("multi_pass_pass_started")
+    assert plan_completed_index < first_pass_started_index
+    assert events[plan_completed_index].message == "SFE: multi-pass plan completed: 2 passes"
+    assert events[first_pass_started_index].message == "SFE: multi-pass pass 1/2 started"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_blocks_direct_source_mutation_with_diagnostics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"foundation": ["context.txt"]}))
+
+    class SourceMutatingExecutor(FakeExecutor):
+        def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+            self.patch_calls.append(executor_payload)
+            (repo / "context.txt").write_text("mutated source\n", encoding="utf-8")
+            return ExecutorResponse(
+                _replacement_proposal("context.txt"),
+                None,
+                1,
+                provider_name=self.provider_name,
+                response_diagnostics={
+                    "provider_name": self.provider_name,
+                    "provider_diagnostics": {
+                        "cwd": str(executor_payload.get("executor_working_directory")),
+                    },
+                },
+            )
+
+    executor = SourceMutatingExecutor()
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("context.txt",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update context in a forced multipass run",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "source_workspace_changed"
+    assert result.issue.path == "context.txt"
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.passes_completed == 0
+    pass_issue = result.multi_pass_summary.failed_pass_issue
+    assert pass_issue is not None
+    diagnostics = pass_issue.diagnostics
+    assert diagnostics is not None
+    assert diagnostics["original_target_directory"] == str(repo.resolve())
+    assert result.active_workspace is not None
+    assert diagnostics["isolated_workspace_directory"] == str(result.active_workspace)
+    assert diagnostics["executor_working_directory"] == str(result.active_workspace)
+    assert diagnostics["changed_path"] == "context.txt"
+    assert diagnostics["expected_to_be_promoted"] is True
+    assert diagnostics["pass_index"] == 1
+    assert diagnostics["pass_label"] == "Foundation"
+    assert diagnostics["mutation_timing"] == "before_patch_application"
+    assert diagnostics["execution_step"] == "promotion_baseline_capture"
+    assert result.promoted_files == ()
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "mutated source\n"
+    assert result.active_workspace is not None
+    assert (result.active_workspace / "context.txt").read_text(encoding="utf-8") == (
+        "old context\n"
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_direct_backend_marks_small_full_content_file_as_full_file_replacement_eligible(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "src/Entity/Todo.php"
+    target.parent.mkdir(parents=True)
+    target.write_text("<?php\nfinal class Todo {}\n", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=repo,
+        task="Update src/Entity/Todo.php",
+        file_paths=[target],
+    )
+    batch = MultiPassBatch(
+        id="domain",
+        title="Domain",
+        goal="Update Todo",
+        allowed_files=("src/Entity/Todo.php",),
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_stale_todo_full_file_diff()])
+
+    DirectBackend(executor=executor).patch_multipass_batch(
+        contract,
+        plan=MultiPassPlan("Project", (batch,)),
+        batch=batch,
+        completed_files=(),
+    )
+
+    guidance = executor.patch_calls[0]["multi_pass"]["full_file_replacement_guidance"]
+    assert guidance["full_content_provided_files"] == ("src/Entity/Todo.php",)
+    assert guidance["eligible_files"] == ("src/Entity/Todo.php",)
+    assert guidance["source_files"] == ("src/Entity/Todo.php",)
+    assert guidance["large_files"] == ()
+
+
+def test_direct_backend_marks_small_controller_as_source_full_file_replacement_eligible(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "src/Controller/TodoController.php"
+    target.parent.mkdir(parents=True)
+    target.write_text("<?php\nfinal class TodoController {}\n", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=repo,
+        task="Integrate Todo controller with service",
+        file_paths=[target],
+    )
+    batch = MultiPassBatch(
+        id="controller-service-integration",
+        title="Controller Service Integration",
+        goal="Update Todo controller",
+        allowed_files=("src/Controller/TodoController.php",),
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_todo_controller_partial_diff()])
+
+    DirectBackend(executor=executor).patch_multipass_batch(
+        contract,
+        plan=MultiPassPlan("Project", (batch,)),
+        batch=batch,
+        completed_files=(),
+    )
+
+    guidance = executor.patch_calls[0]["multi_pass"]["full_file_replacement_guidance"]
+    assert guidance["full_content_provided_files"] == ("src/Controller/TodoController.php",)
+    assert guidance["eligible_files"] == ("src/Controller/TodoController.php",)
+    assert guidance["source_files"] == ("src/Controller/TodoController.php",)
+    assert guidance["large_files"] == ()
+
+
+def test_direct_backend_marks_readme_as_documentation_full_file_replacement_eligible(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "README.md"
+    target.write_text("# Todo\n\nExisting docs.\n", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=repo,
+        task="Update README.md",
+        file_paths=[target],
+    )
+    batch = MultiPassBatch(
+        id="docs",
+        title="Docs",
+        goal="Update README",
+        allowed_files=("README.md",),
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_readme_full_file_diff()])
+
+    DirectBackend(executor=executor).patch_multipass_batch(
+        contract,
+        plan=MultiPassPlan("Project", (batch,)),
+        batch=batch,
+        completed_files=(),
+    )
+
+    guidance = executor.patch_calls[0]["multi_pass"]["full_file_replacement_guidance"]
+    assert guidance["full_content_provided_files"] == ("README.md",)
+    assert guidance["eligible_files"] == ("README.md",)
+    assert guidance["documentation_files"] == ("README.md",)
+
+
+def test_direct_backend_marks_small_twig_template_as_full_file_replacement_eligible(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "templates/dashboard/index.html.twig"
+    target.parent.mkdir(parents=True)
+    target.write_text("{% block body %}Dashboard{% endblock %}\n", encoding="utf-8")
+    contract = build_contract(
+        workspace_root=repo,
+        task="Update dashboard Twig template",
+        file_paths=[target],
+    )
+    batch = MultiPassBatch(
+        id="templates",
+        title="Templates",
+        goal="Update dashboard template",
+        allowed_files=("templates/dashboard/index.html.twig",),
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_dashboard_twig_full_file_diff()])
+
+    DirectBackend(executor=executor).patch_multipass_batch(
+        contract,
+        plan=MultiPassPlan("Project", (batch,)),
+        batch=batch,
+        completed_files=(),
+    )
+
+    guidance = executor.patch_calls[0]["multi_pass"]["full_file_replacement_guidance"]
+    assert guidance["full_content_provided_files"] == (
+        "templates/dashboard/index.html.twig",
+    )
+    assert guidance["eligible_files"] == ("templates/dashboard/index.html.twig",)
+    assert guidance["template_files"] == ("templates/dashboard/index.html.twig",)
+
+
+def test_direct_backend_does_not_mark_large_full_content_file_as_full_file_replacement_eligible(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "large.txt"
+    target.write_text("x" * 65_000, encoding="utf-8")
+    contract = build_contract(
+        workspace_root=repo,
+        task="Update large.txt",
+        file_paths=[target],
+    )
+    batch = MultiPassBatch(
+        id="large",
+        title="Large",
+        goal="Update large file",
+        allowed_files=("large.txt",),
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_valid_new_file_diff("other.txt")])
+
+    DirectBackend(executor=executor).patch_multipass_batch(
+        contract,
+        plan=MultiPassPlan("Project", (batch,)),
+        batch=batch,
+        completed_files=(),
+    )
+
+    guidance = executor.patch_calls[0]["multi_pass"]["full_file_replacement_guidance"]
+    assert guidance["full_content_provided_files"] == ("large.txt",)
+    assert guidance["eligible_files"] == ()
+    assert guidance["large_files"] == ("large.txt",)
+
+
+def test_direct_backend_does_not_mark_file_without_full_content_as_full_file_replacement_eligible(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    contract = build_contract(
+        workspace_root=repo,
+        task="Update missing.txt",
+        file_paths=[],
+    )
+    batch = MultiPassBatch(
+        id="missing",
+        title="Missing",
+        goal="Update missing file",
+        allowed_files=("missing.txt",),
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_valid_new_file_diff("missing.txt")])
+
+    DirectBackend(executor=executor).patch_multipass_batch(
+        contract,
+        plan=MultiPassPlan("Project", (batch,)),
+        batch=batch,
+        completed_files=(),
+    )
+
+    guidance = executor.patch_calls[0]["multi_pass"]["full_file_replacement_guidance"]
+    assert guidance["full_content_provided_files"] == ()
+    assert guidance["eligible_files"] == ()
+    assert guidance["large_files"] == ()
+
+
+def test_run_pipeline_multipass_rescues_hunk_location_mismatch_with_full_file_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("# Todo\n\nExisting docs.\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "Add README")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(
+        FullFileReplacementReviewDecision(
+            approve=True,
+            risk_level="low",
+            reason="coherent README replacement",
+        )
+    )
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"docs": ["README.md"]}))
+    executor = FakeExecutor(multipass_patch_answers=[_readme_full_file_diff()])
+    original_apply = run_pipeline_module._apply_run_patch
+    calls = {"count": 0}
+
+    def fail_once_for_location_mismatch(workspace_root: Path, proposal: object) -> PatchApplyResult:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return PatchApplyResult(
+                False,
+                PatchIssue(
+                    "physical_application_failure",
+                    "hunk_location_mismatch",
+                    "README.md",
+                ),
+                None,
+                False,
+            )
+        return original_apply(workspace_root, proposal)
+
+    monkeypatch.setattr(
+        run_pipeline_module,
+        "_apply_run_patch",
+        fail_once_for_location_mismatch,
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("README.md",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update README documentation",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert reviewer.calls[0].target_path == "README.md"
+    assert "Updated docs" in (repo / "README.md").read_text(encoding="utf-8")
+    diagnostics = result.multi_pass_summary.pass_results[0].fallback_diagnostics
+    assert diagnostics["reviewer_approve"] is True
+    assert diagnostics["final_outcome"] == "applied"
+    assert result.multi_pass_summary.pass_results[0].full_file_replacement_used_files == (
+        "README.md",
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_allows_full_file_fallback_from_executor_guidance_context(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    target = repo / "templates/dashboard/index.html.twig"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "{% extends 'base.html.twig' %}\n\n{% block body %}\nOld dashboard\n{% endblock %}\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "templates/dashboard/index.html.twig")
+    _git(repo, "commit", "-m", "Add dashboard template")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(
+        FullFileReplacementReviewDecision(
+            approve=True,
+            risk_level="low",
+            reason="coherent dashboard template replacement",
+        )
+    )
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {"templates": ["templates/dashboard/index.html.twig"]}
+        )
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_dashboard_twig_full_file_diff()])
+    original_apply = run_pipeline_module._apply_run_patch
+    calls = {"count": 0}
+
+    def fail_once_for_preimage_mismatch(
+        workspace_root: Path,
+        proposal: object,
+    ) -> PatchApplyResult:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return PatchApplyResult(
+                False,
+                PatchIssue(
+                    "physical_application_failure",
+                    "hunk_preimage_mismatch",
+                    "templates/dashboard/index.html.twig",
+                ),
+                None,
+                False,
+            )
+        return original_apply(workspace_root, proposal)
+
+    monkeypatch.setattr(
+        run_pipeline_module,
+        "_apply_run_patch",
+        fail_once_for_preimage_mismatch,
+    )
+    monkeypatch.setattr(
+        run_pipeline_module,
+        "_execution_preview_selected_refs",
+        lambda _patch_result: set(),
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("templates/dashboard/index.html.twig",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Finish todo Twig templates",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert reviewer.calls[0].target_path == "templates/dashboard/index.html.twig"
+    assert "Dashboard ready" in target.read_text(encoding="utf-8")
+    diagnostics = result.multi_pass_summary.pass_results[0].fallback_diagnostics
+    assert diagnostics["selected_context"] is False
+    assert diagnostics["full_content_provided"] is True
+    assert diagnostics["full_file_replacement_eligible"] is True
+    assert diagnostics["included_in_full_file_replacement_guidance"] is True
+    assert diagnostics["allowed_through_executor_provided_context_gate"] is True
+    assert diagnostics["proposed_replacement_full_file_like"] is True
+    assert diagnostics["reviewer_approve"] is True
+    assert diagnostics["final_outcome"] == "applied"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_rejects_full_file_fallback_without_full_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {"templates": ["templates/dashboard/index.html.twig"]}
+        )
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_dashboard_twig_full_file_diff()])
+
+    def fail_for_preimage_mismatch(
+        workspace_root: Path,
+        proposal: object,
+    ) -> PatchApplyResult:
+        return PatchApplyResult(
+            False,
+            PatchIssue(
+                "physical_application_failure",
+                "hunk_preimage_mismatch",
+                "templates/dashboard/index.html.twig",
+            ),
+            None,
+            False,
+        )
+
+    monkeypatch.setattr(
+        run_pipeline_module,
+        "_apply_run_patch",
+        fail_for_preimage_mismatch,
+    )
+    monkeypatch.setattr(
+        run_pipeline_module,
+        "_execution_preview_selected_refs",
+        lambda _patch_result: {"templates/dashboard/index.html.twig"},
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("templates/dashboard/index.html.twig",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Finish todo Twig templates",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue.reason == "missing_target_not_safe_create"
+    assert reviewer.calls == []
+    assert not (repo / "templates/dashboard/index.html.twig").exists()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_rejects_partial_hunk_location_mismatch_without_review(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("# Todo\n\nExisting docs.\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "Add README")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer()
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"docs": ["README.md"]}))
+    executor = FakeExecutor(multipass_patch_answers=[_readme_partial_location_mismatch_diff()])
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("README.md",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update README documentation",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue.reason == "hunk_location_mismatch"
+    assert reviewer.calls == []
+    diagnostics = result.multi_pass_summary.failed_pass_issue.diagnostics
+    assert diagnostics["reviewer_reason"] == "proposed_replacement_not_full_file"
+    assert "Updated docs" not in (repo / "README.md").read_text(encoding="utf-8")
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_controller_partial_hunk_failure_reports_guidance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    controller = repo / "src/Controller/TodoController.php"
+    controller.parent.mkdir(parents=True)
+    controller.write_text(
+        "<?php\n\nnamespace App\\Controller;\n\nfinal class TodoController\n{\n"
+        "    public function index(): string\n    {\n        return 'old';\n    }\n}\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "src/Controller/TodoController.php")
+    _git(repo, "commit", "-m", "Add Todo controller")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {"controller-service-integration": ["src/Controller/TodoController.php"]}
+        )
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_todo_controller_partial_diff()])
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("src/Controller/TodoController.php",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Integrate Todo controller with the service layer",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue.reason == "hunk_preimage_mismatch"
+    assert result.issue.path == "src/Controller/TodoController.php"
+    assert reviewer.calls == []
+    pass_result = result.multi_pass_summary.pass_results[0]
+    assert pass_result.full_content_provided_files == ("src/Controller/TodoController.php",)
+    assert pass_result.full_file_replacement_eligible_files == (
+        "src/Controller/TodoController.php",
+    )
+    assert pass_result.full_file_replacement_used_files == ()
+    diagnostics = result.multi_pass_summary.failed_pass_issue.diagnostics
+    assert diagnostics["selected_context"] is True
+    assert diagnostics["full_content_provided"] is True
+    assert diagnostics["full_file_replacement_eligible"] is True
+    assert diagnostics["included_in_full_file_replacement_guidance"] is True
+    assert diagnostics["executor_used_full_file_replacement"] is False
+    assert diagnostics["reviewer_reason"] == "proposed_replacement_not_full_file"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_retries_small_composer_preimage_mismatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "composer.json").write_text(
+        '{\n  "require": {\n    "php": ">=8.2"\n  }\n}\n',
+        encoding="utf-8",
+    )
+    _git(repo, "add", "composer.json")
+    _git(repo, "commit", "-m", "Add composer")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"dependencies": ["composer.json"]})
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[_stale_full_file_composer_diff(valid_json=True)],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("composer.json",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Continue the existing Symfony Todo List app and inspect composer.json dependencies",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert '"symfony/form": "^7.0"' in (repo / "composer.json").read_text(
+        encoding="utf-8"
+    )
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.pass_results[0].patch_paths == ("composer.json",)
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_merges_composer_dependency_from_stale_hunk(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "composer.json").write_text(
+        '{\n  "require": {\n    "php": ">=8.2"\n  }\n}\n',
+        encoding="utf-8",
+    )
+    _git(repo, "add", "composer.json")
+    _git(repo, "commit", "-m", "Add composer")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"dependencies": ["composer.json"]})
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            "\n".join(
+                [
+                    "diff --git a/composer.json b/composer.json",
+                    "--- a/composer.json",
+                    "+++ b/composer.json",
+                    "@@ -3,3 +3,4 @@",
+                    '   "require": {',
+                    '-    "php": "^8.1"',
+                    '+    "php": ">=8.2",',
+                    '+    "symfony/form": "^7.1"',
+                    "   }",
+                ]
+            )
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("composer.json",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Continue the existing Symfony Todo List app and inspect composer.json dependencies",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    composer = json.loads((repo / "composer.json").read_text(encoding="utf-8"))
+    assert composer["require"]["php"] == ">=8.2"
+    assert composer["require"]["symfony/form"] == "^7.1"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_updates_preexisting_allowed_file_from_create_action(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "composer.json").write_text(
+        '{"require":{"symfony/framework-bundle":"^7.0"}}\n',
+        encoding="utf-8",
+    )
+    (repo / ".env.example").write_text(
+        "APP_ENV=dev\nDATABASE_URL=\"sqlite:///%kernel.project_dir%/var/app.db\"\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "composer.json", ".env.example")
+    _git(repo, "commit", "-m", "Add Symfony config")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {"dependencies-config": ["composer.json", ".env.example"]}
+        )
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            json.dumps(
+                {
+                    "edits": [
+                        {
+                            "path": ".env.example",
+                            "action": "create_file",
+                            "content": (
+                                "APP_ENV=dev\n"
+                                "APP_SECRET=\n"
+                                "DATABASE_URL=\"sqlite:///%kernel.project_dir%/var/data.db\"\n"
+                            ),
+                        }
+                    ]
+                }
+            )
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("composer.json",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Continue and complete the existing Symfony Todo List application.",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert "var/data.db" in (repo / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    assert result.multi_pass_summary is not None
+    pass_result = result.multi_pass_summary.pass_results[0]
+    assert pass_result.patch_paths == (".env.example",)
+    assert pass_result.created_files == ()
+    assert result.changed_files == (".env.example",)
+    assert result.patch_summary is not None
+    assert result.patch_summary.modified_paths == (".env.example",)
+    multi_pass_payload = executor.patch_calls[0]["multi_pass"]
+    current_context = multi_pass_payload["current_allowed_file_context"]
+    assert {
+        "path": ".env.example",
+        "text": "APP_ENV=dev\nDATABASE_URL=\"sqlite:///%kernel.project_dir%/var/app.db\"\n",
+    } in current_context
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_hunk_mismatch_reports_context_diagnostics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "composer.json").write_text(
+        '{\n  "require": {\n    "php": ">=8.2"\n  }\n}\n',
+        encoding="utf-8",
+    )
+    _git(repo, "add", "composer.json")
+    _git(repo, "commit", "-m", "Add composer")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"dependencies": ["composer.json"]})
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[_stale_full_file_composer_diff(valid_json=False)],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("composer.json",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Continue the existing Symfony Todo List app and inspect composer.json dependencies",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "hunk_preimage_mismatch"
+    assert result.multi_pass_summary is not None
+    failed_issue = result.multi_pass_summary.failed_pass_issue
+    assert failed_issue is not None
+    assert failed_issue.diagnostics == {
+        "target_path": "composer.json",
+        "pass_index": 1,
+        "pass_id": "dependencies",
+        "selected_context": True,
+        "full_content_provided": True,
+        "file_existed_before_run": True,
+        "created_earlier_in_run": False,
+        "full_file_replacement_eligible": True,
+        "included_in_full_file_replacement_guidance": True,
+        "executor_used_full_file_replacement": True,
+    }
+    rendered = render_run_result(result)
+    assert "pass 1 diagnostic target path: composer.json" in rendered
+    assert "pass 1 diagnostic selected context: yes" in rendered
+    assert "pass 1 diagnostic pass index: 1" in rendered
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_blocks_unsafe_full_file_candidate_before_review(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add entities")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"entities": ["src/Entity/Todo.php"]})
+    )
+    reviewer = FakeFullFileReplacementReviewer()
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            "\n".join(
+                [
+                    _stale_todo_full_file_diff(),
+                    _stale_todo_full_file_diff(),
+                ]
+            )
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("src/Entity/Todo.php",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update src/Entity/Todo.php entity",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert reviewer.calls == []
+    failed_issue = result.multi_pass_summary.failed_pass_issue
+    assert failed_issue.diagnostics["final_outcome"] == "blocked_by_deterministic_invariant"
+    assert failed_issue.diagnostics["reviewer_reason"] == "target_path_not_exactly_failed_patch_path"
+    assert "completed" not in (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_llm_review_approval_applies_full_file_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add Todo entity")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(
+        FullFileReplacementReviewDecision(
+            approve=True,
+            risk_level="medium",
+            reason="coherent entity replacement",
+        )
+    )
+
+    result = _run_todo_hunk_mismatch_pipeline(
+        repo=repo,
+        tmp_path=tmp_path,
+        manager=manager,
+        reviewer=reviewer,
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert reviewer.calls[0].target_path == "src/Entity/Todo.php"
+    text = (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
+    assert "private bool $completed = false;" in text
+    diagnostics = result.multi_pass_summary.pass_results[0].fallback_diagnostics
+    assert diagnostics["fallback_kind"] == "llm_reviewed_full_file_replacement_after_hunk_mismatch"
+    assert diagnostics["reviewer_approve"] is True
+    assert diagnostics["reviewer_risk_level"] == "medium"
+    assert diagnostics["final_outcome"] == "applied"
+    rendered = render_run_result(result)
+    assert "pass 1 diagnostic reviewer approve result: yes" in rendered
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_llm_review_applies_full_file_replacement_in_multifile_patch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add Todo entity")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {"entities": ["src/Entity/Todo.php", "src/Service/TodoStatsService.php"]}
+        )
+    )
+    reviewer = FakeFullFileReplacementReviewer()
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            "\n".join(
+                [
+                    _stale_todo_full_file_diff(),
+                    _valid_new_file_diff("src/Service/TodoStatsService.php"),
+                ]
+            )
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("src/Entity/Todo.php",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update src/Entity/Todo.php entity and add todo stats service",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert "completed" in (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
+    assert (repo / "src/Service/TodoStatsService.php").is_file()
+    assert result.multi_pass_summary.pass_results[0].patch_paths == (
+        "src/Entity/Todo.php",
+        "src/Service/TodoStatsService.php",
+    )
+    diagnostics = result.multi_pass_summary.pass_results[0].fallback_diagnostics
+    assert diagnostics["final_outcome"] == "applied"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_llm_review_rejection_blocks_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add Todo entity")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(
+        FullFileReplacementReviewDecision(
+            approve=False,
+            risk_level="medium",
+            reason="replacement removes required behavior",
+            concerns=("missing methods",),
+        )
+    )
+
+    result = _run_todo_hunk_mismatch_pipeline(
+        repo=repo,
+        tmp_path=tmp_path,
+        manager=manager,
+        reviewer=reviewer,
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert "completed" not in (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
+    diagnostics = result.multi_pass_summary.failed_pass_issue.diagnostics
+    assert diagnostics["reviewer_approve"] is False
+    assert diagnostics["reviewer_reason"] == "replacement removes required behavior"
+    assert diagnostics["final_outcome"] == "reviewer_rejected"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_llm_review_high_risk_blocks_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add Todo entity")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(
+        FullFileReplacementReviewDecision(
+            approve=True,
+            risk_level="high",
+            reason="too destructive",
+        )
+    )
+
+    result = _run_todo_hunk_mismatch_pipeline(
+        repo=repo,
+        tmp_path=tmp_path,
+        manager=manager,
+        reviewer=reviewer,
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert "completed" not in (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
+    diagnostics = result.multi_pass_summary.failed_pass_issue.diagnostics
+    assert diagnostics["reviewer_approve"] is True
+    assert diagnostics["reviewer_risk_level"] == "high"
+    assert diagnostics["final_outcome"] == "reviewer_rejected"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_invalid_json_reviewer_result_blocks_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add Todo entity")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(
+        parse_full_file_replacement_review_json("{not json")
+    )
+
+    result = _run_todo_hunk_mismatch_pipeline(
+        repo=repo,
+        tmp_path=tmp_path,
+        manager=manager,
+        reviewer=reviewer,
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    diagnostics = result.multi_pass_summary.failed_pass_issue.diagnostics
+    assert diagnostics["reviewer_reason"] == "invalid_json"
+    assert diagnostics["reviewer_error"] == "invalid_json"
+    assert "completed" not in (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_reviewer_failure_blocks_replacement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    monkeypatch.setenv("SFE_FULL_FILE_REPLACEMENT_REVIEW", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    _write_todo_entity(repo)
+    _git(repo, "add", "src/Entity/Todo.php")
+    _git(repo, "commit", "-m", "Add Todo entity")
+    manager = _manager()
+    reviewer = FakeFullFileReplacementReviewer(error=TimeoutError("review timed out"))
+
+    result = _run_todo_hunk_mismatch_pipeline(
+        repo=repo,
+        tmp_path=tmp_path,
+        manager=manager,
+        reviewer=reviewer,
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    diagnostics = result.multi_pass_summary.failed_pass_issue.diagnostics
+    assert diagnostics["reviewer_reason"] == "reviewer_execution_error"
+    assert diagnostics["reviewer_error"] == "reviewer_execution_error"
+    assert "completed" not in (repo / "src/Entity/Todo.php").read_text(encoding="utf-8")
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -2581,6 +3822,223 @@ def _valid_new_file_diff_with_content(path: str, content: str) -> str:
             f"@@ -0,0 +1,{len(lines)} @@",
             *(f"+{line}" for line in lines),
         ]
+    )
+
+
+def _stale_full_file_composer_diff(*, valid_json: bool) -> str:
+    new_lines = (
+        [
+            "{",
+            '  "require": {',
+            '    "php": ">=8.2",',
+            '    "symfony/form": "^7.0"',
+            "  }",
+            "}",
+        ]
+        if valid_json
+        else [
+            "{",
+            '  "require": {',
+            '    "php": ">=8.2",',
+            '    "symfony/form": "^7.0",',
+            "  }",
+            "}",
+        ]
+    )
+    return "\n".join(
+        [
+            "diff --git a/composer.json b/composer.json",
+            "--- a/composer.json",
+            "+++ b/composer.json",
+            f"@@ -1,3 +1,{len(new_lines)} @@",
+            "-{",
+            '-  \"require\": {}',
+            "-}",
+            *(f"+{line}" for line in new_lines),
+        ]
+    )
+
+
+def _write_todo_entity(repo: Path) -> None:
+    target = repo / "src/Entity/Todo.php"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "\n".join(
+            [
+                "<?php",
+                "",
+                "namespace App\\Entity;",
+                "",
+                "class Todo",
+                "{",
+                "    private ?int $id = null;",
+                "",
+                "    public function getId(): ?int",
+                "    {",
+                "        return $this->id;",
+                "    }",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _stale_todo_full_file_diff() -> str:
+    stale_lines = [
+        "<?php",
+        "",
+        "namespace App\\Entity;",
+        "",
+        "class Todo",
+        "{",
+        "    public int $id;",
+        "",
+        "    public function getId(): ?int",
+        "    {",
+        "        return $this->id;",
+        "    }",
+        "}",
+    ]
+    replacement_lines = [
+        "<?php",
+        "",
+        "namespace App\\Entity;",
+        "",
+        "class Todo",
+        "{",
+        "    private ?int $id = null;",
+        "    private string $title = '';",
+        "    private bool $completed = false;",
+        "",
+        "    public function getId(): ?int",
+        "    {",
+        "        return $this->id;",
+        "    }",
+        "",
+        "    public function isCompleted(): bool",
+        "    {",
+        "        return $this->completed;",
+        "    }",
+        "}",
+    ]
+    return "\n".join(
+        [
+            "diff --git a/src/Entity/Todo.php b/src/Entity/Todo.php",
+            "--- a/src/Entity/Todo.php",
+            "+++ b/src/Entity/Todo.php",
+            f"@@ -1,{len(stale_lines)} +1,{len(replacement_lines)} @@",
+            *(f"-{line}" for line in stale_lines),
+            *(f"+{line}" for line in replacement_lines),
+        ]
+    )
+
+
+def _readme_full_file_diff() -> str:
+    old_lines = [
+        "# Todo",
+        "",
+        "Existing docs.",
+    ]
+    new_lines = [
+        "# Todo",
+        "",
+        "Updated docs.",
+        "",
+        "Run the Symfony Todo List app and manage tasks from the dashboard.",
+    ]
+    return "\n".join(
+        [
+            "diff --git a/README.md b/README.md",
+            "--- a/README.md",
+            "+++ b/README.md",
+            f"@@ -1,{len(old_lines)} +1,{len(new_lines)} @@",
+            *(f"-{line}" for line in old_lines),
+            *(f"+{line}" for line in new_lines),
+        ]
+    )
+
+
+def _readme_partial_location_mismatch_diff() -> str:
+    return "\n".join(
+        [
+            "diff --git a/README.md b/README.md",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -99,1 +99,1 @@",
+            "-Old docs",
+            "+Updated docs",
+        ]
+    )
+
+
+def _dashboard_twig_full_file_diff() -> str:
+    old_lines = [
+        "{% extends 'base.html.twig' %}",
+        "",
+        "{% block body %}",
+        "Old dashboard",
+        "{% endblock %}",
+    ]
+    new_lines = [
+        "{% extends 'base.html.twig' %}",
+        "",
+        "{% block body %}",
+        "<section>",
+        "    <h1>Dashboard ready</h1>",
+        "</section>",
+        "{% endblock %}",
+    ]
+    return "\n".join(
+        [
+            "diff --git a/templates/dashboard/index.html.twig b/templates/dashboard/index.html.twig",
+            "--- a/templates/dashboard/index.html.twig",
+            "+++ b/templates/dashboard/index.html.twig",
+            f"@@ -1,{len(old_lines)} +1,{len(new_lines)} @@",
+            *(f"-{line}" for line in old_lines),
+            *(f"+{line}" for line in new_lines),
+        ]
+    )
+
+
+def _todo_controller_partial_diff() -> str:
+    return "\n".join(
+        [
+            "diff --git a/src/Controller/TodoController.php b/src/Controller/TodoController.php",
+            "--- a/src/Controller/TodoController.php",
+            "+++ b/src/Controller/TodoController.php",
+            "@@ -9,1 +9,1 @@",
+            "-        return 'stale';",
+            "+        return 'new';",
+        ]
+    )
+
+
+def _run_todo_hunk_mismatch_pipeline(
+    *,
+    repo: Path,
+    tmp_path: Path,
+    manager: WorkspaceManager,
+    reviewer: FakeFullFileReplacementReviewer,
+) -> object:
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"entities": ["src/Entity/Todo.php"]})
+    )
+    executor = FakeExecutor(multipass_patch_answers=[_stale_todo_full_file_diff()])
+    return RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("src/Entity/Todo.php",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+        full_file_replacement_reviewer=reviewer,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update src/Entity/Todo.php entity with completed state",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
     )
 
 

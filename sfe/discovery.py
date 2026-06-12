@@ -211,6 +211,12 @@ def discover_workspace_context(
         policy=normalized_policy,
         skipped_reason_counts=skipped_reason_counts,
     )
+    candidates = _augment_existing_project_candidates(
+        scanned,
+        candidates,
+        task=task,
+        policy=normalized_policy,
+    )
     if stop_reason is None and "max_candidates" in skipped_reason_counts:
         stop_reason = "max_candidates"
     load_results, load_stop_reason = _load_candidates(
@@ -456,6 +462,111 @@ def _validate_router_selection(
     return tuple(accepted)
 
 
+def _augment_existing_project_candidates(
+    scanned: list[_ScannedFile],
+    candidates: tuple[DiscoveryCandidate, ...],
+    *,
+    task: str,
+    policy: DiscoveryPolicy,
+) -> tuple[DiscoveryCandidate, ...]:
+    if (
+        not _looks_like_existing_symfony_completion_task(task)
+        or not _looks_like_symfony_workspace(scanned)
+    ):
+        return candidates
+    scanned_by_ref = {item.source_ref: item for item in scanned}
+    accepted: list[DiscoveryCandidate] = []
+    seen: set[str] = set()
+    for source_ref in _symfony_anchor_refs(scanned):
+        if len(accepted) >= policy.max_candidates:
+            break
+        if source_ref in seen:
+            continue
+        item = scanned_by_ref.get(source_ref)
+        if item is None:
+            continue
+        seen.add(source_ref)
+        accepted.append(
+            DiscoveryCandidate(
+                source_ref=source_ref,
+                approx_bytes=item.approx_bytes,
+                score=policy.max_candidates + max(0, policy.max_candidates - len(accepted)),
+                reasons=("existing_symfony_anchor",),
+            )
+        )
+    for candidate in candidates:
+        if len(accepted) >= policy.max_candidates:
+            break
+        if candidate.source_ref in seen:
+            continue
+        seen.add(candidate.source_ref)
+        accepted.append(candidate)
+    return tuple(accepted)
+
+
+def _looks_like_existing_symfony_completion_task(task: str) -> bool:
+    normalized = task.lower()
+    existing_terms = ("existing", "current", "continue", "complete", "finish", "reuse")
+    project_terms = ("symfony", "php application", "php app", "todo")
+    return any(term in normalized for term in existing_terms) and any(
+        term in normalized for term in project_terms
+    )
+
+
+def _looks_like_symfony_workspace(scanned: list[_ScannedFile]) -> bool:
+    refs = {item.source_ref for item in scanned}
+    return "composer.json" in refs and (
+        "bin/console" in refs
+        or any(ref.startswith("config/") and ref.endswith(".yaml") for ref in refs)
+        or any(ref.startswith("src/") and ref.endswith(".php") for ref in refs)
+    )
+
+
+def _symfony_anchor_refs(scanned: list[_ScannedFile]) -> tuple[str, ...]:
+    refs = {item.source_ref for item in scanned}
+    ordered: list[str] = []
+    for source_ref in (
+        "composer.json",
+        "README.md",
+        ".env.example",
+        "phpunit.xml.dist",
+        "bin/console",
+    ):
+        if source_ref in refs:
+            ordered.append(source_ref)
+    patterns = (
+        "config/*.yaml",
+        "config/**/*.yaml",
+        "src/Entity/*.php",
+        "src/Entity/**/*.php",
+        "src/Controller/*.php",
+        "src/Controller/**/*.php",
+        "src/Form/*.php",
+        "src/Form/**/*.php",
+        "src/Repository/*.php",
+        "src/Repository/**/*.php",
+        "src/Service/*.php",
+        "src/Service/**/*.php",
+        "templates/*.twig",
+        "templates/**/*.twig",
+        "migrations/*.php",
+        "migrations/**/*.php",
+        "tests/*.php",
+        "tests/**/*.php",
+    )
+    for item in scanned:
+        if any(fnmatch.fnmatchcase(item.source_ref, pattern) for pattern in patterns):
+            ordered.append(item.source_ref)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for source_ref in ordered:
+        if source_ref in seen:
+            continue
+        seen.add(source_ref)
+        deduped.append(source_ref)
+    return tuple(deduped)
+
+
 def _router_selected_ref_rejection_reason(
     root: Path,
     source_ref: str,
@@ -570,18 +681,11 @@ def _load_candidates(
             stop_reason = stop_reason or "max_total_loaded_bytes"
             load_results.append(_skipped_load_result(candidate.source_ref, "max_total_loaded_bytes"))
             continue
-        if Path(candidate.source_ref).name == ".env.example":
-            loaded = _load_env_example(
-                root,
-                candidate.source_ref,
-                max_bytes=policy.max_file_bytes,
-            )
-        else:
-            loaded = load_context_file(
-                root,
-                candidate.source_ref,
-                max_bytes=policy.max_file_bytes,
-            )
+        loaded = load_discovery_context_file(
+            root,
+            candidate.source_ref,
+            max_bytes=policy.max_file_bytes,
+        )
         safe_loaded = _safe_load_result(loaded)
         load_results.append(safe_loaded)
         if loaded.loaded:
@@ -606,6 +710,17 @@ def _skipped_load_result(source_ref: str, reason: str) -> ContextLoadResult:
         approx_tokens=0,
         size_bucket="0",
     )
+
+
+def load_discovery_context_file(
+    root: Path,
+    source_ref: str,
+    *,
+    max_bytes: int = DiscoveryPolicy().max_file_bytes,
+) -> ContextLoadResult:
+    if Path(source_ref).name == ".env.example":
+        return _load_env_example(root, source_ref, max_bytes=max_bytes)
+    return load_context_file(root, source_ref, max_bytes=max_bytes)
 
 
 def _load_env_example(

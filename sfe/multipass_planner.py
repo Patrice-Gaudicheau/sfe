@@ -340,7 +340,7 @@ def build_multipass_planner_prompt(
     ]
     payload = {
         "task": task_text,
-        "max_passes": config.max_passes,
+        "max_passes": config.max_passes if config.max_passes is not None else "auto",
         "max_files_per_pass": config.max_files_per_pass,
         "selected_context_segments": selected_context,
         "required_output_schema": {
@@ -396,11 +396,12 @@ def _call_provider_chat(
     user_prompt: str,
     model: str,
     max_tokens: int,
+    system_instruction: str = MULTIPASS_PLANNER_SYSTEM_INSTRUCTION,
 ) -> dict[str, Any]:
     if call_style == "system_message":
         return provider.chat(
             [
-                {"role": "system", "content": MULTIPASS_PLANNER_SYSTEM_INSTRUCTION},
+                {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_prompt},
             ],
             model=model,
@@ -412,7 +413,7 @@ def _call_provider_chat(
         model=model,
         max_tokens=max_tokens,
         temperature=None,
-        system_instruction=MULTIPASS_PLANNER_SYSTEM_INSTRUCTION,
+        system_instruction=system_instruction,
     )
 
 

@@ -445,6 +445,9 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         )
         if result.promotion_issue.path is not None:
             lines.append(f"  promotion issue path: {result.promotion_issue.path}")
+        diagnostics = getattr(result.promotion_issue, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            lines.extend(_render_source_workspace_changed_diagnostics(diagnostics))
     if result.multi_pass_summary is not None:
         lines.extend(_render_multi_pass_summary(result.multi_pass_summary))
     if issue is not None:
@@ -580,6 +583,12 @@ def _render_multi_pass_summary(summary: object) -> list[str]:
                 f"{index} promoted files: {_format_string_list(list(getattr(pass_result, 'promoted_files', ()) or ())) }",
                 "  pass "
                 f"{index} created files: {_format_string_list(list(getattr(pass_result, 'created_files', ()) or ())) }",
+                "  pass "
+                f"{index} full content provided files: {_format_string_list(list(getattr(pass_result, 'full_content_provided_files', ()) or ())) }",
+                "  pass "
+                f"{index} full-file replacement eligible files: {_format_string_list(list(getattr(pass_result, 'full_file_replacement_eligible_files', ()) or ())) }",
+                "  pass "
+                f"{index} full-file replacement used files: {_format_string_list(list(getattr(pass_result, 'full_file_replacement_used_files', ()) or ())) }",
             ]
         )
         issue = getattr(pass_result, "issue", None)
@@ -597,11 +606,101 @@ def _render_multi_pass_summary(summary: object) -> list[str]:
                     "  pass "
                     f"{index} issue path: {_display_value(getattr(issue, 'path', None))}"
                 )
+            diagnostics = getattr(issue, "diagnostics", None)
+            if isinstance(diagnostics, dict):
+                lines.extend(_render_multi_pass_issue_diagnostics(index, diagnostics))
         diagnostics = getattr(pass_result, "provider_diagnostics", None)
         if isinstance(diagnostics, dict):
             timeout_diagnostics = diagnostics.get("provider_timeout_diagnostics")
             if isinstance(timeout_diagnostics, dict):
                 lines.extend(_render_provider_timeout_diagnostics(timeout_diagnostics))
+        fallback_diagnostics = getattr(pass_result, "fallback_diagnostics", None)
+        if isinstance(fallback_diagnostics, dict):
+            lines.extend(
+                _render_multi_pass_issue_diagnostics(index, fallback_diagnostics)
+            )
+    return lines
+
+
+def _render_multi_pass_issue_diagnostics(
+    index: int,
+    diagnostics: dict[str, object],
+) -> list[str]:
+    lines: list[str] = []
+    labels = (
+        ("fallback_kind", "fallback kind"),
+        ("target_path", "target path"),
+        ("pass_index", "pass index"),
+        ("pass_label", "pass label"),
+        ("selected_context", "selected context"),
+        ("full_content_provided", "full content provided"),
+        ("full_file_replacement_eligible", "full-file replacement eligible"),
+        (
+            "included_in_full_file_replacement_guidance",
+            "included in full-file replacement guidance",
+        ),
+        (
+            "executor_used_full_file_replacement",
+            "executor used full-file replacement",
+        ),
+        (
+            "allowed_through_executor_provided_context_gate",
+            "allowed through executor-provided-context gate",
+        ),
+        (
+            "proposed_replacement_full_file_like",
+            "proposed replacement full-file-like",
+        ),
+        ("file_existed_before_run", "file existed before run"),
+        ("created_earlier_in_run", "created earlier in run"),
+        ("reviewer_enabled_mode", "reviewer enabled mode"),
+        ("reviewer_approve", "reviewer approve result"),
+        ("reviewer_risk_level", "reviewer risk level"),
+        ("reviewer_reason", "reviewer reason"),
+        ("final_outcome", "final outcome"),
+        ("original_target_directory", "original target directory"),
+        ("isolated_workspace_directory", "isolated workspace directory"),
+        ("executor_working_directory", "executor working directory"),
+        ("changed_path", "changed path"),
+        ("expected_to_be_promoted", "expected to be promoted"),
+        ("mutation_timing", "mutation timing"),
+        ("execution_step", "execution step"),
+        ("clue", "clue"),
+    )
+    for key, label in labels:
+        if key not in diagnostics:
+            continue
+        value = diagnostics.get(key)
+        if isinstance(value, bool):
+            rendered = _yes_no(value)
+        else:
+            rendered = _display_value(value)
+        lines.append(f"  pass {index} diagnostic {label}: {rendered}")
+    return lines
+
+
+def _render_source_workspace_changed_diagnostics(
+    diagnostics: dict[str, object],
+) -> list[str]:
+    lines: list[str] = []
+    labels = (
+        ("original_target_directory", "original target directory"),
+        ("isolated_workspace_directory", "isolated workspace directory"),
+        ("executor_working_directory", "executor working directory"),
+        ("changed_path", "changed path"),
+        ("expected_to_be_promoted", "expected to be promoted"),
+        ("pass_index", "pass index"),
+        ("pass_label", "pass label"),
+        ("mutation_timing", "mutation timing"),
+        ("execution_step", "execution step"),
+        ("clue", "clue"),
+    )
+    for key, label in labels:
+        if key not in diagnostics:
+            continue
+        value = diagnostics.get(key)
+        rendered = _yes_no(value) if isinstance(value, bool) else _display_value(value)
+        lines.append(f"  source mutation diagnostic {label}: {rendered}")
     return lines
 
 
@@ -686,6 +785,16 @@ def _render_executor_response_diagnostics(
             f"  executor response provider: {_display_value(diagnostics.get('provider_name'))}",
             f"  executor response error type: {_display_value(diagnostics.get('error_type'))}",
             *_render_provider_timeout_diagnostics(timeout_diagnostics),
+        ]
+    provider_diagnostics = diagnostics.get("provider_diagnostics")
+    if isinstance(provider_diagnostics, dict) and "response_object_type" not in diagnostics:
+        return [
+            "SFE executor response diagnostics",
+            f"  executor response provider: {_display_value(diagnostics.get('provider_name'))}",
+            "  executor provider cwd: "
+            f"{_display_value(provider_diagnostics.get('cwd'))}",
+            "  executor provider command: "
+            f"{_format_diagnostic_list(provider_diagnostics.get('command'))}",
         ]
     lines = [
         "SFE executor response diagnostics",

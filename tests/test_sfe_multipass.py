@@ -33,9 +33,21 @@ def test_multipass_config_defaults_to_auto() -> None:
     config = resolve_multipass_config({})
 
     assert config.mode == "auto"
-    assert config.max_passes == 10
+    assert config.max_passes is None
     assert config.max_files_per_pass == 10
     assert not hasattr(config, "planner_model")
+
+
+def test_multipass_config_accepts_auto_max_passes() -> None:
+    config = resolve_multipass_config({"SFE_MULTIPASS_MAX_PASSES": "auto"})
+
+    assert config.max_passes is None
+
+
+def test_multipass_config_accepts_numeric_max_passes() -> None:
+    config = resolve_multipass_config({"SFE_MULTIPASS_MAX_PASSES": "15"})
+
+    assert config.max_passes == 15
 
 
 def test_multipass_heuristic_detects_large_scaffold() -> None:
@@ -118,6 +130,31 @@ def test_validate_multipass_plan_rejects_too_many_passes() -> None:
 
     assert issue is not None
     assert issue.reason == "too_many_passes"
+
+
+def test_validate_multipass_plan_auto_allows_router_chosen_pass_count() -> None:
+    plan = parse_multipass_plan_json(
+        json.dumps(
+            {
+                "project_summary": "Project",
+                "batches": [
+                    {
+                        "id": f"batch-{index}",
+                        "title": f"Batch {index}",
+                        "goal": "Create files",
+                        "allowed_files": [f"file-{index}.txt"],
+                        "depends_on": [],
+                        "validation_notes": [],
+                    }
+                    for index in range(12)
+                ],
+            }
+        )
+    )
+
+    issue = validate_multipass_plan(plan, MultiPassConfig())
+
+    assert issue is None
 
 
 def test_validate_multipass_plan_rejects_too_many_files_per_pass() -> None:

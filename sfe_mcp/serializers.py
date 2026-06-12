@@ -232,11 +232,15 @@ def _serialize_promotion_issue(result: RunResult) -> dict[str, Any] | None:
     issue = result.promotion_issue
     if issue is None:
         return None
-    return {
+    serialized = {
         "category": issue.category,
         "reason": issue.reason,
         "path": issue.path,
     }
+    diagnostics = getattr(issue, "diagnostics", None)
+    if diagnostics is not None:
+        serialized["diagnostics"] = _safe_diagnostic_mapping(diagnostics)
+    return serialized
 
 
 def _serialize_multi_pass_top_level(result: RunResult) -> dict[str, Any]:
@@ -282,12 +286,26 @@ def _serialize_multi_pass_top_level(result: RunResult) -> dict[str, Any]:
                 "created_files": list(result.created_files),
                 "promoted_files": list(result.promoted_files),
                 "patch_paths": list(result.patch_paths),
+                "full_content_provided_files": list(
+                    result.full_content_provided_files
+                ),
+                "full_file_replacement_eligible_files": list(
+                    result.full_file_replacement_eligible_files
+                ),
+                "full_file_replacement_used_files": list(
+                    result.full_file_replacement_used_files
+                ),
                 "issue": _serialize_multi_pass_issue(result.issue),
                 "provider_diagnostics": (
                     _serialize_executor_response_diagnostics_mapping(
                         result.provider_diagnostics
                     )
                     if result.provider_diagnostics is not None
+                    else None
+                ),
+                "fallback_diagnostics": (
+                    _safe_diagnostic_mapping(result.fallback_diagnostics)
+                    if result.fallback_diagnostics is not None
                     else None
                 ),
             }
@@ -299,11 +317,23 @@ def _serialize_multi_pass_top_level(result: RunResult) -> dict[str, Any]:
 def _serialize_multi_pass_issue(issue: object | None) -> dict[str, Any] | None:
     if issue is None:
         return None
-    return {
+    serialized = {
         "category": getattr(issue, "category", None),
         "reason": getattr(issue, "reason", None),
         "path": getattr(issue, "path", None),
         "pass_id": getattr(issue, "pass_id", None),
+    }
+    diagnostics = getattr(issue, "diagnostics", None)
+    if diagnostics is not None:
+        serialized["diagnostics"] = diagnostics
+    return serialized
+
+
+def _safe_diagnostic_mapping(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: _safe_diagnostic_value(value)
+        for key, value in diagnostics.items()
+        if isinstance(key, str)
     }
 
 

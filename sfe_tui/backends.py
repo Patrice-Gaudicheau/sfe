@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Protocol
 
 from sfe.execution_backend import (
@@ -21,6 +23,7 @@ from .routers import (
 
 
 MISSING_TASK = "missing_task"
+FULL_FILE_REPLACEMENT_PREFERRED_MAX_BYTES = 64_000
 
 
 class BackendAdapter(ExecutionBackend, Protocol):
@@ -85,7 +88,11 @@ class DirectBackend:
         executor_response = self.executor.propose_patch(
             routed.execution_preview.executor_payload
         )
-        return _patch_result_from_executor_response(routed, executor_response)
+        result = _patch_result_from_executor_response(routed, executor_response)
+        return _with_full_file_replacement_guidance_summary(
+            result,
+            routed.execution_preview.executor_payload,
+        )
 
     def patch_multipass_batch(
         self,
@@ -100,6 +107,14 @@ class DirectBackend:
             return patch_error_result(routed, "missing_task")
         if routed.execution_preview is None:
             return patch_error_result(routed, "invalid_execution_preview")
+        current_allowed_file_context = _current_file_context(
+            contract,
+            batch.allowed_files,
+        )
+        full_file_replacement_guidance = _full_file_replacement_guidance(
+            contract,
+            candidate_files=batch.allowed_files,
+        )
         executor_payload = {
             **routed.execution_preview.executor_payload,
             "multi_pass": {
@@ -112,10 +127,14 @@ class DirectBackend:
                 "depends_on": batch.depends_on,
                 "validation_notes": batch.validation_notes,
                 "completed_files": completed_files,
+                "current_allowed_file_context": current_allowed_file_context,
+                "full_file_replacement_guidance": full_file_replacement_guidance,
             },
+            "full_file_replacement_guidance": full_file_replacement_guidance,
         }
         executor_response = self.executor.propose_patch(executor_payload)
-        return _patch_result_from_executor_response(routed, executor_response)
+        result = _patch_result_from_executor_response(routed, executor_response)
+        return _with_full_file_replacement_guidance_summary(result, executor_payload)
 
 
 def backend_by_name(name: str) -> BackendAdapter:
@@ -246,6 +265,118 @@ def _executor_response_diagnostics_summary(
     if executor_response.response_diagnostics is None:
         return {}
     return {"executor_response_diagnostics": executor_response.response_diagnostics}
+
+
+def _with_full_file_replacement_guidance_summary(
+    result: ExecutionResult,
+    executor_payload: dict[str, Any],
+) -> ExecutionResult:
+    guidance = executor_payload.get("full_file_replacement_guidance")
+    if not isinstance(guidance, Mapping):
+        return result
+    return replace(
+        result,
+        summary={
+            **result.summary,
+            "full_file_replacement_guidance": dict(guidance),
+        },
+    )
+
+
+def _full_file_replacement_guidance(
+    contract: SFEContract,
+    *,
+    candidate_files: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    allowed = set(candidate_files) if candidate_files is not None else None
+    full_content_files: list[str] = []
+    eligible_files: list[str] = []
+    documentation_files: list[str] = []
+    source_files: list[str] = []
+    template_files: list[str] = []
+    large_files: list[str] = []
+    file_sizes: dict[str, int] = {}
+    for segment in contract.context_segments:
+        path = segment.source_ref
+        if allowed is not None and path not in allowed:
+            continue
+        if not segment.text:
+            continue
+        size = len(segment.text.encode("utf-8"))
+        full_content_files.append(path)
+        file_sizes[path] = size
+        if size <= FULL_FILE_REPLACEMENT_PREFERRED_MAX_BYTES:
+            eligible_files.append(path)
+            if _is_documentation_full_file_preferred_path(path):
+                documentation_files.append(path)
+            if _is_source_full_file_preferred_path(path):
+                source_files.append(path)
+            if _is_template_full_file_preferred_path(path):
+                template_files.append(path)
+        else:
+            large_files.append(path)
+    return {
+        "max_bytes": FULL_FILE_REPLACEMENT_PREFERRED_MAX_BYTES,
+        "full_content_provided_files": tuple(full_content_files),
+        "eligible_files": tuple(eligible_files),
+        "documentation_files": tuple(documentation_files),
+        "source_files": tuple(source_files),
+        "template_files": tuple(template_files),
+        "large_files": tuple(large_files),
+        "file_sizes": file_sizes,
+    }
+
+
+def _is_documentation_full_file_preferred_path(path: str) -> bool:
+    pure = Path(path)
+    name = pure.name.lower()
+    if name in {"readme.md", "changelog.md", "contributing.md", "license"}:
+        return True
+    if pure.suffix.lower() == ".md":
+        return True
+    parts = tuple(part.lower() for part in pure.parts)
+    return len(parts) >= 2 and parts[0] == "docs" and pure.suffix.lower() == ".md"
+
+
+def _is_source_full_file_preferred_path(path: str) -> bool:
+    pure = Path(path)
+    parts = tuple(part.lower() for part in pure.parts)
+    suffix = pure.suffix.lower()
+    if suffix not in {".php", ".py", ".js", ".jsx", ".ts", ".tsx"}:
+        return False
+    if not parts:
+        return False
+    if parts[0] == "tests":
+        return True
+    if len(parts) >= 2 and parts[0] == "src":
+        return parts[1] in {
+            "controller",
+            "entity",
+            "form",
+            "repository",
+            "service",
+            "security",
+            "validator",
+        }
+    return False
+
+
+def _is_template_full_file_preferred_path(path: str) -> bool:
+    pure = Path(path)
+    parts = tuple(part.lower() for part in pure.parts)
+    return len(parts) >= 2 and parts[0] == "templates" and pure.suffix.lower() == ".twig"
+
+
+def _current_file_context(
+    contract: SFEContract,
+    allowed_files: tuple[str, ...],
+) -> tuple[dict[str, str], ...]:
+    allowed = set(allowed_files)
+    return tuple(
+        {"path": segment.source_ref, "text": segment.text}
+        for segment in contract.context_segments
+        if segment.source_ref in allowed and segment.text
+    )
 
 
 def _local_router_preview_result(name: str, contract: SFEContract) -> ExecutionResult:
@@ -383,6 +514,10 @@ def _build_execution_preview(
             "instructions": contract.instructions,
             "task": contract.task,
             "selected_context_segments": selected_segments,
+            "executor_working_directory": contract.metadata.get("workspace_root"),
+            "full_file_replacement_guidance": _full_file_replacement_guidance(
+                replace(contract, context_segments=selected_segments)
+            ),
         },
     )
 
