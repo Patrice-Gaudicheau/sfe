@@ -1,44 +1,60 @@
 # Spatial Field Engine for Cognition
 
-**Context-governance infrastructure for long-context LLM workflows.**
+**Context-routing and governance infrastructure for long-context LLM workflows.**
 
-Spatial Field Engine for Cognition (`SFE`) is open source context-governance
-infrastructure for long-context LLM workflows. It separates context selection
-from task execution: instead of sending every request as one large flat prompt,
-SFE routes the task through a selector, exposes selected authoritative context
-to the executor, and records the decision path for audit.
+Spatial Field Engine for Cognition (`SFE`) is open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
 
-The commercial relevance is strongest where teams run repeated API-heavy
-long-context workflows and need token-budget control, authority governance, and
-auditable context selection. SFE may be useful when avoided context is large
-enough to amortize routing overhead.
+For technical founders, AI infrastructure teams, and research engineers running repeated API-heavy workflows, SFE provides:
 
-SFE's role separation also makes cost control a model-allocation problem, not
-only a prompt-compression problem. It can reduce input-token exposure by
-selecting a smaller executor context, and it can reduce output-token cost in
-dollar terms when the final answer or patch is produced by a cheaper or more
-specialized executor model. This is a pricing and provider-choice claim, not a
-claim that the executor necessarily emits fewer output tokens.
+- **Bounded Context Exposure:** Reduces repeated input-token exposure by selecting smaller, authoritative executor contexts.
+- **Architectural Role Separation:** Splits Discoverer, Router, and Executor into independent roles, allowing distinct models for each.
+- **Multi-Provider Workflows:** Mix and match OpenAI, Anthropic, Qwen, DeepSeek-compatible endpoints, Ollama, Lemonade, or CodexCLI within a single workflow.
+- **Dollar-Cost Optimization:** Treat cost as a model-allocation problem. Route with a strong reasoning model and execute with a smaller, cheaper, or specialized model.
+- **Controlled Execution Surfaces:** Support local iterative workspace-write loops through a local TUI or integrate via the built-in MCP server.
 
-In protocol-aligned controlled observations on 50k+ structural-tier tasks, SFE
-measured 84.08% router-inclusive token reduction with OpenAI, 83.63% with
-Anthropic, and 83.57% in a single-run Alibaba/Qwen structural comparison. These
-are controlled benchmark observations, not production savings commitments.
+*Note: SFE is an experimental research prototype. It does not claim to make models more intelligent, nor does it guarantee universal token savings. The evidence here is early, mostly synthetic, and benchmark-specific. Treat results as a technical prototype signal, not production readiness. See [Limitations](#limitations) for details.*
 
-SFE does not claim to make a model more intelligent. The current project tests a
-narrower engineering hypothesis: for some tasks, explicit workspace structure
-and selective context activation can preserve measured task success while
-reducing executor context and improving traceability.
+## Quick Start: TUI or MCP
 
-The evidence in this repository is early, mostly synthetic, and
-benchmark-specific. Treat the results as a research signal from a technical
-prototype, not as proof of general model capability or production readiness.
+Configure at least one provider before using the TUI or MCP server:
 
-For the current product doctrine, start with
-`docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context
-engine; the TUI is the current local user-facing control surface; patch/worktree
-is the developer execution mode inside `workspace_write`; benchmarks are the
-experimental evidence and architectural feedback loop.
+```bash
+cp .env.example .env
+```
+
+Fill in at least one provider configuration in `.env`. `SFE_PROVIDER` is the
+simplest starting point for local use. Advanced users can split runtime roles
+with `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and
+`SFE_PROVIDER_EXECUTOR`. See [Setup](#setup) and [Provider Support](#provider-support)
+below for the provider-specific variables.
+
+To start the local TUI:
+
+```bash
+make sfe-tui
+```
+
+Use this minimal workflow:
+
+```text
+Workspace: <enter the target workspace directory>
+/task <describe what SFE should do>
+/run
+```
+
+`Workspace` selects the target directory. `/task` defines the current task.
+`/run` lets SFE route the task, select context, and execute the appropriate
+mode. For write tasks, SFE uses its workspace-write path and mechanical
+boundaries. For read-only or answer tasks, SFE can answer without mutating the
+workspace.
+
+For MCP clients, use the local SFE MCP server instead of the TUI. The current
+client setup notes cover both
+[Antigravity](docs/sfe_mcp_client_setup.md#antigravity-setup) and
+[Codex App](docs/sfe_mcp_client_setup.md#codex-app-setup-with-the-form);
+they also show the expected MCP tool flow and local STDIO process shape.
+
+For the current product doctrine, start with `docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context engine; the TUI is the current local user-facing control surface; patch/worktree is the developer execution mode inside `workspace_write`; benchmarks are the experimental evidence and architectural feedback loop.
 
 ## Core Engineering Signal
 
