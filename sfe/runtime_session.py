@@ -18,6 +18,7 @@ from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.execution_mode_router import ExecutionModeRouter
 from sfe.git_worktree_backend import GitWorktreeBackend
+from sfe.multipass_planner import MultiPassPlanner
 from sfe.run_pipeline import (
     RunPipeline,
     RunProgressCallback,
@@ -81,6 +82,7 @@ class RuntimeSession:
         workspace_manager: WorkspaceManager | None = None,
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
+        multipass_planner: MultiPassPlanner | None = None,
     ) -> None:
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend
@@ -89,6 +91,7 @@ class RuntimeSession:
         )
         self.discovery_router = discovery_router
         self.execution_mode_router = execution_mode_router
+        self.multipass_planner = multipass_planner
         self.workspace_root: Path | None = None
         self.workspace_session: WorkspaceSession | None = None
         self.discovery_result: DiscoveryResult | None = None
@@ -152,6 +155,7 @@ class RuntimeSession:
             workspace_manager=self.workspace_manager,
             discovery_router=self.discovery_router,
             execution_mode_router=self.execution_mode_router,
+            multipass_planner=self.multipass_planner,
             progress_callback=capture_progress,
         )
         if before_execute is not None:

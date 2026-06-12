@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from sfe.contracts import SFEContract
-from sfe.multipass import MultiPassBatch, MultiPassConfig, MultiPassPlan
+from sfe.multipass import MultiPassBatch, MultiPassPlan
 
 
 @dataclass(frozen=True)
@@ -71,14 +71,6 @@ class ExecutionBackend(Protocol):
         ...
 
     def patch(self, contract: SFEContract) -> ExecutionResult:
-        ...
-
-    def plan_multipass(
-        self,
-        contract: SFEContract,
-        *,
-        config: MultiPassConfig | None = None,
-    ) -> ExecutionResult:
         ...
 
     def patch_multipass_batch(

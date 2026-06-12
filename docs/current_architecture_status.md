@@ -50,6 +50,13 @@ cleanly before workspace work starts.
 it becomes Git/worktree/patch/promotion oriented after routing is intentional
 and accepted; it is not conceptual drift from SFE.
 
+Large `workspace_write` tasks may use multi-pass execution. In that path the
+Router designs and validates the strict JSON batch plan before execution
+proceeds. The Executor does not design the global plan; it only generates the
+strict patch for each already-validated batch. Batch patches remain subject to
+the same patch parsing, path validation, worktree isolation, application, and
+promotion machinery as normal workspace writes.
+
 The worktree is the main operational guard for `workspace_write`. If the
 selected workspace is already inside a Git repository, `/run` uses that
 repository to create or reuse an SFE-owned worktree. If the selected workspace

@@ -26,7 +26,7 @@ def test_multipass_config_resolves_mode_and_limits() -> None:
     assert config.mode == "true"
     assert config.max_passes == 6
     assert config.max_files_per_pass == 9
-    assert config.planner_model == "planner-model"
+    assert not hasattr(config, "planner_model")
 
 
 def test_multipass_config_defaults_to_auto() -> None:
@@ -35,7 +35,7 @@ def test_multipass_config_defaults_to_auto() -> None:
     assert config.mode == "auto"
     assert config.max_passes == 10
     assert config.max_files_per_pass == 10
-    assert config.planner_model is None
+    assert not hasattr(config, "planner_model")
 
 
 def test_multipass_heuristic_detects_large_scaffold() -> None:

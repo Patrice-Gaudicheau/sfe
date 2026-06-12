@@ -21,7 +21,6 @@ class MultiPassConfig:
     mode: str = DEFAULT_MULTIPASS_MODE
     max_passes: int = DEFAULT_MULTIPASS_MAX_PASSES
     max_files_per_pass: int = DEFAULT_MULTIPASS_MAX_FILES_PER_PASS
-    planner_model: str | None = None
 
     @property
     def forced(self) -> bool:
@@ -99,7 +98,6 @@ def resolve_multipass_config(
             env.get("SFE_MULTIPASS_MAX_FILES_PER_PASS"),
             DEFAULT_MULTIPASS_MAX_FILES_PER_PASS,
         ),
-        planner_model=_non_empty(env.get("SFE_MULTIPASS_PLANNER_MODEL")),
     )
 
 
@@ -288,13 +286,6 @@ def _resolve_positive_int(value: str | None, default: int) -> int:
     except ValueError:
         return default
     return parsed if parsed > 0 else default
-
-
-def _non_empty(value: str | None) -> str | None:
-    if value is None:
-        return None
-    stripped = value.strip()
-    return stripped or None
 
 
 def _string_tuple(value: object) -> tuple[str, ...] | None:

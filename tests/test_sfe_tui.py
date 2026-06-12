@@ -38,6 +38,12 @@ from sfe.execution_mode_router import (
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
 )
+from sfe.multipass import (
+    MultiPassConfig,
+    MultiPassIssue,
+    parse_multipass_plan_json,
+)
+from sfe.multipass_planner import MultiPassPlannerResponse
 from sfe.provider_progress import ProviderCallIdleTimeoutError
 from sfe.runtime_session import (
     RunReportResult,
@@ -65,6 +71,7 @@ from sfe_tui.executors import (
     OpenAIReadOnlyExecutor,
     PATCH_SYSTEM_INSTRUCTION,
     READ_ONLY_SYSTEM_INSTRUCTION,
+    ReadOnlyExecutor,
     _build_user_prompt,
     create_tui_executor,
 )
@@ -191,7 +198,6 @@ class FakeExecutor:
         self,
         response: ExecutorResponse | None = None,
         patch_response: ExecutorResponse | None = None,
-        multipass_plan_response: ExecutorResponse | None = None,
         multipass_patch_responses: list[ExecutorResponse] | None = None,
     ) -> None:
         self.response = response or ExecutorResponse(
@@ -204,12 +210,10 @@ class FakeExecutor:
             error_category=None,
             provider_calls_made=1,
         )
-        self.multipass_plan_response = multipass_plan_response
         self.multipass_patch_responses = list(multipass_patch_responses or [])
         self.calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
         self.console_calls: list[dict[str, object]] = []
-        self.multipass_plan_calls: list[dict[str, object]] = []
 
     def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.console_calls.append(executor_payload)
@@ -225,14 +229,66 @@ class FakeExecutor:
             return self.multipass_patch_responses.pop(0)
         return self.patch_response
 
-    def plan_multipass(self, executor_payload: dict[str, object]) -> ExecutorResponse:
-        self.multipass_plan_calls.append(executor_payload)
-        return self.multipass_plan_response or ExecutorResponse(
-            None,
-            "invalid_response",
-            1,
-            provider_name="fake-executor",
+
+class FakeMultiPassPlanner:
+    provider_name = "fake-router-planner"
+    model = "fake-router-planner-model"
+
+    def __init__(
+        self,
+        plan_answer: str,
+        *,
+        issue: MultiPassIssue | None = None,
+    ) -> None:
+        self.plan_answer = plan_answer
+        self.issue = issue
+        self.calls: list[dict[str, object]] = []
+
+    def plan(
+        self,
+        contract: object,
+        *,
+        config: MultiPassConfig,
+    ) -> MultiPassPlannerResponse:
+        self.calls.append({"contract": contract, "config": config})
+        if self.issue is not None:
+            return MultiPassPlannerResponse(
+                plan=None,
+                issue=self.issue,
+                answer=self.plan_answer,
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
+            )
+        parsed = parse_multipass_plan_json(self.plan_answer)
+        if isinstance(parsed, MultiPassIssue):
+            return MultiPassPlannerResponse(
+                plan=None,
+                issue=parsed,
+                answer=self.plan_answer,
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
+            )
+        return MultiPassPlannerResponse(
+            plan=parsed,
+            issue=None,
+            answer=self.plan_answer,
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
         )
+
+
+def test_executor_planning_path_is_not_exposed() -> None:
+    executor = FakeExecutor()
+    backend = DirectBackend(executor=executor)
+
+    assert not hasattr(ReadOnlyExecutor, "plan_multipass")
+    assert not hasattr(executor, "plan_multipass")
+    assert not hasattr(DirectBackend, "plan_multipass")
+    assert not hasattr(backend, "plan_multipass")
+    assert hasattr(backend, "patch_multipass_batch")
 
 
 class RecordingActivityIndicator:
@@ -4623,35 +4679,32 @@ def test_tui_run_report_after_workspace_write_run_does_not_execute_again(tmp_pat
 def test_tui_run_report_displays_multipass_summary(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
     repo = init_git_repo(tmp_path / "repo")
+    planner = FakeMultiPassPlanner(
+        json.dumps(
+            {
+                "project_summary": "Mock app",
+                "batches": [
+                    {
+                        "id": "foundation",
+                        "title": "Foundation",
+                        "goal": "Create composer file",
+                        "allowed_files": ["composer.json"],
+                        "depends_on": [],
+                        "validation_notes": [],
+                    },
+                    {
+                        "id": "public",
+                        "title": "Public",
+                        "goal": "Create public index",
+                        "allowed_files": ["public/index.php"],
+                        "depends_on": ["foundation"],
+                        "validation_notes": [],
+                    },
+                ],
+            }
+        )
+    )
     executor = FakeExecutor(
-        multipass_plan_response=ExecutorResponse(
-            answer=json.dumps(
-                {
-                    "project_summary": "Mock app",
-                    "batches": [
-                        {
-                            "id": "foundation",
-                            "title": "Foundation",
-                            "goal": "Create composer file",
-                            "allowed_files": ["composer.json"],
-                            "depends_on": [],
-                            "validation_notes": [],
-                        },
-                        {
-                            "id": "public",
-                            "title": "Public",
-                            "goal": "Create public index",
-                            "allowed_files": ["public/index.php"],
-                            "depends_on": ["foundation"],
-                            "validation_notes": [],
-                        },
-                    ],
-                }
-            ),
-            error_category=None,
-            provider_calls_made=1,
-            provider_name="fake-executor",
-        ),
         multipass_patch_responses=[
             ExecutorResponse(
                 answer=valid_create_diff("composer.json", "{}"),
@@ -4677,6 +4730,7 @@ def test_tui_run_report_displays_multipass_summary(tmp_path, monkeypatch) -> Non
         backend=DirectBackend(executor=executor),
         discovery_router=FakeDiscoveryRouter(files_to_inspect=("context.txt",)),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     )
 
     assert app.run() == 0
@@ -4689,7 +4743,8 @@ def test_tui_run_report_displays_multipass_summary(tmp_path, monkeypatch) -> Non
     assert "pass 1 promoted files: composer.json" in report_output
     assert "pass 2/2 id: public" in report_output
     assert "pass 2 promoted files: public/index.php" in report_output
-    assert len(executor.multipass_plan_calls) == 1
+    assert len(planner.calls) == 1
+    assert not hasattr(executor, "plan_multipass")
     assert len(executor.patch_calls) == 2
     assert app.workspace_session is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
@@ -6529,24 +6584,31 @@ def test_build_user_prompt_marks_empty_selected_context_as_none() -> None:
     assert "Selected context:\nnone" in prompt
 
 
-def test_build_user_prompt_includes_multipass_plan_limits() -> None:
+def test_build_user_prompt_includes_only_multipass_batch_constraints() -> None:
     prompt = _build_user_prompt(
         {
             "instructions": [],
             "task": ProtectedText(id="task_current", text="Create project"),
             "selected_context_segments": [],
             "multi_pass": {
-                "mode": "plan",
-                "max_passes": 8,
-                "max_files_per_pass": 10,
+                "mode": "batch",
+                "project_summary": "Mock scaffold",
+                "batch_id": "foundation",
+                "batch_title": "Foundation",
+                "batch_goal": "Create foundation",
+                "allowed_files": ("composer.json",),
+                "completed_files": (),
+                "validation_notes": ("mock validation",),
             },
         }
     )
 
-    assert "Multi-pass planning request:" in prompt
-    assert "Maximum passes allowed: 8" in prompt
-    assert "Maximum files allowed per batch: 10" in prompt
-    assert "Every batch MUST keep allowed_files at or below the maximum" in prompt
+    assert "Multi-pass batch constraints:" in prompt
+    assert "Batch id: foundation" in prompt
+    assert "Allowed files for this batch:\n- composer.json" in prompt
+    assert "Return a strict git diff for this batch only" in prompt
+    assert "Multi-pass planning request:" not in prompt
+    assert "Return exactly one JSON object" not in prompt
 
 
 def test_tui_executor_factory_defaults_to_openai_when_sfe_provider_unset() -> None:

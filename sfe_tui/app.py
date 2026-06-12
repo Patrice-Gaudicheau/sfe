@@ -17,6 +17,7 @@ from sfe.discovery import (
 from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_mode_router import ExecutionModeRouter
 from sfe.execution_backend import ExecutionResult
+from sfe.multipass_planner import MultiPassPlanner
 from sfe.patching import (
     MECHANICAL_GUARD_REJECTED,
     ParsedPatch,
@@ -131,6 +132,7 @@ class SfeTuiApp:
         backend: BackendAdapter | None = None,
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
+        multipass_planner: MultiPassPlanner | None = None,
         patch_json_repairer: PatchJsonRepairer | None = None,
         patch_reviewer: PatchReviewer | None = None,
         workspace_manager: WorkspaceManager | None = None,
@@ -149,6 +151,7 @@ class SfeTuiApp:
         self.backend = backend or backend_by_name("direct")
         self.discovery_router = discovery_router
         self.execution_mode_router = execution_mode_router
+        self.multipass_planner = multipass_planner
         self.patch_json_repairer = patch_json_repairer or create_tui_patch_json_repairer()
         self.patch_reviewer = patch_reviewer or create_tui_patch_reviewer()
         self.workspace_manager = workspace_manager or WorkspaceManager(GitWorktreeBackend())
@@ -158,6 +161,7 @@ class SfeTuiApp:
             workspace_manager=self.workspace_manager,
             discovery_router=self.discovery_router,
             execution_mode_router=self.execution_mode_router,
+            multipass_planner=self.multipass_planner,
         )
         self.workspace_reviewer = workspace_reviewer or create_workspace_reviewer()
         self.activity_indicator_factory = (

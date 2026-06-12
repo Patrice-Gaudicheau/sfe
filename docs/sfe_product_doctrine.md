@@ -87,6 +87,12 @@ development infrastructure: Git preparation, worktree isolation, patch
 generation, validation, and promotion. That is not conceptual drift. It is the
 first serious developer application of the SFE engine.
 
+For large `workspace_write` tasks, multi-pass coordination is a Router
+responsibility. The Router designs and validates the global batch plan because
+that is coherence and execution-mode coordination. The Executor remains the
+patching role: it generates each operational batch patch one batch at a time and
+does not design the global multi-pass plan.
+
 The future API should be treated as another access surface for the same SFE
 core, not as a replacement doctrine.
 

@@ -12,7 +12,7 @@ from sfe.execution_backend import (
     RouterPreviewDiagnostics,
 )
 from sfe.contracts import ContextSegment, SFEContract
-from sfe.multipass import MultiPassBatch, MultiPassConfig, MultiPassPlan
+from sfe.multipass import MultiPassBatch, MultiPassPlan
 from .executors import ExecutorResponse, ReadOnlyExecutor, create_tui_executor
 from .routers import (
     LOCAL_LEXICAL_PREVIEW_MODE,
@@ -86,33 +86,6 @@ class DirectBackend:
             routed.execution_preview.executor_payload
         )
         return _patch_result_from_executor_response(routed, executor_response)
-
-    def plan_multipass(
-        self,
-        contract: SFEContract,
-        *,
-        config: MultiPassConfig | None = None,
-    ) -> ExecutionResult:
-        routed = self.dry_run(contract)
-        if contract.task is None:
-            return multipass_plan_error_result(routed, "missing_task")
-        if routed.execution_preview is None:
-            return multipass_plan_error_result(routed, "invalid_execution_preview")
-        plan_multipass = getattr(self.executor, "plan_multipass", None)
-        if plan_multipass is None:
-            return multipass_plan_error_result(routed, "multipass_not_supported")
-        executor_payload = {
-            **routed.execution_preview.executor_payload,
-            "multi_pass": {
-                "mode": "plan",
-                "max_passes": config.max_passes if config is not None else None,
-                "max_files_per_pass": (
-                    config.max_files_per_pass if config is not None else None
-                ),
-            },
-        }
-        executor_response = plan_multipass(executor_payload)
-        return _multipass_plan_result_from_executor_response(routed, executor_response)
 
     def patch_multipass_batch(
         self,
@@ -194,23 +167,6 @@ def patch_error_result(result: ExecutionResult, error_category: str) -> Executio
     )
 
 
-def multipass_plan_error_result(
-    result: ExecutionResult,
-    error_category: str,
-) -> ExecutionResult:
-    return ExecutionResult(
-        backend=result.backend,
-        status="multipass_plan_failed",
-        provider_calls_made=0,
-        summary={**result.summary, "multipass_plan_error_category": error_category},
-        contract=result.contract,
-        execution_preview=result.execution_preview,
-        router_preview=result.router_preview,
-        answer=None,
-        error_category=error_category,
-    )
-
-
 def _console_result_from_executor_response(
     routed: ExecutionResult,
     executor_response: ExecutorResponse,
@@ -273,34 +229,6 @@ def _patch_result_from_executor_response(
             "provider_calls_made": executor_response.provider_calls_made,
             "patch_error_category": executor_response.error_category,
             "patch_applied": False,
-            "executor_provider": executor_response.provider_name,
-            **_executor_response_diagnostics_summary(executor_response),
-        },
-        contract=routed.contract,
-        execution_preview=routed.execution_preview,
-        router_preview=routed.router_preview,
-        answer=executor_response.answer,
-        error_category=executor_response.error_category,
-    )
-
-
-def _multipass_plan_result_from_executor_response(
-    routed: ExecutionResult,
-    executor_response: ExecutorResponse,
-) -> ExecutionResult:
-    status = (
-        "multipass_plan_proposed"
-        if executor_response.answer
-        else "multipass_plan_failed"
-    )
-    return ExecutionResult(
-        backend=routed.backend,
-        status=status,
-        provider_calls_made=executor_response.provider_calls_made,
-        summary={
-            **routed.summary,
-            "provider_calls_made": executor_response.provider_calls_made,
-            "multipass_plan_error_category": executor_response.error_category,
             "executor_provider": executor_response.provider_name,
             **_executor_response_diagnostics_summary(executor_response),
         },

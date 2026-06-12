@@ -28,6 +28,13 @@ from sfe.execution_mode_router import (
     create_configured_execution_mode_router,
 )
 from sfe.git_worktree_backend import GitWorktreeBackend
+from sfe.multipass import (
+    MultiPassConfig,
+    MultiPassIssue,
+    MultiPassPlan,
+    parse_multipass_plan_json,
+)
+from sfe.multipass_planner import MultiPassPlannerResponse
 from sfe.run_pipeline import (
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
@@ -57,7 +64,6 @@ class FakeExecutor:
         patch_answer: str | None = None,
         console_answer: str | None = None,
         console_error_category: str | None = None,
-        multipass_plan_answer: str | None = None,
         multipass_patch_answers: list[ExecutorResponse | str] | None = None,
     ) -> None:
         self.patch_answer = _replacement_proposal() if patch_answer is None else patch_answer
@@ -65,11 +71,9 @@ class FakeExecutor:
             "Symfony is a PHP framework." if console_answer is None else console_answer
         )
         self.console_error_category = console_error_category
-        self.multipass_plan_answer = multipass_plan_answer
         self.multipass_patch_answers = list(multipass_patch_answers or [])
         self.console_calls: list[dict[str, object]] = []
         self.patch_calls: list[dict[str, object]] = []
-        self.multipass_plan_calls: list[dict[str, object]] = []
 
     def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
         self.console_calls.append(executor_payload)
@@ -99,13 +103,63 @@ class FakeExecutor:
             return ExecutorResponse(answer, None, 1, provider_name=self.provider_name)
         return ExecutorResponse(self.patch_answer, None, 1, provider_name=self.provider_name)
 
-    def plan_multipass(self, executor_payload: dict[str, object]) -> ExecutorResponse:
-        self.multipass_plan_calls.append(executor_payload)
-        return ExecutorResponse(
-            self.multipass_plan_answer,
-            None if self.multipass_plan_answer else "invalid_response",
-            1,
+
+class FakeMultiPassPlanner:
+    provider_name = "fake-router-planner"
+    model = "fake-router-planner-model"
+
+    def __init__(
+        self,
+        plan_answer: str | None = None,
+        *,
+        issue: MultiPassIssue | None = None,
+    ) -> None:
+        self.plan_answer = plan_answer
+        self.issue = issue
+        self.calls: list[dict[str, object]] = []
+
+    def plan(
+        self,
+        contract: object,
+        *,
+        config: MultiPassConfig,
+    ) -> MultiPassPlannerResponse:
+        self.calls.append({"contract": contract, "config": config})
+        if self.issue is not None:
+            return MultiPassPlannerResponse(
+                plan=None,
+                issue=self.issue,
+                answer=self.plan_answer,
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
+            )
+        if not self.plan_answer:
+            return MultiPassPlannerResponse(
+                plan=None,
+                issue=MultiPassIssue("multi_pass_planning", "invalid_response"),
+                answer=self.plan_answer,
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
+            )
+        parsed = parse_multipass_plan_json(self.plan_answer)
+        if isinstance(parsed, MultiPassIssue):
+            return MultiPassPlannerResponse(
+                plan=None,
+                issue=parsed,
+                answer=self.plan_answer,
+                provider_name=self.provider_name,
+                model=self.model,
+                provider_calls_made=1,
+            )
+        return MultiPassPlannerResponse(
+            plan=parsed,
+            issue=None,
+            answer=self.plan_answer,
             provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
         )
 
 
@@ -1944,12 +1998,14 @@ def test_run_pipeline_small_workspace_write_stays_single_pass(
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
     executor = FakeExecutor(_valid_new_file_diff())
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"unused": ["unused.txt"]}))
 
     result = RunPipeline(
         backend=DirectBackend(executor=executor),
         workspace_manager=manager,
         discovery_router=FakeDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     ).run(
         RunRequest(
             workspace_root=repo,
@@ -1960,7 +2016,7 @@ def test_run_pipeline_small_workspace_write_stays_single_pass(
 
     assert result.status == RUN_STATUS_COMPLETED
     assert result.multi_pass_summary is None
-    assert executor.multipass_plan_calls == []
+    assert planner.calls == []
     assert len(executor.patch_calls) == 1
     assert executor.patch_calls[0].get("multi_pass") is None
     assert result.promoted_files == ("index.html",)
@@ -1974,13 +2030,15 @@ def test_run_pipeline_forced_multipass_promotes_each_batch(
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
-    executor = FakeExecutor(
-        multipass_plan_answer=_multipass_plan_json(
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
             {
                 "foundation": ["index.html"],
                 "docs": ["README.md"],
             }
-        ),
+        )
+    )
+    executor = FakeExecutor(
         multipass_patch_answers=[
             _valid_new_file_diff("index.html"),
             _valid_new_file_diff_with_content("README.md", "# Demo\n"),
@@ -1992,6 +2050,7 @@ def test_run_pipeline_forced_multipass_promotes_each_batch(
         workspace_manager=manager,
         discovery_router=FakeDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     ).run(
         RunRequest(
             workspace_root=repo,
@@ -2012,7 +2071,8 @@ def test_run_pipeline_forced_multipass_promotes_each_batch(
     assert result.promoted_files == ("index.html", "README.md")
     assert (repo / "index.html").is_file()
     assert (repo / "README.md").read_text(encoding="utf-8") == "# Demo\n"
-    assert len(executor.multipass_plan_calls) == 1
+    assert len(planner.calls) == 1
+    assert not hasattr(executor, "plan_multipass")
     assert len(executor.patch_calls) == 2
     assert executor.patch_calls[0]["multi_pass"]["allowed_files"] == ("index.html",)
     assert manager.cleanup(result.workspace_session).cleaned is True
@@ -2025,8 +2085,10 @@ def test_run_pipeline_multipass_rejects_patch_outside_batch_scope(
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"foundation": ["index.html"]})
+    )
     executor = FakeExecutor(
-        multipass_plan_answer=_multipass_plan_json({"foundation": ["index.html"]}),
         multipass_patch_answers=[_valid_new_file_diff("README.md")],
     )
 
@@ -2035,6 +2097,7 @@ def test_run_pipeline_multipass_rejects_patch_outside_batch_scope(
         workspace_manager=manager,
         discovery_router=FakeDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     ).run(
         RunRequest(
             workspace_root=repo,
@@ -2061,13 +2124,15 @@ def test_run_pipeline_multipass_invalid_plan_fails_cleanly(
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
-    executor = FakeExecutor(multipass_plan_answer="{bad json")
+    planner = FakeMultiPassPlanner("{bad json")
+    executor = FakeExecutor()
 
     result = RunPipeline(
         backend=DirectBackend(executor=executor),
         workspace_manager=manager,
         discovery_router=FakeDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     ).run(
         RunRequest(
             workspace_root=repo,
@@ -2080,8 +2145,7 @@ def test_run_pipeline_multipass_invalid_plan_fails_cleanly(
     assert result.issue is not None
     assert result.issue.category == "multi_pass_planning"
     assert result.issue.reason == "invalid_plan_json"
-    assert result.patch_result is not None
-    assert result.patch_result.status == "multipass_plan_proposed"
+    assert result.patch_result is None
     assert result.multi_pass_summary is not None
     assert result.multi_pass_summary.status == "failed"
     assert result.multi_pass_summary.passes_completed == 0
@@ -2110,8 +2174,10 @@ def test_run_pipeline_multipass_timeout_reports_failed_pass_diagnostics(
             "provider_stdout_chunk_count": 0,
         },
     }
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"foundation": ["index.html"]})
+    )
     executor = FakeExecutor(
-        multipass_plan_answer=_multipass_plan_json({"foundation": ["index.html"]}),
         multipass_patch_answers=[
             ExecutorResponse(
                 None,
@@ -2128,6 +2194,7 @@ def test_run_pipeline_multipass_timeout_reports_failed_pass_diagnostics(
         workspace_manager=manager,
         discovery_router=FakeDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     ).run(
         RunRequest(
             workspace_root=repo,
@@ -2158,8 +2225,8 @@ def test_run_pipeline_auto_multipass_symfony_scaffold_mock(
         "src": tuple(f"src/File{index}.php" for index in range(1, 8)),
         "templates": tuple(f"templates/page_{index}.html.twig" for index in range(1, 8)),
     }
+    planner = FakeMultiPassPlanner(_multipass_plan_json(batch_files))
     executor = FakeExecutor(
-        multipass_plan_answer=_multipass_plan_json(batch_files),
         multipass_patch_answers=[
             _valid_multi_new_file_diff(files)
             for files in batch_files.values()
@@ -2171,6 +2238,7 @@ def test_run_pipeline_auto_multipass_symfony_scaffold_mock(
         workspace_manager=manager,
         discovery_router=FakeDiscoveryRouter(),
         execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
     ).run(
         RunRequest(
             workspace_root=repo,
@@ -2184,6 +2252,7 @@ def test_run_pipeline_auto_multipass_symfony_scaffold_mock(
     assert result.multi_pass_summary.passes_total == 3
     assert result.multi_pass_summary.passes_completed == 3
     assert len(result.promoted_files) == 21
+    assert len(planner.calls) == 1
     assert len(executor.patch_calls) == 3
     assert all((repo / path).is_file() for path in result.promoted_files)
     assert manager.cleanup(result.workspace_session).cleaned is True

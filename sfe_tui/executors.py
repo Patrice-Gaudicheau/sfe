@@ -54,7 +54,6 @@ from sfe.provider_config import (
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
 DEFAULT_PATCH_OUTPUT_TOKENS = 12000
-DEFAULT_MULTIPASS_PLAN_OUTPUT_TOKENS = 4000
 DEFAULT_LEMONADE_EXECUTOR_MODEL = "Qwen3.5-35B-A3B-GGUF"
 READ_ONLY_SYSTEM_INSTRUCTION = (
     "You are the read-only SFE TUI executor. Answer only from the selected "
@@ -99,17 +98,6 @@ PATCH_SYSTEM_INSTRUCTION = (
     "renames, mode-only changes, binary patches, or symlink changes. If no safe "
     "unified diff can be proposed, return no text."
 )
-MULTIPASS_PLAN_SYSTEM_INSTRUCTION = (
-    "You are the SFE multi-pass planner for large workspace_write tasks. Return "
-    "only one strict JSON object. Do not return Markdown, code fences, prose, "
-    "or a patch. The object must contain project_summary and batches. Each "
-    "batch must contain id, title, goal, allowed_files, depends_on, and "
-    "validation_notes. Keep batches small and coherent. Use relative file paths "
-    "only. Do not include files under .git, .sfe-worktrees, vendor, var, cache, "
-    "node_modules, or generated/sensitive directories."
-)
-
-
 @dataclass(frozen=True)
 class ExecutorResponse:
     answer: str | None
@@ -131,9 +119,6 @@ class ReadOnlyExecutor(Protocol):
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         ...
 
-    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
-        ...
-
 
 class DirectProviderReadOnlyExecutor:
     """Small direct read-only executor for selected TUI context."""
@@ -150,9 +135,7 @@ class DirectProviderReadOnlyExecutor:
         provider_error_classifier: Callable[[Exception], str | None] | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         max_patch_output_tokens: int = DEFAULT_PATCH_OUTPUT_TOKENS,
-        max_multipass_plan_output_tokens: int = DEFAULT_MULTIPASS_PLAN_OUTPUT_TOKENS,
         provider_idle_timeout_seconds: float | None = None,
-        multipass_planner_model: str | None = None,
     ) -> None:
         self.provider = provider
         self.provider_name = provider_name
@@ -163,9 +146,7 @@ class DirectProviderReadOnlyExecutor:
         self.provider_error_classifier = provider_error_classifier
         self.max_output_tokens = max_output_tokens
         self.max_patch_output_tokens = max_patch_output_tokens
-        self.max_multipass_plan_output_tokens = max_multipass_plan_output_tokens
         self.provider_idle_timeout_seconds = provider_idle_timeout_seconds
-        self.multipass_planner_model = multipass_planner_model
 
     def execute(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return self._execute_with_instruction(
@@ -186,14 +167,6 @@ class DirectProviderReadOnlyExecutor:
             executor_payload,
             system_instruction=PATCH_SYSTEM_INSTRUCTION,
             max_tokens=self.max_patch_output_tokens,
-        )
-
-    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
-        return self._execute_with_instruction(
-            executor_payload,
-            system_instruction=MULTIPASS_PLAN_SYSTEM_INSTRUCTION,
-            max_tokens=self.max_multipass_plan_output_tokens,
-            model=self.multipass_planner_model or self.model,
         )
 
     def _execute_with_instruction(
@@ -317,10 +290,6 @@ class OpenAIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
             provider_error_types=(OpenAIAPIError,),
             max_output_tokens=max_output_tokens,
             max_patch_output_tokens=max_patch_output_tokens,
-            multipass_planner_model=_first_env_value(
-                environ,
-                ("SFE_MULTIPASS_PLANNER_MODEL",),
-            ),
             provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
                 role="executor",
                 provider_name=provider_name,
@@ -358,10 +327,6 @@ class CodexCLIReadOnlyExecutor(DirectProviderReadOnlyExecutor):
             call_style="system_instruction",
             max_output_tokens=max_output_tokens,
             max_patch_output_tokens=DEFAULT_PATCH_OUTPUT_TOKENS,
-            multipass_planner_model=_first_env_value(
-                environ,
-                ("SFE_MULTIPASS_PLANNER_MODEL",),
-            ),
             provider_idle_timeout_seconds=resolve_provider_idle_timeout_seconds(
                 role="executor",
                 provider_name=provider_name,
@@ -384,9 +349,6 @@ class ProviderConfigurationErrorExecutor:
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _configuration_error_response(self.provider_name)
 
-    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
-        return _configuration_error_response(self.provider_name)
-
 
 class UnsupportedProviderExecutor:
     """Executor that reports a valid provider not yet supported by the TUI."""
@@ -401,9 +363,6 @@ class UnsupportedProviderExecutor:
         return _unsupported_provider_response(self.provider_name)
 
     def propose_patch(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
-        return _unsupported_provider_response(self.provider_name)
-
-    def plan_multipass(self, executor_payload: dict[str, Any]) -> ExecutorResponse:
         return _unsupported_provider_response(self.provider_name)
 
 
@@ -721,26 +680,6 @@ def _build_multi_pass_prompt_section(value: object) -> str:
     if not isinstance(value, Mapping):
         return ""
     mode = value.get("mode")
-    if mode == "plan":
-        max_passes = value.get("max_passes")
-        max_files_per_pass = value.get("max_files_per_pass")
-        return "\n".join(
-            [
-                "Multi-pass planning request:",
-                f"Maximum passes allowed: {max_passes or 'unspecified'}",
-                "Maximum files allowed per batch: "
-                f"{max_files_per_pass or 'unspecified'}",
-                "Every batch MUST keep allowed_files at or below the maximum "
-                "files per batch. Split foundation, config, source, templates, "
-                "assets, and tests into separate batches when needed.",
-                "Return exactly one JSON object with this shape:",
-                '{"project_summary":"...","batches":[{"id":"foundation",'
-                '"title":"Foundation","goal":"...","allowed_files":["path"],'
-                '"depends_on":[],"validation_notes":["note"]}]}',
-                "Use explicit allowed_files for every file the batch may create "
-                "or modify.",
-            ]
-        )
     if mode == "batch":
         allowed_files = _format_prompt_list(value.get("allowed_files"))
         completed_files = _format_prompt_list(value.get("completed_files"))

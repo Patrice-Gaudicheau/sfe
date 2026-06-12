@@ -18,7 +18,7 @@ from sfe.discovery import (
     discover_workspace_context,
     load_discovered_context,
 )
-from sfe.contracts import build_contract
+from sfe.contracts import SFEContract, build_contract
 from sfe.discovery_router import DiscoveryRouter
 from sfe.execution_mode_router import (
     EXECUTION_MODE_CONSOLE_OUTPUT,
@@ -37,12 +37,14 @@ from sfe.multipass import (
     MultiPassConfig,
     MultiPassIssue,
     MultiPassRunSummary,
-    parse_multipass_plan_json,
     provider_diagnostics_from_execution_summary,
     resolve_multipass_config,
     should_use_multipass,
-    validate_multipass_plan,
     validate_patch_paths_in_batch,
+)
+from sfe.multipass_planner import (
+    MultiPassPlanner,
+    create_configured_multipass_planner,
 )
 from sfe.patching import (
     HunkAccountingDiagnostics,
@@ -260,6 +262,7 @@ class RunPipeline:
         workspace_manager: WorkspaceManager | None = None,
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
+        multipass_planner: MultiPassPlanner | None = None,
         git_preparer: GitWorkspacePreparer | None = None,
         progress_callback: RunProgressCallback | None = None,
     ) -> None:
@@ -271,6 +274,7 @@ class RunPipeline:
         self.execution_mode_router = (
             execution_mode_router or create_configured_execution_mode_router()
         )
+        self.multipass_planner = multipass_planner or create_configured_multipass_planner()
         self.git_preparer = git_preparer or GitWorkspacePreparer()
         self.progress_callback = progress_callback
 
@@ -648,25 +652,26 @@ class RunPipeline:
         discovery_result: DiscoveryResult,
         dry_run_result: ExecutionResult,
         selected_source_refs: tuple[str, ...],
-        contract: object,
+        contract: SFEContract,
         config: MultiPassConfig,
     ) -> RunResult:
         self._emit_progress(
             "multi_pass_planning_started",
             "SFE: multi-pass planning started",
         )
-        plan_result = self.backend.plan_multipass(  # type: ignore[arg-type]
+        planner_response = self.multipass_planner.plan(
             contract,
             config=config,
         )
-        if not plan_result.answer:
-            issue = RunIssue(
+        if planner_response.issue is not None or planner_response.plan is None:
+            planning_issue = planner_response.issue or MultiPassIssue(
                 "multi_pass_planning",
-                plan_result.error_category or "invalid_response",
+                "invalid_response",
             )
+            issue = _run_issue_from_multipass(planning_issue)
             summary = _build_multi_pass_summary(
                 status="failed",
-                failed_issue=_multi_pass_issue_from_run_issue(issue),
+                failed_issue=planning_issue,
             )
             return _multipass_run_result(
                 status=RUN_STATUS_FAILED,
@@ -677,61 +682,20 @@ class RunPipeline:
                 worktree_created=worktree_created,
                 discovery_result=discovery_result,
                 dry_run_result=dry_run_result,
-                patch_result=plan_result,
+                patch_result=None,
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
                 multi_pass_summary=summary,
             )
 
-        parsed_plan = parse_multipass_plan_json(plan_result.answer)
-        if isinstance(parsed_plan, MultiPassIssue):
-            issue = _run_issue_from_multipass(parsed_plan)
-            summary = _build_multi_pass_summary(
-                status="failed",
-                failed_issue=parsed_plan,
-            )
-            return _multipass_run_result(
-                status=RUN_STATUS_FAILED,
-                issue=issue,
-                execution_mode_decision=execution_mode_decision,
-                session=session,
-                active_workspace=active_workspace,
-                worktree_created=worktree_created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=plan_result,
-                selected_source_refs=selected_source_refs,
-                git_preparation=git_preparation,
-                multi_pass_summary=summary,
-            )
-        plan_issue = validate_multipass_plan(parsed_plan, config)
-        if plan_issue is not None:
-            issue = _run_issue_from_multipass(plan_issue)
-            summary = _build_multi_pass_summary(
-                status="failed",
-                project_summary=parsed_plan.project_summary,
-                passes_total=len(parsed_plan.batches),
-                failed_issue=plan_issue,
-            )
-            return _multipass_run_result(
-                status=RUN_STATUS_FAILED,
-                issue=issue,
-                execution_mode_decision=execution_mode_decision,
-                session=session,
-                active_workspace=active_workspace,
-                worktree_created=worktree_created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=plan_result,
-                selected_source_refs=selected_source_refs,
-                git_preparation=git_preparation,
-                multi_pass_summary=summary,
-            )
+        parsed_plan = planner_response.plan
 
         self._emit_progress(
             "multi_pass_plan_completed",
             f"SFE: multi-pass plan completed: {len(parsed_plan.batches)} passes",
             multi_pass_total=len(parsed_plan.batches),
+            provider_name=planner_response.provider_name,
+            model=planner_response.model,
         )
         pass_results: list[MultiPassBatchResult] = []
         completed_summaries: list[PatchSummary] = []
@@ -1086,13 +1050,13 @@ class RunPipeline:
             worktree_created=worktree_created,
             discovery_result=discovery_result,
             dry_run_result=dry_run_result,
-            patch_result=latest_patch_result or plan_result,
+            patch_result=latest_patch_result,
             patch_generated=True,
             patch_applied=True,
             patch_summary=aggregate_summary,
             changed_files=aggregate_summary.paths if aggregate_summary else (),
             selected_source_refs=selected_source_refs,
-            executor_provider=_executor_provider(latest_patch_result or plan_result),
+            executor_provider=_executor_provider(latest_patch_result),
             warnings=_warnings_for_summary(aggregate_summary),
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,

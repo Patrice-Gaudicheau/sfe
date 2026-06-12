@@ -200,6 +200,7 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIn("SFE_PATCH_NORMALIZE_HUNK_COUNTS=", text)
         self.assertIn("SFE_LEMONADE_ROUTER_MODEL=", text)
         self.assertIn("SFE_LEMONADE_EXECUTOR_MODEL=", text)
+        self.assertNotIn("SFE_MULTIPASS_PLANNER_MODEL", text)
         self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{12,}")
         for line in text.splitlines():
             if line.startswith("OPENAI_API_KEY="):

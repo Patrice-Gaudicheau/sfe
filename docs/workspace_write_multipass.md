@@ -16,7 +16,7 @@ Large monolithic patches are brittle:
 - one malformed diff can lose the whole scaffold attempt;
 - a single patch with many files is harder to validate and diagnose.
 
-Multi-pass reduces that risk by asking the provider to split the work into
+Multi-pass reduces that risk by asking the Router to split the work into
 bounded batches, then validating and promoting each batch independently.
 
 ## How It Works
@@ -25,9 +25,9 @@ The core flow is:
 
 1. SFE routes the task to `workspace_write`.
 2. SFE discovers context as usual.
-3. The executor produces a strict JSON multi-pass plan.
+3. The Router produces and validates a strict JSON multi-pass plan.
 4. The plan contains batches with explicit `allowed_files`.
-5. For each batch, the executor produces one strict git diff.
+5. For each validated batch, the Executor produces one strict git diff.
 6. SFE rejects patches that touch files outside that batch's `allowed_files`.
 7. SFE parses and validates the patch using the normal strict patch machinery.
 8. SFE applies and promotes the batch before moving to the next batch.
@@ -42,7 +42,6 @@ multi-pass path does not relax `parse_unified_diff`.
 SFE_WORKSPACE_WRITE_MULTIPASS=auto
 SFE_MULTIPASS_MAX_PASSES=10
 SFE_MULTIPASS_MAX_FILES_PER_PASS=10
-SFE_MULTIPASS_PLANNER_MODEL=
 ```
 
 `SFE_WORKSPACE_WRITE_MULTIPASS` accepts:
@@ -57,8 +56,11 @@ is `10`, chosen after live Symfony-style scaffold validation.
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` limits each batch's `allowed_files`. The
 default is `10`.
 
-`SFE_MULTIPASS_PLANNER_MODEL` is optional. When blank, the planner uses the
-configured executor model.
+`SFE_MULTIPASS_PLANNER_MODEL` is deprecated and ignored. Existing `.env` files
+containing it still load, but the value no longer influences planning. Configure
+multi-pass planning quality through the Router provider and model settings,
+such as `SFE_PROVIDER_ROUTER`, `SFE_OPENAI_ROUTER_MODEL`,
+`SFE_CODEXCLI_ROUTER_MODEL`, or another supported Router model variable.
 
 ## Report Fields
 
@@ -98,5 +100,6 @@ Automatic resume is not implemented in v1. If a later batch fails after earlier
 batches were promoted, SFE reports `safe_resume_possible`, the failed pass id,
 and promoted files, but it does not yet resume the run automatically.
 
-Multi-pass also remains bounded by provider quality: the planner must produce
-valid strict JSON, and each batch must produce a valid strict patch.
+Multi-pass also remains bounded by provider quality: the Router planner must
+produce valid strict JSON, and the Executor must produce a valid strict patch
+for each batch.
