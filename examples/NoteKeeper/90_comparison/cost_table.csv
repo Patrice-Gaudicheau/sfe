@@ -1,0 +1,1 @@
+scenario,task_id,provider,router_model,discovery_model,executor_model,input_tokens,cached_input_tokens,output_tokens,total_estimated_cost,currency,latency_or_wall_clock_duration,success,notes

@@ -1,0 +1,114 @@
+{
+  "scenario": "sfe_single_model_gpt54",
+  "description": "SFE run with gpt-5.4 used for routing, discovery, and execution.",
+  "runs": [
+    {
+      "task_id": "01_initial_scaffold",
+      "provider": null,
+      "models": {
+        "primary": "gpt-5.4",
+        "router": "gpt-5.4",
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "reviewer": null
+      },
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "total_estimated_cost": null,
+      "currency": null,
+      "latency_or_wall_clock_duration": null,
+      "success": null,
+      "generated_or_modified_files": [],
+      "manual_verification_notes": null
+    },
+    {
+      "task_id": "02_persistence_and_crud",
+      "provider": null,
+      "models": {
+        "primary": "gpt-5.4",
+        "router": "gpt-5.4",
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "reviewer": null
+      },
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "total_estimated_cost": null,
+      "currency": null,
+      "latency_or_wall_clock_duration": null,
+      "success": null,
+      "generated_or_modified_files": [],
+      "manual_verification_notes": null
+    },
+    {
+      "task_id": "03_labels_search_archive",
+      "provider": null,
+      "models": {
+        "primary": "gpt-5.4",
+        "router": "gpt-5.4",
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "reviewer": null
+      },
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "total_estimated_cost": null,
+      "currency": null,
+      "latency_or_wall_clock_duration": null,
+      "success": null,
+      "generated_or_modified_files": [],
+      "manual_verification_notes": null
+    },
+    {
+      "task_id": "04_checklists_and_pinning",
+      "provider": null,
+      "models": {
+        "primary": "gpt-5.4",
+        "router": "gpt-5.4",
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "reviewer": null
+      },
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "total_estimated_cost": null,
+      "currency": null,
+      "latency_or_wall_clock_duration": null,
+      "success": null,
+      "generated_or_modified_files": [],
+      "manual_verification_notes": null
+    },
+    {
+      "task_id": "05_responsive_polish",
+      "provider": null,
+      "models": {
+        "primary": "gpt-5.4",
+        "router": "gpt-5.4",
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "reviewer": null
+      },
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "total_estimated_cost": null,
+      "currency": null,
+      "latency_or_wall_clock_duration": null,
+      "success": null,
+      "generated_or_modified_files": [],
+      "manual_verification_notes": null
+    }
+  ],
+  "totals": {
+    "input_tokens": null,
+    "cached_input_tokens": null,
+    "output_tokens": null,
+    "total_estimated_cost": null,
+    "currency": null,
+    "latency_or_wall_clock_duration": null
+  }
+}
