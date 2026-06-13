@@ -17,6 +17,14 @@ const labelsToggle = document.getElementById("labelsToggle");
 const orbitsToggle = document.getElementById("orbitsToggle");
 const scaleToggle = document.getElementById("scaleToggle");
 
+const DEFAULT_TIME_SPEED = 2;
+
+function setStatus(message) {
+  if (statusText) {
+    statusText.textContent = message;
+  }
+}
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x02040b);
 
@@ -457,10 +465,10 @@ const starField = new THREE.Points(
 scene.add(starField);
 
 let simulationRunning = true;
-let timeSpeed = Number(speedRange.value);
-let showLabels = labelsToggle.checked;
-let showOrbits = orbitsToggle.checked;
-let realisticScale = scaleToggle.checked;
+let timeSpeed = Number(speedRange?.value ?? DEFAULT_TIME_SPEED);
+let showLabels = labelsToggle?.checked ?? true;
+let showOrbits = orbitsToggle?.checked ?? true;
+let realisticScale = scaleToggle?.checked ?? false;
 let simTime = 0;
 let seasonPreset = "spring";
 let focusedBodyName = "Sun";
@@ -508,7 +516,7 @@ function setBodyFocus(name) {
   const pos = new THREE.Vector3();
   entry.mesh.getWorldPosition(pos);
   focusTarget.copy(pos);
-  statusText.textContent = `Focused ${name}`;
+  setStatus(`Focused ${name}`);
 }
 
 function setSeasonPreset(name) {
@@ -517,12 +525,12 @@ function setSeasonPreset(name) {
   if (!earthBody || !moonBody) return;
   seasonPreset = name in seasonOffsets ? name : "spring";
   setBodyFocus("Earth");
-  statusText.textContent = {
+  setStatus({
     spring: "Spring equinox preset selected",
     summer: "Summer solstice preset selected",
     autumn: "Autumn equinox preset selected",
     winter: "Winter solstice preset selected",
-  }[seasonPreset];
+  }[seasonPreset]);
 }
 
 const seasonOrder = ["spring", "summer", "autumn", "winter"];
@@ -576,7 +584,7 @@ document.querySelectorAll("[data-camera]").forEach((button) => {
       camera.position.set(0, 8, 12);
       focusTarget.set(0, 0, 0);
     }
-    statusText.textContent = `Camera preset: ${button.textContent}`;
+    setStatus(`Camera preset: ${button.textContent}`);
   });
 });
 
@@ -584,38 +592,38 @@ document.querySelectorAll("[data-season]").forEach((button) => {
   button.addEventListener("click", () => setSeasonPreset(button.dataset.season));
 });
 
-playPauseButton.addEventListener("click", () => {
+playPauseButton?.addEventListener("click", () => {
   simulationRunning = !simulationRunning;
   playPauseButton.textContent = simulationRunning ? "Pause" : "Play";
   playPauseButton.setAttribute("aria-pressed", String(simulationRunning));
-  statusText.textContent = simulationRunning ? "Simulation resumed" : "Simulation paused";
+  setStatus(simulationRunning ? "Simulation resumed" : "Simulation paused");
 });
 
-speedRange.addEventListener("input", () => {
+speedRange?.addEventListener("input", () => {
   timeSpeed = Number(speedRange.value);
-  statusText.textContent = `Time speed set to ${timeSpeed.toFixed(1)}`;
+  setStatus(`Time speed set to ${timeSpeed.toFixed(1)}`);
 });
 
-labelsToggle.addEventListener("change", () => {
+labelsToggle?.addEventListener("change", () => {
   showLabels = labelsToggle.checked;
   bodies.forEach(({ label }) => {
     label.visible = showLabels;
   });
-  statusText.textContent = showLabels ? "Labels shown" : "Labels hidden";
+  setStatus(showLabels ? "Labels shown" : "Labels hidden");
 });
 
-orbitsToggle.addEventListener("change", () => {
+orbitsToggle?.addEventListener("change", () => {
   showOrbits = orbitsToggle.checked;
   orbitGroup.visible = showOrbits;
-  statusText.textContent = showOrbits ? "Orbits shown" : "Orbits hidden";
+  setStatus(showOrbits ? "Orbits shown" : "Orbits hidden");
 });
 
-scaleToggle.addEventListener("change", () => {
+scaleToggle?.addEventListener("change", () => {
   realisticScale = scaleToggle.checked;
   applyScaleMode();
-  statusText.textContent = realisticScale
+  setStatus(realisticScale
     ? "Realistic scale mode enabled"
-    : "Educational scale mode enabled";
+    : "Educational scale mode enabled");
 });
 
 renderer.domElement.addEventListener("pointerdown", (event) => {
@@ -643,13 +651,13 @@ window.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
   if (event.key === " ") {
     event.preventDefault();
-    playPauseButton.click();
+    playPauseButton?.click();
   } else if (key === "l") {
-    labelsToggle.click();
+    labelsToggle?.click();
   } else if (key === "o") {
-    orbitsToggle.click();
+    orbitsToggle?.click();
   } else if (key === "r") {
-    scaleToggle.click();
+    scaleToggle?.click();
   } else if (key === "s") {
     const currentIndex = seasonOrder.indexOf(seasonPreset);
     const nextSeason = seasonOrder[(currentIndex + 1) % seasonOrder.length];
@@ -677,7 +685,7 @@ function onResize() {
 window.addEventListener("resize", onResize);
 onResize();
 
-statusText.textContent = "Solar system data model and procedural textures loaded";
+setStatus("Solar system data model and procedural textures loaded");
 updateInfoPanel("Sun");
 setSeasonPreset("spring");
 applyScaleMode();
