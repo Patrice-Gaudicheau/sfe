@@ -12,10 +12,10 @@
       "cached_input_tokens": 0,
       "currency": null,
       "generated_or_modified_files": [
-        "examples/NoteKeeper/20_sfe_single_model_gpt54/app/index.html",
-        "examples/NoteKeeper/20_sfe_single_model_gpt54/app/styles.css",
-        "examples/NoteKeeper/20_sfe_single_model_gpt54/app/app.js",
-        "examples/NoteKeeper/20_sfe_single_model_gpt54/app/README.md"
+        "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/index.html",
+        "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/styles.css",
+        "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/app.js",
+        "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/README.md"
       ],
       "input_tokens": 4844,
       "latency_or_wall_clock_duration": 20528,
@@ -60,7 +60,7 @@
       "validation_error": null
     }
   ],
-  "scenario": "sfe_single_model_gpt54",
+  "scenario": "sfe_single_model_gpt54_nomultipass",
   "totals": {
     "cached_input_tokens": 0,
     "currency": null,

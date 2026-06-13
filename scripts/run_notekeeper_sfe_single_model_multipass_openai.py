@@ -1,8 +1,8 @@
-"""Run the NoteKeeper SFE split-model OpenAI benchmark scenario.
+"""Run the NoteKeeper SFE single-model multipass OpenAI benchmark scenario.
 
 This runner reuses the NoteKeeper SFE benchmark helpers from the single-model
-scenario while configuring split OpenAI models and multipass auto mode for the
-scenario 30 benchmark.
+no-multipass scenario while configuring one OpenAI model for all SFE roles and
+multipass auto mode for the scenario 40 benchmark.
 """
 
 from __future__ import annotations
@@ -46,20 +46,18 @@ sys.modules[_single_spec.name] = base
 _single_spec.loader.exec_module(base)
 
 
-DEFAULT_ROUTER_MODEL = "gpt-5.4"
-DEFAULT_DISCOVERY_MODEL = "gpt-5.4"
-DEFAULT_EXECUTOR_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_TIMEOUT_SECONDS = 300.0
 DEFAULT_MAX_PATCH_OUTPUT_TOKENS = 30_000
-SCENARIO_NAME = "sfe_split_gpt54_router_gpt54mini_executor"
+SCENARIO_NAME = "sfe_single_model_gpt54_multipass"
 SCENARIO_DESCRIPTION = (
-    "SFE split-model run with gpt-5.4 for routing/discovery/planning and "
-    "gpt-5.4-mini for execution."
+    "SFE single-model run with gpt-5.4 for routing, discovery, multipass "
+    "planning, and execution, with multipass auto."
 )
 
 NOTEKEEPER_ROOT = PROJECT_ROOT / "examples" / "NoteKeeper"
 BRIEF_DIR = NOTEKEEPER_ROOT / "00_project_brief"
-SCENARIO_DIR = NOTEKEEPER_ROOT / "30_sfe_split_gpt54_router_gpt54mini_executor"
+SCENARIO_DIR = NOTEKEEPER_ROOT / "40_sfe_single_model_gpt54_multipass"
 APP_DIR = SCENARIO_DIR / "app"
 RUNS_DIR = SCENARIO_DIR / "runs"
 TOKEN_USAGE_PATH = SCENARIO_DIR / "token_usage.json"
@@ -83,7 +81,7 @@ def main() -> int:
         config = _validate_args(args)
         context = base.load_benchmark_context()
         base.validate_benchmark_layout(context.tasks)
-        with tempfile.TemporaryDirectory(prefix="notekeeper-sfe-split-model-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="notekeeper-sfe-single-model-multipass-") as tmp:
             workspace_root = Path(tmp) / "workspace"
             base.build_controlled_workspace(workspace_root, context)
             base.validate_controlled_workspace(workspace_root)
@@ -93,7 +91,7 @@ def main() -> int:
 
             if not os.getenv("OPENAI_API_KEY"):
                 raise MissingOpenAIAPIKeyError(
-                    "OPENAI_API_KEY is required for the NoteKeeper SFE split-model run."
+                    "OPENAI_API_KEY is required for the NoteKeeper SFE single-model multipass run."
                 )
             run_sfe_scenario(context=context, config=config, workspace_root=workspace_root)
         return 0
@@ -118,13 +116,11 @@ def configure_shared_paths() -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the NoteKeeper SFE split-model OpenAI benchmark with gpt-5.4 "
-            "for router/discovery/planning and gpt-5.4-mini for execution."
+            "Run the NoteKeeper SFE single-model OpenAI benchmark with one "
+            "model for router, discovery, multipass planning, and execution."
         )
     )
-    parser.add_argument("--router-model", default=DEFAULT_ROUTER_MODEL)
-    parser.add_argument("--discovery-model", default=DEFAULT_DISCOVERY_MODEL)
-    parser.add_argument("--executor-model", default=DEFAULT_EXECUTOR_MODEL)
+    parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument(
         "--dry-run-validate-inputs",
@@ -135,22 +131,17 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _validate_args(args: argparse.Namespace) -> dict[str, Any]:
-    router_model = str(args.router_model or "").strip()
-    discovery_model = str(args.discovery_model or "").strip()
-    executor_model = str(args.executor_model or "").strip()
-    if not router_model:
-        raise NoteKeeperSFERunnerError("--router-model must not be empty.")
-    if not discovery_model:
-        raise NoteKeeperSFERunnerError("--discovery-model must not be empty.")
-    if not executor_model:
-        raise NoteKeeperSFERunnerError("--executor-model must not be empty.")
+    model = str(args.model or "").strip()
+    if not model:
+        raise NoteKeeperSFERunnerError("--model must not be empty.")
     if args.timeout <= 0:
         raise NoteKeeperSFERunnerError("--timeout must be greater than 0.")
     return {
-        "router_model": router_model,
-        "discovery_model": discovery_model,
-        "executor_model": executor_model,
-        "multipass_planner_model": router_model,
+        "model": model,
+        "router_model": model,
+        "discovery_model": model,
+        "executor_model": model,
+        "multipass_planner_model": model,
         "timeout": float(args.timeout),
         "dry_run_validate_inputs": bool(args.dry_run_validate_inputs),
     }
@@ -188,10 +179,11 @@ def run_sfe_scenario(
     write_report(run_results, config)
     if failed:
         raise NoteKeeperSFERunnerError(
-            "SFE split-model run failed; see task artifacts for diagnostics."
+            "SFE single-model multipass run failed; see task artifacts for diagnostics."
         )
     print("success: true")
     print(f"scenario: {SCENARIO_NAME}")
+    print(f"model: {config['model']}")
     print(f"router_model: {config['router_model']}")
     print(f"discovery_model: {config['discovery_model']}")
     print(f"executor_model: {config['executor_model']}")
@@ -383,7 +375,7 @@ def build_sfe_task_prompt(*, context: BenchmarkContext, task: TaskInstruction) -
 
 def model_record(config: dict[str, Any]) -> dict[str, Any]:
     return {
-        "primary": config["router_model"],
+        "primary": config["model"],
         "router": config["router_model"],
         "discovery": config["discovery_model"],
         "executor": config["executor_model"],
@@ -471,6 +463,7 @@ def write_token_usage(run_results: list[dict[str, Any]], config: dict[str, Any])
                 ),
             },
             "configuration": {
+                "model": config["model"],
                 "router_model": config["router_model"],
                 "discovery_model": config["discovery_model"],
                 "executor_model": config["executor_model"],
@@ -485,13 +478,13 @@ def write_report(run_results: list[dict[str, Any]], config: dict[str, Any]) -> N
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     all_success = all(result["success"] for result in run_results)
     lines = [
-        "# SFE split-model gpt-5.4 router / gpt-5.4-mini executor report",
+        "# SFE single-model gpt-5.4 multipass report",
         "",
         f"Generated at: `{generated_at}`",
         "",
         "## Scenario",
         "",
-        "- Workflow: SFE split-model run.",
+        "- Workflow: SFE single-model run with multipass auto.",
         f"- Provider: `{PROVIDER_NAME}`.",
         f"- Router model: `{config['router_model']}`.",
         f"- Discovery model: `{config['discovery_model']}`.",
@@ -529,7 +522,7 @@ def write_report(run_results: list[dict[str, Any]], config: dict[str, Any]) -> N
             "",
             "## Model Routing",
             "",
-            "Multipass planning is created through `create_configured_multipass_planner()` with the OpenAI router provider factory and `SFE_OPENAI_ROUTER_MODEL`, so planner calls use the router model unless the SFE internals change.",
+            "Multipass planning is created through `create_configured_multipass_planner()` with the OpenAI router provider factory and `SFE_OPENAI_ROUTER_MODEL`. This runner sets that model to the same value as router, discovery, and executor.",
             "",
             "## Generated Files",
             "",
@@ -551,6 +544,7 @@ def _print_dry_run_success(
     print("success: true")
     print("mode: dry-run-validate-inputs")
     print(f"scenario: {SCENARIO_NAME}")
+    print(f"model: {config['model']}")
     print(f"router_model: {config['router_model']}")
     print(f"discovery_model: {config['discovery_model']}")
     print(f"executor_model: {config['executor_model']}")

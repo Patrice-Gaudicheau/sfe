@@ -43,12 +43,12 @@ from sfe_tui.executors import OpenAIReadOnlyExecutor  # noqa: E402
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_TIMEOUT_SECONDS = 300.0
 DEFAULT_MAX_PATCH_OUTPUT_TOKENS = 30_000
-SCENARIO_NAME = "sfe_single_model_gpt54"
-SCENARIO_DESCRIPTION = "SFE run with gpt-5.4 used for routing, discovery, and execution."
+SCENARIO_NAME = "sfe_single_model_gpt54_nomultipass"
+SCENARIO_DESCRIPTION = "SFE run with gpt-5.4 used for routing, discovery, and execution, with multipass forced off."
 
 NOTEKEEPER_ROOT = PROJECT_ROOT / "examples" / "NoteKeeper"
 BRIEF_DIR = NOTEKEEPER_ROOT / "00_project_brief"
-SCENARIO_DIR = NOTEKEEPER_ROOT / "20_sfe_single_model_gpt54"
+SCENARIO_DIR = NOTEKEEPER_ROOT / "20_sfe_single_model_gpt54_nomultipass"
 APP_DIR = SCENARIO_DIR / "app"
 RUNS_DIR = SCENARIO_DIR / "runs"
 TOKEN_USAGE_PATH = SCENARIO_DIR / "token_usage.json"
@@ -666,7 +666,7 @@ def write_report(run_results: list[dict[str, Any]], config: dict[str, Any]) -> N
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     all_success = all(result["success"] for result in run_results)
     lines = [
-        "# SFE single-model gpt-5.4 report",
+        "# SFE single-model gpt-5.4 no-multipass report",
         "",
         f"Generated at: `{generated_at}`",
         "",

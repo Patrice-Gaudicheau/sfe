@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RUNNER_PATH = PROJECT_ROOT / "scripts" / "run_notekeeper_sfe_single_model_openai.py"
+RUNNER_PATH = PROJECT_ROOT / "scripts" / "run_notekeeper_sfe_single_model_nomultipass_openai.py"
 
 spec = importlib.util.spec_from_file_location("notekeeper_sfe_single_model_runner", RUNNER_PATH)
 assert spec is not None

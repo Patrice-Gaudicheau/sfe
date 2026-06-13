@@ -1,4 +1,4 @@
-# SFE single-model gpt-5.4 report
+# SFE single-model gpt-5.4 no-multipass report
 
 Generated at: `2026-06-13T09:52:27+00:00`
 
@@ -29,10 +29,10 @@ Generated at: `2026-06-13T09:52:27+00:00`
 
 ## Generated Files
 
-- `examples/NoteKeeper/20_sfe_single_model_gpt54/app/index.html`
-- `examples/NoteKeeper/20_sfe_single_model_gpt54/app/styles.css`
-- `examples/NoteKeeper/20_sfe_single_model_gpt54/app/app.js`
-- `examples/NoteKeeper/20_sfe_single_model_gpt54/app/README.md`
+- `examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/index.html`
+- `examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/styles.css`
+- `examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/app.js`
+- `examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/README.md`
 
 ## Notes
 
@@ -45,6 +45,8 @@ The scenario was run exactly once with:
 ```bash
 python3 scripts/run_notekeeper_sfe_single_model_openai.py --model gpt-5.4
 ```
+
+Note: this is the historical command used for the run. The runner and scenario folder were later renamed from `single_model` to `single_model_nomultipass` for benchmark clarity.
 
 The run used the real SFE `RunPipeline` / `RunRequest` path. Multipass was forced off intentionally for scenario 20 to isolate SFE routing, discovery, context selection, and executor behavior without testing the multi-pass scaffold workflow. A future scenario named `40_sfe_single_model_gpt54_multipass` will test the same model with multipass enabled.
 

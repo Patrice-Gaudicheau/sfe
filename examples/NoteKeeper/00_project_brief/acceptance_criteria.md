@@ -3,8 +3,9 @@
 ## Project shape
 
 - For the baseline scenario, the generated app must live in `examples/NoteKeeper/10_baseline_full_context_gpt54/app/`.
-- For the SFE single-model scenario, the generated app must live in `examples/NoteKeeper/20_sfe_single_model_gpt54/app/`.
-- For the SFE split-model scenario, the generated app must live in `examples/NoteKeeper/30_sfe_split_gpt54_router_gpt54mini_executor/app/`.
+- For the SFE single-model no-multipass scenario, the generated app must live in `examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/`.
+- For the SFE split-model multipass-auto scenario, the generated app must live in `examples/NoteKeeper/30_sfe_split_gpt54_router_gpt54mini_executor/app/`.
+- For the SFE single-model multipass-auto scenario, the generated app must live in `examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/`.
 - Each scenario app folder must contain exactly the required runtime files: `index.html`, `styles.css`, `app.js`, and `README.md`.
 - The app runs by opening `index.html` directly in a modern browser.
 - No server, package manager, framework, build step, external dependency, or external asset is required.

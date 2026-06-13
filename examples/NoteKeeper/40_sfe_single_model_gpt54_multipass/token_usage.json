@@ -1,0 +1,127 @@
+{
+  "configuration": {
+    "discovery_model": "gpt-5.4",
+    "executor_model": "gpt-5.4",
+    "model": "gpt-5.4",
+    "multipass": "auto",
+    "multipass_planner_model": "gpt-5.4",
+    "router_model": "gpt-5.4"
+  },
+  "description": "SFE run with gpt-5.4 used for routing, discovery, multipass planning, and execution, with multipass auto.",
+  "runs": [
+    {
+      "cached_input_tokens": null,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": null,
+      "latency_or_wall_clock_duration": null,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": null,
+      "provider": null,
+      "success": null,
+      "task_id": "01_initial_scaffold",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": null,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": null,
+      "latency_or_wall_clock_duration": null,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": null,
+      "provider": null,
+      "success": null,
+      "task_id": "02_persistence_and_crud",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": null,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": null,
+      "latency_or_wall_clock_duration": null,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": null,
+      "provider": null,
+      "success": null,
+      "task_id": "03_labels_search_archive",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": null,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": null,
+      "latency_or_wall_clock_duration": null,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": null,
+      "provider": null,
+      "success": null,
+      "task_id": "04_checklists_and_pinning",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": null,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": null,
+      "latency_or_wall_clock_duration": null,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": null,
+      "provider": null,
+      "success": null,
+      "task_id": "05_responsive_polish",
+      "total_estimated_cost": null
+    }
+  ],
+  "scenario": "sfe_single_model_gpt54_multipass",
+  "totals": {
+    "cached_input_tokens": null,
+    "currency": null,
+    "input_tokens": null,
+    "latency_or_wall_clock_duration": null,
+    "output_tokens": null,
+    "total_estimated_cost": null
+  }
+}
