@@ -1,114 +1,149 @@
 {
-  "scenario": "baseline_full_context_gpt54",
   "description": "Baseline full-context run with gpt-5.4 only, without SFE.",
   "runs": [
     {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/index.html",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/app.js",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 2820,
+      "latency_or_wall_clock_duration": 21826,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 4489,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
       "task_id": "01_initial_scaffold",
-      "provider": null,
-      "models": {
-        "primary": "gpt-5.4",
-        "router": null,
-        "discovery": null,
-        "executor": "gpt-5.4",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
+      "total_estimated_cost": null
     },
     {
+      "cached_input_tokens": 2304,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/index.html",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/app.js",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 6609,
+      "latency_or_wall_clock_duration": 26393,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 6240,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
       "task_id": "02_persistence_and_crud",
-      "provider": null,
-      "models": {
-        "primary": "gpt-5.4",
-        "router": null,
-        "discovery": null,
-        "executor": "gpt-5.4",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
+      "total_estimated_cost": null
     },
     {
+      "cached_input_tokens": 2304,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/index.html",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/app.js",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 8027,
+      "latency_or_wall_clock_duration": 29302,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 7689,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
       "task_id": "03_labels_search_archive",
-      "provider": null,
-      "models": {
-        "primary": "gpt-5.4",
-        "router": null,
-        "discovery": null,
-        "executor": "gpt-5.4",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
+      "total_estimated_cost": null
     },
     {
+      "cached_input_tokens": 2304,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/index.html",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/app.js",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 9230,
+      "latency_or_wall_clock_duration": 39550,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 9477,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
       "task_id": "04_checklists_and_pinning",
-      "provider": null,
-      "models": {
-        "primary": "gpt-5.4",
-        "router": null,
-        "discovery": null,
-        "executor": "gpt-5.4",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
+      "total_estimated_cost": null
     },
     {
-      "task_id": "05_responsive_polish",
-      "provider": null,
+      "cached_input_tokens": 2304,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/index.html",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/app.js",
+        "examples/NoteKeeper/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 10774,
+      "latency_or_wall_clock_duration": 37770,
+      "manual_verification_notes": null,
       "models": {
-        "primary": "gpt-5.4",
-        "router": null,
         "discovery": null,
         "executor": "gpt-5.4",
-        "reviewer": null
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
       },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
+      "output_tokens": 10291,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "05_responsive_polish",
+      "total_estimated_cost": null
     }
   ],
+  "scenario": "baseline_full_context_gpt54",
   "totals": {
-    "input_tokens": null,
-    "cached_input_tokens": null,
-    "output_tokens": null,
-    "total_estimated_cost": null,
+    "cached_input_tokens": 9216,
     "currency": null,
-    "latency_or_wall_clock_duration": null
+    "input_tokens": 37460,
+    "latency_or_wall_clock_duration": 154841,
+    "output_tokens": 38186,
+    "total_estimated_cost": null
   }
 }
