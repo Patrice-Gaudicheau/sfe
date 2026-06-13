@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoteKeeper</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div class="app-header__top">
+        <div>
+          <p class="eyebrow">Local notes workspace</p>
+          <h1>NoteKeeper</h1>
+        </div>
+        <form class="search-form" role="search">
+          <label for="search-notes">Search notes</label>
+          <input
+            id="search-notes"
+            name="search"
+            type="search"
+            placeholder="Search titles, text, checklist items, or labels"
+            autocomplete="off"
+          >
+        </form>
+      </div>
+
+      <nav class="view-switcher" aria-label="Notes views">
+        <button type="button" class="view-switcher__button is-active" aria-pressed="true">
+          Active notes
+        </button>
+        <button type="button" class="view-switcher__button" aria-pressed="false">
+          Archived notes
+        </button>
+      </nav>
+    </header>
+
+    <section class="composer" aria-labelledby="create-note-heading">
+      <div class="section-heading">
+        <h2 id="create-note-heading">Create a note</h2>
+        <p>Capture a quick thought, task list, or reference for later.</p>
+      </div>
+
+      <form class="note-form">
+        <div class="form-grid">
+          <div class="field-group">
+            <label for="note-title">Title</label>
+            <input
+              id="note-title"
+              name="title"
+              type="text"
+              placeholder="Optional note title"
+              autocomplete="off"
+            >
+          </div>
+
+          <div class="field-group">
+            <label for="note-labels">Labels</label>
+            <input
+              id="note-labels"
+              name="labels"
+              type="text"
+              placeholder="Ideas, Work, Personal"
+              autocomplete="off"
+            >
+          </div>
+        </div>
+
+        <fieldset class="note-type-group">
+          <legend>Note type</legend>
+          <label>
+            <input type="radio" name="note-type" value="text" checked>
+            Text note
+          </label>
+          <label>
+            <input type="radio" name="note-type" value="checklist">
+            Checklist note
+          </label>
+        </fieldset>
+
+        <div class="field-group">
+          <label for="note-body">Body</label>
+          <textarea
+            id="note-body"
+            name="body"
+            rows="5"
+            placeholder="Write your note here"
+          ></textarea>
+        </div>
+
+        <section class="checklist-editor" aria-labelledby="checklist-editor-heading">
+          <div class="section-heading section-heading--compact">
+            <h3 id="checklist-editor-heading">Checklist items</h3>
+            <p>Add items for checklist-style notes.</p>
+          </div>
+
+          <div class="checklist-editor__controls">
+            <label for="new-checklist-item">New checklist item</label>
+            <div class="checklist-editor__input-row">
+              <input
+                id="new-checklist-item"
+                name="new-checklist-item"
+                type="text"
+                placeholder="Add an item"
+                autocomplete="off"
+              >
+              <button type="button">Add item</button>
+            </div>
+          </div>
+
+          <ul class="checklist-editor__list" aria-label="Checklist items being edited">
+            <li>No checklist items yet.</li>
+          </ul>
+        </section>
+
+        <div class="form-actions">
+          <button type="submit">Save note</button>
+          <button type="reset">Clear form</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="notes-area" aria-labelledby="notes-heading">
+      <div class="section-heading">
+        <h2 id="notes-heading">Notes</h2>
+        <p>Saved notes will appear here as cards in a later task.</p>
+      </div>
+
+      <div class="notes-results" aria-live="polite">
+        <article class="note-card note-card--placeholder">
+          <h3>Placeholder note card</h3>
+          <p>Your active and archived notes will be rendered in this area.</p>
+          <p>Use the form above to prepare a text note or checklist note.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

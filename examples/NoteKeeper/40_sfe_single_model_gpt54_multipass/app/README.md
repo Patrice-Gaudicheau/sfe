@@ -1,0 +1,21 @@
+# NoteKeeper
+
+NoteKeeper is a small browser-only notes application scaffold designed to run locally with no server, build step, or dependencies.
+
+## Run
+
+Open `index.html` directly in a modern browser by double-clicking the file or using your browser's Open File option.
+
+## Current scaffold includes
+
+- NoteKeeper app shell with the product name in the interface
+- Search input area in the header
+- View controls for active and archived notes
+- Note creation form with title, body, labels, and note type options
+- Checklist-oriented form area for checklist note entry
+- Placeholder notes section and empty-state messaging
+- Baseline styling for a clean, original card-based layout
+
+## Scope for later tasks
+
+This initial scaffold is focused on structure and usability only. Full note CRUD behavior, localStorage persistence, search results, archive management, checklist interactions, pinning, and complete manual verification flows are expected to be implemented in later benchmark tasks.

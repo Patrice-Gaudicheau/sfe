@@ -1,0 +1,138 @@
+{
+  "all_promoted_files": [
+    "app/index.html",
+    "app/styles.css",
+    "app/app.js",
+    "app/README.md"
+  ],
+  "created_files_by_pass": {
+    "app-shell-html": [
+      "app/index.html"
+    ],
+    "baseline-styles": [
+      "app/styles.css"
+    ],
+    "readme-scaffold": [
+      "app/README.md"
+    ],
+    "scaffold-behavior": [
+      "app/app.js"
+    ]
+  },
+  "enabled": true,
+  "failed_pass_id": null,
+  "failed_pass_issue": null,
+  "pass_results": [
+    {
+      "allowed_files": [
+        "app/index.html"
+      ],
+      "created_files": [
+        "app/index.html"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "app-shell-html",
+      "patch_paths": [
+        "app/index.html"
+      ],
+      "promoted_files": [
+        "app/index.html"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Create semantic NoteKeeper app shell"
+    },
+    {
+      "allowed_files": [
+        "app/styles.css"
+      ],
+      "created_files": [
+        "app/styles.css"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "baseline-styles",
+      "patch_paths": [
+        "app/styles.css"
+      ],
+      "promoted_files": [
+        "app/styles.css"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Add original responsive baseline styling"
+    },
+    {
+      "allowed_files": [
+        "app/app.js"
+      ],
+      "created_files": [
+        "app/app.js"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "scaffold-behavior",
+      "patch_paths": [
+        "app/app.js"
+      ],
+      "promoted_files": [
+        "app/app.js"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Wire initial client-side scaffold interactions"
+    },
+    {
+      "allowed_files": [
+        "app/README.md"
+      ],
+      "created_files": [
+        "app/README.md"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "readme-scaffold",
+      "patch_paths": [
+        "app/README.md"
+      ],
+      "promoted_files": [
+        "app/README.md"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Document scaffold usage and current scope"
+    }
+  ],
+  "passes_completed": 4,
+  "passes_total": 4,
+  "project_summary": "Build the initial NoteKeeper static app scaffold in app/ with a browser-openable HTML shell, original baseline styling, a note creation form that supports text and checklist modes, active/archive view controls, placeholder notes area, minimal client-side interaction for scaffold usability, and README run/feature notes aligned with the benchmark's first task while preserving room for later CRUD and persistence passes.",
+  "promoted_files_by_pass": {
+    "app-shell-html": [
+      "app/index.html"
+    ],
+    "baseline-styles": [
+      "app/styles.css"
+    ],
+    "readme-scaffold": [
+      "app/README.md"
+    ],
+    "scaffold-behavior": [
+      "app/app.js"
+    ]
+  },
+  "safe_resume_possible": false,
+  "status": "completed"
+}
