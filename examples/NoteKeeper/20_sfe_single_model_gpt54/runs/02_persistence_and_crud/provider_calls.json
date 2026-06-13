@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 561,
+      "latency": 1311,
+      "latency_ms": 1311,
+      "model": "gpt-5.4",
+      "output_tokens": 45,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "02_persistence_and_crud",
+      "total_tokens": 606
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 946,
+      "latency": 1493,
+      "latency_ms": 1493,
+      "model": "gpt-5.4",
+      "output_tokens": 81,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "02_persistence_and_crud",
+      "total_tokens": 1027
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 3465,
+      "latency": 21835,
+      "latency_ms": 21835,
+      "model": "gpt-5.4",
+      "output_tokens": 5302,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "02_persistence_and_crud",
+      "total_tokens": 8767
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [
+      "examples/NoteKeeper/20_sfe_single_model_gpt54/app/index.html",
+      "examples/NoteKeeper/20_sfe_single_model_gpt54/app/styles.css",
+      "examples/NoteKeeper/20_sfe_single_model_gpt54/app/app.js",
+      "examples/NoteKeeper/20_sfe_single_model_gpt54/app/README.md"
+    ],
+    "input_tokens": 4844,
+    "latency_or_wall_clock_duration": 20528,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_off": true,
+    "output_tokens": 3785,
+    "provider": "openai-api",
+    "provider_call_count": 3,
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
+    "task_id": "01_initial_scaffold",
+    "task_title": "Initial static scaffold",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 25073
+  },
+  "sfe": {
+    "changed_files": [
+      "app/"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task is to create and edit specific files in the workspace for a static app scaffold, so it requires modifying workspace contents rather than only printing text or taking an external action."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": true,
+    "git_initial_commit_hash": "0e0ea0c",
+    "issue": null,
+    "multi_pass_summary": null,
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "file_count": 4,
+      "hunk_count": 4,
+      "lines_added": 513,
+      "lines_removed": 0,
+      "modified_paths": [],
+      "paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md"
+    ],
+    "status": "completed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected",
+      "large_change",
+      "multiple_creations"
+    ]
+  }
+}

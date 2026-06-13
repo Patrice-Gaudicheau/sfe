@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoteKeeper</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">Local notes</p>
+        <h1>NoteKeeper</h1>
+      </div>
+      <form class="search-form" role="search">
+        <label for="search-input">Search notes</label>
+        <input
+          id="search-input"
+          name="search"
+          type="search"
+          placeholder="Search titles, text, labels, or checklist items"
+          disabled
+        >
+      </form>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <nav class="view-switcher" aria-label="Note views">
+          <button type="button" class="view-button is-active" aria-pressed="true">
+            Active notes
+          </button>
+          <button type="button" class="view-button" aria-pressed="false">
+            Archived notes
+          </button>
+        </nav>
+
+        <section class="composer card-panel" aria-labelledby="create-note-heading">
+          <div class="section-heading">
+            <h2 id="create-note-heading">Create a note</h2>
+            <p>Static scaffold for the NoteKeeper workflow.</p>
+          </div>
+
+          <form class="note-form">
+            <div class="field-group">
+              <label for="note-title">Title</label>
+              <input id="note-title" name="title" type="text" placeholder="Optional title">
+            </div>
+
+            <div class="field-group">
+              <label for="note-type">Note type</label>
+              <select id="note-type" name="type">
+                <option value="text">Text note</option>
+                <option value="checklist">Checklist note</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="note-body">Body</label>
+              <textarea
+                id="note-body"
+                name="body"
+                rows="5"
+                placeholder="Write a quick note"
+              ></textarea>
+            </div>
+
+            <div class="field-group">
+              <label for="note-labels">Labels</label>
+              <input
+                id="note-labels"
+                name="labels"
+                type="text"
+                placeholder="Ideas, Work, Personal"
+              >
+            </div>
+
+            <div class="checklist-placeholder" aria-live="polite">
+              <p>Checklist items will appear here when checklist support is added.</p>
+            </div>
+
+            <button type="submit" class="primary-button">Save note</button>
+          </form>
+        </section>
+      </aside>
+
+      <section class="content-area" aria-labelledby="notes-heading">
+        <div class="section-heading">
+          <h2 id="notes-heading">Notes</h2>
+          <p>Saved note cards will appear here in a responsive grid.</p>
+        </div>
+        <div id="notes-region" class="notes-grid" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
