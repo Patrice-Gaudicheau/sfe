@@ -1,0 +1,941 @@
+<<<SFE_FILE path="app/index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>SolarSystem3D</title>
+    <meta
+      name="description"
+      content="SolarSystem3D is a static Three.js solar system simulator shell with responsive controls, selected-body details, and a procedural starfield."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar" aria-label="Solar system controls">
+        <div class="brand-block">
+          <h1>SolarSystem3D</h1>
+          <p class="subtitle">
+            Static educational 3D solar system simulator
+          </p>
+        </div>
+
+        <section class="control-panel primary-controls" aria-labelledby="simulation-controls-heading">
+          <h2 id="simulation-controls-heading">Simulation</h2>
+          <div class="control-row grouped">
+            <button id="playPauseButton" type="button" aria-pressed="true">
+              Pause
+            </button>
+
+            <label class="range-control" for="timeSpeed">
+              <span>Time speed</span>
+              <input
+                id="timeSpeed"
+                name="timeSpeed"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="35"
+              />
+            </label>
+
+            <output id="timeSpeedValue" for="timeSpeed" aria-live="polite">
+              35x
+            </output>
+          </div>
+
+          <div class="control-row grouped">
+            <label for="datePreset">Date / season</label>
+            <select id="datePreset" name="datePreset">
+              <option value="live">Live simulation position</option>
+              <option value="spring-equinox">Spring equinox</option>
+              <option value="summer-solstice">Summer solstice</option>
+              <option value="autumn-equinox">Autumn equinox</option>
+              <option value="winter-solstice">Winter solstice</option>
+            </select>
+          </div>
+
+          <div class="control-row preset-grid" role="group" aria-label="Season presets">
+            <button type="button" data-season="spring-equinox">
+              Spring equinox
+            </button>
+            <button type="button" data-season="summer-solstice">
+              Summer solstice
+            </button>
+            <button type="button" data-season="autumn-equinox">
+              Autumn equinox
+            </button>
+            <button type="button" data-season="winter-solstice">
+              Winter solstice
+            </button>
+          </div>
+        </section>
+
+        <section class="control-panel secondary-controls" aria-labelledby="view-controls-heading">
+          <h2 id="view-controls-heading">View</h2>
+
+          <div class="control-row preset-grid" role="group" aria-label="Camera presets">
+            <button type="button" data-camera="overview">Overview</button>
+            <button type="button" data-camera="inner">Inner planets</button>
+            <button type="button" data-camera="earth">Earth and Moon</button>
+            <button type="button" data-camera="outer">Outer planets</button>
+            <button type="button" data-camera="sun">Sun view</button>
+          </div>
+
+          <div class="toggle-grid" role="group" aria-label="Scene display toggles">
+            <label class="toggle-control" for="toggleLabels">
+              <input id="toggleLabels" name="toggleLabels" type="checkbox" checked />
+              <span>Labels</span>
+            </label>
+
+            <label class="toggle-control" for="toggleOrbits">
+              <input id="toggleOrbits" name="toggleOrbits" type="checkbox" checked />
+              <span>Orbits</span>
+            </label>
+
+            <label class="toggle-control" for="scaleMode">
+              <input id="scaleMode" name="scaleMode" type="checkbox" />
+              <span>Realistic scale</span>
+            </label>
+          </div>
+        </section>
+      </header>
+
+      <main class="main-layout">
+        <section class="scene-panel" aria-label="3D solar system scene">
+          <div id="sceneContainer" class="scene-container">
+            <div class="scene-overlay" aria-hidden="true">
+              <p>Drag to orbit · Scroll or pinch to zoom · Right-drag to pan</p>
+            </div>
+          </div>
+        </section>
+
+        <aside class="sidebar" aria-label="Selected body information and notes">
+          <section class="info-card selected-body-card" aria-labelledby="selected-body-heading">
+            <h2 id="selected-body-heading">Selected body</h2>
+
+            <dl class="info-list">
+              <div>
+                <dt>Name</dt>
+                <dd id="bodyName">Sun</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd id="bodyType">Star</dd>
+              </div>
+              <div>
+                <dt>Distance</dt>
+                <dd id="bodyDistance">Placeholder</dd>
+              </div>
+              <div>
+                <dt>Orbital period</dt>
+                <dd id="bodyOrbitPeriod">Placeholder</dd>
+              </div>
+              <div>
+                <dt>Rotation period</dt>
+                <dd id="bodyRotationPeriod">Placeholder</dd>
+              </div>
+            </dl>
+
+            <p id="bodyDescription" class="body-description">
+              This panel will update as bodies are added and selection behavior is
+              wired in later tasks.
+            </p>
+          </section>
+
+          <section class="info-card notes-card" aria-labelledby="astronomy-notes-heading">
+            <h2 id="astronomy-notes-heading">Astronomy notes</h2>
+            <p>
+              This simulator uses simplified educational positions. Seasons are
+              caused by Earth’s axial tilt relative to sunlight, not by Earth
+              being closer to or farther from the Sun.
+            </p>
+            <p class="support-note">
+              If your browser blocks ES module loading from <code>file://</code>,
+              run a simple static server as described in the README.
+            </p>
+          </section>
+
+          <section class="info-card shortcuts-card" aria-labelledby="shortcuts-heading">
+            <h2 id="shortcuts-heading">Control placeholders</h2>
+            <ul>
+              <li>Play/pause simulation</li>
+              <li>Adjust time speed</li>
+              <li>Switch scale modes</li>
+              <li>Toggle labels and orbit paths</li>
+              <li>Jump to camera presets</li>
+            </ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+<<<END_SFE_FILE>>>
+
+<<<SFE_FILE path="app/styles.css">
+:root {
+  color-scheme: dark;
+  --bg: #050816;
+  --bg-elevated: rgba(9, 15, 34, 0.88);
+  --bg-elevated-strong: rgba(14, 24, 52, 0.94);
+  --border: rgba(145, 171, 255, 0.18);
+  --text: #ecf2ff;
+  --muted: #a8b8df;
+  --accent: #7db3ff;
+  --accent-strong: #5e8fff;
+  --focus: #ffe07a;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  --radius: 16px;
+  --control-height: 2.6rem;
+  --panel-gap: 1rem;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, rgba(44, 67, 126, 0.22), transparent 30%),
+    linear-gradient(180deg, #02040b 0%, #071122 100%);
+  color: var(--text);
+}
+
+body {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+output {
+  font: inherit;
+}
+
+button,
+input,
+select {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(17, 28, 59, 0.86);
+  color: var(--text);
+}
+
+button {
+  min-height: var(--control-height);
+  padding: 0.7rem 0.95rem;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+button:hover,
+button:focus-visible {
+  background: rgba(33, 50, 99, 0.92);
+  border-color: rgba(164, 187, 255, 0.5);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+input[type="range"] {
+  width: 100%;
+}
+
+select {
+  min-height: var(--control-height);
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1.2fr);
+  gap: var(--panel-gap);
+  padding: 1rem;
+  background: linear-gradient(
+    180deg,
+    rgba(2, 6, 20, 0.92),
+    rgba(5, 11, 28, 0.82)
+  );
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+
+.brand-block,
+.control-panel,
+.info-card,
+.scene-container {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.brand-block {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.brand-block h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2vw, 1.85rem);
+  line-height: 1.1;
+}
+
+.subtitle {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.control-panel {
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+}
+
+.control-panel h2,
+.info-card h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.control-row {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.control-row.grouped {
+  grid-template-columns: auto minmax(160px, 1fr) auto;
+  align-items: end;
+}
+
+.range-control {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.range-control span,
+.control-row > label {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+output {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  min-width: 4.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(11, 19, 42, 0.9);
+}
+
+.preset-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.65rem;
+}
+
+.toggle-control {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: var(--control-height);
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(12, 20, 44, 0.9);
+}
+
+.toggle-control input {
+  margin: 0;
+}
+
+.main-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--panel-gap);
+  padding: 1rem;
+}
+
+.scene-panel {
+  min-height: 0;
+}
+
+.scene-container {
+  position: relative;
+  min-height: calc(100vh - 11.5rem);
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, #09132b 0%, #02050d 75%);
+}
+
+.scene-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.scene-overlay {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 2;
+  pointer-events: none;
+  max-width: min(32rem, calc(100% - 2rem));
+  padding: 0.65rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(4, 8, 20, 0.65);
+  color: var(--muted);
+  font-size: 0.9rem;
+  backdrop-filter: blur(6px);
+}
+
+.scene-overlay p {
+  margin: 0;
+}
+
+.sidebar {
+  display: grid;
+  gap: var(--panel-gap);
+  align-content: start;
+}
+
+.info-card {
+  padding: 1rem;
+}
+
+.info-list {
+  margin: 0.85rem 0 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.info-list div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.info-list dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.info-list dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.body-description,
+.info-card p,
+.info-card li {
+  color: var(--muted);
+}
+
+.support-note code {
+  color: var(--text);
+}
+
+.shortcuts-card ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
+}
+
+@media (max-width: 1100px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-container {
+    min-height: 60vh;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar,
+  .main-layout {
+    padding: 0.75rem;
+  }
+
+  .control-row.grouped {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .scene-container {
+    min-height: 52vh;
+  }
+
+  .scene-overlay {
+    border-radius: 14px;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand-block,
+  .control-panel,
+  .info-card {
+    padding: 0.9rem;
+  }
+
+  button,
+  select,
+  .toggle-control,
+  output {
+    font-size: 0.95rem;
+  }
+}
+<<<END_SFE_FILE>>>
+
+<<<SFE_FILE path="app/app.js">
+import * as THREE from "https://unpkg.com/three@0.165.0/build/three.module.js";
+
+const sceneContainer = document.getElementById("sceneContainer");
+const playPauseButton = document.getElementById("playPauseButton");
+const timeSpeedInput = document.getElementById("timeSpeed");
+const timeSpeedValue = document.getElementById("timeSpeedValue");
+const datePreset = document.getElementById("datePreset");
+const seasonButtons = document.querySelectorAll("[data-season]");
+const bodyName = document.getElementById("bodyName");
+const bodyType = document.getElementById("bodyType");
+const bodyDistance = document.getElementById("bodyDistance");
+const bodyOrbitPeriod = document.getElementById("bodyOrbitPeriod");
+const bodyRotationPeriod = document.getElementById("bodyRotationPeriod");
+const bodyDescription = document.getElementById("bodyDescription");
+
+const state = {
+  isPlaying: true,
+  timeSpeed: Number(timeSpeedInput.value),
+  selectedSeason: "live",
+};
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: false,
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(sceneContainer.clientWidth, sceneContainer.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+sceneContainer.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02050d);
+
+const camera = new THREE.PerspectiveCamera(
+  52,
+  sceneContainer.clientWidth / sceneContainer.clientHeight,
+  0.1,
+  2000
+);
+camera.position.set(0, 28, 78);
+
+const ambientLight = new THREE.AmbientLight(0x8aa4ff, 0.6);
+scene.add(ambientLight);
+
+const sunLight = new THREE.PointLight(0xffe1a8, 2.8, 0, 2);
+sunLight.position.set(0, 0, 0);
+scene.add(sunLight);
+
+const rimLight = new THREE.DirectionalLight(0x7aa2ff, 0.8);
+rimLight.position.set(-40, 20, 25);
+scene.add(rimLight);
+
+const solarGroup = new THREE.Group();
+scene.add(solarGroup);
+
+const orbitGuideMaterial = new THREE.MeshBasicMaterial({
+  color: 0x2f4f88,
+  transparent: true,
+  opacity: 0.22,
+  wireframe: true,
+});
+
+const orbitGuideGeometry = new THREE.TorusGeometry(18, 0.05, 6, 120);
+const orbitGuide = new THREE.Mesh(orbitGuideGeometry, orbitGuideMaterial);
+orbitGuide.rotation.x = Math.PI / 2;
+solarGroup.add(orbitGuide);
+
+const sunMaterial = new THREE.MeshStandardMaterial({
+  map: createSunTexture(),
+  emissive: new THREE.Color(0xffa83a),
+  emissiveIntensity: 1.15,
+  roughness: 0.8,
+  metalness: 0,
+});
+
+const sunMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(5.8, 48, 48),
+  sunMaterial
+);
+solarGroup.add(sunMesh);
+
+const accentPlanet = new THREE.Mesh(
+  new THREE.SphereGeometry(1.6, 32, 32),
+  new THREE.MeshStandardMaterial({
+    map: createPlanetTexture({
+      base: "#4d86ff",
+      accent: "#7ecf7a",
+      cloud: "#ffffff",
+    }),
+    roughness: 1,
+    metalness: 0,
+  })
+);
+accentPlanet.position.set(18, 0, 0);
+solarGroup.add(accentPlanet);
+
+const secondaryPlanet = new THREE.Mesh(
+  new THREE.SphereGeometry(2.4, 32, 32),
+  new THREE.MeshStandardMaterial({
+    map: createPlanetTexture({
+      base: "#c58e4b",
+      accent: "#9d5c32",
+      cloud: "#edcaa8",
+    }),
+    roughness: 1,
+    metalness: 0,
+  })
+);
+secondaryPlanet.position.set(-27, 0, -10);
+solarGroup.add(secondaryPlanet);
+
+const starfield = createStarfield(1800, 900);
+scene.add(starfield);
+
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+
+  if (state.isPlaying) {
+    const speedFactor = 0.12 + state.timeSpeed * 0.012;
+    sunMesh.rotation.y += delta * 0.2;
+    accentPlanet.position.x = Math.cos(clock.elapsedTime * 0.25 * speedFactor) * 18;
+    accentPlanet.position.z = Math.sin(clock.elapsedTime * 0.25 * speedFactor) * 18;
+    accentPlanet.rotation.y += delta * 0.9;
+
+    secondaryPlanet.position.x =
+      Math.cos(clock.elapsedTime * 0.12 * speedFactor + 1.4) * 29;
+    secondaryPlanet.position.z =
+      Math.sin(clock.elapsedTime * 0.12 * speedFactor + 1.4) * 29;
+    secondaryPlanet.rotation.y += delta * 0.6;
+  }
+
+  renderer.render(scene, camera);
+}
+
+function updateTimeSpeedLabel() {
+  state.timeSpeed = Number(timeSpeedInput.value);
+  timeSpeedValue.value = `${state.timeSpeed}x`;
+}
+
+function updatePlayPause() {
+  state.isPlaying = !state.isPlaying;
+  playPauseButton.textContent = state.isPlaying ? "Pause" : "Play";
+  playPauseButton.setAttribute("aria-pressed", String(state.isPlaying));
+}
+
+function applySeasonSelection(value) {
+  state.selectedSeason = value;
+  datePreset.value = value;
+  bodyName.textContent = "Sun";
+  bodyType.textContent = "Star";
+  bodyDistance.textContent = "0 AU";
+  bodyOrbitPeriod.textContent = "Center of the system";
+  bodyRotationPeriod.textContent = "Approx. 27 Earth days";
+  bodyDescription.textContent =
+    value === "live"
+      ? "Baseline scene shell active. Later tasks add all planets, selection, labels, camera presets, and season positioning."
+      : `Selected preset: ${value.replaceAll("-", " ")}. Later tasks will move Earth and the Moon to this simplified educational season position.`;
+}
+
+function handleResize() {
+  const width = sceneContainer.clientWidth;
+  const height = sceneContainer.clientHeight;
+
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(width, height);
+}
+
+function createSunTexture() {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  const gradient = ctx.createRadialGradient(
+    size * 0.5,
+    size * 0.5,
+    size * 0.08,
+    size * 0.5,
+    size * 0.5,
+    size * 0.5
+  );
+  gradient.addColorStop(0, "#fff8c9");
+  gradient.addColorStop(0.3, "#ffc85a");
+  gradient.addColorStop(0.68, "#ff8c2e");
+  gradient.addColorStop(1, "#7f2600");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 550; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = Math.random() * 18 + 4;
+    ctx.fillStyle = `rgba(255, ${160 + Math.random() * 70}, 0, ${0.06 + Math.random() * 0.08})`;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createPlanetTexture({ base, accent, cloud }) {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 220; i += 1) {
+    ctx.fillStyle = `${accent}${Math.floor(100 + Math.random() * 100).toString(16).padStart(2, "0")}`;
+    ctx.beginPath();
+    ctx.arc(
+      Math.random() * size,
+      Math.random() * size,
+      Math.random() * 24 + 6,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+
+  for (let i = 0; i < 120; i += 1) {
+    ctx.fillStyle = `${cloud}${Math.floor(60 + Math.random() * 80).toString(16).padStart(2, "0")}`;
+    ctx.beginPath();
+    ctx.ellipse(
+      Math.random() * size,
+      Math.random() * size,
+      Math.random() * 18 + 8,
+      Math.random() * 8 + 4,
+      Math.random() * Math.PI,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createStarfield(count, spread) {
+  const positions = new Float32Array(count * 3);
+
+  for (let i = 0; i < count; i += 1) {
+    const radius = spread * (0.55 + Math.random() * 0.45);
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const index = i * 3;
+
+    positions[index] = radius * Math.sin(phi) * Math.cos(theta);
+    positions[index + 1] = radius * Math.cos(phi);
+    positions[index + 2] = radius * Math.sin(phi) * Math.sin(theta);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+  const material = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 1.6,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.88,
+  });
+
+  return new THREE.Points(geometry, material);
+}
+
+playPauseButton.addEventListener("click", updatePlayPause);
+timeSpeedInput.addEventListener("input", updateTimeSpeedLabel);
+datePreset.addEventListener("change", (event) => {
+  applySeasonSelection(event.target.value);
+});
+
+seasonButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    applySeasonSelection(button.dataset.season);
+  });
+});
+
+window.addEventListener("resize", handleResize);
+
+updateTimeSpeedLabel();
+applySeasonSelection("live");
+handleResize();
+animate();
+<<<END_SFE_FILE>>>
+
+<<<SFE_FILE path="app/README.md">
+# SolarSystem3D
+
+SolarSystem3D is a static Three.js browser app scaffold for an educational solar system simulator. This first task establishes the simulator-first layout, a full-screen 3D scene shell, responsive control areas, a selected-body information panel placeholder, baseline lighting, resize handling, and a procedurally generated star background.
+
+## Current status
+
+This is the initial scene shell, not the fully completed simulator yet. The current implementation includes:
+
+- A simulator-first page with the 3D scene visible on first load
+- Responsive top control regions for simulation and view settings
+- Placeholder controls for:
+  - play/pause
+  - time speed
+  - date and season presets
+  - camera presets
+  - label visibility
+  - orbit visibility
+  - scale mode
+- A selected-body panel scaffold
+- A baseline Three.js scene with:
+  - perspective camera
+  - WebGL renderer
+  - ambient, point, and directional lighting
+  - resize handling
+  - procedural starfield
+  - temporary solar-system placeholder meshes
+
+Later tasks will add the full Sun, all eight planets, Earth's Moon, visible orbit paths for each body, procedural body textures, labels, selection, camera focus behavior, seasons, and additional accessibility polish.
+
+## Run instructions
+
+This app uses a pinned browser ES module import for Three.js:
+
+- `https://unpkg.com/three@0.165.0/build/three.module.js`
+
+Because some browsers restrict ES module loading from `file://`, the most reliable way to run the app is with a simple static server.
+
+### Recommended
+
+```bash
+cd app
+python3 -m http.server 8000
+```
+
+Then open:
+
+- `http://localhost:8000/`
+
+### Direct open from disk
+
+You can try opening `app/index.html` directly in a browser. Depending on browser security rules for module imports, this may or may not work consistently. If the scene does not load, use the static-server method above.
+
+## Project files
+
+```text
+app/
+  index.html
+  styles.css
+  app.js
+  README.md
+```
+
+## Accessibility notes
+
+- Controls use semantic HTML elements such as `button`, `input`, `select`, `label`, `section`, and `aside`.
+- Visible focus styles are included for keyboard navigation.
+- The 3D scene remains the primary surface instead of being hidden behind a landing page.
+- Controls are visible without hover-only interaction.
+- Placeholder controls are keyboard reachable even before all behaviors are fully wired.
+
+## Astronomy simplifications
+
+This project is intended as an educational approximation rather than a precision astronomy tool.
+
+Current and planned simplifications include:
+
+- Simplified orbital layout for readability
+- Educational season positioning rather than ephemeris-grade dates
+- A clear note that seasons are caused by Earth's axial tilt relative to sunlight, not by Earth being closer to the Sun
+- Procedural textures instead of downloaded planetary imagery
+
+## Manual verification for this task
+
+Use these checks for the current scaffold task:
+
+1. Open the app in a browser, ideally through a static server.
+2. Confirm the first screen is the simulator layout rather than a landing page.
+3. Confirm the scene fills the main content area and resizes with the browser window.
+4. Confirm the top controls are visible and readable on desktop widths.
+5. Confirm the selected-body panel appears on the right on desktop and stacks below on smaller screens.
+6. Confirm the time speed slider updates its visible value.
+7. Confirm the play/pause button changes text when pressed.
+8. Confirm season buttons and the date selector update the placeholder selected-body description text.
+9. Confirm a starry 3D background is visible.
+10. Confirm keyboard tab focus is visible on buttons, the slider, checkboxes, and the select menu.
+
+## Notes for reviewers
+
+- No backend, package manager, bundler, or build step is required.
+- No external image textures or audio are used.
+- Three.js is pinned to an explicit version.
+- This task focuses on static scaffolding and the baseline scene shell only.
+<<<END_SFE_FILE>>>

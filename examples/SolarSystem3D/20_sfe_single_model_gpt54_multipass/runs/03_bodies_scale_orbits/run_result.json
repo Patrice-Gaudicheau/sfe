@@ -1,0 +1,250 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+    ],
+    "input_tokens": 98784,
+    "latency_or_wall_clock_duration": 262903,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 46535,
+    "provider": "openai-api",
+    "provider_call_count": 6,
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
+    "task_id": "03_bodies_scale_orbits",
+    "task_title": "Bodies, educational scale, rings, and orbit paths",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 263039
+  },
+  "sfe": {
+    "changed_files": [
+      "app/app.js",
+      "app/index.html",
+      "app/README.md",
+      "app/styles.css"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires modifying specific files in the workspace to implement the app changes described."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": false,
+    "git_initial_commit_hash": null,
+    "issue": null,
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/README.md",
+        "app/app.js",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "created_files_by_pass": {},
+      "enabled": true,
+      "failed_pass_id": null,
+      "failed_pass_issue": null,
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "scene-body-system",
+          "patch_paths": [
+            "app/app.js",
+            "app/index.html",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/README.md",
+            "app/app.js",
+            "app/index.html"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Build solar system body scene graph",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/index.html",
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "orbits-and-rings",
+          "patch_paths": [
+            "app/app.js"
+          ],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Add orbit paths and Saturn ring system",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "labels-and-scene-copy",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "promoted_files": [
+            "app/styles.css"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Integrate labels or coherent placeholders",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "docs-task3-refresh",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "skipped",
+          "title": "Refresh README for task 3",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+          ]
+        }
+      ],
+      "passes_completed": 3,
+      "passes_total": 4,
+      "project_summary": "Implement task 3 by upgrading the current static Three.js shell into a coherent educational-scale solar system scene with all required bodies, Saturn\u2019s rings, visible orbit paths, Moon orbit behavior, and basic labels/placeholders while keeping the current simulator-first layout and shared body/texture data model intact.",
+      "promoted_files_by_pass": {
+        "labels-and-scene-copy": [
+          "app/styles.css"
+        ],
+        "scene-body-system": [
+          "app/README.md",
+          "app/app.js",
+          "app/index.html"
+        ]
+      },
+      "safe_resume_possible": false,
+      "status": "completed"
+    },
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 7,
+      "lines_added": 0,
+      "lines_removed": 59,
+      "modified_paths": [
+        "app/app.js",
+        "app/index.html",
+        "app/README.md",
+        "app/styles.css"
+      ],
+      "paths": [
+        "app/app.js",
+        "app/index.html",
+        "app/README.md",
+        "app/styles.css"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/README.md",
+      "app/app.js",
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/03_bodies_scale_orbits.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "completed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected",
+      "multi_pass_path_outside_allowed_files:app/index.html",
+      "multi_pass_path_outside_allowed_files:app/README.md",
+      "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+    ]
+  }
+}

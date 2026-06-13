@@ -1,0 +1,692 @@
+<<<SFE_FILE path="app/index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>SolarSystem3D</title>
+    <meta
+      name="description"
+      content="SolarSystem3D is a static Three.js solar system simulator with educational-scale bodies, visible orbit paths, labels, and procedural textures."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar" aria-label="Solar system controls">
+        <div class="brand-block">
+          <h1>SolarSystem3D</h1>
+          <p class="subtitle">
+            Static educational 3D solar system simulator
+          </p>
+        </div>
+
+        <section
+          class="control-panel primary-controls"
+          aria-labelledby="simulation-controls-heading"
+        >
+          <div class="panel-heading-row">
+            <h2 id="simulation-controls-heading">Simulation</h2>
+            <p class="panel-summary">
+              Play, pause, adjust time, or jump to simplified season views.
+            </p>
+          </div>
+
+          <div class="control-row control-row-simulation">
+            <button id="playPauseButton" type="button" aria-pressed="true">
+              Pause
+            </button>
+
+            <div class="time-speed-block">
+              <label class="range-control" for="timeSpeed">
+                <span>Time speed</span>
+                <input
+                  id="timeSpeed"
+                  name="timeSpeed"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="35"
+                  aria-describedby="timeSpeedHint"
+                />
+              </label>
+
+              <output id="timeSpeedValue" for="timeSpeed" aria-live="polite">
+                35x
+              </output>
+            </div>
+
+            <small id="timeSpeedHint" class="control-hint">
+              Slower settings help inspect inner orbits; faster settings make
+              outer-planet motion easier to notice.
+            </small>
+          </div>
+
+          <div class="control-row season-select-row">
+            <label for="datePreset">Date / season preset</label>
+            <select id="datePreset" name="datePreset">
+              <option value="live">Live simulation position</option>
+              <option value="spring-equinox">Spring equinox</option>
+              <option value="summer-solstice">Summer solstice</option>
+              <option value="autumn-equinox">Autumn equinox</option>
+              <option value="winter-solstice">Winter solstice</option>
+            </select>
+          </div>
+
+          <div
+            class="control-row preset-grid season-grid"
+            role="group"
+            aria-label="Season presets"
+          >
+            <button type="button" data-season="spring-equinox">
+              Spring equinox
+            </button>
+            <button type="button" data-season="summer-solstice">
+              Summer solstice
+            </button>
+            <button type="button" data-season="autumn-equinox">
+              Autumn equinox
+            </button>
+            <button type="button" data-season="winter-solstice">
+              Winter solstice
+            </button>
+          </div>
+
+          <div class="season-explainer" aria-labelledby="season-explainer-title">
+            <p id="season-explainer-title" class="season-explainer-title">
+              Why seasons happen
+            </p>
+            <p class="season-explainer-copy">
+              Seasons are caused by Earth’s axial tilt relative to sunlight, not
+              by Earth being closer to or farther from the Sun. These presets use
+              simplified teaching positions: at the equinoxes the axis is not
+              leaning strongly toward or away from the Sun, while at the
+              solstices the Northern Hemisphere tilts toward or away from
+              sunlight.
+            </p>
+          </div>
+        </section>
+
+        <section
+          class="control-panel secondary-controls"
+          aria-labelledby="view-controls-heading"
+        >
+          <div class="panel-heading-row">
+            <h2 id="view-controls-heading">View</h2>
+            <p class="panel-summary">
+              Change camera framing and scene display without hiding the 3D
+              system.
+            </p>
+          </div>
+
+          <div
+            class="control-row preset-grid camera-grid"
+            role="group"
+            aria-label="Camera presets"
+          >
+            <button type="button" data-camera="overview">Overview</button>
+            <button type="button" data-camera="inner">Inner planets</button>
+            <button type="button" data-camera="earth">Earth and Moon</button>
+            <button type="button" data-camera="outer">Outer planets</button>
+            <button type="button" data-camera="sun">Sun view</button>
+          </div>
+
+          <div
+            class="toggle-grid"
+            role="group"
+            aria-label="Scene display toggles"
+          >
+            <label class="toggle-control" for="toggleLabels">
+              <input
+                id="toggleLabels"
+                name="toggleLabels"
+                type="checkbox"
+                checked
+              />
+              <span>
+                <strong>Labels</strong>
+                <small>Show body name tags</small>
+              </span>
+            </label>
+
+            <label class="toggle-control" for="toggleOrbits">
+              <input
+                id="toggleOrbits"
+                name="toggleOrbits"
+                type="checkbox"
+                checked
+              />
+              <span>
+                <strong>Orbits</strong>
+                <small>Show orbit path guides</small>
+              </span>
+            </label>
+
+            <label class="toggle-control" for="scaleMode">
+              <input id="scaleMode" name="scaleMode" type="checkbox" />
+              <span>
+                <strong>Realistic scale</strong>
+                <small>Spread distances and reduce body sizes</small>
+              </span>
+            </label>
+          </div>
+        </section>
+      </header>
+
+      <main class="main-layout">
+        <section class="scene-panel" aria-label="3D solar system scene">
+          <div
+            id="sceneContainer"
+            class="scene-container"
+            aria-describedby="sceneInteractionHint"
+          >
+            <div class="scene-overlay" aria-hidden="true">
+              <p>
+                Drag to orbit, scroll or pinch to zoom, pan to shift the view,
+                click a body to focus it, use the preset buttons for predictable
+                framing, and toggle labels or orbit guides as needed.
+              </p>
+            </div>
+
+            <p id="sceneInteractionHint" class="sr-only">
+              Drag to orbit the camera, scroll or pinch to zoom, pan to shift the
+              view, click a body to focus it, and toggle labels or orbits from
+              the view controls.
+            </p>
+
+            <div
+              id="labelsLayer"
+              class="labels-layer"
+              aria-label="Body labels"
+            ></div>
+          </div>
+        </section>
+
+        <aside
+          class="sidebar"
+          aria-label="Selected body information and notes"
+        >
+          <section
+            class="info-card selected-body-card"
+            aria-labelledby="selected-body-heading"
+          >
+            <div class="selected-body-heading-row">
+              <h2 id="selected-body-heading">Selected body</h2>
+              <span
+                id="selectionStatus"
+                class="selection-chip"
+                aria-live="polite"
+              >
+                Focused: Sun
+              </span>
+            </div>
+
+            <dl class="info-list">
+              <div>
+                <dt>Name</dt>
+                <dd id="bodyName">Sun</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd id="bodyType">Star</dd>
+              </div>
+              <div>
+                <dt>Distance</dt>
+                <dd id="bodyDistance">0 AU</dd>
+              </div>
+              <div>
+                <dt>Orbital period</dt>
+                <dd id="bodyOrbitPeriod">Center of the solar system</dd>
+              </div>
+              <div>
+                <dt>Rotation period</dt>
+                <dd id="bodyRotationPeriod">Approx. 27 Earth days</dd>
+              </div>
+            </dl>
+
+            <p id="bodyDescription" class="body-description">
+              The Sun is the star at the center of the solar system. Its light
+              and gravity drive the motion and energy balance of the planets.
+            </p>
+          </section>
+
+          <section
+            class="info-card notes-card"
+            aria-labelledby="astronomy-notes-heading"
+          >
+            <h2 id="astronomy-notes-heading">Astronomy notes</h2>
+            <p>
+              This simulator uses simplified educational positions. Seasons are
+              caused by Earth’s axial tilt relative to sunlight, not by Earth
+              being closer to or farther from the Sun.
+            </p>
+            <p>
+              The spring equinox, summer solstice, autumn equinox, and winter
+              solstice controls place Earth at simplified seasonal positions
+              rather than precision ephemeris dates.
+            </p>
+            <p>
+              Educational scale is the initial default so Mercury through
+              Neptune, Saturn’s rings, the Moon’s orbit, and body labels remain
+              easy to inspect together.
+            </p>
+            <p>
+              Realistic scale better preserves relative distance and size
+              relationships, but still keeps small bodies minimally visible so
+              they do not disappear during navigation.
+            </p>
+            <p class="support-note">
+              This app uses pinned browser ES module imports for Three.js and
+              OrbitControls. If your browser blocks module loading from
+              <code>file://</code>, run a simple static server as described in
+              the README.
+            </p>
+          </section>
+
+          <section
+            class="info-card shortcuts-card"
+            aria-labelledby="dataset-heading"
+          >
+            <h2 id="dataset-heading">Interaction notes</h2>
+            <ul>
+              <li>OrbitControls provide rotate, zoom, and pan camera movement</li>
+              <li>
+                Camera preset buttons offer overview, inner, Earth-and-Moon,
+                outer, and Sun-focused framing
+              </li>
+              <li>
+                Clicking a body or activating a visible label updates selection
+                and focuses the camera
+              </li>
+              <li>
+                Labels remain keyboard reachable when visible and highlight the
+                current selection
+              </li>
+              <li>
+                Core keyboard shortcuts: Space play/pause, L labels, O orbits, F
+                refocus selected body, 1–5 camera presets
+              </li>
+              <li>
+                No audio, music, narration, or generated sound is included in
+                this static app
+              </li>
+            </ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+<<<END_SFE_FILE>>>
+
+<<<SFE_FILE path="app/README.md">
+# SolarSystem3D
+
+SolarSystem3D is a static Three.js browser app for an educational solar system simulator. This implementation includes free camera navigation with pinned OrbitControls, camera preset buttons, clickable body selection with focus behavior, toggleable labels, season presets, scale switching, procedural textures, and a selected-body information panel.
+
+## Current implementation summary
+
+The app currently includes:
+
+- A simulator-first layout with the 3D scene visible on first load
+- Exactly 10 required modeled bodies:
+  - Sun
+  - Mercury
+  - Venus
+  - Earth
+  - Moon
+  - Mars
+  - Jupiter
+  - Saturn
+  - Uranus
+  - Neptune
+- Centralized body metadata for:
+  - name
+  - type
+  - approximate distance
+  - orbital period
+  - rotation period
+  - description
+  - educational and realistic visual radii
+  - educational and realistic orbit radii
+  - parent relationship for the Moon
+  - label placement values
+  - camera focus tuning values
+  - procedural texture style parameters
+- Procedural Canvas textures for:
+  - Sun
+  - rocky planets
+  - Earth
+  - Moon
+  - Mars
+  - Jupiter
+  - Saturn
+  - Uranus-like ice giant styling
+  - Neptune-like ice giant styling
+- A Three.js scene with:
+  - visible orbit paths
+  - Earth’s Moon orbiting Earth
+  - Saturn’s rings
+  - Earth axial tilt marker
+  - procedural starfield background
+- Simulation controls for:
+  - play / pause
+  - time speed slider
+  - live position and season preset selection
+- Season preset buttons for:
+  - spring equinox
+  - summer solstice
+  - autumn equinox
+  - winter solstice
+- View controls for:
+  - overview camera preset
+  - inner planets camera preset
+  - Earth and Moon camera preset
+  - outer planets camera preset
+  - Sun view camera preset
+  - label toggle
+  - orbit toggle
+  - educational / realistic scale switch
+- Click or tap body selection with raycasting
+- Camera focus behavior when selecting a body
+- DOM overlay labels that can be toggled and activated as focus buttons
+- Selected-body panel updates for:
+  - name
+  - type
+  - distance
+  - orbital period
+  - rotation period
+  - short description
+- Keyboard shortcuts for core review actions
+- No audio, music, sound effects, narration, or generated sound
+
+## Run instructions
+
+This app uses pinned browser ES module imports:
+
+- `https://unpkg.com/three@0.165.0/build/three.module.js`
+- `https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js`
+
+Because some browsers restrict module loading from `file://`, the recommended way to run the app is with a simple static server.
+
+### Recommended static-server method
+
+```bash
+cd app
+python3 -m http.server 8000
+```
+
+Then open:
+
+- `http://localhost:8000/`
+
+### Direct open from disk
+
+You can try opening `app/index.html` directly. Depending on the browser, ES module imports may be blocked from local disk. If the scene fails to load, use the static-server method above.
+
+## Project files
+
+```text
+app/
+  index.html
+  styles.css
+  app.js
+  README.md
+```
+
+## Camera navigation and focus behavior
+
+### OrbitControls
+
+The app uses pinned `OrbitControls` from the same explicit Three.js version.
+
+Supported navigation behavior:
+
+- Drag to orbit the camera
+- Scroll wheel or pinch to zoom
+- Pan to shift the view
+- Damping for smoother movement
+- Resize-safe camera and renderer updates
+- Practical touch interaction where the browser supports pointer and gesture handling through OrbitControls
+
+The implementation uses one main animation loop and updates controls inside that loop.
+
+### Camera presets
+
+The view panel provides predictable camera presets:
+
+- **Overview**
+- **Inner planets**
+- **Earth and Moon**
+- **Outer planets**
+- **Sun view**
+
+Behavior notes:
+
+- Presets move the camera to reusable target-plus-offset states
+- Presets animate into place instead of hard-cutting by default
+- Presets keep tracking the intended target body as bodies move
+- Changing scale mode reapplies framing coherently
+- Selecting a specific body exits preset-follow mode and switches focus to the chosen body
+
+### Click-to-focus and selection
+
+Bodies can be selected directly in the 3D scene.
+
+Selection behavior includes:
+
+- Raycasting against body meshes only
+- Ignoring labels, orbit paths, and background stars for direct selection
+- Updating the selected-body panel immediately
+- Updating the visible selected label highlight
+- Reframing the camera on the selected body
+- Using forgiving selection support for smaller bodies such as the Moon
+
+Visible labels are also interactive buttons, so a reviewer can focus a body either by clicking its 3D mesh or by activating its label.
+
+## Labels and scene toggles
+
+### Labels
+
+Labels are rendered in a DOM overlay positioned from projected 3D body positions.
+
+Current label behavior:
+
+- Labels are visible by default
+- Labels can be toggled off and on
+- Labels hide when projected offscreen or outside the visible depth range
+- Labels show stronger styling for the selected body
+- Visible labels remain keyboard reachable
+- Activating a visible label focuses and selects the corresponding body
+
+### Orbit visibility
+
+Orbit path guides can be toggled on and off from the view controls or by keyboard shortcut.
+
+### Scale mode
+
+The scale control switches between:
+
+- **Educational scale** as the default
+- **Realistic scale** for stronger relative distance and size relationships
+
+Realistic mode still keeps minimum visible body sizes so small objects do not disappear entirely during navigation and review.
+
+## Data model and visualization notes
+
+The body data model is centralized in `app.js` and drives rendering, animation, labels, selection, camera framing, and info-panel output.
+
+Each body definition includes enough information to support:
+
+- rendering radius
+- orbit path size
+- orbital motion
+- rotation behavior
+- body description text
+- distance labels
+- parent relationships
+- label placement
+- camera focus offset behavior
+- procedural texture generation
+
+The Moon is explicitly modeled as a child of Earth for orbit and focus behavior.
+
+## Seasons and astronomy simplifications
+
+This app is an educational approximation, not a precision ephemeris.
+
+Current simplifications include:
+
+- Circular or nearly circular visual orbit paths
+- Rounded, educational orbital and rotation values
+- Educational orbit compression in the default scale
+- Realistic scale that is still partially usability-adjusted
+- Minimum visible-size floors in realistic mode
+- Constant Earth axial tilt of about 23.5 degrees
+- Simplified seasonal Earth positions for:
+  - spring equinox
+  - summer solstice
+  - autumn equinox
+  - winter solstice
+- Other bodies continue following the simplified live animation model when Earth is shown in a seasonal teaching position
+- Procedural surfaces are illustrative rather than photorealistic
+
+The app and UI intentionally state that seasons are caused by Earth’s axial tilt relative to sunlight, not by Earth being closer to or farther from the Sun.
+
+## Procedural texture approach
+
+No external image textures are used.
+
+Texture-like surfaces are generated with Canvas APIs and cached in memory for reuse.
+
+Current visual strategies include:
+
+- **Sun**: warm gradients, glowing cellular detail, layered hot spots, streaks
+- **Mercury / rocky planets**: mottling, craters, and stony tonal variation
+- **Venus**: pale yellow clouded appearance with soft haze
+- **Earth**: ocean-like, land-like, cloud-like, and polar cues
+- **Moon**: cratered gray surface with maria-like variation
+- **Mars**: reddish base, darker regions, dust-like variation, polar caps
+- **Jupiter**: horizontal bands and a storm-like feature
+- **Saturn**: banded body plus visible ring system
+- **Uranus**: blue-green ice giant appearance
+- **Neptune**: deeper blue ice giant appearance with storm-like variation
+
+## Accessibility notes
+
+The app is built as a static reviewable interface with semantic controls.
+
+Current accessibility-related behavior includes:
+
+- Semantic `button`, `input`, `select`, `label`, `section`, `main`, and `aside` usage
+- Visible focus styles
+- The simulator remains the first-screen primary surface
+- Controls are visible without hover-only access
+- Core controls are keyboard reachable
+- The selected-body panel uses readable field labels
+- Labels can be hidden if they become dense on smaller screens
+- Visible labels are implemented as keyboard-focusable buttons
+- Camera presets are regular buttons
+- The scene area includes interaction guidance for screen-reader users
+- No drag-and-drop-only interaction is required
+- No audio is present
+
+### Keyboard shortcuts
+
+The current implementation supports:
+
+- `Space` — play or pause
+- `L` — toggle labels
+- `O` — toggle orbit guides
+- `F` — refocus the currently selected body
+- `1` — overview preset
+- `2` — inner planets preset
+- `3` — Earth and Moon preset
+- `4` — outer planets preset
+- `5` — Sun view preset
+
+## Performance and reviewability notes
+
+The implementation keeps the static browser app reviewable and reasonably efficient.
+
+Current decisions include:
+
+- One main `requestAnimationFrame` loop
+- Reused meshes, materials, labels, and orbit lines
+- Reused cached procedural textures
+- OrbitControls updated within the same loop
+- No repeated listener attachment during animation
+- Bounded body count and label count
+- Resize handling updates camera aspect ratio and renderer size
+- Camera focus uses interpolation instead of rebuilding scene objects
+- Scale changes update existing transforms instead of duplicating bodies
+
+## Manual verification steps
+
+1. Run the app with `python3 -m http.server 8000` from the `app/` folder, then open `http://localhost:8000/`.
+2. Confirm the first visible screen is the simulator itself, not a landing page.
+3. Confirm the Sun, all eight planets, and Earth’s Moon are visible in the scene.
+4. Confirm Saturn has visible rings.
+5. Confirm visible orbit paths exist for the planets and the Moon.
+6. Confirm every required body has a visible procedural texture or texture-like surface.
+7. Drag in the scene and confirm free camera orbiting works.
+8. Zoom with wheel or pinch and confirm zoom works.
+9. Pan and confirm the view shifts without breaking rendering.
+10. Use the camera preset buttons:
+    - Overview
+    - Inner planets
+    - Earth and Moon
+    - Outer planets
+    - Sun view
+11. Confirm each preset produces a predictable framing.
+12. Click the Sun in the scene and confirm:
+    - it becomes selected
+    - the selected-body panel updates
+    - the camera focuses toward it
+13. Repeat click selection for Earth, Moon, and at least one outer planet such as Jupiter or Neptune.
+14. Confirm the selected-body panel shows:
+    - name
+    - type
+    - approximate distance
+    - orbital period
+    - rotation period
+    - short description
+15. Confirm labels are visible by default.
+16. Toggle labels off and confirm they disappear.
+17. Toggle labels back on and confirm they return.
+18. Activate a visible label and confirm it selects and focuses that body.
+19. Toggle orbit visibility and confirm orbit guides hide and reappear.
+20. Switch between educational and realistic scale and confirm the scene updates coherently without duplicate bodies.
+21. Select each season preset and confirm Earth moves to distinct simplified positions:
+    - spring equinox
+    - summer solstice
+    - autumn equinox
+    - winter solstice
+22. Focus Earth during a season preset and confirm the Earth axial tilt marker remains visible in close views.
+23. Confirm keyboard reachability by tabbing through controls and visible labels.
+24. Confirm focus outlines are visible while tabbing.
+25. Test shortcuts:
+    - `Space`
+    - `L`
+    - `O`
+    - `F`
+    - `1` through `5`
+26. Confirm touch or pointer interaction remains practical where supported.
+27. Confirm there is no music, no sound effect, no narration, and no audio control.
+28. If direct `file://` loading fails, confirm the static-server fallback works instead.
+
+## Reviewer notes
+
+- No backend is required.
+- No package manager, bundler, or build step is required.
+- Three.js and OrbitControls are pinned to explicit CDN versions.
+- No external planet texture images are used.
+- No audio assets or generated sound are used.
+- Seasonal positions are intentionally simplified for teaching clarity.
+<<<END_SFE_FILE>>>

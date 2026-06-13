@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>SolarSystem3D</title>
+    <meta
+      name="description"
+      content="SolarSystem3D is a static Three.js solar system simulator with educational-scale bodies, visible orbit paths, labels, and procedural textures."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar" aria-label="Solar system controls">
+        <div class="brand-block">
+          <h1>SolarSystem3D</h1>
+          <p class="subtitle">
+            Static educational 3D solar system simulator
+          </p>
+        </div>
+
+        <section
+          class="control-panel primary-controls"
+          aria-labelledby="simulation-controls-heading"
+        >
+          <div class="panel-heading-row">
+            <h2 id="simulation-controls-heading">Simulation</h2>
+            <p class="panel-summary">
+              Play, pause, adjust time, or jump to simplified season views.
+            </p>
+          </div>
+
+          <div class="control-row control-row-simulation">
+            <button
+              id="playPauseButton"
+              type="button"
+              aria-pressed="true"
+              aria-keyshortcuts="Space"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Pause
+            </button>
+
+            <div class="time-speed-block">
+              <label class="range-control" for="timeSpeed">
+                <span>Time speed</span>
+                <input
+                  id="timeSpeed"
+                  name="timeSpeed"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="35"
+                  aria-describedby="timeSpeedHint keyboardShortcutsHint shortcutsGuardHint"
+                  aria-label="Simulation time speed"
+                />
+              </label>
+
+              <output id="timeSpeedValue" for="timeSpeed" aria-live="polite">
+                35x
+              </output>
+            </div>
+
+            <small id="timeSpeedHint" class="control-hint">
+              Slower settings help inspect inner orbits; faster settings make
+              outer-planet motion easier to notice.
+            </small>
+          </div>
+
+          <div class="control-row season-select-row">
+            <label for="datePreset">Date / season preset</label>
+            <select
+              id="datePreset"
+              name="datePreset"
+              aria-describedby="shortcutsGuardHint"
+            >
+              <option value="live">Live simulation position</option>
+              <option value="spring-equinox">Spring equinox</option>
+              <option value="summer-solstice">Summer solstice</option>
+              <option value="autumn-equinox">Autumn equinox</option>
+              <option value="winter-solstice">Winter solstice</option>
+            </select>
+          </div>
+
+          <div
+            class="control-row preset-grid season-grid"
+            role="group"
+            aria-label="Season presets"
+          >
+            <button type="button" data-season="spring-equinox">
+              Spring equinox
+            </button>
+            <button type="button" data-season="summer-solstice">
+              Summer solstice
+            </button>
+            <button type="button" data-season="autumn-equinox">
+              Autumn equinox
+            </button>
+            <button type="button" data-season="winter-solstice">
+              Winter solstice
+            </button>
+          </div>
+
+          <div class="season-explainer" aria-labelledby="season-explainer-title">
+            <p id="season-explainer-title" class="season-explainer-title">
+              Why seasons happen
+            </p>
+            <p class="season-explainer-copy">
+              Seasons are caused by Earth’s axial tilt relative to sunlight, not
+              by Earth being closer to or farther from the Sun. These presets use
+              simplified teaching positions: at the equinoxes the axis is not
+              leaning strongly toward or away from the Sun, while at the
+              solstices the Northern Hemisphere tilts toward or away from
+              sunlight.
+            </p>
+          </div>
+        </section>
+
+        <section
+          class="control-panel secondary-controls"
+          aria-labelledby="view-controls-heading"
+        >
+          <div class="panel-heading-row">
+            <h2 id="view-controls-heading">View</h2>
+            <p class="panel-summary">
+              Change camera framing and scene display without hiding the 3D
+              system.
+            </p>
+          </div>
+
+          <div
+            class="control-row preset-grid camera-grid"
+            role="group"
+            aria-label="Camera presets"
+          >
+            <button
+              type="button"
+              data-camera="overview"
+              aria-keyshortcuts="1"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              data-camera="inner"
+              aria-keyshortcuts="2"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Inner planets
+            </button>
+            <button
+              type="button"
+              data-camera="earth"
+              aria-keyshortcuts="3"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Earth and Moon
+            </button>
+            <button
+              type="button"
+              data-camera="outer"
+              aria-keyshortcuts="4"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Outer planets
+            </button>
+            <button
+              type="button"
+              data-camera="sun"
+              aria-keyshortcuts="5"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Sun view
+            </button>
+          </div>
+
+          <div
+            class="toggle-grid"
+            role="group"
+            aria-label="Scene display toggles"
+          >
+            <label class="toggle-control" for="toggleLabels">
+              <input
+                id="toggleLabels"
+                name="toggleLabels"
+                type="checkbox"
+                checked
+                aria-keyshortcuts="L"
+                aria-controls="labelsLayer"
+                aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+              />
+              <span>
+                <strong>Labels</strong>
+                <small>Show body name tags</small>
+              </span>
+            </label>
+
+            <label class="toggle-control" for="toggleOrbits">
+              <input
+                id="toggleOrbits"
+                name="toggleOrbits"
+                type="checkbox"
+                checked
+                aria-keyshortcuts="O"
+                aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+              />
+              <span>
+                <strong>Orbits</strong>
+                <small>Show orbit path guides, including the Moon orbit</small>
+              </span>
+            </label>
+
+            <label class="toggle-control" for="scaleMode">
+              <input
+                id="scaleMode"
+                name="scaleMode"
+                type="checkbox"
+                aria-describedby="shortcutsGuardHint"
+              />
+              <span>
+                <strong>Realistic scale</strong>
+                <small>Spread distances and reduce body sizes</small>
+              </span>
+            </label>
+          </div>
+
+          <p id="keyboardShortcutsHint" class="keyboard-shortcuts-hint">
+            Keyboard shortcuts: Space play/pause, L labels, O orbits, F refocus
+            selection, ArrowUp/ArrowRight faster, ArrowDown/ArrowLeft slower,
+            1–5 camera presets.
+          </p>
+          <p id="shortcutsGuardHint" class="keyboard-shortcuts-hint">
+            Shortcuts pause while typing in standard form fields. The time-speed
+            slider still supports arrow keys for fine adjustment.
+          </p>
+        </section>
+      </header>
+
+      <main class="main-layout">
+        <section class="scene-panel" aria-label="3D solar system scene">
+          <div
+            id="sceneContainer"
+            class="scene-container"
+            aria-describedby="sceneInteractionHint"
+          >
+            <div class="scene-overlay" aria-hidden="true">
+              <p>
+                Drag to orbit, scroll or pinch to zoom, pan to shift the view,
+                click a body to focus it, use the preset buttons for predictable
+                framing, and toggle labels or orbit guides as needed.
+              </p>
+            </div>
+
+            <p id="sceneInteractionHint" class="sr-only">
+              Drag to orbit the camera, scroll or pinch to zoom, pan to shift the
+              view, click a body to focus it, and toggle labels or orbits from
+              the view controls.
+            </p>
+
+            <div
+              id="labelsLayer"
+              class="labels-layer"
+              aria-label="Body labels"
+            ></div>
+          </div>
+        </section>
+
+        <aside
+          class="sidebar"
+          aria-label="Selected body information and notes"
+        >
+          <section
+            class="info-card selected-body-card"
+            aria-labelledby="selected-body-heading"
+          >
+            <div class="selected-body-heading-row">
+              <h2 id="selected-body-heading">Selected body</h2>
+              <span
+                id="selectionStatus"
+                class="selection-chip"
+                aria-live="polite"
+              >
+                Focused: Sun
+              </span>
+            </div>
+
+            <p id="selectionAnnouncement" class="sr-only" aria-live="polite">
+              Selected body is Sun.
+            </p>
+
+            <dl class="info-list">
+              <div>
+                <dt>Name</dt>
+                <dd id="bodyName">Sun</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd id="bodyType">Star</dd>
+              </div>
+              <div>
+                <dt>Distance</dt>
+                <dd id="bodyDistance">0 AU</dd>
+              </div>
+              <div>
+                <dt>Orbital period</dt>
+                <dd id="bodyOrbitPeriod">Center of the solar system</dd>
+              </div>
+              <div>
+                <dt>Rotation period</dt>
+                <dd id="bodyRotationPeriod">Approx. 27 Earth days</dd>
+              </div>
+            </dl>
+
+            <p id="bodyDescription" class="body-description">
+              The Sun is the star at the center of the solar system. Its light
+              and gravity drive the motion and energy balance of the planets.
+            </p>
+
+            <button
+              id="refocusButton"
+              class="secondary-action-button"
+              type="button"
+              aria-keyshortcuts="F"
+              aria-describedby="keyboardShortcutsHint shortcutsGuardHint"
+            >
+              Refocus selected body
+            </button>
+          </section>
+
+          <section
+            class="info-card notes-card"
+            aria-labelledby="astronomy-notes-heading"
+          >
+            <h2 id="astronomy-notes-heading">Astronomy notes</h2>
+            <p>
+              This simulator uses simplified educational positions. Seasons are
+              caused by Earth’s axial tilt relative to sunlight, not by Earth
+              being closer to or farther from the Sun.
+            </p>
+            <p>
+              The spring equinox, summer solstice, autumn equinox, and winter
+              solstice controls place Earth at simplified seasonal positions
+              rather than precision ephemeris dates.
+            </p>
+            <p>
+              Educational scale is the initial default so Mercury through
+              Neptune, Saturn’s rings, the Moon’s orbit, and body labels remain
+              easy to inspect together.
+            </p>
+            <p>
+              Realistic scale better preserves relative distance and size
+              relationships, but still keeps small bodies minimally visible so
+              they do not disappear during navigation.
+            </p>
+            <p class="support-note">
+              This app uses pinned browser ES module imports for Three.js and
+              OrbitControls. If your browser blocks module loading from
+              <code>file://</code>, run a simple static server as described in
+              the README.
+            </p>
+          </section>
+
+          <section
+            class="info-card shortcuts-card"
+            aria-labelledby="dataset-heading"
+          >
+            <h2 id="dataset-heading">Interaction notes</h2>
+            <ul>
+              <li>OrbitControls provide rotate, zoom, and pan camera movement</li>
+              <li>
+                Camera preset buttons offer overview, inner, Earth-and-Moon,
+                outer, and Sun-focused framing
+              </li>
+              <li>
+                Clicking a body or activating a visible label updates selection
+                and focuses the camera
+              </li>
+              <li>
+                Labels remain keyboard reachable when visible and leave the tab
+                order when hidden
+              </li>
+              <li>
+                Core keyboard shortcuts: Space play/pause, L labels, O orbits, F
+                refocus selected body, Arrow keys adjust speed, 1–5 camera presets
+              </li>
+              <li>
+                Shortcuts do not override normal typing behavior in standard form
+                inputs and selects
+              </li>
+              <li>
+                No audio, music, narration, or generated sound is included in
+                this static app
+              </li>
+            </ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

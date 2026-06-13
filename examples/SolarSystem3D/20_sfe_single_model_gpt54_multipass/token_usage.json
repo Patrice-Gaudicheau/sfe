@@ -1,0 +1,254 @@
+{
+  "configuration": {
+    "discovery_model": "gpt-5.4",
+    "executor_model": "gpt-5.4",
+    "model": "gpt-5.4",
+    "multipass": "true",
+    "multipass_planner_model": "gpt-5.4",
+    "router_model": "gpt-5.4"
+  },
+  "description": "SFE single-model run with gpt-5.4 used for routing, discovery, multipass planning, and execution, with multipass forced on.",
+  "runs": [
+    {
+      "cached_input_tokens": 5376,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 12713,
+      "latency_or_wall_clock_duration": 43278,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 7507,
+      "provider": "openai-api",
+      "provider_call_count": 4,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "01_static_scaffold",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 70868,
+      "latency_or_wall_clock_duration": 160357,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 34630,
+      "provider": "openai-api",
+      "provider_call_count": 6,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 98784,
+      "latency_or_wall_clock_duration": 262903,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 46535,
+      "provider": "openai-api",
+      "provider_call_count": 6,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "03_bodies_scale_orbits",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 135491,
+      "latency_or_wall_clock_duration": 231624,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 52964,
+      "provider": "openai-api",
+      "provider_call_count": 7,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "04_animation_time_scale",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 115656,
+      "latency_or_wall_clock_duration": 192392,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 43364,
+      "provider": "openai-api",
+      "provider_call_count": 6,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "05_earth_seasons",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 195513,
+      "latency_or_wall_clock_duration": 377153,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 88364,
+      "provider": "openai-api",
+      "provider_call_count": 8,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "06_camera_labels_focus",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 175368,
+      "latency_or_wall_clock_duration": 344147,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 79100,
+      "provider": "openai-api",
+      "provider_call_count": 7,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "07_info_accessibility",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+        "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+      ],
+      "input_tokens": 75756,
+      "latency_or_wall_clock_duration": 121495,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 28589,
+      "provider": "openai-api",
+      "provider_call_count": 4,
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "08_responsive_performance_readme",
+      "total_estimated_cost": null,
+      "validation_error": null
+    }
+  ],
+  "scenario": "sfe_single_model_gpt54_multipass",
+  "totals": {
+    "cached_input_tokens": 5376,
+    "currency": null,
+    "input_tokens": 880149,
+    "latency_or_wall_clock_duration": 1733349,
+    "output_tokens": 381053,
+    "total_estimated_cost": null
+  }
+}

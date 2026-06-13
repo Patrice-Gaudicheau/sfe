@@ -1,0 +1,777 @@
+<<<SFE_FILE path="app/index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>SolarSystem3D</title>
+    <meta
+      name="description"
+      content="SolarSystem3D is a static Three.js solar system simulator with educational-scale bodies, visible orbit paths, labels, and procedural textures."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar" aria-label="Solar system controls">
+        <div class="brand-block">
+          <h1>SolarSystem3D</h1>
+          <p class="subtitle">
+            Static educational 3D solar system simulator
+          </p>
+        </div>
+
+        <section
+          class="control-panel primary-controls"
+          aria-labelledby="simulation-controls-heading"
+        >
+          <div class="panel-heading-row">
+            <h2 id="simulation-controls-heading">Simulation</h2>
+            <p class="panel-summary">
+              Play, pause, adjust time, or jump to simplified season views.
+            </p>
+          </div>
+
+          <div class="control-row control-row-simulation">
+            <button id="playPauseButton" type="button" aria-pressed="true">
+              Pause
+            </button>
+
+            <div class="time-speed-block">
+              <label class="range-control" for="timeSpeed">
+                <span>Time speed</span>
+                <input
+                  id="timeSpeed"
+                  name="timeSpeed"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="35"
+                  aria-describedby="timeSpeedHint"
+                />
+              </label>
+
+              <output id="timeSpeedValue" for="timeSpeed" aria-live="polite">
+                35x
+              </output>
+            </div>
+
+            <small id="timeSpeedHint" class="control-hint">
+              Slower settings help inspect inner orbits; faster settings make
+              outer-planet motion easier to notice.
+            </small>
+          </div>
+
+          <div class="control-row season-select-row">
+            <label for="datePreset">Date / season preset</label>
+            <select id="datePreset" name="datePreset">
+              <option value="live">Live simulation position</option>
+              <option value="spring-equinox">Spring equinox</option>
+              <option value="summer-solstice">Summer solstice</option>
+              <option value="autumn-equinox">Autumn equinox</option>
+              <option value="winter-solstice">Winter solstice</option>
+            </select>
+          </div>
+
+          <div
+            class="control-row preset-grid season-grid"
+            role="group"
+            aria-label="Season presets"
+          >
+            <button type="button" data-season="spring-equinox">
+              Spring equinox
+            </button>
+            <button type="button" data-season="summer-solstice">
+              Summer solstice
+            </button>
+            <button type="button" data-season="autumn-equinox">
+              Autumn equinox
+            </button>
+            <button type="button" data-season="winter-solstice">
+              Winter solstice
+            </button>
+          </div>
+        </section>
+
+        <section
+          class="control-panel secondary-controls"
+          aria-labelledby="view-controls-heading"
+        >
+          <div class="panel-heading-row">
+            <h2 id="view-controls-heading">View</h2>
+            <p class="panel-summary">
+              Change camera framing and scene display without hiding the 3D
+              system.
+            </p>
+          </div>
+
+          <div
+            class="control-row preset-grid camera-grid"
+            role="group"
+            aria-label="Camera presets"
+          >
+            <button type="button" data-camera="overview">Overview</button>
+            <button type="button" data-camera="inner">Inner planets</button>
+            <button type="button" data-camera="earth">Earth and Moon</button>
+            <button type="button" data-camera="outer">Outer planets</button>
+            <button type="button" data-camera="sun">Sun view</button>
+          </div>
+
+          <div
+            class="toggle-grid"
+            role="group"
+            aria-label="Scene display toggles"
+          >
+            <label class="toggle-control" for="toggleLabels">
+              <input
+                id="toggleLabels"
+                name="toggleLabels"
+                type="checkbox"
+                checked
+              />
+              <span>
+                <strong>Labels</strong>
+                <small>Show body name tags</small>
+              </span>
+            </label>
+
+            <label class="toggle-control" for="toggleOrbits">
+              <input
+                id="toggleOrbits"
+                name="toggleOrbits"
+                type="checkbox"
+                checked
+              />
+              <span>
+                <strong>Orbits</strong>
+                <small>Show orbit path guides</small>
+              </span>
+            </label>
+
+            <label class="toggle-control" for="scaleMode">
+              <input id="scaleMode" name="scaleMode" type="checkbox" />
+              <span>
+                <strong>Realistic scale</strong>
+                <small>Spread distances and reduce body sizes</small>
+              </span>
+            </label>
+          </div>
+        </section>
+      </header>
+
+      <main class="main-layout">
+        <section class="scene-panel" aria-label="3D solar system scene">
+          <div id="sceneContainer" class="scene-container">
+            <div class="scene-overlay" aria-hidden="true">
+              <p>
+                Educational scale is the default. Switch to realistic scale to
+                spread orbital distances more strongly and shrink body sizes
+                toward truer proportions while preserving visibility, rings, the
+                Moon’s Earth-relative orbit, and Earth’s tilt marker.
+              </p>
+            </div>
+
+            <div
+              id="labelsLayer"
+              class="labels-layer"
+              aria-hidden="true"
+            ></div>
+          </div>
+        </section>
+
+        <aside
+          class="sidebar"
+          aria-label="Selected body information and notes"
+        >
+          <section
+            class="info-card selected-body-card"
+            aria-labelledby="selected-body-heading"
+          >
+            <h2 id="selected-body-heading">Selected body</h2>
+
+            <dl class="info-list">
+              <div>
+                <dt>Name</dt>
+                <dd id="bodyName">Sun</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd id="bodyType">Star</dd>
+              </div>
+              <div>
+                <dt>Distance</dt>
+                <dd id="bodyDistance">0 AU</dd>
+              </div>
+              <div>
+                <dt>Orbital period</dt>
+                <dd id="bodyOrbitPeriod">Center of the solar system</dd>
+              </div>
+              <div>
+                <dt>Rotation period</dt>
+                <dd id="bodyRotationPeriod">Approx. 27 Earth days</dd>
+              </div>
+            </dl>
+
+            <p id="bodyDescription" class="body-description">
+              The Sun is the star at the center of the solar system. Its light
+              and gravity drive the motion and energy balance of the planets.
+            </p>
+          </section>
+
+          <section
+            class="info-card notes-card"
+            aria-labelledby="astronomy-notes-heading"
+          >
+            <h2 id="astronomy-notes-heading">Astronomy notes</h2>
+            <p>
+              This simulator uses simplified educational positions. Seasons are
+              caused by Earth’s axial tilt relative to sunlight, not by Earth
+              being closer to or farther from the Sun.
+            </p>
+            <p>
+              Educational scale is the initial default so Mercury through
+              Neptune, Saturn’s rings, the Moon’s orbit, and body labels remain
+              easy to inspect together.
+            </p>
+            <p>
+              Realistic scale better preserves relative distance and size
+              relationships, but still keeps small bodies minimally visible so
+              they do not disappear during navigation.
+            </p>
+            <p class="support-note">
+              If your browser blocks ES module loading from <code>file://</code>,
+              run a simple static server as described in the README.
+            </p>
+          </section>
+
+          <section
+            class="info-card shortcuts-card"
+            aria-labelledby="dataset-heading"
+          >
+            <h2 id="dataset-heading">Data and texture pipeline</h2>
+            <ul>
+              <li>Centralized metadata for 10 required solar system bodies</li>
+              <li>Canvas-generated procedural textures with in-memory caching</li>
+              <li>
+                Distinct presets for Sun, rocky worlds, Earth, Moon, gas giants,
+                and ice giants
+              </li>
+              <li>
+                Moon data is modeled relative to Earth with a parent
+                relationship
+              </li>
+              <li>
+                Orbit paths, Saturn’s rings, and label anchors are generated
+                from the same scene data model
+              </li>
+              <li>
+                Scale switching updates existing scene objects in place instead
+                of recreating them
+              </li>
+            </ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+<<<END_SFE_FILE>>>
+
+<<<SFE_FILE path="app/styles.css">
+:root {
+  color-scheme: dark;
+  --bg: #050816;
+  --bg-elevated: rgba(9, 15, 34, 0.88);
+  --bg-elevated-strong: rgba(14, 24, 52, 0.94);
+  --border: rgba(145, 171, 255, 0.18);
+  --text: #ecf2ff;
+  --muted: #a8b8df;
+  --accent: #7db3ff;
+  --accent-strong: #5e8fff;
+  --focus: #ffe07a;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  --radius: 16px;
+  --control-height: 2.6rem;
+  --panel-gap: 1rem;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, rgba(44, 67, 126, 0.22), transparent 30%),
+    linear-gradient(180deg, #02040b 0%, #071122 100%);
+  color: var(--text);
+}
+
+body {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+output {
+  font: inherit;
+}
+
+button,
+input,
+select {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(17, 28, 59, 0.86);
+  color: var(--text);
+}
+
+button {
+  min-height: var(--control-height);
+  padding: 0.7rem 0.95rem;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+button:hover,
+button:focus-visible {
+  background: rgba(33, 50, 99, 0.92);
+  border-color: rgba(164, 187, 255, 0.5);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+input[type="range"] {
+  width: 100%;
+}
+
+select {
+  min-height: var(--control-height);
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1.2fr);
+  gap: var(--panel-gap);
+  padding: 1rem;
+  background: linear-gradient(
+    180deg,
+    rgba(2, 6, 20, 0.92),
+    rgba(5, 11, 28, 0.82)
+  );
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+
+.brand-block,
+.control-panel,
+.info-card,
+.scene-container {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.brand-block {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.brand-block h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2vw, 1.85rem);
+  line-height: 1.1;
+}
+
+.subtitle {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.control-panel {
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+}
+
+.control-panel h2,
+.info-card h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.panel-heading-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.panel-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.control-row {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.control-row.grouped {
+  grid-template-columns: auto minmax(160px, 1fr) auto;
+  align-items: end;
+}
+
+.control-row-simulation {
+  gap: 0.75rem;
+}
+
+.time-speed-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: end;
+}
+
+.range-control {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.range-control span,
+.control-row > label {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.control-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.season-select-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.season-select-row > label {
+  display: block;
+}
+
+output {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  min-width: 5.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(11, 19, 42, 0.9);
+  white-space: nowrap;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.65rem;
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.65rem;
+}
+
+.toggle-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.7rem;
+  min-height: var(--control-height);
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(12, 20, 44, 0.9);
+}
+
+.toggle-control input {
+  margin: 0;
+}
+
+.toggle-control span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.toggle-control strong {
+  font-size: 0.92rem;
+  line-height: 1.2;
+}
+
+.toggle-control small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.main-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--panel-gap);
+  padding: 1rem;
+}
+
+.scene-panel {
+  min-height: 0;
+}
+
+.scene-container {
+  position: relative;
+  min-height: calc(100vh - 11.5rem);
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, #09132b 0%, #02050d 75%);
+}
+
+.scene-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.scene-overlay {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 2;
+  pointer-events: none;
+  max-width: min(34rem, calc(100% - 2rem));
+  padding: 0.7rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(4, 8, 20, 0.68);
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  backdrop-filter: blur(6px);
+}
+
+.scene-overlay p {
+  margin: 0;
+}
+
+.labels-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.body-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(169, 192, 255, 0.45);
+  background: rgba(6, 10, 24, 0.84);
+  color: #f4f7ff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  transform: translate(-50%, -50%);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  backdrop-filter: blur(4px);
+}
+
+.body-label.is-hidden {
+  opacity: 0;
+}
+
+.body-label.is-selected {
+  border-color: rgba(255, 224, 122, 0.75);
+  color: #fff4bf;
+}
+
+.sidebar {
+  display: grid;
+  gap: var(--panel-gap);
+  align-content: start;
+}
+
+.info-card {
+  padding: 1rem;
+}
+
+.info-list {
+  margin: 0.85rem 0 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.info-list div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.info-list dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.info-list dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.body-description,
+.info-card p,
+.info-card li {
+  color: var(--muted);
+}
+
+.support-note code {
+  color: var(--text);
+}
+
+.shortcuts-card ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.2rem;
+}
+
+@media (max-width: 1100px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-container {
+    min-height: 60vh;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar,
+  .main-layout {
+    padding: 0.75rem;
+  }
+
+  .time-speed-block {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  output {
+    justify-self: start;
+  }
+
+  .preset-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toggle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-container {
+    min-height: 52vh;
+  }
+
+  .scene-overlay {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    max-width: none;
+    border-radius: 14px;
+    font-size: 0.85rem;
+  }
+
+  .body-label {
+    font-size: 0.72rem;
+    padding: 0.24rem 0.45rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand-block,
+  .control-panel,
+  .info-card {
+    padding: 0.9rem;
+  }
+
+  .preset-grid {
+    grid-template-columns: 1fr;
+  }
+
+  button,
+  select,
+  .toggle-control,
+  output {
+    font-size: 0.95rem;
+  }
+
+  .toggle-control {
+    padding: 0.7rem 0.75rem;
+  }
+
+  .panel-summary,
+  .control-hint,
+  .toggle-control small {
+    font-size: 0.76rem;
+  }
+
+  .body-label {
+    font-size: 0.68rem;
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+<<<END_SFE_FILE>>>

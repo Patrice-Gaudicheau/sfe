@@ -1,0 +1,286 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/index.html",
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/styles.css",
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/app.js",
+      "examples/SolarSystem3D/20_sfe_single_model_gpt54_multipass/app/README.md"
+    ],
+    "input_tokens": 195513,
+    "latency_or_wall_clock_duration": 377153,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 88364,
+    "provider": "openai-api",
+    "provider_call_count": 8,
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
+    "task_id": "06_camera_labels_focus",
+    "task_title": "Camera navigation, presets, labels, and click focus",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 377357
+  },
+  "sfe": {
+    "changed_files": [
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires implementing app features by modifying specific files in the workspace under app/, so it must be resolved through file edits rather than console-only output or external actions."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": false,
+    "git_initial_commit_hash": null,
+    "issue": null,
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/README.md",
+        "app/app.js",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "created_files_by_pass": {},
+      "enabled": true,
+      "failed_pass_id": null,
+      "failed_pass_issue": null,
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "camera-controls-foundation",
+          "patch_paths": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/README.md",
+            "app/app.js"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Add Three.js camera controls foundation",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "camera-presets-and-focus-state",
+          "patch_paths": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Implement camera presets and animated focus behavior",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "selection-raycast-and-info-sync",
+          "patch_paths": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Add click-to-select body focusing",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/styles.css",
+            "app/index.html"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "labels-overlay-and-selection-polish",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Polish labels, selected state, and responsive interaction details",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/README.md",
+            "app/index.html"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/README.md"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/README.md"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "documentation-and-final-task6-review",
+          "patch_paths": [
+            "app/index.html",
+            "app/README.md"
+          ],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Finalize task 6 documentation and review notes",
+          "warnings": []
+        }
+      ],
+      "passes_completed": 5,
+      "passes_total": 5,
+      "project_summary": "Implement task 6 for the static SolarSystem3D app by adding OrbitControls-based camera navigation, predictable camera presets, click/raycast body selection with camera focus behavior, and polishing label/update flows plus documentation so the existing simulator meets camera, labels, and focus acceptance criteria without changing the static app shape.",
+      "promoted_files_by_pass": {
+        "camera-controls-foundation": [
+          "app/README.md",
+          "app/app.js"
+        ],
+        "labels-overlay-and-selection-polish": [
+          "app/index.html",
+          "app/styles.css"
+        ]
+      },
+      "safe_resume_possible": false,
+      "status": "completed"
+    },
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 11,
+      "lines_added": 0,
+      "lines_removed": 470,
+      "modified_paths": [
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "paths": [
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/README.md",
+      "app/app.js",
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/06_camera_labels_focus.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "completed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected"
+    ]
+  }
+}

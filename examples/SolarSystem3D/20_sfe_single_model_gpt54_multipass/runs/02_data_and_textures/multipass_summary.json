@@ -1,0 +1,137 @@
+{
+  "all_promoted_files": [
+    "app/README.md",
+    "app/app.js",
+    "app/index.html"
+  ],
+  "created_files_by_pass": {},
+  "enabled": true,
+  "failed_pass_id": null,
+  "failed_pass_issue": null,
+  "pass_results": [
+    {
+      "allowed_files": [
+        "app/app.js"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [
+        "app/app.js"
+      ],
+      "full_file_replacement_eligible_files": [
+        "app/app.js"
+      ],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "define-body-data-model",
+      "patch_paths": [
+        "app/app.js",
+        "app/README.md"
+      ],
+      "promoted_files": [
+        "app/README.md",
+        "app/app.js"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Define complete solar system body data",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/app.js"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [
+        "app/app.js"
+      ],
+      "full_file_replacement_eligible_files": [
+        "app/app.js"
+      ],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "build-procedural-texture-pipeline",
+      "patch_paths": [
+        "app/app.js",
+        "app/README.md"
+      ],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Build reusable procedural texture generators",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/app.js",
+        "app/index.html"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [
+        "app/app.js",
+        "app/index.html"
+      ],
+      "full_file_replacement_eligible_files": [
+        "app/app.js",
+        "app/index.html"
+      ],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "wire-data-and-texture-shell-integration",
+      "patch_paths": [
+        "app/index.html",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "promoted_files": [
+        "app/index.html"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Integrate data and textures into the current app shell",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/README.md"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "update-docs-for-data-and-textures",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "skipped",
+      "title": "Document the data model and procedural texture implementation",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+      ]
+    }
+  ],
+  "passes_completed": 3,
+  "passes_total": 4,
+  "project_summary": "Expand the existing static SolarSystem3D scaffold into task 2 by introducing a complete educational solar system body data model and a reusable procedural Canvas texture pipeline, while keeping the simulator shell intact and documenting the new data/texture behavior.",
+  "promoted_files_by_pass": {
+    "define-body-data-model": [
+      "app/README.md",
+      "app/app.js"
+    ],
+    "wire-data-and-texture-shell-integration": [
+      "app/index.html"
+    ]
+  },
+  "safe_resume_possible": false,
+  "status": "completed"
+}
