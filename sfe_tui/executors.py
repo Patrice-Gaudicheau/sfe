@@ -70,37 +70,17 @@ CONSOLE_SYSTEM_INSTRUCTION = (
     "file replacement JSON."
 )
 PATCH_SYSTEM_INSTRUCTION = (
-    "You are the SFE TUI patch proposal executor. Return only a strict unified "
-    "diff/git diff that SFE can apply. The response must start with a diff "
-    "header like diff --git a/<relative-path> b/<relative-path>; do not start "
-    "with {, [, text, or Markdown. Do not return JSON. Do not return an edits "
-    "array. Do not return Markdown. Do not wrap the patch in a code fence. Do "
-    "not explain the patch. Do not modify files, run commands, or use tools; "
-    "generate a patch proposal only. Do not include a file manifest or any prose "
-    "before or after the diff. All paths must be relative to the workspace and use "
-    "a/<relative-path> and b/<relative-path> diff paths. For a new file, use "
-    "a complete Git-style new-file unified diff that still starts with "
-    "diff --git a/<relative-path> b/<relative-path>; do not start the response "
-    "with --- /dev/null. Use --- /dev/null and +++ b/<relative-path> file "
-    "headers inside the file section, plus normal unified diff hunks. Hunk header counts must "
-    "exactly match the hunk body. For each hunk, old_count must equal the "
-    "number of context lines plus removed lines. For each hunk, new_count must "
-    "equal the number of context lines plus added lines. Do not guess hunk "
-    "counts. Recount the hunk body before writing the hunk header. Prefer small "
-    "localized hunks when possible, except when later full-file replacement "
-    "guidance marks a small fully provided file as eligible or strongly "
-    "preferred. For new files, use @@ -0,0 +1,N @@ where N "
-    "exactly equals the number of added + lines in that hunk. Every added "
-    "content line must start with +. Do not claim to inspect, read, or rely on "
-    "workspace files unless they appear in Selected context. If Selected context "
-    "is none and the task asks for a path, treat that path as absent and create "
-    "it as a new file; do not emit a modification hunk for an absent file. If "
-    "unsure, keep files smaller and hunks "
-    "simpler. Include normal unified diff hunks for every changed file. Do not "
-    "create files under .git, vendor, var, cache, "
-    "node_modules, or generated/sensitive directories. Do not propose deletes, "
-    "renames, mode-only changes, binary patches, or symlink changes. If no safe "
-    "unified diff can be proposed, return no text."
+    "You are the SFE TUI workspace_write executor. If your runtime gives you "
+    "filesystem tools, make the requested edits directly inside the executor "
+    "working directory and return a concise summary. Do not write outside that "
+    "directory. SFE will trust the actual disk changes and then enforce the "
+    "destination-directory boundary. If your runtime cannot edit files directly, "
+    "return a strict unified diff/git diff that SFE can apply as a compatibility "
+    "path. The diff response must start with a diff header like diff --git "
+    "a/<relative-path> b/<relative-path>; do not start with {, [, text, or "
+    "Markdown. Do not return JSON. Do not return an edits array. Do not wrap "
+    "the patch in a code fence. All paths must be relative to the workspace. "
+    "Keep changes focused on the user task."
 )
 @dataclass(frozen=True)
 class ExecutorResponse:
@@ -769,9 +749,10 @@ def _build_multi_pass_prompt_section(value: object) -> str:
                 full_file_guidance,
                 "Validation notes:",
                 validation_notes or "- none",
-                "Return a strict git diff focused on this batch. Prefer the "
-                "planned focus files, but include related in-workspace files "
-                "when the task requires them.",
+                "Make edits focused on this batch. Prefer the planned focus "
+                "files, but include related in-workspace files when the task "
+                "requires them. If direct filesystem edits are unavailable, "
+                "return a strict git diff for this batch.",
             ]
         )
     return ""

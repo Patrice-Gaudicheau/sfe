@@ -61,16 +61,13 @@ Use a numeric value such as `5`, `10`, or `15` to enforce a maximum.
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` limits each batch's `allowed_files`. The
 default is `10`.
 
-`SFE_FULL_FILE_REPLACEMENT_REVIEW` controls the optional LLM-reviewed full-file
-replacement fallback after `hunk_preimage_mismatch`:
-
-- `false`: never use the reviewer fallback. This is the default.
-- `auto`: use it only when deterministic invariants pass.
-- `true`: currently equivalent to `auto`.
-
-The reviewer receives the task, target path, pass details, current file content,
-proposed replacement content, and related selected paths. It returns strict JSON
-approval metadata only; it must not rewrite or repair patches.
+Multi-pass `workspace_write` follows the same reliability rule as single-pass
+`workspace_write`: SFE trusts the actual disk changes in the isolated worktree
+and then verifies that every created, modified, or deleted path is inside the
+selected destination directory. It no longer uses hunk/preimage validation,
+patch repair, or LLM-reviewed full-file replacement fallback as a blocking
+promotion gate. This is a deliberate reliability tradeoff: fewer false failures,
+with the safety boundary enforced at filesystem scope.
 
 `SFE_MULTIPASS_PLANNER_MODEL` is deprecated and ignored. Existing `.env` files
 containing it still load, but the value no longer influences planning. Configure
@@ -92,8 +89,8 @@ such as `SFE_PROVIDER_ROUTER`, `SFE_OPENAI_ROUTER_MODEL`,
   plausible.
 - `promoted_files_by_pass`: files promoted by each batch.
 - `all_promoted_files`: consolidated promoted file list.
-- `fallback_diagnostics`: per-pass metadata when the LLM-reviewed full-file
-  replacement fallback was used successfully.
+- `fallback_diagnostics`: retained as a report field for compatibility; current
+  workspace-write runs do not use patch fallback repair.
 
 Provider timeout diagnostics are also attached per pass when a timeout happens
 during batch generation.

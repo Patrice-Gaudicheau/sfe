@@ -39,23 +39,25 @@ whether the task should produce a console answer, write workspace files, or be
 treated as an outside-workspace action. `console_output` returns a
 natural-language answer with no worktree or patch. `workspace_write` discovers
 workspace context, builds the internal routing/preflight state needed for a
-reduced executor payload, asks the configured executor for a structured patch
-proposal, applies the proposal inside an SFE-created Git worktree, and returns
-compact safe metadata. It does not require human approval, diff inspection,
-router review, syntax checks, tests, or lint before applying inside the
-worktree. `external_action` is recognized but not implemented yet and fails
-cleanly before workspace work starts.
+reduced executor payload, asks the configured executor to make workspace
+changes in an SFE-created Git worktree, and returns compact safe metadata. SFE
+trusts actual disk changes and then enforces one boundary: every created,
+modified, or deleted path must be inside the selected destination directory
+before promotion. It does not require human approval, diff inspection, router
+review, patch hunk/preimage validation, patch repair, syntax checks, tests, or
+lint before promotion. `external_action` is recognized but not implemented yet
+and fails cleanly before workspace work starts.
 
-`workspace_write` is the developer patch/worktree execution mode. The fact that
-it becomes Git/worktree/patch/promotion oriented after routing is intentional
-and accepted; it is not conceptual drift from SFE.
+`workspace_write` is the developer worktree execution mode. It may still accept
+a generated diff as a compatibility path, but success is based on actual
+worktree changes and the destination-directory boundary.
 
 Large `workspace_write` tasks may use multi-pass execution. In that path the
 Router designs and validates the strict JSON batch plan before execution
-proceeds. The Executor does not design the global plan; it only generates the
-strict patch for each already-validated batch. Batch patches remain subject to
-the same patch parsing, path validation, worktree isolation, application, and
-promotion machinery as normal workspace writes.
+proceeds. The Executor does not design the global plan; it only makes the
+changes for each already-validated batch. Batch outputs use the same worktree
+isolation, actual-change capture, destination-boundary check, and promotion
+machinery as normal workspace writes.
 
 The worktree is the main operational guard for `workspace_write`. If the
 selected workspace is already inside a Git repository, `/run` uses that

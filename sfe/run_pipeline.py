@@ -12,7 +12,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass, replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Callable
 
 from sfe.discovery import (
@@ -34,14 +34,6 @@ from sfe.execution_mode_router import (
 )
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.git_worktree_backend import GitWorktreeBackend
-from sfe.full_file_replacement_review import (
-    FULL_FILE_REPLACEMENT_REVIEW_FALLBACK_KIND,
-    FullFileReplacementReviewDecision,
-    FullFileReplacementReviewRequest,
-    FullFileReplacementReviewer,
-    create_configured_full_file_replacement_reviewer,
-    resolve_full_file_replacement_review_mode,
-)
 from sfe.multipass import (
     MultiPassBatch,
     MultiPassBatchResult,
@@ -139,6 +131,7 @@ class PromotionTarget:
     source_path: Path
     worktree_path: Path
     source_before: bytes | None
+    change_kind: str = "modified"
 
 
 @dataclass(frozen=True)
@@ -175,23 +168,6 @@ class RunPatchProposal:
         if isinstance(self.proposal, ParsedPatch):
             return tuple(file_patch.new_path for file_patch in self.proposal.files)
         return self.proposal.paths
-
-
-@dataclass(frozen=True)
-class PatchRetryResult:
-    proposal: RunPatchProposal
-    apply_result: PatchApplyResult
-    diagnostics: dict[str, object] | None = None
-
-
-@dataclass(frozen=True)
-class FullFileReplacementFallbackCandidate:
-    path: str
-    file_patch_index: int
-    current_content: str
-    replacement_content: str
-    diagnostics: dict[str, object]
-    issue: str | None = None
 
 
 @dataclass(frozen=True)
@@ -302,10 +278,11 @@ class RunPipeline:
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
         multipass_planner: MultiPassPlanner | None = None,
-        full_file_replacement_reviewer: FullFileReplacementReviewer | None = None,
+        full_file_replacement_reviewer: object | None = None,
         git_preparer: GitWorkspacePreparer | None = None,
         progress_callback: RunProgressCallback | None = None,
     ) -> None:
+        del full_file_replacement_reviewer
         self.backend = backend
         self.workspace_manager = workspace_manager or WorkspaceManager(
             GitWorktreeBackend()
@@ -315,10 +292,6 @@ class RunPipeline:
             execution_mode_router or create_configured_execution_mode_router()
         )
         self.multipass_planner = multipass_planner or create_configured_multipass_planner()
-        self.full_file_replacement_reviewer = (
-            full_file_replacement_reviewer
-            or create_configured_full_file_replacement_reviewer()
-        )
         self.git_preparer = git_preparer or GitWorkspacePreparer()
         self.progress_callback = progress_callback
 
@@ -546,73 +519,77 @@ class RunPipeline:
             )
 
         proposal = self._parse_patch_response(active_workspace, patch_result)
+        parse_issue: RunIssue | None = None
+        patch_proposal_diagnostics = None
         if isinstance(proposal, RunIssue):
-            diagnostics = None
+            parse_issue = proposal
             if proposal.category == "invalid_patch_proposal":
-                diagnostics = build_patch_proposal_diagnostics(
+                patch_proposal_diagnostics = build_patch_proposal_diagnostics(
                     patch_result.answer or "",
                     selected_source_refs=selected_source_refs,
                 )
-            return RunResult(
-                status=RUN_STATUS_FAILED,
-                issue=proposal,
-                execution_mode_decision=execution_mode_decision,
-                workspace_session=session,
-                active_workspace=active_workspace,
-                worktree_created=created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=patch_result,
-                selected_source_refs=selected_source_refs,
-                executor_provider=_executor_provider(patch_result),
-                warnings=_base_warnings(),
-                git_auto_init=git_preparation.auto_initialized,
-                git_initial_commit_hash=git_preparation.initial_commit_hash,
-                git_init_warning=git_preparation.warning,
-                patch_proposal_diagnostics=diagnostics,
-            )
+            proposal = None
 
-        guard_issue = validate_patch_paths(active_workspace, proposal.paths)
-        if guard_issue is not None:
-            return _patch_failed_result(
-                guard_issue,
-                session=session,
-                active_workspace=active_workspace,
-                worktree_created=created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=patch_result,
-                proposal=proposal,
-                selected_source_refs=selected_source_refs,
-                git_preparation=git_preparation,
-                execution_mode_decision=execution_mode_decision,
-            )
+        apply_result: PatchApplyResult | None = None
+        if proposal is not None:
+            apply_result = _apply_run_patch(active_workspace, proposal.proposal)
 
-        self._emit_progress(
-            "patch_validation_completed",
-            "SFE: patch validation completed",
-            patch_file_count=proposal.summary.file_count,
-            patch_hunk_count=proposal.summary.hunk_count,
+        promotion_baseline = _capture_actual_workspace_changes(session, active_workspace)
+        patch_summary = (
+            apply_result.summary
+            if apply_result is not None and apply_result.summary is not None
+            else proposal.summary
+            if proposal is not None
+            else _summary_from_promotion_baseline(promotion_baseline)
         )
-        promotion_baseline = _capture_promotion_baseline(
-            session,
-            active_workspace,
-            proposal.summary.paths,
+        changed_files = _promotion_baseline_paths(promotion_baseline)
+        self._emit_progress(
+            "workspace_boundary_check_completed",
+            "SFE: workspace boundary check completed",
+            changed_file_count=len(changed_files),
+            destination_root=str(session.source_path.resolve()),
         )
         if promotion_baseline.issue is not None:
-            issue = _source_workspace_changed_issue_with_diagnostics(
+            return _workspace_write_failed_result(
                 promotion_baseline.issue,
                 session=session,
                 active_workspace=active_workspace,
-                proposed_paths=proposal.summary.paths,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
                 patch_result=patch_result,
-                pass_index=None,
-                pass_id=None,
-                pass_label=None,
-                mutation_timing="before_patch_application",
-                execution_step="promotion_baseline_capture",
+                proposal=proposal,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
+                patch_applied=bool(apply_result and apply_result.applied),
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                patch_proposal_diagnostics=patch_proposal_diagnostics,
             )
-            return _promotion_failed_result(
+        if parse_issue is not None and not changed_files:
+            return _workspace_write_failed_result(
+                parse_issue,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=patch_result,
+                proposal=proposal,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
+                patch_applied=bool(apply_result and apply_result.applied),
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                patch_proposal_diagnostics=patch_proposal_diagnostics,
+            )
+
+        promotion_result = _promote_actual_workspace_changes(promotion_baseline)
+        if promotion_result.status not in {"applied", "skipped"}:
+            issue = promotion_result.issue or RunIssue("promotion", "promotion_not_applied")
+            return _workspace_write_failed_result(
                 issue,
                 session=session,
                 active_workspace=active_workspace,
@@ -624,59 +601,11 @@ class RunPipeline:
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
                 execution_mode_decision=execution_mode_decision,
-                patch_applied=False,
-            )
-
-        apply_result = _apply_run_patch(active_workspace, proposal.proposal)
-        if not apply_result.applied:
-            return _patch_failed_result(
-                apply_result.issue,
-                session=session,
-                active_workspace=active_workspace,
-                worktree_created=created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=patch_result,
-                proposal=proposal,
-                selected_source_refs=selected_source_refs,
-                git_preparation=git_preparation,
-                execution_mode_decision=execution_mode_decision,
-            )
-
-        status_result = self.workspace_manager.status(session)
-        changed_files = _changed_files(status_result, proposal.summary)
-        patch_summary = apply_result.summary or proposal.summary
-        promotion_result = _promote_run_changes(promotion_baseline)
-        if promotion_result.status != "applied":
-            issue = _source_workspace_changed_issue_with_diagnostics(
-                promotion_result.issue
-                or RunIssue("promotion", "promotion_not_applied"),
-                session=session,
-                active_workspace=active_workspace,
-                proposed_paths=proposal.summary.paths,
-                patch_result=patch_result,
-                pass_index=None,
-                pass_id=None,
-                pass_label=None,
-                mutation_timing="after_patch_application",
-                execution_step="promotion_apply",
-            )
-            return _promotion_failed_result(
-                issue,
-                session=session,
-                active_workspace=active_workspace,
-                worktree_created=created,
-                discovery_result=discovery_result,
-                dry_run_result=dry_run_result,
-                patch_result=patch_result,
-                proposal=proposal,
-                selected_source_refs=selected_source_refs,
-                git_preparation=git_preparation,
-                execution_mode_decision=execution_mode_decision,
-                patch_applied=True,
+                patch_applied=bool(apply_result and apply_result.applied),
                 patch_summary=patch_summary,
                 changed_files=changed_files,
                 promotion_result=promotion_result,
+                patch_proposal_diagnostics=patch_proposal_diagnostics,
             )
         self._emit_progress(
             "promotion_completed",
@@ -692,8 +621,8 @@ class RunPipeline:
             discovery_result=discovery_result,
             dry_run_result=dry_run_result,
             patch_result=patch_result,
-            patch_generated=True,
-            patch_applied=True,
+            patch_generated=proposal is not None,
+            patch_applied=bool(apply_result and apply_result.applied),
             patch_summary=patch_summary,
             changed_files=changed_files,
             selected_source_refs=selected_source_refs,
@@ -703,9 +632,12 @@ class RunPipeline:
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
             promotion_status=promotion_result.status,
-            promotion_applied=True,
+            promotion_applied=promotion_result.status == "applied",
             promoted_files=promotion_result.promoted_files,
-            patch_hunk_count_normalization=proposal.hunk_count_normalization,
+            patch_proposal_diagnostics=patch_proposal_diagnostics,
+            patch_hunk_count_normalization=(
+                proposal.hunk_count_normalization if proposal is not None else None
+            ),
         )
 
     def _run_workspace_write_multipass(
@@ -784,6 +716,11 @@ class RunPipeline:
                 multi_pass_index=index,
                 multi_pass_total=len(parsed_plan.batches),
                 multi_pass_id=batch.id,
+            )
+            changed_files_before_pass = set(
+                _promotion_baseline_paths(
+                    _capture_actual_workspace_changes(session, active_workspace)
+                )
             )
             batch_warnings: list[str] = []
             if batch.allowed_files and all(
@@ -885,59 +822,130 @@ class RunPipeline:
                 completed_files=tuple(completed_files),
                 existing_update_files=existing_update_files,
             )
+            parse_issue: RunIssue | None = None
+            patch_proposal_diagnostics = None
             if isinstance(proposal, RunIssue):
-                pass_issue = _multi_pass_issue_from_run_issue(proposal, pass_id=batch.id)
-                pass_results.append(
-                    _failed_batch_result(
-                        batch,
-                        issue=pass_issue,
-                        provider_diagnostics=provider_diagnostics,
-                        executor_contract_diagnostics=executor_contract_diagnostics,
-                    )
-                )
-                diagnostics = None
+                parse_issue = proposal
                 if proposal.category == "invalid_patch_proposal":
-                    diagnostics = build_patch_proposal_diagnostics(
+                    patch_proposal_diagnostics = build_patch_proposal_diagnostics(
                         patch_result.answer or "",
                         selected_source_refs=selected_source_refs,
                     )
-                summary = _build_multi_pass_summary(
-                    status="failed",
-                    project_summary=parsed_plan.project_summary,
-                    passes_total=len(parsed_plan.batches),
-                    pass_results=tuple(pass_results),
-                    failed_issue=pass_issue,
-                    all_promoted_files=tuple(all_promoted_files),
-                    safe_resume_possible=bool(all_promoted_files),
-                )
-                return _multipass_run_result(
-                    status=RUN_STATUS_FAILED,
-                    issue=proposal,
-                    execution_mode_decision=execution_mode_decision,
-                    session=session,
-                    active_workspace=active_workspace,
-                    worktree_created=worktree_created,
-                    discovery_result=discovery_result,
-                    dry_run_result=dry_run_result,
-                    patch_result=patch_result,
-                    selected_source_refs=selected_source_refs,
-                    git_preparation=git_preparation,
-                    multi_pass_summary=summary,
-                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
-                    promoted_files=tuple(all_promoted_files),
-                    patch_proposal_diagnostics=diagnostics,
-                    )
+                proposal = None
 
             executor_contract_diagnostics = _executor_contract_diagnostics(
                 active_workspace,
                 patch_result,
                 proposal,
             )
-            guard_issue = validate_patch_paths(active_workspace, proposal.paths)
-            if guard_issue is not None:
-                issue = _run_issue_from_patch(
-                    guard_issue,
-                    default_reason="patch_not_applicable",
+            if proposal is not None:
+                scope_issue = validate_patch_paths_in_batch(proposal.paths, batch)
+                if scope_issue is not None:
+                    for path in _paths_outside_batch(proposal.paths, batch):
+                        warning = f"multi_pass_path_outside_allowed_files:{path}"
+                        batch_warnings.append(warning)
+                        multi_pass_warnings.append(warning)
+
+            apply_result: PatchApplyResult | None = None
+            if proposal is not None:
+                apply_result = _apply_run_patch(active_workspace, proposal.proposal)
+            fallback_diagnostics: dict[str, object] | None = None
+
+            promotion_baseline = _capture_actual_workspace_changes(
+                session,
+                active_workspace,
+            )
+            patch_summary = (
+                apply_result.summary
+                if apply_result is not None and apply_result.summary is not None
+                else proposal.summary
+                if proposal is not None
+                else _summary_from_promotion_baseline(promotion_baseline)
+            )
+            if promotion_baseline.issue is not None:
+                issue = promotion_baseline.issue
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                        executor_contract_diagnostics=executor_contract_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(
+                        (*completed_summaries, patch_summary)
+                    ),
+                    promoted_files=tuple(all_promoted_files),
+                    patch_proposal_diagnostics=patch_proposal_diagnostics,
+                )
+            if parse_issue is not None and not promotion_baseline.targets:
+                pass_issue = _multi_pass_issue_from_run_issue(
+                    parse_issue,
+                    pass_id=batch.id,
+                )
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                        executor_contract_diagnostics=executor_contract_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=parse_issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                    patch_proposal_diagnostics=patch_proposal_diagnostics,
+                )
+
+            promotion_result = _promote_actual_workspace_changes(promotion_baseline)
+            if promotion_result.status not in {"applied", "skipped"}:
+                issue = promotion_result.issue or RunIssue(
+                    "promotion",
+                    "promotion_not_applied",
                 )
                 pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
                 pass_results.append(
@@ -970,234 +978,37 @@ class RunPipeline:
                     selected_source_refs=selected_source_refs,
                     git_preparation=git_preparation,
                     multi_pass_summary=summary,
-                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    patch_summary=_combine_patch_summaries(
+                        (*completed_summaries, patch_summary)
+                    ),
                     promoted_files=tuple(all_promoted_files),
+                    promotion_status=promotion_result.status,
+                    promotion_issue=promotion_result.issue,
+                    patch_proposal_diagnostics=patch_proposal_diagnostics,
                 )
 
-            scope_issue = validate_patch_paths_in_batch(proposal.paths, batch)
-            if scope_issue is not None:
-                for path in _paths_outside_batch(proposal.paths, batch):
+            pass_promoted_files = tuple(
+                path
+                for path in promotion_result.promoted_files
+                if path not in changed_files_before_pass
+            )
+            for path in pass_promoted_files:
+                if path not in set(batch.allowed_files):
                     warning = f"multi_pass_path_outside_allowed_files:{path}"
                     batch_warnings.append(warning)
                     multi_pass_warnings.append(warning)
 
-            promotion_baseline = _capture_promotion_baseline(
-                session,
-                active_workspace,
-                proposal.summary.paths,
+            latest_hunk_normalization = (
+                proposal.hunk_count_normalization if proposal is not None else None
             )
-            if promotion_baseline.issue is not None:
-                issue = _source_workspace_changed_issue_with_diagnostics(
-                    promotion_baseline.issue,
-                    session=session,
-                    active_workspace=active_workspace,
-                    proposed_paths=proposal.summary.paths,
-                    patch_result=patch_result,
-                    pass_index=index,
-                    pass_id=batch.id,
-                    pass_label=batch.title,
-                    mutation_timing="before_patch_application",
-                    execution_step="promotion_baseline_capture",
-                )
-                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
-                pass_results.append(
-                    _failed_batch_result(
-                        batch,
-                        issue=pass_issue,
-                        provider_diagnostics=provider_diagnostics,
-                        executor_contract_diagnostics=executor_contract_diagnostics,
-                    )
-                )
-                summary = _build_multi_pass_summary(
-                    status="failed",
-                    project_summary=parsed_plan.project_summary,
-                    passes_total=len(parsed_plan.batches),
-                    pass_results=tuple(pass_results),
-                    failed_issue=pass_issue,
-                    all_promoted_files=tuple(all_promoted_files),
-                    safe_resume_possible=bool(all_promoted_files),
-                )
-                return _multipass_run_result(
-                    status=RUN_STATUS_FAILED,
-                    issue=issue,
-                    execution_mode_decision=execution_mode_decision,
-                    session=session,
-                    active_workspace=active_workspace,
-                    worktree_created=worktree_created,
-                    discovery_result=discovery_result,
-                    dry_run_result=dry_run_result,
-                    patch_result=patch_result,
-                    selected_source_refs=selected_source_refs,
-                    git_preparation=git_preparation,
-                    multi_pass_summary=summary,
-                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
-                    promoted_files=tuple(all_promoted_files),
-                )
-
-            apply_result = _apply_run_patch(active_workspace, proposal.proposal)
-            fallback_diagnostics: dict[str, object] | None = None
-            if not apply_result.applied:
-                retry_result = _retry_existing_create_as_update(
-                    active_workspace,
-                    proposal,
-                    issue=apply_result.issue,
-                    existing_update_files=existing_update_files,
-                )
-                if retry_result is None:
-                    retry_result = _retry_small_file_preimage_mismatch(
-                        active_workspace,
-                        proposal,
-                        issue=apply_result.issue,
-                    )
-                if retry_result is None:
-                    retry_result = self._retry_llm_reviewed_full_file_replacement(
-                        workspace_root=active_workspace,
-                        request=request,
-                        contract=current_contract,
-                        patch_result=patch_result,
-                        proposal=proposal,
-                        issue=apply_result.issue,
-                        completed_files=tuple(completed_files),
-                        initial_existing_files=initial_existing_files,
-                        pass_index=index,
-                        batch=batch,
-                    )
-                if retry_result is not None and retry_result.apply_result.applied:
-                    proposal = retry_result.proposal
-                    apply_result = retry_result.apply_result
-                    fallback_diagnostics = retry_result.diagnostics
-                else:
-                    failed_apply_issue = (
-                        retry_result.apply_result.issue
-                        if retry_result is not None
-                        else apply_result.issue
-                    )
-                    issue = _run_issue_from_patch(
-                        failed_apply_issue,
-                        default_reason="patch_not_applicable",
-                    )
-                    diagnostics = _multi_pass_patch_issue_diagnostics(
-                        active_workspace=active_workspace,
-                        source_workspace=session.source_path,
-                        contract=current_contract,
-                        patch_result=patch_result,
-                        proposal=proposal,
-                        path=issue.path,
-                        completed_files=tuple(completed_files),
-                        initial_existing_files=initial_existing_files,
-                        pass_index=index,
-                        batch=batch,
-                    )
-                    llm_diagnostics = None
-                    if retry_result is not None:
-                        llm_diagnostics = retry_result.diagnostics
-                    if llm_diagnostics is not None:
-                        diagnostics = {
-                            **(diagnostics or {}),
-                            **llm_diagnostics,
-                        }
-                    pass_issue = _multi_pass_issue_from_run_issue(
-                        issue,
-                        pass_id=batch.id,
-                        diagnostics=diagnostics,
-                    )
-                    pass_results.append(
-                        _failed_batch_result(
-                            batch,
-                            issue=pass_issue,
-                            provider_diagnostics=provider_diagnostics,
-                            executor_contract_diagnostics=executor_contract_diagnostics,
-                        )
-                    )
-                    summary = _build_multi_pass_summary(
-                        status="failed",
-                        project_summary=parsed_plan.project_summary,
-                        passes_total=len(parsed_plan.batches),
-                        pass_results=tuple(pass_results),
-                        failed_issue=pass_issue,
-                        all_promoted_files=tuple(all_promoted_files),
-                        safe_resume_possible=bool(all_promoted_files),
-                    )
-                    return _multipass_run_result(
-                        status=RUN_STATUS_FAILED,
-                        issue=issue,
-                        execution_mode_decision=execution_mode_decision,
-                        session=session,
-                        active_workspace=active_workspace,
-                        worktree_created=worktree_created,
-                        discovery_result=discovery_result,
-                        dry_run_result=dry_run_result,
-                        patch_result=patch_result,
-                        selected_source_refs=selected_source_refs,
-                        git_preparation=git_preparation,
-                        multi_pass_summary=summary,
-                        patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
-                        promoted_files=tuple(all_promoted_files),
-                    )
-
-            patch_summary = apply_result.summary or proposal.summary
-            promotion_result = _promote_run_changes(promotion_baseline)
-            if promotion_result.status != "applied":
-                issue = _source_workspace_changed_issue_with_diagnostics(
-                    promotion_result.issue
-                    or RunIssue(
-                        "promotion",
-                        "promotion_not_applied",
-                    ),
-                    session=session,
-                    active_workspace=active_workspace,
-                    proposed_paths=proposal.summary.paths,
-                    patch_result=patch_result,
-                    pass_index=index,
-                    pass_id=batch.id,
-                    pass_label=batch.title,
-                    mutation_timing="after_patch_application",
-                    execution_step="promotion_apply",
-                )
-                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
-                pass_results.append(
-                    _failed_batch_result(
-                        batch,
-                        issue=pass_issue,
-                        provider_diagnostics=provider_diagnostics,
-                        executor_contract_diagnostics=executor_contract_diagnostics,
-                    )
-                )
-                summary = _build_multi_pass_summary(
-                    status="failed",
-                    project_summary=parsed_plan.project_summary,
-                    passes_total=len(parsed_plan.batches),
-                    pass_results=tuple(pass_results),
-                    failed_issue=pass_issue,
-                    all_promoted_files=tuple(all_promoted_files),
-                    safe_resume_possible=bool(all_promoted_files),
-                )
-                return _multipass_run_result(
-                    status=RUN_STATUS_FAILED,
-                    issue=issue,
-                    execution_mode_decision=execution_mode_decision,
-                    session=session,
-                    active_workspace=active_workspace,
-                    worktree_created=worktree_created,
-                    discovery_result=discovery_result,
-                    dry_run_result=dry_run_result,
-                    patch_result=patch_result,
-                    selected_source_refs=selected_source_refs,
-                    git_preparation=git_preparation,
-                    multi_pass_summary=summary,
-                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
-                    promoted_files=tuple(all_promoted_files),
-                    promotion_status=promotion_result.status,
-                    promotion_issue=promotion_result.issue,
-                )
-
-            latest_hunk_normalization = proposal.hunk_count_normalization
             completed_summaries.append(patch_summary)
-            completed_files.extend(promotion_result.promoted_files)
-            all_promoted_files.extend(promotion_result.promoted_files)
+            completed_files.extend(pass_promoted_files)
+            for promoted_file in promotion_result.promoted_files:
+                if promoted_file not in all_promoted_files:
+                    all_promoted_files.append(promoted_file)
             out_of_scope_promoted_files.update(
                 path
-                for path in promotion_result.promoted_files
+                for path in pass_promoted_files
                 if path not in set(batch.allowed_files)
             )
             current_contract = _refresh_multipass_contract(
@@ -1218,7 +1029,7 @@ class RunPipeline:
                     status="completed",
                     allowed_files=batch.allowed_files,
                     created_files=patch_summary.created_paths,
-                    promoted_files=promotion_result.promoted_files,
+                    promoted_files=pass_promoted_files,
                     patch_paths=patch_summary.paths,
                     provider_diagnostics=provider_diagnostics,
                     fallback_diagnostics=fallback_diagnostics,
@@ -1231,7 +1042,7 @@ class RunPipeline:
                     full_file_replacement_used_files=executor_contract_diagnostics[
                         "full_file_replacement_used_files"
                     ],
-                    warnings=tuple(batch_warnings),
+                    warnings=tuple(dict.fromkeys(batch_warnings)),
                 )
             )
             self._emit_progress(
@@ -1240,7 +1051,7 @@ class RunPipeline:
                 multi_pass_index=index,
                 multi_pass_total=len(parsed_plan.batches),
                 multi_pass_id=batch.id,
-                promoted_file_count=len(promotion_result.promoted_files),
+                promoted_file_count=len(pass_promoted_files),
             )
 
         aggregate_summary = _combine_patch_summaries(tuple(completed_summaries))
@@ -1279,115 +1090,11 @@ class RunPipeline:
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
-            promotion_status="applied",
-            promotion_applied=True,
+            promotion_status="applied" if all_promoted_files else "skipped",
+            promotion_applied=bool(all_promoted_files),
             promoted_files=tuple(all_promoted_files),
             patch_hunk_count_normalization=latest_hunk_normalization,
             multi_pass_summary=multi_pass_summary,
-        )
-
-    def _retry_llm_reviewed_full_file_replacement(
-        self,
-        *,
-        workspace_root: Path,
-        request: RunRequest,
-        contract: SFEContract,
-        patch_result: ExecutionResult,
-        proposal: RunPatchProposal,
-        issue: PatchIssue | None,
-        completed_files: tuple[str, ...],
-        initial_existing_files: frozenset[str],
-        pass_index: int,
-        batch: MultiPassBatch,
-    ) -> PatchRetryResult | None:
-        mode = resolve_full_file_replacement_review_mode()
-        if mode == "false":
-            return None
-        candidate = _full_file_replacement_review_candidate(
-            workspace_root=workspace_root,
-            contract=contract,
-            patch_result=patch_result,
-            proposal=proposal,
-            issue=issue,
-            completed_files=completed_files,
-            initial_existing_files=initial_existing_files,
-            pass_index=pass_index,
-            batch=batch,
-            reviewer_mode=mode,
-        )
-        if candidate is None:
-            return None
-        if candidate.issue is not None:
-            return PatchRetryResult(
-                proposal=proposal,
-                apply_result=PatchApplyResult(False, issue, None, False),
-                diagnostics=candidate.diagnostics,
-            )
-        review_request = FullFileReplacementReviewRequest(
-            task_summary=request.task,
-            target_path=candidate.path,
-            pass_number=pass_index,
-            pass_label=batch.title or batch.id,
-            current_content=candidate.current_content,
-            proposed_replacement_content=candidate.replacement_content,
-            related_selected_file_paths=tuple(
-                path
-                for path in _execution_preview_selected_refs(patch_result)
-                if path != candidate.path
-            )[:20],
-        )
-        try:
-            decision = self.full_file_replacement_reviewer.review(review_request)
-        except Exception:
-            decision = FullFileReplacementReviewDecision(
-                approve=False,
-                risk_level="high",
-                reason="reviewer_execution_error",
-                error="reviewer_execution_error",
-            )
-        diagnostics = _full_file_replacement_review_diagnostics(
-            candidate,
-            decision=decision,
-            outcome="applied" if decision.apply_allowed else "reviewer_rejected",
-        )
-        diagnostics = {
-            **diagnostics,
-            "reviewer_provider": self.full_file_replacement_reviewer.provider_name,
-            "reviewer_model": self.full_file_replacement_reviewer.model,
-        }
-        if not decision.apply_allowed:
-            return PatchRetryResult(
-                proposal=proposal,
-                apply_result=PatchApplyResult(False, issue, None, False),
-                diagnostics=diagnostics,
-            )
-        retry_patch = _proposal_with_reviewed_full_file_replacement(
-            proposal,
-            candidate,
-        )
-        retry_apply = _apply_run_patch(workspace_root, retry_patch)
-        if not retry_apply.applied:
-            diagnostics = {
-                **diagnostics,
-                "final_outcome": "reviewer_approved_apply_failed",
-            }
-            return PatchRetryResult(
-                proposal=proposal,
-                apply_result=retry_apply,
-                diagnostics=diagnostics,
-            )
-        retry_proposal = RunPatchProposal(
-            proposal=retry_patch,
-            summary=summarize_patch(retry_patch),
-            preview=proposal.preview,
-            parse_status=proposal.parse_status
-            + "_llm_reviewed_full_file_replacement_retry",
-            hunk_count_normalization=proposal.hunk_count_normalization,
-        )
-        return PatchRetryResult(
-            proposal=retry_proposal,
-            apply_result=retry_apply,
-            diagnostics=diagnostics,
         )
 
     def _emit_progress(
@@ -1728,6 +1435,56 @@ def _promotion_failed_result(
     )
 
 
+def _workspace_write_failed_result(
+    issue: RunIssue,
+    *,
+    session: WorkspaceSession,
+    active_workspace: Path,
+    worktree_created: bool,
+    discovery_result: DiscoveryResult,
+    dry_run_result: ExecutionResult,
+    patch_result: ExecutionResult,
+    proposal: RunPatchProposal | None,
+    selected_source_refs: tuple[str, ...],
+    git_preparation: GitPreparationResult,
+    execution_mode_decision: ExecutionModeDecision,
+    patch_applied: bool,
+    patch_summary: PatchSummary | None,
+    changed_files: tuple[str, ...],
+    promotion_result: PromotionResult | None = None,
+    patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
+) -> RunResult:
+    return RunResult(
+        status=RUN_STATUS_FAILED,
+        issue=issue,
+        execution_mode_decision=execution_mode_decision,
+        workspace_session=session,
+        active_workspace=active_workspace,
+        worktree_created=worktree_created,
+        discovery_result=discovery_result,
+        dry_run_result=dry_run_result,
+        patch_result=patch_result,
+        patch_generated=proposal is not None,
+        patch_applied=patch_applied,
+        patch_summary=patch_summary,
+        changed_files=changed_files,
+        selected_source_refs=selected_source_refs,
+        executor_provider=_executor_provider(patch_result),
+        warnings=_warnings_for_summary(patch_summary),
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
+        promotion_status=promotion_result.status if promotion_result else "rejected",
+        promotion_applied=False,
+        promoted_files=promotion_result.promoted_files if promotion_result else (),
+        promotion_issue=issue,
+        patch_proposal_diagnostics=patch_proposal_diagnostics,
+        patch_hunk_count_normalization=(
+            proposal.hunk_count_normalization if proposal is not None else None
+        ),
+    )
+
+
 def _multipass_run_result(
     *,
     status: str,
@@ -2020,33 +1777,6 @@ def _normalize_same_run_unified_creates(
     )
 
 
-def _retry_existing_create_as_update(
-    workspace_root: Path,
-    proposal: RunPatchProposal,
-    *,
-    issue: PatchIssue | None,
-    existing_update_files: tuple[str, ...],
-) -> PatchRetryResult | None:
-    if (
-        issue is None
-        or issue.reason != "target_already_exists"
-        or not existing_update_files
-    ):
-        return None
-    normalized = _normalize_same_run_create_patches(
-        workspace_root,
-        proposal,
-        completed_files=(),
-        existing_update_files=existing_update_files,
-    )
-    if isinstance(normalized, RunIssue) or normalized is proposal:
-        return None
-    retry_apply = _apply_run_patch(workspace_root, normalized.proposal)
-    if not retry_apply.applied:
-        return None
-    return PatchRetryResult(proposal=normalized, apply_result=retry_apply)
-
-
 def _same_run_create_as_modify(
     workspace_root: Path,
     file_patch: ParsedFilePatch,
@@ -2111,395 +1841,6 @@ def _paths_outside_batch(
     return tuple(path for path in paths if path not in allowed)
 
 
-FULL_FILE_REPLACEMENT_REVIEW_MAX_BYTES = 128_000
-FULL_FILE_REPLACEMENT_REVIEW_HUNK_MISMATCH_REASONS = {
-    "hunk_preimage_mismatch",
-    "hunk_location_mismatch",
-}
-
-
-def _retry_small_file_preimage_mismatch(
-    workspace_root: Path,
-    proposal: RunPatchProposal,
-    *,
-    issue: PatchIssue | None,
-) -> PatchRetryResult | None:
-    if (
-        issue is None
-        or issue.reason
-        not in {"hunk_preimage_mismatch", "hunk_location_mismatch"}
-        or issue.path is None
-        or not isinstance(proposal.proposal, ParsedPatch)
-    ):
-        return None
-    files: list[ParsedFilePatch] = []
-    replaced = False
-    for file_patch in proposal.proposal.files:
-        if file_patch.new_path != issue.path:
-            files.append(file_patch)
-            continue
-        replacement = _small_file_replacement_file_patch(workspace_root, file_patch)
-        if replacement is None:
-            return None
-        files.append(replacement)
-        replaced = True
-    if not replaced:
-        return None
-    retry_patch = ParsedPatch(tuple(files))
-    retry_apply = _apply_run_patch(workspace_root, retry_patch)
-    if not retry_apply.applied:
-        return PatchRetryResult(
-            proposal=RunPatchProposal(
-                proposal=retry_patch,
-                summary=summarize_patch(retry_patch),
-                preview=proposal.preview,
-                parse_status=proposal.parse_status + "_small_file_replacement_retry",
-                hunk_count_normalization=proposal.hunk_count_normalization,
-            ),
-            apply_result=retry_apply,
-        )
-    retry_proposal = RunPatchProposal(
-        proposal=retry_patch,
-        summary=summarize_patch(retry_patch),
-        preview=proposal.preview,
-        parse_status=proposal.parse_status + "_small_file_replacement_retry",
-        hunk_count_normalization=proposal.hunk_count_normalization,
-    )
-    return PatchRetryResult(proposal=retry_proposal, apply_result=retry_apply)
-
-
-def _full_file_replacement_review_candidate(
-    *,
-    workspace_root: Path,
-    contract: SFEContract,
-    patch_result: ExecutionResult,
-    proposal: RunPatchProposal,
-    issue: PatchIssue | None,
-    completed_files: tuple[str, ...],
-    initial_existing_files: frozenset[str],
-    pass_index: int,
-    batch: MultiPassBatch,
-    reviewer_mode: str,
-) -> FullFileReplacementFallbackCandidate | None:
-    if (
-        issue is None
-        or issue.reason not in FULL_FILE_REPLACEMENT_REVIEW_HUNK_MISMATCH_REASONS
-        or issue.path is None
-        or not isinstance(proposal.proposal, ParsedPatch)
-    ):
-        return None
-    path = issue.path
-    selected_refs = _execution_preview_selected_refs(patch_result)
-    contract_refs = {segment.source_ref for segment in contract.context_segments}
-    executor_diagnostics = _executor_contract_diagnostics(
-        workspace_root,
-        patch_result,
-        proposal,
-    )
-    full_content_guidance_files = set(executor_diagnostics["full_content_provided_files"])
-    eligible_files = set(executor_diagnostics["full_file_replacement_eligible_files"])
-    included_in_guidance = path in full_content_guidance_files or path in eligible_files
-    full_file_eligible = path in eligible_files
-    target = workspace_root / path
-    selected_context = path in selected_refs
-    created_earlier = path in completed_files and path not in initial_existing_files
-    full_content_provided = (
-        target.is_file()
-        and (selected_context or (path in batch.allowed_files and path in contract_refs))
-    )
-    executor_provided_context_allowed = (
-        full_content_provided and full_file_eligible and included_in_guidance
-    )
-    diagnostics = {
-        "fallback_kind": FULL_FILE_REPLACEMENT_REVIEW_FALLBACK_KIND,
-        "target_path": path,
-        "pass_index": pass_index,
-        "pass_id": batch.id,
-        "pass_label": batch.title,
-        "selected_context": selected_context,
-        "full_content_provided": full_content_provided,
-        "full_file_replacement_eligible": full_file_eligible,
-        "included_in_full_file_replacement_guidance": included_in_guidance,
-        "allowed_through_executor_provided_context_gate": (
-            executor_provided_context_allowed
-        ),
-        "file_existed_before_run": path in initial_existing_files,
-        "created_earlier_in_run": created_earlier,
-        "reviewer_enabled_mode": reviewer_mode,
-        "proposed_replacement_full_file_like": False,
-    }
-
-    def blocked(reason: str) -> FullFileReplacementFallbackCandidate:
-        return FullFileReplacementFallbackCandidate(
-            path=path,
-            file_patch_index=-1,
-            current_content="",
-            replacement_content="",
-            diagnostics={
-                **diagnostics,
-                "final_outcome": "blocked_by_deterministic_invariant",
-                "reviewer_reason": reason,
-            },
-            issue=reason,
-        )
-
-    matching_indexes = [
-        index
-        for index, candidate_file_patch in enumerate(proposal.proposal.files)
-        if candidate_file_patch.new_path == path
-    ]
-    if len(matching_indexes) != 1:
-        return blocked("target_path_not_exactly_failed_patch_path")
-    file_patch_index = matching_indexes[0]
-    file_patch = proposal.proposal.files[file_patch_index]
-    if path not in batch.allowed_files:
-        return blocked("target_path_not_in_current_pass_scope")
-    if validate_patch_paths(workspace_root, (path,)) is not None:
-        return blocked("target_path_outside_workspace_scope")
-    if (
-        not selected_context
-        and not created_earlier
-        and not executor_provided_context_allowed
-    ):
-        return blocked("target_not_selected_or_created_earlier")
-    if not full_content_provided:
-        return blocked("full_current_content_not_provided")
-    try:
-        current_content = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return blocked("current_content_unreadable")
-    replacement_lines = _full_file_replacement_lines_from_patch(
-        file_patch,
-        current_line_count=len(current_content.splitlines()),
-    )
-    if replacement_lines is None:
-        return blocked("proposed_replacement_not_full_file")
-    diagnostics = {
-        **diagnostics,
-        "proposed_replacement_full_file_like": True,
-    }
-    replacement_content = "\n".join(replacement_lines)
-    if replacement_lines:
-        replacement_content += "\n"
-    if not replacement_content.strip():
-        return blocked("proposed_replacement_empty")
-    if (
-        len(replacement_content.encode("utf-8"))
-        > FULL_FILE_REPLACEMENT_REVIEW_MAX_BYTES
-    ):
-        return blocked("proposed_replacement_too_large")
-    return FullFileReplacementFallbackCandidate(
-        path=path,
-        file_patch_index=file_patch_index,
-        current_content=current_content,
-        replacement_content=replacement_content,
-        diagnostics=diagnostics,
-    )
-
-
-def _proposal_with_reviewed_full_file_replacement(
-    proposal: RunPatchProposal,
-    candidate: FullFileReplacementFallbackCandidate,
-) -> ParsedPatch:
-    if not isinstance(proposal.proposal, ParsedPatch):
-        raise TypeError("reviewed fallback requires a parsed patch proposal")
-    files = list(proposal.proposal.files)
-    current_lines = candidate.current_content.splitlines()
-    replacement_lines = candidate.replacement_content.splitlines()
-    old_start = 1 if current_lines else 0
-    new_start = 1 if replacement_lines else 0
-    files[candidate.file_patch_index] = ParsedFilePatch(
-        old_path=candidate.path,
-        new_path=candidate.path,
-        hunks=(
-            ParsedHunk(
-                old_start=old_start,
-                old_count=len(current_lines),
-                new_start=new_start,
-                new_count=len(replacement_lines),
-                lines=tuple(
-                    [*(PatchLine("-", line) for line in current_lines)]
-                    + [*(PatchLine("+", line) for line in replacement_lines)]
-                ),
-            ),
-        ),
-        operation=PATCH_OPERATION_MODIFY,
-    )
-    return ParsedPatch(files=tuple(files))
-
-
-def _full_file_replacement_review_diagnostics(
-    candidate: FullFileReplacementFallbackCandidate,
-    *,
-    decision: FullFileReplacementReviewDecision,
-    outcome: str,
-) -> dict[str, object]:
-    return {
-        **candidate.diagnostics,
-        "reviewer_approve": decision.approve,
-        "reviewer_risk_level": decision.risk_level,
-        "reviewer_reason": decision.reason,
-        "reviewer_concerns": list(decision.concerns),
-        "reviewer_error": decision.error,
-        "final_outcome": outcome,
-    }
-
-
-def _small_file_replacement_file_patch(
-    workspace_root: Path,
-    file_patch: ParsedFilePatch,
-) -> ParsedFilePatch | None:
-    path = file_patch.new_path
-    if not _is_small_replacement_candidate_path(path):
-        return None
-    target = (workspace_root / path).resolve()
-    if not target.is_file():
-        return None
-    try:
-        current_text = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    if len(current_text.encode("utf-8")) > 64_000:
-        return None
-    replacement_lines = _full_file_replacement_lines_from_patch(
-        file_patch,
-        current_line_count=len(current_text.splitlines()),
-    )
-    if replacement_lines is None and path == "composer.json":
-        replacement_edit = _composer_json_merge_replacement_from_patch(
-            path,
-            current_text=current_text,
-            file_patch=file_patch,
-        )
-        if replacement_edit is None:
-            return None
-        return _replacement_edit_as_file_patch(
-            path=path,
-            current_text=current_text,
-            replacement_text=replacement_edit.content,
-        )
-    if replacement_lines is None:
-        return None
-    replacement_text = "\n".join(replacement_lines)
-    if replacement_lines:
-        replacement_text += "\n"
-    if path == "composer.json":
-        try:
-            parsed_json = json.loads(replacement_text)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(parsed_json, dict):
-            return None
-    return _replacement_edit_as_file_patch(
-        path=path,
-        current_text=current_text,
-        replacement_text=replacement_text,
-    )
-
-
-def _replacement_edit_as_file_patch(
-    *,
-    path: str,
-    current_text: str,
-    replacement_text: str,
-) -> ParsedFilePatch:
-    current_lines = current_text.splitlines()
-    replacement_lines = replacement_text.splitlines()
-    return ParsedFilePatch(
-        old_path=path,
-        new_path=path,
-        hunks=(
-            ParsedHunk(
-                old_start=1 if current_lines else 0,
-                old_count=len(current_lines),
-                new_start=1 if replacement_lines else 0,
-                new_count=len(replacement_lines),
-                lines=tuple(
-                    [*(PatchLine("-", line) for line in current_lines)]
-                    + [*(PatchLine("+", line) for line in replacement_lines)]
-                ),
-            ),
-        ),
-        operation=PATCH_OPERATION_MODIFY,
-    )
-
-
-_COMPOSER_PACKAGE_LINE_RE = re.compile(r'^\s*"(?P<name>[^"]+)":\s*"(?P<constraint>[^"]+)"\s*,?\s*$')
-
-
-def _composer_json_merge_replacement_from_patch(
-    path: str,
-    *,
-    current_text: str,
-    file_patch: ParsedFilePatch,
-) -> StructuredFileEdit | None:
-    try:
-        parsed_json = json.loads(current_text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed_json, dict):
-        return None
-    additions = _composer_dependency_additions(file_patch)
-    if not additions:
-        return None
-    changed = False
-    for section, packages in additions.items():
-        current_section = parsed_json.setdefault(section, {})
-        if not isinstance(current_section, dict):
-            return None
-        for package, constraint in packages.items():
-            if current_section.get(package) != constraint:
-                current_section[package] = constraint
-                changed = True
-    if not changed:
-        return None
-    replacement_text = json.dumps(parsed_json, indent=4, ensure_ascii=False) + "\n"
-    return StructuredFileEdit(
-        path=path,
-        action=SUPPORTED_REPLACE_ACTION,
-        content=replacement_text,
-    )
-
-
-def _composer_dependency_additions(
-    file_patch: ParsedFilePatch,
-) -> dict[str, dict[str, str]]:
-    additions: dict[str, dict[str, str]] = {}
-    current_section: str | None = None
-    for hunk in file_patch.hunks:
-        for line in hunk.lines:
-            text = line.text.strip()
-            if line.kind in {" ", "+"}:
-                if text.startswith('"require-dev"') and "{" in text:
-                    current_section = "require-dev"
-                elif text.startswith('"require"') and "{" in text:
-                    current_section = "require"
-                elif text == "},":
-                    current_section = None
-            if line.kind != "+":
-                continue
-            match = _COMPOSER_PACKAGE_LINE_RE.match(line.text)
-            if match is None:
-                continue
-            package = match.group("name")
-            constraint = match.group("constraint")
-            section = current_section or _infer_composer_dependency_section(package)
-            additions.setdefault(section, {})[package] = constraint
-    return additions
-
-
-def _infer_composer_dependency_section(package: str) -> str:
-    if package.startswith("phpunit/") or package in {
-        "symfony/browser-kit",
-        "symfony/css-selector",
-        "symfony/maker-bundle",
-        "symfony/phpunit-bridge",
-        "symfony/web-profiler-bundle",
-    }:
-        return "require-dev"
-    return "require"
-
-
 def _full_file_replacement_lines_from_patch(
     file_patch: ParsedFilePatch,
     *,
@@ -2516,69 +1857,6 @@ def _full_file_replacement_lines_from_patch(
     if hunk.old_count < max(1, current_line_count - 1):
         return None
     return replacement_lines
-
-
-def _is_small_replacement_candidate_path(path: str) -> bool:
-    pure = PurePosixPath(path)
-    if path in {"composer.json", "README.md", ".env.example", "phpunit.xml.dist"}:
-        return True
-    if pure.suffix.lower() in {".css", ".html", ".js", ".jsx", ".md", ".ts", ".tsx"}:
-        return True
-    return (
-        len(pure.parts) >= 2
-        and pure.parts[0] == "config"
-        and pure.suffix in {".yaml", ".yml"}
-    )
-
-
-def _multi_pass_patch_issue_diagnostics(
-    *,
-    active_workspace: Path,
-    source_workspace: Path,
-    contract: SFEContract,
-    patch_result: ExecutionResult,
-    proposal: RunPatchProposal,
-    path: str | None,
-    completed_files: tuple[str, ...],
-    initial_existing_files: frozenset[str],
-    pass_index: int,
-    batch: MultiPassBatch,
-) -> dict[str, object] | None:
-    if path is None:
-        return None
-    selected_refs = _execution_preview_selected_refs(patch_result)
-    contract_refs = {segment.source_ref for segment in contract.context_segments}
-    target = active_workspace / path
-    executor_diagnostics = _executor_contract_diagnostics(
-        active_workspace,
-        patch_result,
-        proposal,
-    )
-    eligible_files = set(
-        executor_diagnostics["full_file_replacement_eligible_files"]
-    )
-    full_content_guidance_files = set(executor_diagnostics["full_content_provided_files"])
-    used_files = set(executor_diagnostics["full_file_replacement_used_files"])
-    return {
-        "target_path": path,
-        "pass_index": pass_index,
-        "pass_id": batch.id,
-        "selected_context": path in selected_refs,
-        "full_content_provided": (
-            target.is_file()
-            and (path in selected_refs or path in batch.allowed_files and path in contract_refs)
-        ),
-        "file_existed_before_run": (
-            path in initial_existing_files
-            or ((source_workspace / path).exists() and path not in completed_files)
-        ),
-        "created_earlier_in_run": path in completed_files
-        and path not in initial_existing_files,
-        "full_file_replacement_eligible": path in eligible_files,
-        "included_in_full_file_replacement_guidance": path in full_content_guidance_files
-        or path in eligible_files,
-        "executor_used_full_file_replacement": path in used_files,
-    }
 
 
 def _executor_contract_diagnostics(
@@ -2657,20 +1935,6 @@ def _full_file_replacement_used_files(
     return tuple(used)
 
 
-def _execution_preview_selected_refs(result: ExecutionResult) -> set[str]:
-    preview = result.execution_preview
-    if preview is None:
-        return set()
-    segments = preview.executor_payload.get("selected_context_segments")
-    if not isinstance(segments, list | tuple):
-        return set()
-    return {
-        segment.source_ref
-        for segment in segments
-        if isinstance(getattr(segment, "source_ref", None), str)
-    }
-
-
 def _dedupe_paths(paths: object) -> tuple[str, ...]:
     seen: set[str] = set()
     deduped: list[str] = []
@@ -2740,6 +2004,228 @@ def _changed_files(
     if status_result.ok and status_result.status is not None:
         return status_result.status.changed_files
     return summary.paths
+
+
+def _promotion_baseline_paths(baseline: PromotionBaseline) -> tuple[str, ...]:
+    return tuple(target.relative_path for target in baseline.targets)
+
+
+def _summary_from_promotion_baseline(baseline: PromotionBaseline) -> PatchSummary | None:
+    if baseline.issue is not None or not baseline.targets:
+        return None
+    paths = _promotion_baseline_paths(baseline)
+    created_paths = tuple(
+        target.relative_path
+        for target in baseline.targets
+        if target.change_kind == "created"
+    )
+    modified_paths = tuple(
+        target.relative_path
+        for target in baseline.targets
+        if target.change_kind == "modified"
+    )
+    return PatchSummary(
+        paths=paths,
+        file_count=len(paths),
+        hunk_count=0,
+        lines_added=0,
+        lines_removed=0,
+        modified_paths=modified_paths,
+        created_paths=created_paths,
+    )
+
+
+def _capture_actual_workspace_changes(
+    session: WorkspaceSession,
+    active_workspace: Path,
+) -> PromotionBaseline:
+    status_result = _git(
+        session.worktree_path,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "-uall",
+        "--no-renames",
+    )
+    if status_result.returncode != 0:
+        return PromotionBaseline(
+            issue=RunIssue("workspace_status", "worktree_status_failed")
+        )
+    active_root = active_workspace.resolve()
+    source_root = session.source_path.resolve()
+    try:
+        active_prefix = active_root.relative_to(session.worktree_path.resolve())
+    except ValueError:
+        return PromotionBaseline(
+            issue=RunIssue("workspace_boundary", "active_workspace_outside_worktree")
+        )
+    active_prefix_parts = active_prefix.parts
+    targets: list[PromotionTarget] = []
+    offending_paths: list[str] = []
+    for status_code, worktree_relative_path in _parse_git_status_z(status_result.stdout):
+        worktree_relative = Path(worktree_relative_path)
+        if worktree_relative.is_absolute() or ".." in worktree_relative.parts:
+            offending_paths.append(worktree_relative_path)
+            continue
+        if active_prefix_parts:
+            if worktree_relative.parts[: len(active_prefix_parts)] != active_prefix_parts:
+                offending_paths.append(worktree_relative_path)
+                continue
+            destination_relative = Path(*worktree_relative.parts[len(active_prefix_parts) :])
+        else:
+            destination_relative = worktree_relative
+        if not destination_relative.parts:
+            offending_paths.append(worktree_relative_path)
+            continue
+        relative_path = destination_relative.as_posix()
+        worktree_target = active_root / destination_relative
+        source_target = source_root / destination_relative
+        deleted = "D" in status_code and not worktree_target.exists()
+        issue = _validate_actual_change_target(
+            source_root=source_root,
+            source_target=source_target,
+            active_root=active_root,
+            worktree_target=worktree_target,
+            relative_path=relative_path,
+            deleted=deleted,
+        )
+        if issue is not None:
+            return PromotionBaseline(issue=issue)
+        source_before = _read_optional_file_bytes(source_target, relative_path)
+        if isinstance(source_before, RunIssue):
+            return PromotionBaseline(issue=source_before)
+        change_kind = (
+            "deleted"
+            if deleted
+            else "created"
+            if source_before is None
+            else "modified"
+        )
+        targets.append(
+            PromotionTarget(
+                relative_path=relative_path,
+                source_path=source_target,
+                worktree_path=worktree_target,
+                source_before=source_before,
+                change_kind=change_kind,
+            )
+        )
+    if offending_paths:
+        return PromotionBaseline(
+            issue=_workspace_boundary_issue(
+                offending_paths=tuple(offending_paths),
+                source_root=source_root,
+                active_root=active_root,
+            )
+        )
+    return PromotionBaseline(targets=tuple(targets))
+
+
+def _parse_git_status_z(status_text: str) -> tuple[tuple[str, str], ...]:
+    entries: list[tuple[str, str]] = []
+    for raw_entry in status_text.split("\0"):
+        if not raw_entry or len(raw_entry) < 4:
+            continue
+        status_code = raw_entry[:2]
+        path = raw_entry[3:]
+        if path:
+            entries.append((status_code, path))
+    return tuple(entries)
+
+
+def _validate_actual_change_target(
+    *,
+    source_root: Path,
+    source_target: Path,
+    active_root: Path,
+    worktree_target: Path,
+    relative_path: str,
+    deleted: bool,
+) -> RunIssue | None:
+    try:
+        if deleted:
+            worktree_target.parent.resolve().relative_to(active_root)
+        else:
+            worktree_target.resolve().relative_to(active_root)
+    except ValueError:
+        return _workspace_boundary_issue(
+            offending_paths=(relative_path,),
+            source_root=source_root,
+            active_root=active_root,
+        )
+    try:
+        if source_target.exists() or source_target.is_symlink():
+            source_target.resolve().relative_to(source_root)
+        else:
+            source_target.parent.resolve().relative_to(source_root)
+    except ValueError:
+        return _workspace_boundary_issue(
+            offending_paths=(relative_path,),
+            source_root=source_root,
+            active_root=active_root,
+        )
+    return None
+
+
+def _workspace_boundary_issue(
+    *,
+    offending_paths: tuple[str, ...],
+    source_root: Path,
+    active_root: Path,
+) -> RunIssue:
+    return RunIssue(
+        "workspace_boundary",
+        "changed_path_outside_destination",
+        offending_paths[0] if offending_paths else None,
+        diagnostics={
+            "authorized_output_root": str(source_root),
+            "isolated_workspace_root": str(active_root),
+            "offending_paths": offending_paths,
+        },
+    )
+
+
+def _promote_actual_workspace_changes(baseline: PromotionBaseline) -> PromotionResult:
+    if baseline.issue is not None:
+        return PromotionResult("rejected", issue=baseline.issue)
+    if not baseline.targets:
+        return PromotionResult("skipped")
+
+    written: list[PromotionTarget] = []
+    created_dirs: list[Path] = []
+    try:
+        for target in baseline.targets:
+            if target.change_kind == "deleted":
+                if target.source_path.exists() or target.source_path.is_symlink():
+                    if not target.source_path.is_file() and not target.source_path.is_symlink():
+                        raise IsADirectoryError(str(target.source_path))
+                    target.source_path.unlink()
+                written.append(target)
+                continue
+            if not target.worktree_path.is_file():
+                return PromotionResult(
+                    "rejected",
+                    issue=RunIssue(
+                        "promotion",
+                        "worktree_changed_path_not_file",
+                        target.relative_path,
+                    ),
+                )
+            created_dirs.extend(_ensure_parent_dirs(target.source_path.parent))
+            target.source_path.write_bytes(target.worktree_path.read_bytes())
+            written.append(target)
+    except OSError:
+        _rollback_promotion(written)
+        _cleanup_created_dirs(created_dirs)
+        failed_path = written[-1].relative_path if written else None
+        return PromotionResult(
+            "rejected",
+            issue=RunIssue("promotion", "source_write_failed", failed_path),
+        )
+    return PromotionResult(
+        "applied",
+        promoted_files=tuple(target.relative_path for target in baseline.targets),
+    )
 
 
 def _source_workspace_changed_issue_with_diagnostics(

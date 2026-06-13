@@ -4576,7 +4576,7 @@ def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
     )
     assert "SFE: executor prompt prepared" in progress_lines
     assert "SFE: patch/worktree execution started" in progress_lines
-    assert "SFE: patch validation completed" in progress_lines
+    assert "SFE: workspace boundary check completed" in progress_lines
     assert progress_lines[-1] == "SFE: promotion completed"
     assert output.index(progress_lines[0]) < output.index(run_output)
     assert "SFE run" in run_output
@@ -4637,7 +4637,7 @@ def test_tui_run_progress_lines_omit_sensitive_material(tmp_path) -> None:
     assert "SECRET_TASK_TEXT" not in progress_text
     assert "old context" not in progress_text
     assert "new context" not in progress_text
-    assert "SFE: patch validation completed" in progress_text
+    assert "SFE: workspace boundary check completed" in progress_text
 
     assert app.workspace_session is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
@@ -6529,46 +6529,22 @@ def test_console_system_instruction_forbids_diffs_and_file_edits() -> None:
     assert "Do not produce a patch, diff, or file replacement JSON" in instruction
 
 
-def test_patch_system_instruction_requires_unified_diff_only() -> None:
+def test_patch_system_instruction_prefers_direct_edits_with_diff_fallback() -> None:
     instruction = PATCH_SYSTEM_INSTRUCTION
 
-    assert "Return only a strict unified diff/git diff" in instruction
+    assert "workspace_write executor" in instruction
+    assert "make the requested edits directly" in instruction
+    assert "Do not write outside that directory" in instruction
+    assert "trust the actual disk changes" in instruction
+    assert "destination-directory boundary" in instruction
+    assert "If your runtime cannot edit files directly" in instruction
+    assert "return a strict unified diff/git diff" in instruction
     assert "diff --git a/<relative-path> b/<relative-path>" in instruction
-    assert "The response must start with a diff header" in instruction
+    assert "diff response must start with a diff header" in instruction
     assert "Do not return JSON" in instruction
     assert "Do not return an edits array" in instruction
-    assert "Do not return Markdown" in instruction
     assert "Do not wrap the patch in a code fence" in instruction
-    assert "Do not explain the patch" in instruction
-    assert "Do not include a file manifest" in instruction
     assert "All paths must be relative to the workspace" in instruction
-    assert "complete Git-style new-file unified diff" in instruction
-    assert "do not start the response with --- /dev/null" in instruction
-    assert "--- /dev/null" in instruction
-    assert "+++ b/<relative-path>" in instruction
-    assert "normal unified diff hunks" in instruction
-    assert "Hunk header counts must exactly match the hunk body" in instruction
-    assert "old_count must equal the number of context lines plus removed lines" in instruction
-    assert "new_count must equal the number of context lines plus added lines" in instruction
-    assert "@@ -0,0 +1,N @@" in instruction
-    assert "N exactly equals the number of added + lines" in instruction
-    assert "Every added content line must start with +" in instruction
-    assert "Do not claim to inspect, read, or rely on workspace files" in instruction
-    assert "unless they appear in Selected context" in instruction
-    assert "treat that path as absent and create it as a new file" in instruction
-    assert "do not emit a modification hunk for an absent file" in instruction
-    assert "Do not guess hunk counts" in instruction
-    assert "Recount the hunk body before writing the hunk header" in instruction
-    assert "Prefer small localized hunks when possible" in instruction
-    assert "keep files smaller and hunks simpler" in instruction
-    assert ".git, vendor, var, cache" in instruction
-    assert "deletes" in instruction
-    assert "renames" in instruction
-    assert "mode-only changes" in instruction
-    assert "binary patches" in instruction
-    assert "symlink changes" in instruction
-    assert "If no safe unified diff can be proposed, return no text" in instruction
-    assert "except when later full-file replacement guidance marks" in instruction
     assert "Return only one strict JSON object" not in instruction
     assert '"edits"' not in instruction
 
@@ -6608,7 +6584,8 @@ def test_build_user_prompt_includes_multipass_batch_guidance() -> None:
     assert "Multi-pass batch guidance:" in prompt
     assert "Batch id: foundation" in prompt
     assert "Planned focus files for this batch:\n- composer.json" in prompt
-    assert "Return a strict git diff focused on this batch" in prompt
+    assert "Make edits focused on this batch" in prompt
+    assert "return a strict git diff for this batch" in prompt
     assert "Multi-pass planning request:" not in prompt
     assert "Return exactly one JSON object" not in prompt
 

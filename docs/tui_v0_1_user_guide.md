@@ -184,7 +184,7 @@ SFE: relevant context selected: 3 files
 SFE: estimated token reduction: 71.4%
 SFE: executor prompt prepared
 SFE: patch/worktree execution started
-SFE: patch validation completed
+SFE: workspace boundary check completed
 SFE: promotion completed
 ```
 

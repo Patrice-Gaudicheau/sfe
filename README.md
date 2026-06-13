@@ -277,13 +277,18 @@ SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `/run` first asks the core execution-mode router how to resolve the task.
 `console_output` produces a natural-language answer in the TUI with no Git
 preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
-existing discovery, context-routing, executor, patch, and isolated worktree
-pipeline for creating, modifying, or deleting workspace files. If the selected
-workspace is not yet a Git repository, `workspace_write` can initialize a local
-snapshot first; it does not create a remote, push, run syntax checks, run tests
-or lint, require diff inspection, require human approval, or require router
-review. `external_action` is recognized as outside-workspace work, but is not
-implemented yet and fails cleanly. Historical and debug commands such as
+existing discovery, context-routing, executor, and isolated worktree pipeline
+for creating, modifying, or deleting workspace files. SFE trusts the actual disk
+changes produced in the isolated worktree, then enforces one safety boundary:
+every created, modified, or deleted path must be inside the selected destination
+directory before changes are promoted. This deliberately avoids fragile patch
+hunk/preimage validation and repair loops, trading fewer false failures for a
+filesystem-scope boundary check. If the selected workspace is not yet a Git
+repository, `workspace_write` can initialize a local snapshot first; it does not
+create a remote, push, run syntax checks, run tests or lint, require diff
+inspection, require human approval, or require router review. `external_action`
+is recognized as outside-workspace work, but is not implemented yet and fails
+cleanly. Historical and debug commands such as
 `/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
 `/review-worktree` remain available, but are hidden from the default help.
 
@@ -484,29 +489,22 @@ Large `workspace_write` scaffold tasks can also use core multi-pass execution.
 project/scaffold requests, `true` forces multi-pass for validation or testing,
 and `false` preserves single-pass behavior. Multi-pass asks the Router for a
 strict JSON batch plan, validates that plan before execution, then asks the
-Executor to generate one patch per validated batch with an explicit
-`allowed_files` list. The default guardrails reject invalid plans, batches that
+Executor to make one batch of workspace changes with an explicit `allowed_files`
+list. The default guardrails reject invalid plans, batches that
 exceed a numeric `SFE_MULTIPASS_MAX_PASSES` cap when configured (`auto` by
 default) or
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` (default `10`). `allowed_files` is planning
-guidance and report metadata by default; patches that touch additional files
-inside the workspace are reported as warnings rather than rejected. Paths that
-escape the workspace or target blocked internal directories are still rejected.
-This improves large scaffold reliability but does
-not implement automatic resume after a failed pass; the run report indicates
-whether a manual resume is plausible.
+guidance and report metadata by default; actual changes that touch additional
+files inside the destination directory are reported as warnings rather than
+rejected. Any actual changed path outside the destination directory rejects the
+run with a diagnostic listing the offending paths. This improves large scaffold
+reliability but does not implement automatic resume after a failed pass; the
+run report indicates whether a manual resume is plausible.
 
 `SFE_MULTIPASS_PLANNER_MODEL` is deprecated and ignored. Multi-pass planning now
 uses the configured Router provider/model, such as `SFE_PROVIDER_ROUTER`,
 `SFE_OPENAI_ROUTER_MODEL`, `SFE_CODEXCLI_ROUTER_MODEL`, or another supported
 Router model variable.
-
-`SFE_FULL_FILE_REPLACEMENT_REVIEW=false` is the default. `auto` enables an
-optional LLM-reviewed full-file replacement fallback for `hunk_preimage_mismatch`
-failures in multi-pass runs. The fallback first checks deterministic invariants,
-then asks the configured Router provider/model only to approve or reject the
-proposed replacement. The reviewer is not asked to repair or rewrite patches.
-`true` is currently equivalent to `auto`.
 
 Google/Gemini discovery can be selected with `SFE_PROVIDER_DISCOVERY=google`
 and optionally `SFE_GOOGLE_DISCOVERY_MODEL=<model-id>`.
