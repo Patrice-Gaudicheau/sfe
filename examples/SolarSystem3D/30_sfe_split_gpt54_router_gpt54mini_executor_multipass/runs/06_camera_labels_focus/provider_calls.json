@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 629,
+      "latency": 1182,
+      "latency_ms": 1182,
+      "model": "gpt-5.4",
+      "output_tokens": 41,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "06_camera_labels_focus",
+      "total_tokens": 670
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 1145,
+      "latency": 1515,
+      "latency_ms": 1515,
+      "model": "gpt-5.4",
+      "output_tokens": 82,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "06_camera_labels_focus",
+      "total_tokens": 1227
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 15109,
+      "latency": 21557,
+      "latency_ms": 21557,
+      "model": "gpt-5.4-mini",
+      "output_tokens": 5284,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "06_camera_labels_focus",
+      "total_tokens": 20393
+    }
+  ]
+}

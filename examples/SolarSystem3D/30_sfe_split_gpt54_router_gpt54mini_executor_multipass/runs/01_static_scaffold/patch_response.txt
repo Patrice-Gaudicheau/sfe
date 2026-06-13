@@ -1,0 +1,438 @@
+diff --git a/app/index.html b/app/index.html
+new file mode 100644
+index 0000000..f3c1db1
+--- /dev/null
++++ b/app/index.html
+@@ -0,0 +1,79 @@
++<!doctype html>
++<html lang="en">
++  <head>
++    <meta charset="utf-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1" />
++    <title>SolarSystem3D</title>
++    <meta
++      name="description"
++      content="SolarSystem3D is a static Three.js solar system simulator with procedural textures, a star field, and educational controls."
++    />
++    <link rel="stylesheet" href="./styles.css" />
++  </head>
++  <body>
++    <a class="skip-link" href="#controls">Skip to controls</a>
++
++    <div class="app-shell">
++      <header class="topbar" aria-label="Application header">
++        <div>
++          <h1>SolarSystem3D</h1>
++          <p class="subtitle">
++            Static Three.js educational solar system shell with procedural textures and
++            camera controls.
++          </p>
++        </div>
++        <p class="status" id="statusText" aria-live="polite">Ready</p>
++      </header>
++
++      <main class="layout" aria-label="Solar system simulator">
++        <section class="viewer-panel" aria-label="3D viewer">
++          <div id="sceneContainer" class="scene-container" aria-label="Three.js scene canvas host"></div>
++          <div class="overlay panel">
++            <h2>Selected body</h2>
++            <dl id="selectedBodyInfo" class="body-info">
++              <div><dt>Name</dt><dd id="bodyName">No body selected</dd></div>
++              <div><dt>Type</dt><dd id="bodyType">—</dd></div>
++              <div><dt>Distance</dt><dd id="bodyDistance">—</dd></div>
++              <div><dt>Orbit period</dt><dd id="bodyOrbit">—</dd></div>
++              <div><dt>Rotation period</dt><dd id="bodyRotation">—</dd></div>
++              <div><dt>Description</dt><dd id="bodyDescription">Select a body to inspect it.</dd></div>
++            </dl>
++          </div>
++        </section>
++
++        <aside class="controls panel" id="controls" aria-label="Primary controls">
++          <h2>Controls</h2>
++
++          <section aria-labelledby="simulationHeading">
++            <h3 id="simulationHeading">Simulation</h3>
++            <div class="control-row">
++              <button id="playPauseButton" type="button">Pause</button>
++              <label for="speedRange">Time speed</label>
++              <input id="speedRange" type="range" min="0" max="10" step="0.1" value="2" />
++            </div>
++          </section>
++
++          <section aria-labelledby="cameraHeading">
++            <h3 id="cameraHeading">Camera presets</h3>
++            <div class="button-grid">
++              <button type="button" data-camera="overview">Overview</button>
++              <button type="button" data-camera="inner">Inner planets</button>
++              <button type="button" data-camera="earth-moon">Earth and Moon</button>
++              <button type="button" data-camera="outer">Outer planets</button>
++              <button type="button" data-camera="sun">Sun view</button>
++            </div>
++          </section>
++
++          <section aria-labelledby="displayHeading">
++            <h3 id="displayHeading">Display</h3>
++            <div class="toggle-list">
++              <label><input id="labelsToggle" type="checkbox" checked /> Show labels</label>
++              <label><input id="orbitsToggle" type="checkbox" checked /> Show orbits</label>
++            </div>
++          </section>
++
++          <section aria-labelledby="seasonHeading">
++            <h3 id="seasonHeading">Season presets</h3>
++            <p class="note">Season positions are simplified educational approximations, not precision ephemerides.</p>
++            <div class="button-grid">
++              <button type="button" data-season="spring">Spring equinox</button>
++              <button type="button" data-season="summer">Summer solstice</button>
++              <button type="button" data-season="autumn">Autumn equinox</button>
++              <button type="button" data-season="winter">Winter solstice</button>
++            </div>
++          </section>
++
++          <section aria-labelledby="infoHeading">
++            <h3 id="infoHeading">About</h3>
++            <p class="note">
++              Use mouse, trackpad, or touch to orbit the scene. Click a body to focus it and
++              update the information panel.
++            </p>
++          </section>
++        </aside>
++      </main>
++    </div>
++
++    <script type="module" src="./app.js"></script>
++  </body>
++</html>
+diff --git a/app/styles.css b/app/styles.css
+new file mode 100644
+index 0000000..97a439e
+--- /dev/null
++++ b/app/styles.css
+@@ -0,0 +1,205 @@
++:root {
++  color-scheme: dark;
++  --bg: #050816;
++  --panel: rgba(10, 16, 32, 0.82);
++  --panel-border: rgba(157, 185, 255, 0.16);
++  --text: #ecf2ff;
++  --muted: #aab8d6;
++  --accent: #89b4ff;
++}
++
++* {
++  box-sizing: border-box;
++}
++
++html,
++body {
++  margin: 0;
++  min-height: 100%;
++  background: radial-gradient(circle at top, #101b3d 0%, var(--bg) 52%, #02030a 100%);
++  color: var(--text);
++  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
++}
++
++body {
++  min-height: 100vh;
++}
++
++button,
++input {
++  font: inherit;
++}
++
++button {
++  border: 1px solid var(--panel-border);
++  background: rgba(20, 30, 56, 0.95);
++  color: var(--text);
++  border-radius: 0.7rem;
++  padding: 0.72rem 0.9rem;
++  cursor: pointer;
++}
++
++button:hover,
++button:focus-visible,
++input:focus-visible {
++  outline: 2px solid var(--accent);
++  outline-offset: 2px;
++}
++
++input[type="range"] {
++  width: 100%;
++}
++
++.skip-link {
++  position: absolute;
++  left: -999px;
++  top: 0;
++}
++
++.skip-link:focus {
++  left: 1rem;
++  top: 1rem;
++  z-index: 20;
++  background: #000;
++  padding: 0.5rem 0.75rem;
++}
++
++.app-shell {
++  min-height: 100vh;
++  display: grid;
++  grid-template-rows: auto 1fr;
++}
++
++.topbar {
++  display: flex;
++  justify-content: space-between;
++  gap: 1rem;
++  align-items: center;
++  padding: 1rem 1rem 0.5rem;
++}
++
++.topbar h1,
++.controls h2,
++.panel h2,
++.controls h3 {
++  margin: 0;
++}
++
++.subtitle,
++.status,
++.note {
++  margin: 0.25rem 0 0;
++  color: var(--muted);
++}
++
++.layout {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) 20rem;
++  gap: 1rem;
++  padding: 0 1rem 1rem;
++  min-height: 0;
++}
++
++.viewer-panel {
++  position: relative;
++  min-height: 0;
++}
++
++.scene-container {
++  width: 100%;
++  height: min(78vh, 46rem);
++  min-height: 24rem;
++  border-radius: 1rem;
++  overflow: hidden;
++  border: 1px solid var(--panel-border);
++  background: #02040b;
++}
++
++.panel {
++  background: var(--panel);
++  border: 1px solid var(--panel-border);
++  border-radius: 1rem;
++  backdrop-filter: blur(10px);
++}
++
++.overlay {
++  position: absolute;
++  left: 1rem;
++  bottom: 1rem;
++  width: min(24rem, calc(100% - 2rem));
++  padding: 1rem;
++}
++
++.body-info {
++  margin: 0.75rem 0 0;
++}
++
++.body-info div + div {
++  margin-top: 0.5rem;
++}
++
++.body-info dt {
++  font-size: 0.78rem;
++  color: var(--muted);
++}
++
++.body-info dd {
++  margin: 0.15rem 0 0;
++}
++
++.controls {
++  padding: 1rem;
++  display: grid;
++  gap: 1rem;
++  align-content: start;
++}
++
++.control-row,
++.toggle-list,
++.button-grid {
++  display: grid;
++  gap: 0.75rem;
++}
++
++.toggle-list label {
++  display: flex;
++  align-items: center;
++  gap: 0.5rem;
++}
++
++@media (max-width: 900px) {
++  .layout {
++    grid-template-columns: 1fr;
++  }
++
++  .controls {
++    order: 2;
++  }
++}
++
++@media (max-width: 640px) {
++  .topbar,
++  .layout {
++    padding-left: 0.75rem;
++    padding-right: 0.75rem;
++  }
++
++  .scene-container {
++    height: min(62vh, 34rem);
++    min-height: 20rem;
++  }
++
++  .overlay {
++    position: static;
++    width: auto;
++    margin-top: 0.75rem;
++  }
++}
+diff --git a/app/app.js b/app/app.js
+new file mode 100644
+index 0000000..ba207ee
+--- /dev/null
++++ b/app/app.js
+@@ -0,0 +1,111 @@
++import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
++import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
++
++const container = document.getElementById("sceneContainer");
++const statusText = document.getElementById("statusText");
++
++const scene = new THREE.Scene();
++scene.background = new THREE.Color(0x02040b);
++
++const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
++camera.position.set(0, 24, 58);
++
++const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
++renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
++renderer.setSize(container.clientWidth, container.clientHeight, false);
++container.appendChild(renderer.domElement);
++
++const controls = new OrbitControls(camera, renderer.domElement);
++controls.enableDamping = true;
++controls.target.set(0, 0, 0);
++
++scene.add(new THREE.AmbientLight(0xbfd5ff, 0.7));
++const sunLight = new THREE.PointLight(0xffffff, 2.4, 0, 2);
++sunLight.position.set(0, 0, 0);
++scene.add(sunLight);
++scene.add(new THREE.DirectionalLight(0xffffff, 0.4));
++
++const stars = new THREE.BufferGeometry();
++const starCount = 1200;
++const starPositions = new Float32Array(starCount * 3);
++for (let i = 0; i < starCount; i += 1) {
++  const radius = 450 + Math.random() * 500;
++  const theta = Math.random() * Math.PI * 2;
++  const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
++  const x = radius * Math.sin(phi) * Math.cos(theta);
++  const y = radius * Math.cos(phi);
++  const z = radius * Math.sin(phi) * Math.sin(theta);
++  starPositions.set([x, y, z], i * 3);
++}
++stars.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
++const starField = new THREE.Points(
++  stars,
++  new THREE.PointsMaterial({ color: 0xffffff, size: 1.4, sizeAttenuation: true })
++);
++scene.add(starField);
++
++const sunGeo = new THREE.SphereGeometry(4, 32, 24);
++const sunMat = new THREE.MeshBasicMaterial({ color: 0xffcc66 });
++const sun = new THREE.Mesh(sunGeo, sunMat);
++scene.add(sun);
++
++const earthGeo = new THREE.SphereGeometry(1.3, 28, 20);
++const earth = new THREE.Mesh(earthGeo, new THREE.MeshStandardMaterial({ color: 0x4b87ff }));
++earth.position.set(11, 0, 0);
++scene.add(earth);
++
++const moon = new THREE.Mesh(
++  new THREE.SphereGeometry(0.35, 20, 16),
++  new THREE.MeshStandardMaterial({ color: 0xbbbbbb })
++);
++moon.position.set(12.4, 0, 0);
++scene.add(moon);
++
++const earthOrbit = new THREE.Line(
++  new THREE.BufferGeometry().setFromPoints(
++    Array.from({ length: 128 }, (_, i) => {
++      const a = (i / 128) * Math.PI * 2;
++      return new THREE.Vector3(Math.cos(a) * 11, 0, Math.sin(a) * 11);
++    })
++  ),
++  new THREE.LineBasicMaterial({ color: 0x446080, transparent: true, opacity: 0.65 })
++);
++scene.add(earthOrbit);
++
++function onResize() {
++  const { clientWidth, clientHeight } = container;
++  camera.aspect = clientWidth / clientHeight;
++  camera.updateProjectionMatrix();
++  renderer.setSize(clientWidth, clientHeight, false);
++}
++
++window.addEventListener("resize", onResize);
++onResize();
++
++statusText.textContent = "Static scene shell loaded";
++
++function animate() {
++  requestAnimationFrame(animate);
++  sun.rotation.y += 0.003;
++  earth.rotation.y += 0.01;
++  moon.rotation.y += 0.01;
++  moon.position.x = earth.position.x + Math.cos(performance.now() * 0.0015) * 1.8;
++  moon.position.z = Math.sin(performance.now() * 0.0015) * 1.8;
++  controls.update();
++  renderer.render(scene, camera);
++}
++
++animate();
+diff --git a/app/README.md b/app/README.md
+new file mode 100644
+index 0000000..98bc35d
+--- /dev/null
++++ b/app/README.md
+@@ -0,0 +1,18 @@
++# SolarSystem3D
++
++Static Three.js scaffold for the SolarSystem3D benchmark.
++
++## Run
++
++This version uses browser ES module imports from a pinned Three.js CDN, so it is best opened through a simple static server:
++
++```bash
++cd app
++python3 -m http.server 8000
++```
++
++Then open `http://localhost:8000/`.
++
++## Notes
++
++- The scene is a baseline shell with camera controls, a procedural star background, resize handling, and placeholder info panels.
++- Controls and labels are semantic and keyboard reachable.
++- This is an educational visualization scaffold; later tasks will add the full solar system data, textures, and interactions.

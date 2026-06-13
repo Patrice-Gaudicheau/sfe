@@ -1,0 +1,3 @@
+scenario,comparison_scope,success,input_tokens,cached_input_tokens,output_tokens,total_tokens,baseline_total_tokens,absolute_total_delta,percent_total_delta,expensive_gpt54_tokens,gpt54mini_executor_tokens,interpretation
+10_baseline_full_context_gpt54,full_run,True,132210,30464,130387,262597,262597,0,0.0%,262597,0,Full-context gpt-5.4 baseline.
+30_sfe_split_gpt54_router_gpt54mini_executor_multipass,full_run,True,121578,0,51585,173163,262597,-89434,-34.1%,21459,151704,SFE split multipass completed successfully with lower total token volume and sharply lower gpt-5.4 exposure.

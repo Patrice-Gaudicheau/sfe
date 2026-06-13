@@ -1,0 +1,290 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/index.html",
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/styles.css",
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/app.js",
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/README.md"
+    ],
+    "input_tokens": 12689,
+    "latency_or_wall_clock_duration": 30005,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4-mini",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": true,
+    "multipass_mode": "auto",
+    "output_tokens": 4504,
+    "provider": "openai-api",
+    "provider_call_count": 4,
+    "provider_calls_by_role": {
+      "discovery": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 1028,
+        "latency_ms": 1697,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 61,
+        "success_count": 1
+      },
+      "executor": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 5353,
+        "latency_ms": 19031,
+        "models": [
+          "gpt-5.4-mini"
+        ],
+        "output_tokens": 3794,
+        "success_count": 1
+      },
+      "multipass_planner": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 5635,
+        "latency_ms": 7193,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 604,
+        "success_count": 1
+      },
+      "router": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 673,
+        "latency_ms": 2084,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 45,
+        "success_count": 1
+      }
+    },
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
+    "task_id": "01_static_scaffold",
+    "task_title": "Static scaffold and Three.js scene shell",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 30130
+  },
+  "sfe": {
+    "changed_files": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task explicitly requires creating or modifying specific files in the workspace under app/ to implement the scaffolded Three.js app and documentation."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": true,
+    "git_initial_commit_hash": "b2f8863",
+    "issue": null,
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/README.md",
+        "app/app.js",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "created_files_by_pass": {
+        "scaffold-html-shell": [
+          "app/index.html",
+          "app/styles.css",
+          "app/app.js",
+          "app/README.md"
+        ]
+      },
+      "enabled": true,
+      "failed_pass_id": null,
+      "failed_pass_issue": null,
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/index.html"
+          ],
+          "created_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "scaffold-html-shell",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/README.md",
+            "app/app.js",
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Create simulator-first HTML shell",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/styles.css",
+            "multi_pass_path_outside_allowed_files:app/app.js",
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/styles.css"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "responsive-layout-styles",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "skipped",
+          "title": "Add responsive layout and focus-visible styling",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/styles.css"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "three-scene-shell",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "skipped",
+          "title": "Initialize Three.js scene and procedural starfield",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/app.js"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "readme-run-and-scope",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "skipped",
+          "title": "Document static run method and baseline features",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+          ]
+        }
+      ],
+      "passes_completed": 1,
+      "passes_total": 4,
+      "project_summary": "Build the initial static SolarSystem3D app scaffold in app/ with a first-screen 3D simulator shell, responsive semantic UI, baseline Three.js scene setup, procedural star background, resize handling, and README run notes for static-server fallback.",
+      "promoted_files_by_pass": {
+        "scaffold-html-shell": [
+          "app/README.md",
+          "app/app.js",
+          "app/index.html",
+          "app/styles.css"
+        ]
+      },
+      "safe_resume_possible": false,
+      "status": "completed"
+    },
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "file_count": 4,
+      "hunk_count": 4,
+      "lines_added": 414,
+      "lines_removed": 0,
+      "modified_paths": [],
+      "paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/README.md",
+      "app/app.js",
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/01_static_scaffold.md"
+    ],
+    "status": "completed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected",
+      "multiple_creations",
+      "multi_pass_path_outside_allowed_files:app/styles.css",
+      "multi_pass_path_outside_allowed_files:app/app.js",
+      "multi_pass_path_outside_allowed_files:app/README.md",
+      "multi_pass_skipped_already_promoted_outside_batch:app/styles.css",
+      "multi_pass_skipped_already_promoted_outside_batch:app/app.js",
+      "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+    ]
+  }
+}

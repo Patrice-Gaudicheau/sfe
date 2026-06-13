@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 627,
+      "latency": 1347,
+      "latency_ms": 1347,
+      "model": "gpt-5.4",
+      "output_tokens": 36,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "04_animation_time_scale",
+      "total_tokens": 663
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 1143,
+      "latency": 1679,
+      "latency_ms": 1679,
+      "model": "gpt-5.4",
+      "output_tokens": 78,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "04_animation_time_scale",
+      "total_tokens": 1221
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 13595,
+      "latency": 24185,
+      "latency_ms": 24185,
+      "model": "gpt-5.4-mini",
+      "output_tokens": 6496,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "04_animation_time_scale",
+      "total_tokens": 20091
+    }
+  ]
+}

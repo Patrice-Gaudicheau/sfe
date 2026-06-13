@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 665,
+      "latency": 1546,
+      "latency_ms": 1546,
+      "model": "gpt-5.4",
+      "output_tokens": 40,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_tokens": 705
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 1180,
+      "latency": 1867,
+      "latency_ms": 1867,
+      "model": "gpt-5.4",
+      "output_tokens": 75,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_tokens": 1255
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 8654,
+      "latency": 40436,
+      "latency_ms": 40436,
+      "model": "gpt-5.4-mini",
+      "output_tokens": 9450,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_tokens": 18104
+    }
+  ]
+}

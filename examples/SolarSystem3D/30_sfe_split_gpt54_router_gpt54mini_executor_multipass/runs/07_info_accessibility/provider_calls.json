@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 634,
+      "latency": 1504,
+      "latency_ms": 1504,
+      "model": "gpt-5.4",
+      "output_tokens": 45,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "07_info_accessibility",
+      "total_tokens": 679
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 1150,
+      "latency": 1841,
+      "latency_ms": 1841,
+      "model": "gpt-5.4",
+      "output_tokens": 74,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "07_info_accessibility",
+      "total_tokens": 1224
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 15338,
+      "latency": 24060,
+      "latency_ms": 24060,
+      "model": "gpt-5.4-mini",
+      "output_tokens": 5634,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "07_info_accessibility",
+      "total_tokens": 20972
+    }
+  ]
+}

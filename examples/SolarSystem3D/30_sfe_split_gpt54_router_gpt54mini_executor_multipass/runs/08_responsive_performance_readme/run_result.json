@@ -1,0 +1,133 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/index.html",
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/styles.css",
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/app.js",
+      "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/README.md"
+    ],
+    "input_tokens": 17562,
+    "latency_or_wall_clock_duration": 24885,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4-mini",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": true,
+    "multipass_mode": "auto",
+    "output_tokens": 5230,
+    "provider": "openai-api",
+    "provider_call_count": 3,
+    "provider_calls_by_role": {
+      "discovery": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 1161,
+        "latency_ms": 1353,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 80,
+        "success_count": 1
+      },
+      "executor": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 15756,
+        "latency_ms": 22339,
+        "models": [
+          "gpt-5.4-mini"
+        ],
+        "output_tokens": 5109,
+        "success_count": 1
+      },
+      "router": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 645,
+        "latency_ms": 1193,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 41,
+        "success_count": 1
+      }
+    },
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
+    "task_id": "08_responsive_performance_readme",
+    "task_title": "Responsive polish, performance review, and README",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 24944
+  },
+  "sfe": {
+    "changed_files": [],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires editing specified files in the workspace, including app code, styles, HTML, and README updates."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": false,
+    "git_initial_commit_hash": null,
+    "issue": null,
+    "multi_pass_summary": null,
+    "patch_applied": false,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 3,
+      "hunk_count": 19,
+      "lines_added": 31,
+      "lines_removed": 9,
+      "modified_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js"
+      ],
+      "paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [],
+    "promotion_applied": false,
+    "promotion_status": "skipped",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/08_responsive_performance_readme.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "completed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected"
+    ]
+  }
+}
