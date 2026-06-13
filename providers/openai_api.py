@@ -358,11 +358,15 @@ def normalize_usage(raw_usage: Any) -> dict[str, int | None]:
     total_tokens = _first_int(usage, ("total_tokens",))
     if total_tokens is None and input_tokens is not None and output_tokens is not None:
         total_tokens = input_tokens + output_tokens
-    return {
+    normalized = {
         "prompt_tokens": input_tokens,
         "completion_tokens": output_tokens,
         "total_tokens": total_tokens,
     }
+    cached_input_tokens = _cached_input_tokens(usage)
+    if cached_input_tokens is not None:
+        normalized["cached_input_tokens"] = cached_input_tokens
+    return normalized
 
 
 def _responses_payload(
@@ -415,6 +419,23 @@ def _to_plain_data(value: Any) -> Any:
 def _first_int(data: dict[str, Any], keys: tuple[str, ...]) -> int | None:
     for key in keys:
         value = data.get(key)
+        if value is not None:
+            return int(value)
+    return None
+
+
+def _cached_input_tokens(usage: dict[str, Any]) -> int | None:
+    details_candidates = (
+        usage.get("input_tokens_details"),
+        usage.get("prompt_tokens_details"),
+    )
+    for details in details_candidates:
+        details = _to_plain_data(details)
+        if not isinstance(details, dict):
+            continue
+        value = details.get("cached_tokens")
+        if value is None:
+            value = details.get("cached_input_tokens")
         if value is not None:
             return int(value)
     return None

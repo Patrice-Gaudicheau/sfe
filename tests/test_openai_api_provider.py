@@ -78,6 +78,25 @@ class OpenAIAPIProviderTests(unittest.TestCase):
             {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
         )
 
+    def test_usage_normalization_preserves_cached_input_tokens_when_reported(self) -> None:
+        usage = normalize_usage(
+            {
+                "input_tokens": 20,
+                "output_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 12},
+            }
+        )
+
+        self.assertEqual(
+            usage,
+            {
+                "prompt_tokens": 20,
+                "completion_tokens": 5,
+                "total_tokens": 25,
+                "cached_input_tokens": 12,
+            },
+        )
+
     def test_chat_normalizes_response_without_codexcli_metadata(self) -> None:
         class FakeProvider(OpenAIAPIProvider):
             def _responses_create(self, **_: object) -> dict[str, object]:
