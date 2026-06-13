@@ -1,0 +1,230 @@
+{
+  "description": "Baseline full-context run with gpt-5.4 only, without SFE.",
+  "runs": [
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 4782,
+      "latency_or_wall_clock_duration": 25837,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 4938,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "01_static_scaffold",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 9030,
+      "latency_or_wall_clock_duration": 53359,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 12031,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 15217,
+      "latency_or_wall_clock_duration": 55470,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 13749,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "03_bodies_scale_orbits",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 16740,
+      "latency_or_wall_clock_duration": 61541,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 15574,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "04_animation_time_scale",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 18369,
+      "latency_or_wall_clock_duration": 68575,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 17693,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "05_earth_seasons",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 20232,
+      "latency_or_wall_clock_duration": 85695,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 21529,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "06_camera_labels_focus",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 23586,
+      "latency_or_wall_clock_duration": 87657,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 22278,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "07_info_accessibility",
+      "total_estimated_cost": null
+    },
+    {
+      "cached_input_tokens": 4352,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+        "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+      ],
+      "input_tokens": 24254,
+      "latency_or_wall_clock_duration": 90432,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": null,
+        "executor": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": null
+      },
+      "output_tokens": 22595,
+      "parsing_error": null,
+      "provider": "openai-api",
+      "provider_error": null,
+      "success": true,
+      "task_id": "08_responsive_performance_readme",
+      "total_estimated_cost": null
+    }
+  ],
+  "scenario": "baseline_full_context_gpt54",
+  "totals": {
+    "cached_input_tokens": 30464,
+    "currency": null,
+    "input_tokens": 132210,
+    "latency_or_wall_clock_duration": 528566,
+    "output_tokens": 130387,
+    "total_estimated_cost": null
+  }
+}

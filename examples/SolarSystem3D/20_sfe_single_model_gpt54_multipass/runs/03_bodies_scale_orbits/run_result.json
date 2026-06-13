@@ -1,0 +1,155 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [],
+    "input_tokens": 45340,
+    "latency_or_wall_clock_duration": 56796,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 13410,
+    "provider": "openai-api",
+    "provider_call_count": 4,
+    "sfe_issue": {
+      "category": "physical_application_failure",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/app.js",
+      "reason": "hunk_preimage_mismatch"
+    },
+    "sfe_status": "failed",
+    "success": false,
+    "task_id": "03_bodies_scale_orbits",
+    "task_title": "Bodies, educational scale, rings, and orbit paths",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 56850
+  },
+  "sfe": {
+    "changed_files": [],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires modifying specific files in the workspace to implement the app changes described."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": false,
+    "git_initial_commit_hash": null,
+    "issue": {
+      "category": "physical_application_failure",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/app.js",
+      "reason": "hunk_preimage_mismatch"
+    },
+    "multi_pass_summary": {
+      "all_promoted_files": [],
+      "created_files_by_pass": {},
+      "enabled": true,
+      "failed_pass_id": "scene-body-system",
+      "failed_pass_issue": {
+        "category": "physical_application_failure",
+        "diagnostics": {
+          "created_earlier_in_run": false,
+          "executor_used_full_file_replacement": false,
+          "file_existed_before_run": true,
+          "full_content_provided": true,
+          "full_file_replacement_eligible": true,
+          "included_in_full_file_replacement_guidance": true,
+          "pass_id": "scene-body-system",
+          "pass_index": 1,
+          "selected_context": true,
+          "target_path": "app/app.js"
+        },
+        "pass_id": "scene-body-system",
+        "path": "app/app.js",
+        "reason": "hunk_preimage_mismatch"
+      },
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": {
+            "category": "physical_application_failure",
+            "diagnostics": {
+              "created_earlier_in_run": false,
+              "executor_used_full_file_replacement": false,
+              "file_existed_before_run": true,
+              "full_content_provided": true,
+              "full_file_replacement_eligible": true,
+              "included_in_full_file_replacement_guidance": true,
+              "pass_id": "scene-body-system",
+              "pass_index": 1,
+              "selected_context": true,
+              "target_path": "app/app.js"
+            },
+            "pass_id": "scene-body-system",
+            "path": "app/app.js",
+            "reason": "hunk_preimage_mismatch"
+          },
+          "pass_id": "scene-body-system",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "failed",
+          "title": "Build full educational-scale body scene",
+          "warnings": []
+        }
+      ],
+      "passes_completed": 0,
+      "passes_total": 4,
+      "project_summary": "Implement task 3 for SolarSystem3D by converting the current preview into a coherent educational-scale solar system view with all required bodies rendered in order, visible orbit paths including the Moon, Saturn's rings, and stable UI copy that reflects the milestone while preserving the static Three.js structure and procedural texture pipeline.",
+      "promoted_files_by_pass": {},
+      "safe_resume_possible": false,
+      "status": "failed"
+    },
+    "patch_applied": false,
+    "patch_generated": false,
+    "patch_summary": null,
+    "promoted_files": [],
+    "promotion_applied": false,
+    "promotion_status": "skipped",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/03_bodies_scale_orbits.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "failed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected"
+    ]
+  }
+}

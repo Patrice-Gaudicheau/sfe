@@ -1,0 +1,46 @@
+{
+  "configuration": {
+    "discovery_model": "gpt-5.4",
+    "executor_model": "gpt-5.4",
+    "model": "gpt-5.4",
+    "multipass": "true",
+    "multipass_planner_model": "gpt-5.4",
+    "router_model": "gpt-5.4"
+  },
+  "description": "SFE single-model run with gpt-5.4 used for routing, discovery, multipass planning, and execution, with multipass forced on.",
+  "runs": [
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": 189748,
+      "latency_or_wall_clock_duration": 255692,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 56271,
+      "provider": "openai-api",
+      "provider_call_count": 9,
+      "sfe_status": "failed",
+      "success": false,
+      "task_id": "01_static_scaffold",
+      "total_estimated_cost": null,
+      "validation_error": null
+    }
+  ],
+  "scenario": "sfe_single_model_gpt54_multipass",
+  "totals": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "input_tokens": 189748,
+    "latency_or_wall_clock_duration": 255692,
+    "output_tokens": 56271,
+    "total_estimated_cost": null
+  }
+}

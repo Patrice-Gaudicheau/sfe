@@ -1,0 +1,440 @@
+diff --git a/app/index.html b/app/index.html
+--- a/app/index.html
++++ b/app/index.html
+@@ -117,7 +117,14 @@
+             <h2 id="camera-controls-title">Camera presets</h2>
+             <div class="button-wrap">
+-              <button type="button" data-camera-preset="overview">Overview</button>
++              <button
++                type="button"
++                data-camera-preset="overview"
++                class="is-active"
++                aria-pressed="true"
++              >
++                Overview
++              </button>
+               <button type="button" data-camera-preset="inner">
+                 Inner planets
+               </button>
+@@ -132,6 +139,11 @@
+                 Sun view
+               </button>
+             </div>
++            <p class="panel-note">
++              Pointer navigation supports rotate, zoom, and pan. Click a body
++              in the scene to focus it, or use a preset for a stable guided
++              view.
++            </p>
+           </section>
+ 
+           <section class="panel" aria-labelledby="display-options-title">
+diff --git a/app/styles.css b/app/styles.css
+--- a/app/styles.css
++++ b/app/styles.css
+@@ -215,6 +215,11 @@
+     0 0 0 1px rgba(124, 199, 255, 0.08);
+ }
+ 
++button[data-camera-preset].is-active {
++  border-color: rgba(124, 199, 255, 0.74);
++  background: rgba(18, 37, 74, 0.95);
++}
++
+ input[type="range"] {
+   padding: 0.2rem 0.4rem;
+ }
+diff --git a/app/app.js b/app/app.js
+--- a/app/app.js
++++ b/app/app.js
+@@ -1,4 +1,5 @@
+ import * as THREE from "https://unpkg.com/three@0.165.0/build/three.module.js";
++import { OrbitControls } from "https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js";
+ 
+ const canvas = document.querySelector("#scene-canvas");
+ const container = document.querySelector("#scene-container");
+@@ -13,6 +14,9 @@
+ const playButton = document.querySelector("#play-button");
+ const pauseButton = document.querySelector("#pause-button");
+ const dateInput = document.querySelector("#date-input");
++const cameraPresetButtons = [
++  ...document.querySelectorAll("[data-camera-preset]"),
++];
+ const seasonButtons = [...document.querySelectorAll("[data-season-button]")];
+ 
+ const BODY_VISUAL_CONFIG = {
+@@ -1171,6 +1175,17 @@
+   updatePlaybackButtons();
+ }
+ 
++function updateCameraPresetButtons(activePresetKey = null) {
++  cameraPresetButtons.forEach((button) => {
++    const isActive = button.dataset.cameraPreset === activePresetKey;
++    button.classList.toggle("is-active", isActive);
++    button.setAttribute("aria-pressed", String(isActive));
++  });
++}
++
++function getFocusDistanceForBody(body) {
++  return Math.max(3.5, body.visualRadius[appState.scaleMode] * (body.id === "sun" ? 5.5 : 8.5));
++}
++
+ function updateSeasonButtons() {
+   seasonButtons.forEach((button) => {
+     const isActive = button.dataset.season === appState.seasonKey;
+@@ -1463,6 +1478,19 @@
+   });
+ 
+   const scene = new THREE.Scene();
++
++  const controls = new OrbitControls(camera, renderer.domElement);
++  controls.enableDamping = true;
++  controls.dampingFactor = 0.06;
++  controls.enablePan = true;
++  controls.minDistance = 3;
++  controls.maxDistance = 320;
++  controls.target.set(0, 0, 0);
++  controls.addEventListener("start", () => {
++    appState.cameraPresetKey = null;
++    updateCameraPresetButtons(null);
++  });
++  controls.update();
++
+   scene.background = new THREE.Color(0x03050c);
+ 
+   const camera = new THREE.PerspectiveCamera(
+@@ -1494,6 +1522,7 @@
+     renderer,
+     scene,
+     camera,
++    controls,
+     pointer,
+     raycaster,
+     lights: {
+@@ -1529,6 +1558,8 @@
+   isPlaying: true,
+   scaleMode: "educational",
+   showOrbits: true,
++  cameraPresetKey: "overview",
++  activeFocusTargetId: "sun",
+   showLabels: true,
+   seasonKey: "spring",
+   simulationSpeed: Number(timeSpeedInput?.value || 25),
+@@ -1655,6 +1686,7 @@
+   appState.isPlaying = isPlaying;
+   updatePlaybackButtons();
+   updateStatus(
++
+     isPlaying
+       ? `Simulation playing at ${appState.simulationSpeed}× baseline speed`
+       : "Simulation paused with current positions preserved and updates minimized",
+@@ -1671,28 +1703,39 @@
+   }
+ 
+   sceneShell.focusTarget.copy(targetPosition);
+-
+-  const distance = Math.max(
+-    3.5,
+-    body.visualRadius[appState.scaleMode] * (body.id === "sun" ? 5.5 : 8.5),
+-  );
++  appState.activeFocusTargetId = bodyId;
++  appState.cameraPresetKey = null;
++  updateCameraPresetButtons(null);
++  const distance = getFocusDistanceForBody(body);
+ 
+   if (body.id === "earth") {
+     sceneShell.focusCameraPosition.set(
+       targetPosition.x + distance * 0.82,
+       targetPosition.y + distance * 0.72,
+       targetPosition.z + distance * 0.82,
++    );
++  } else if (body.id === "moon") {
++    sceneShell.focusCameraPosition.set(
++      targetPosition.x + distance * 1.15,
++      targetPosition.y + distance * 0.62,
++      targetPosition.z + distance * 1.1,
+     );
+   } else {
+-  sceneShell.focusCameraPosition.set(
+-    targetPosition.x + distance,
+-    targetPosition.y + distance * 0.5,
+-    targetPosition.z + distance,
+-  );
++    sceneShell.focusCameraPosition.set(
++      targetPosition.x + distance,
++      targetPosition.y + distance * 0.5,
++      targetPosition.z + distance,
++    );
+   }
+ 
+   updateSelectedBodyPanel(bodyId);
+   updateStatus(`Focused on ${body.name}`);
+ }
+ 
++function getCameraPresetConfig(presetKey) {
++  const earthPosition = getBodyWorldPosition(solarSystem, "earth");
++  const moonPosition = getBodyWorldPosition(solarSystem, "moon");
++  const sunPosition = getBodyWorldPosition(solarSystem, "sun");
++
++  return {
++    overview: {
++      target: new THREE.Vector3(0, 0, 0),
++      position:
++        appState.scaleMode === "educational"
++          ? new THREE.Vector3(0, 18, 42)
++          : new THREE.Vector3(0, 32, 96),
++      label: "overview",
++      focusBodyId: "sun",
++    },
++    inner: {
++      target: new THREE.Vector3(0, 0, 0),
++      position:
++        appState.scaleMode === "educational"
++          ? new THREE.Vector3(0, 11, 28)
++          : new THREE.Vector3(0, 18, 46),
++      label: "inner planets",
++      focusBodyId: "earth",
++    },
++    "earth-moon": {
++      target: earthPosition.clone().lerp(moonPosition, 0.18),
++      position: earthPosition.clone().add(new THREE.Vector3(4.2, 3.4, 4.2)),
++      label: "Earth and Moon",
++      focusBodyId: "earth",
++    },
++    outer: {
++      target: new THREE.Vector3(0, 0, 0),
++      position:
++        appState.scaleMode === "educational"
++          ? new THREE.Vector3(0, 26, 68)
++          : new THREE.Vector3(0, 48, 140),
++      label: "outer planets",
++      focusBodyId: "jupiter",
++    },
++    sun: {
++      target: sunPosition,
++      position: new THREE.Vector3(10, 6, 10),
++      label: "Sun view",
++      focusBodyId: "sun",
++    },
++  }[presetKey];
++}
++
+ function setCameraPreset(presetKey) {
+-  const presets = {
+-    overview: {
+-      target: new THREE.Vector3(0, 0, 0),
+-      position:
+-        appState.scaleMode === "educational"
+-          ? new THREE.Vector3(0, 18, 42)
+-          : new THREE.Vector3(0, 32, 96),
+-    },
+-    inner: {
+-      target: new THREE.Vector3(0, 0, 0),
+-      position: new THREE.Vector3(0, 10, 26),
+-    },
+-    "earth-moon": {
+-      target: getBodyWorldPosition(solarSystem, "earth"),
+-      position: getBodyWorldPosition(solarSystem, "earth").add(
+-        new THREE.Vector3(4.2, 3.4, 4.2),
+-      ),
+-    },
+-    outer: {
+-      target: new THREE.Vector3(0, 0, 0),
+-      position:
+-        appState.scaleMode === "educational"
+-          ? new THREE.Vector3(0, 24, 64)
+-          : new THREE.Vector3(0, 44, 132),
+-    },
+-    sun: {
+-      target: getBodyWorldPosition(solarSystem, "sun"),
+-      position: new THREE.Vector3(10, 6, 10),
+-    },
+-  },
+-
+-  const preset = presets[presetKey];
++  const preset = getCameraPresetConfig(presetKey);
+ 
+   if (!preset) {
+     return;
+   }
+ 
+   sceneShell.focusTarget.copy(preset.target);
+   sceneShell.focusCameraPosition.copy(preset.position);
+-  updateStatus(`Camera preset: ${presetKey.replace("-", " ")}`);
++  appState.cameraPresetKey = presetKey;
++  appState.activeFocusTargetId = preset.focusBodyId || appState.activeFocusTargetId;
++  updateCameraPresetButtons(presetKey);
++  if (preset.focusBodyId) {
++    updateSelectedBodyPanel(preset.focusBodyId);
++  }
++  updateStatus(`Camera preset: ${preset.label}`);
+ }
+ 
+ function animateCamera(delta) {
+-  camera.position.lerp(sceneShell.focusCameraPosition, Math.min(1, delta * 2.2));
+-  tempCameraLookAt.lerp(sceneShell.focusTarget, Math.min(1, delta * 2.6));
+-  camera.lookAt(sceneShell.focusTarget);
++  const controls = sceneShell.controls;
++  const bodyId = appState.cameraPresetKey ? appState.activeFocusTargetId : appState.selectedBodyId;
++
++  if (bodyId) {
++    sceneShell.focusTarget.copy(getBodyWorldPosition(solarSystem, bodyId));
++  }
++
++  camera.position.lerp(sceneShell.focusCameraPosition, Math.min(1, delta * 2.2));
++  tempCameraLookAt.copy(controls.target).lerp(sceneShell.focusTarget, Math.min(1, delta * 2.6));
++  controls.target.copy(tempCameraLookAt);
++  controls.update();
+ }
+ 
+ function syncDateToSeason(dateValue) {
+@@ -1758,6 +1801,9 @@
+   });
+ 
+   document.querySelectorAll("[data-camera-preset]").forEach((button) => {
++    button.setAttribute(
++      "aria-pressed",
++      String(button.dataset.cameraPreset === appState.cameraPresetKey),
++    );
+     button.addEventListener("click", () => {
+       setCameraPreset(button.dataset.cameraPreset);
+     });
+@@ -1807,6 +1853,16 @@
+       if (hitBodyId) {
+         focusBody(hitBodyId);
+       }
++    } else if (!appState.cameraPresetKey) {
++      appState.activeFocusTargetId = null;
+     }
+   });
+ 
+@@ -1856,6 +1912,22 @@
+   updatePlaybackButtons();
+   bindControls();
+   updateEarthTiltMarker();
++  updateCameraPresetButtons("overview");
++  const controls = sceneShell.controls;
++  if (controls) {
++    controls.target.copy(sceneShell.focusTarget);
++    controls.update();
++  }
+ }
+ 
+ onResize();
+ initializeApp();
+ animate();
+diff --git a/app/README.md b/app/README.md
+--- a/app/README.md
++++ b/app/README.md
+@@ -1,82 +1,92 @@
+ # SolarSystem3D
+ 
+-SolarSystem3D is a static Three.js educational solar system simulator. The current milestone renders the Sun, all eight planets, Earth’s Moon, Saturn’s rings, and visible orbit paths in a simulator-first layout with educational scale as the default and a realistic scale option for comparison.
++SolarSystem3D is a static Three.js educational solar system simulator. This milestone includes full solar-system rendering, camera navigation, preset viewpoints, toggleable labels, and click-to-focus selection in a simulator-first layout.
+ 
+ ## Run
+ 
+-This app uses a pinned browser ES module import for Three.js:
++This app uses pinned browser ES module imports for:
+ 
+ - `https://unpkg.com/three@0.165.0/build/three.module.js`
++- `https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js`
+ 
+-Directly opening `index.html` with `file://` may work in some browsers, but browser ES module rules can be unreliable. The recommended fallback is a tiny static server:
++Directly opening `index.html` with `file://` may work in some browsers, but module loading for Three.js and `OrbitControls` can be unreliable depending on browser security rules. The recommended run method is a tiny static server:
+ 
+ ```bash
+ cd app
+ python3 -m http.server 8000
+ ```
+ 
+-Then open:
++Then open:
+ 
+ - `http://localhost:8000/`
+ 
+ ## Current milestone contents
+ 
+ - First-screen simulator presentation rather than a landing page
+ - Responsive scene-and-controls shell for phone, tablet, and desktop widths
+ - Sun, Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune, and Earth’s Moon rendered in the correct order
+-- Visible orbit paths for every planet and for the Moon
++- Procedural textures generated in `app.js` without external planet image files
++- Procedural star background generated with Three.js points
+ - Saturn ring system
++- Visible orbit paths for every planet and for the Moon
+ - Educational scale as the default mode
+ - Realistic scale mode that updates the existing scene coherently without duplicating bodies
+-- Selected-body panel populated from the shared body dataset
+ - Play and pause controls wired to the shared simulation state
+ - Time speed slider that visibly changes the orbital and rotational update rate
+-- Time controls, season preset controls, camera preset controls, label toggle, orbit toggle, and scale mode control areas
+-- Baseline Three.js renderer, perspective camera, ambient light, point light, and resize handling
+-- Procedural star background generated in JavaScript without external images
+-- Shared solar-system body dataset and cached procedural texture system in `app.js` for the Sun, all eight planets, and Earth’s Moon
++- Season preset controls for spring equinox, summer solstice, autumn equinox, and winter solstice
++- OrbitControls-based camera navigation with rotate, zoom, and pan
++- Camera preset controls for overview, inner planets, Earth and Moon, outer planets, and Sun view
++- Click selection that updates the selected-body panel and moves focus toward the chosen body
++- Toggleable body labels
++- Toggleable orbit visibility
++- Selected-body panel populated from the shared body dataset
+ - One animation loop that reuses stable textures, materials, and geometries instead of recreating them every frame
+-- Visible Earth axial tilt marker and four season preset buttons for spring equinox, summer solstice, autumn equinox, and winter solstice
++- Visible Earth axial tilt marker for season comparison
+ 
+ ## Astronomy and milestone notes
+ 
+ - Orbits are simplified circular educational paths rather than precision ephemerides.
+ - Educational scale enlarges small bodies and compresses distances so everything remains inspectable.
+ - Realistic scale better preserves relative size and distance relationships, but still keeps bodies minimally visible for usability.
+-- Season presets use the correct wording, including "spring equinox".
++- Season presets use the correct wording, including "spring equinox".
+ - Seasons are explained as resulting from Earth’s axial tilt relative to sunlight, not from changing distance to the Sun.
+ - Earth season presets place Earth at four distinct simplified orbital positions chosen for clarity, not ephemeris accuracy.
+ - The Earth axis marker keeps a constant tilt of about 23.5° so viewers can compare how sunlight changes between the equinoxes and solstices.
+ - The Moon remains associated with Earth in the simplified model.
+-- The benchmark allows simplified educational orbital positions rather than precision ephemerides.
++- Camera presets are educational framing aids rather than astronomy-grade observer positions.
+ 
+ ## Accessibility notes
+ 
+ - Controls use semantic HTML elements and visible text labels.
+ - Keyboard focus states are styled for buttons, inputs, and selects.
+ - A skip link jumps directly to the controls panel.
+ - The canvas is labeled for assistive technologies.
+ - Controls are visible on screen and are not hover-only.
+ - Play and pause buttons expose pressed state with `aria-pressed`.
+ - Season preset buttons expose active pressed state so the current educational season view is visible without relying on motion alone.
+-- Keyboard shortcuts support play or pause and label or orbit toggles without requiring pointer-only interaction.
++- Camera preset buttons expose active pressed state.
++- Keyboard shortcuts support play or pause and label or orbit toggles without requiring pointer-only interaction.
++- Labels can be disabled if the text overlays are distracting on smaller screens.
+ 
+ ## Manual verification for this milestone
+ 
+ - Open the app and confirm the 3D canvas is the main first-screen surface.
+ - Confirm the Sun, all eight planets, and Earth’s Moon are visible.
+ - Confirm the planetary order runs outward from the Sun as Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune.
+ - Confirm Saturn has visible rings.
+-- Confirm planet orbit guides and the Moon orbit guide are visible.
++- Confirm the scene background shows procedural stars rather than a downloaded image.
+ - Change scale mode between Educational and Realistic and confirm bodies update in place without duplication.
+ - Toggle orbit visibility and confirm the orbit guides hide and reappear.
+ - Toggle label visibility and confirm labels hide and reappear.
+ - Click Play and Pause and confirm orbital and rotational updates start and stop.
+ - Move the time speed slider and confirm motion visibly slows down and speeds up.
+ - Click spring equinox, summer solstice, autumn equinox, and winter solstice and confirm Earth moves to four distinct simplified positions.
+ - Confirm the app uses the phrase "spring equinox" and does not use "spring solstice".
+-- Focus Earth with the Earth and Moon camera preset or by clicking Earth and confirm the axial tilt marker remains visible.
++- Drag with mouse or trackpad and confirm the camera rotates freely.
++- Zoom and pan with the pointer device and confirm navigation remains usable.
++- Click the overview, inner planets, Earth and Moon, outer planets, and Sun view buttons and confirm each preset moves to a distinct guided view.
++- Click several bodies including the Sun, Earth, Mars, and Neptune and confirm the selected-body panel updates and the camera focus moves toward the clicked body.
++- Focus Earth with the Earth and Moon camera preset or by clicking Earth and confirm the axial tilt marker remains visible.
+ - Confirm the season explanation states that seasons come from axial tilt relative to sunlight, not from Earth being closer to or farther from the Sun.
+ - Pause the simulation and confirm the current body positions are preserved rather than resetting.
+ - Resize the page around phone, tablet, and desktop widths and confirm the layout stays readable without horizontal scrolling.
+-- Confirm the scene shows a dark star field and renders without requiring any backend service.
+-- If `file://` loading fails in your browser, run the documented static server command and reload from `http://localhost:8000/`.
++- Confirm the app renders without any backend service.
++- If `file://` loading fails in your browser, run the documented static server command and reload from `http://localhost:8000/`.

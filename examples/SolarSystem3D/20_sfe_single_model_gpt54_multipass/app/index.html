@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>SolarSystem3D</title>
+    <meta
+      name="description"
+      content="SolarSystem3D is a static Three.js educational solar system simulator."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#controls-panel">Skip to controls</a>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>SolarSystem3D</h1>
+          <p class="subtitle">Static Three.js solar system data and texture preview</p>
+        </div>
+        <div class="status-note" aria-live="polite">
+          Baseline scene loaded with procedural stars
+        </div>
+      </header>
+
+      <main class="layout" aria-label="Solar system simulator">
+        <section
+          class="scene-section"
+          aria-label="3D solar system viewport"
+        >
+          <div id="scene-container" class="scene-container">
+            <canvas
+              id="scene-canvas"
+              aria-label="Interactive 3D solar system canvas"
+            ></canvas>
+            <div class="scene-caption" aria-hidden="true">
+              Previewing the shared body dataset, procedural planet textures, Moon relationship, and Saturn ring texture pipeline.
+            </div>
+          </div>
+        </section>
+
+        <aside
+          id="controls-panel"
+          class="sidebar"
+          aria-label="Simulation controls and selected body information"
+        >
+          <section class="panel" aria-labelledby="simulation-controls-title">
+            <h2 id="simulation-controls-title">Simulation controls</h2>
+            <div class="control-grid">
+              <button type="button">Play</button>
+              <button type="button">Pause</button>
+              <label>
+                <span>Time speed</span>
+                <input type="range" min="0" max="100" value="25" />
+              </label>
+              <label>
+                <span>Date</span>
+                <input type="date" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="camera-controls-title">
+            <h2 id="camera-controls-title">Camera presets</h2>
+            <div class="button-wrap">
+              <button type="button">Overview</button>
+              <button type="button">Inner planets</button>
+              <button type="button">Earth and Moon</button>
+              <button type="button">Outer planets</button>
+              <button type="button">Sun view</button>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="display-options-title">
+            <h2 id="display-options-title">Display options</h2>
+            <div class="control-grid">
+              <label><input type="checkbox" checked /> Show labels</label>
+              <label><input type="checkbox" checked /> Show orbits</label>
+              <label>
+                <span>Scale mode</span>
+                <select>
+                  <option>Educational</option>
+                  <option>Realistic</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="data-pipeline-title">
+            <h2 id="data-pipeline-title">Data and texture pipeline</h2>
+            <p>
+              The current milestone establishes a reusable body dataset for the Sun, eight planets, and Earth's Moon, plus procedural Canvas textures for rocky worlds, clouded planets, gas giants, ice giants, crater fields, bands, haze, and rings.
+            </p>
+          </section>
+
+          <section class="panel selected-panel" aria-labelledby="selected-body-title">
+            <h2 id="selected-body-title">Selected body</h2>
+            <p>Select a body to inspect details in a later task.</p>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

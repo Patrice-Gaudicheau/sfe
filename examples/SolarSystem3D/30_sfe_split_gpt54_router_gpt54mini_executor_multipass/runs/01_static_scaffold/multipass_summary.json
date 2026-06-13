@@ -1,0 +1,131 @@
+{
+  "all_promoted_files": [
+    "app/index.html",
+    "app/styles.css",
+    "app/app.js",
+    "app/README.md"
+  ],
+  "created_files_by_pass": {
+    "scaffold-html-structure": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ]
+  },
+  "enabled": true,
+  "failed_pass_id": null,
+  "failed_pass_issue": null,
+  "pass_results": [
+    {
+      "allowed_files": [
+        "app/index.html"
+      ],
+      "created_files": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "scaffold-html-structure",
+      "patch_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "promoted_files": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Create simulator page structure",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/styles.css",
+        "multi_pass_path_outside_allowed_files:app/app.js",
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/styles.css"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "responsive-shell-styles",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "skipped",
+      "title": "Style responsive app shell",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/styles.css"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/app.js"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "threejs-scene-baseline",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "skipped",
+      "title": "Implement baseline Three.js scene",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/app.js"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/README.md"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "readme-run-notes",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "skipped",
+      "title": "Document static run method and shell features",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+      ]
+    }
+  ],
+  "passes_completed": 1,
+  "passes_total": 4,
+  "project_summary": "Build the initial static SolarSystem3D app shell in app/ with a first-screen Three.js scene, responsive control/info layout, baseline camera/renderer/lighting/resize handling, procedural star background, and README run notes for direct file use versus simple static-server fallback.",
+  "promoted_files_by_pass": {
+    "scaffold-html-structure": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ]
+  },
+  "safe_resume_possible": false,
+  "status": "completed"
+}

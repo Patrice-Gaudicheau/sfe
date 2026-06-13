@@ -1,0 +1,26 @@
+{
+  "api_error_retry_count": 0,
+  "cached_input_tokens": 4352,
+  "currency": null,
+  "generated_or_modified_files": [
+    "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/index.html",
+    "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/styles.css",
+    "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/app.js",
+    "examples/SolarSystem3D/10_baseline_full_context_gpt54/app/README.md"
+  ],
+  "input_tokens": 9030,
+  "latency_ms": 53359,
+  "latency_or_wall_clock_duration": 53359,
+  "manual_verification_notes": null,
+  "model": "gpt-5.4",
+  "output_tokens": 12031,
+  "parsing_error": null,
+  "provider": "openai-api",
+  "provider_error": null,
+  "response_text_length": 38134,
+  "success": true,
+  "task_id": "02_data_and_textures",
+  "task_title": "Solar system data model and procedural texture pipeline",
+  "total_estimated_cost": null,
+  "total_tokens": 21061
+}

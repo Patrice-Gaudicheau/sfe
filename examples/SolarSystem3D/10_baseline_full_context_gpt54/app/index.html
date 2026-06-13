@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SolarSystem3D</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#controls-heading">Skip to controls and selected body info</a>
+    <div class="app-shell">
+      <header class="topbar" aria-label="Application header">
+        <div>
+          <h1>SolarSystem3D</h1>
+          <p class="subtitle">Educational 3D solar system with procedural textures, animated orbits, selectable bodies, camera presets, and season presets</p>
+        </div>
+        <div class="status-badge" id="status-badge" aria-live="polite">Task 8: Responsive polish, performance review, and README finalized</div>
+      </header>
+
+      <main class="layout">
+        <section class="viewer-panel" aria-label="3D solar system viewer">
+          <div id="scene-container" class="scene-container">
+            <canvas id="scene-canvas" aria-label="3D solar system canvas"></canvas>
+            <div id="label-layer" class="label-layer" aria-hidden="true"></div>
+            <div class="scene-overlay">
+              <div class="overlay-chip" id="scale-chip">Educational scale mode</div>
+              <div class="overlay-chip" id="playback-chip">Simulation running</div>
+              <div class="overlay-chip" id="season-chip">Season view: live orbit motion</div>
+              <div class="overlay-chip" id="selection-chip">Selected: Earth</div>
+              <div class="overlay-chip" id="orbit-chip">Visible orbit paths</div>
+              <div class="overlay-chip" id="label-chip">Visible labels</div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="sidebar" aria-label="Controls and selected body information">
+          <section class="panel controls-panel" aria-labelledby="controls-heading">
+            <h2 id="controls-heading">Controls</h2>
+            <div class="control-grid two-col">
+              <button type="button" id="playButton" aria-label="Play simulation">Play</button>
+              <button type="button" id="pauseButton" aria-label="Pause simulation">Pause</button>
+            </div>
+
+            <label class="control-block" for="speedRange">
+              <span>Time speed <strong id="speedValue">35</strong> days / second</span>
+              <input id="speedRange" type="range" min="0" max="200" step="1" value="35" aria-describedby="speed-help keyboard-help" />
+            </label>
+            <p id="speed-help" class="help-text">0 pauses orbital progression without changing your selected scale mode.</p>
+
+            <label class="control-block" for="dateInput">
+              <span>Date / preset</span>
+              <input id="dateInput" type="date" value="2024-03-20" aria-describedby="date-help" />
+            </label>
+            <p id="date-help" class="help-text">Dates are mapped to a simplified educational Earth orbit for season comparison rather than precision ephemerides.</p>
+
+            <div class="button-group" aria-label="Season presets">
+              <button type="button" class="season-button" data-season="spring">Spring equinox</button>
+              <button type="button" class="season-button" data-season="summer">Summer solstice</button>
+              <button type="button" class="season-button" data-season="autumn">Autumn equinox</button>
+              <button type="button" class="season-button" data-season="winter">Winter solstice</button>
+            </div>
+
+            <div class="button-group" aria-label="Camera presets">
+              <button type="button" class="camera-preset-button" data-preset="overview">Overview</button>
+              <button type="button" class="camera-preset-button" data-preset="inner">Inner planets</button>
+              <button type="button" class="camera-preset-button" data-preset="earthmoon">Earth and Moon</button>
+              <button type="button" class="camera-preset-button" data-preset="outer">Outer planets</button>
+              <button type="button" class="camera-preset-button" data-preset="sun">Sun view</button>
+            </div>
+
+            <div class="toggle-list">
+              <label><input type="checkbox" id="labelsToggle" checked /> Show labels</label>
+              <label><input type="checkbox" id="orbitsToggle" checked /> Show orbits</label>
+              <label class="scale-toggle-label" for="scaleModeSelect">
+                <span>Scale mode</span>
+                <select id="scaleModeSelect" aria-label="Scale mode selector">
+                  <option value="educational" selected>Educational scale</option>
+                  <option value="realistic">Realistic scale</option>
+                </select>
+              </label>
+            </div>
+
+            <p id="keyboard-help" class="help-text">Mouse or touch: orbit, zoom, and pan. Click a body to focus it. Keyboard shortcuts: Space play/pause, L labels, O orbits, 1-5 camera presets, [ slower, ] faster, Arrow Left / Arrow Right step one day while paused.</p>
+          </section>
+
+          <section class="panel info-panel" aria-live="polite" aria-labelledby="selected-heading">
+            <h2 id="selected-heading">Selected body</h2>
+            <dl>
+              <div>
+                <dt>Name</dt>
+                <dd id="selected-name">Earth</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd id="selected-type">Rocky planet</dd>
+              </div>
+              <div>
+                <dt>Distance</dt>
+                <dd id="selected-distance">149.6 million km from the Sun</dd>
+              </div>
+              <div>
+                <dt>Orbital period</dt>
+                <dd id="selected-orbit">365 days</dd>
+              </div>
+              <div>
+                <dt>Rotation period</dt>
+                <dd id="selected-rotation">24 hours</dd>
+              </div>
+              <div>
+                <dt>Description</dt>
+                <dd id="selected-description">Earth is shown with blue oceans, land-like regions, clouds, a visible axial tilt marker, and simplified season presets for the Northern Hemisphere.</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel notes-panel">
+            <h2>Seasons and axial tilt</h2>
+            <p>Earth's seasons are caused by axial tilt relative to sunlight, not by Earth being much closer to or farther from the Sun.</p>
+            <p>The spring equinox and autumn equinox place Earth where the axis is neither leaning strongly toward nor away from the Sun. The summer solstice tilts the Northern Hemisphere toward the Sun, and the winter solstice tilts it away.</p>
+            <p>This simulator uses simplified educational positions rather than precision ephemeris data.</p>
+          </section>
+
+          <section class="panel data-panel">
+            <h2>Body data model</h2>
+            <div id="body-summary" class="body-summary" aria-live="polite"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

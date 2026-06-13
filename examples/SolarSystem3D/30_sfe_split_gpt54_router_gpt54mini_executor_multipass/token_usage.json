@@ -1,0 +1,229 @@
+{
+  "configuration": {
+    "discovery_model": "gpt-5.4",
+    "executor_model": "gpt-5.4-mini",
+    "multipass": "auto",
+    "multipass_planner_model": "gpt-5.4",
+    "router_model": "gpt-5.4"
+  },
+  "description": "SFE split-model run with gpt-5.4 for routing/discovery/planning and gpt-5.4-mini for execution.",
+  "runs": [
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/index.html",
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/styles.css",
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/app.js",
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/README.md"
+      ],
+      "input_tokens": 13002,
+      "latency_or_wall_clock_duration": 26718,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4-mini",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 5466,
+      "provider": "openai-api",
+      "provider_call_count": 4,
+      "provider_calls_by_role": {
+        "discovery": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 1028,
+          "latency_ms": 1141,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 62,
+          "success_count": 1
+        },
+        "executor": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 5666,
+          "latency_ms": 18969,
+          "models": [
+            "gpt-5.4-mini"
+          ],
+          "output_tokens": 4791,
+          "success_count": 1
+        },
+        "multipass_planner": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 5635,
+          "latency_ms": 4624,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 571,
+          "success_count": 1
+        },
+        "router": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 673,
+          "latency_ms": 1984,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 42,
+          "success_count": 1
+        }
+      },
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "01_static_scaffold",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/index.html",
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/styles.css",
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/app.js",
+        "examples/SolarSystem3D/30_sfe_split_gpt54_router_gpt54mini_executor_multipass/app/README.md"
+      ],
+      "input_tokens": 11723,
+      "latency_or_wall_clock_duration": 47864,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4-mini",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 11126,
+      "provider": "openai-api",
+      "provider_call_count": 3,
+      "provider_calls_by_role": {
+        "discovery": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 1181,
+          "latency_ms": 1129,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 79,
+          "success_count": 1
+        },
+        "executor": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 9877,
+          "latency_ms": 45687,
+          "models": [
+            "gpt-5.4-mini"
+          ],
+          "output_tokens": 11006,
+          "success_count": 1
+        },
+        "router": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 665,
+          "latency_ms": 1048,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 41,
+          "success_count": 1
+        }
+      },
+      "sfe_status": "completed",
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_estimated_cost": null,
+      "validation_error": null
+    },
+    {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": 16690,
+      "latency_or_wall_clock_duration": 36801,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4-mini",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 8659,
+      "provider": "openai-api",
+      "provider_call_count": 3,
+      "provider_calls_by_role": {
+        "discovery": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 1141,
+          "latency_ms": 1434,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 82,
+          "success_count": 1
+        },
+        "executor": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 14924,
+          "latency_ms": 33868,
+          "models": [
+            "gpt-5.4-mini"
+          ],
+          "output_tokens": 8530,
+          "success_count": 1
+        },
+        "router": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 625,
+          "latency_ms": 1499,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 47,
+          "success_count": 1
+        }
+      },
+      "sfe_status": "failed",
+      "success": false,
+      "task_id": "03_bodies_scale_orbits",
+      "total_estimated_cost": null,
+      "validation_error": null
+    }
+  ],
+  "scenario": "sfe_split_gpt54_router_gpt54mini_executor_multipass",
+  "totals": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "input_tokens": 41415,
+    "latency_or_wall_clock_duration": 111383,
+    "output_tokens": 25251,
+    "total_estimated_cost": null
+  }
+}

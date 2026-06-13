@@ -1,0 +1,19 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 4352,
+      "error": null,
+      "input_tokens": 9030,
+      "latency": 53359,
+      "latency_ms": 53359,
+      "model": "gpt-5.4",
+      "output_tokens": 12031,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "02_data_and_textures",
+      "total_tokens": 21061
+    }
+  ]
+}

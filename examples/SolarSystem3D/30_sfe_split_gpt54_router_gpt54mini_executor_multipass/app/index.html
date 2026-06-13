@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SolarSystem3D</title>
+    <meta
+      name="description"
+      content="SolarSystem3D is a static Three.js educational solar system simulator with procedural textures."
+    >
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to simulator</a>
+
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">SolarSystem3D</p>
+        <h1>Static Three.js solar system simulator with procedural bodies</h1>
+      </div>
+      <p class="header-note">
+        Educational approximation with the Sun, eight planets, Earth's Moon, visible orbit paths, labels, camera presets, and season controls.
+      </p>
+    </header>
+
+    <main id="main-content" class="simulator-shell">
+      <section class="viewport-panel" aria-label="Three.js solar system view">
+        <div id="scene-container" class="scene-container" aria-label="3D scene container"></div>
+        <div class="overlay-hint" aria-live="polite">
+          Drag to orbit, scroll to zoom, click any body to focus it.
+        </div>
+      </section>
+
+      <aside class="controls-panel" aria-label="Simulation controls">
+        <section class="control-group" aria-labelledby="simulation-controls-title">
+          <h2 id="simulation-controls-title">Simulation controls</h2>
+          <p class="section-note">
+            Seasons are simplified educational positions: Earth's tilt relative to sunlight matters more than distance from the Sun.
+          </p>
+          <div class="button-row">
+            <button type="button" id="play-pause-button">Pause</button>
+            <button type="button" id="spring-equinox-button">Spring equinox</button>
+            <button type="button" id="summer-solstice-button">Summer solstice</button>
+            <button type="button" id="autumn-equinox-button">Autumn equinox</button>
+            <button type="button" id="winter-solstice-button">Winter solstice</button>
+          </div>
+          <label class="control-field" for="speed-range">
+            <span>Time speed</span>
+            <input id="speed-range" type="range" min="0" max="10" step="0.1" value="1" aria-describedby="speed-value">
+            <output id="speed-value" for="speed-range">1.0×</output>
+          </label>
+          <label class="control-field" for="camera-preset">
+            <span>Camera preset</span>
+            <select id="camera-preset">
+              <option value="overview">Overview</option>
+              <option value="inner">Inner planets</option>
+              <option value="earth-moon">Earth and Moon</option>
+              <option value="outer">Outer planets</option>
+              <option value="sun">Sun view</option>
+            </select>
+          </label>
+          <div class="button-row">
+            <button type="button" id="labels-toggle">Hide labels</button>
+            <button type="button" id="orbits-toggle">Hide orbits</button>
+            <button type="button" id="scale-toggle">Realistic scale</button>
+          </div>
+        </section>
+
+        <section class="control-group" aria-labelledby="selected-body-title">
+          <h2 id="selected-body-title">Selected body</h2>
+          <div id="selected-body-panel" class="selected-body-panel" aria-live="polite">
+            <p class="empty-state">No body selected. Click the Sun, a planet, or the Moon to inspect it.</p>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

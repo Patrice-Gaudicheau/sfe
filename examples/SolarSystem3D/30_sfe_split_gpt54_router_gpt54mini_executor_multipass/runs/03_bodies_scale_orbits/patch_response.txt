@@ -1,0 +1,934 @@
+diff --git a/app/index.html b/app/index.html
+index 7a1f6a1..f0d5e4c 100644
+--- a/app/index.html
++++ b/app/index.html
+@@ -1,52 +1,63 @@
+ <!doctype html>
+ <html lang="en">
+   <head>
+     <meta charset="utf-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1">
+     <title>SolarSystem3D</title>
+     <meta
+       name="description"
+-      content="SolarSystem3D is a static Three.js educational solar system simulator with procedural textures."
++      content="SolarSystem3D is a static Three.js educational solar system simulator with procedural textures, orbits, and camera controls."
+     >
+     <link rel="stylesheet" href="./styles.css">
+   </head>
+   <body>
+     <a class="skip-link" href="#main-content">Skip to simulator</a>
+ 
+     <header class="app-header">
+       <div>
+         <p class="eyebrow">SolarSystem3D</p>
+-        <h1>Static Three.js solar system simulator with procedural bodies</h1>
++        <h1>Static Three.js solar system simulator</h1>
+       </div>
+       <p class="header-note">
+-        Educational approximation with the Sun, eight planets, Earth's Moon, visible orbit paths, labels, camera presets, and season controls.
++        Educational approximation with the Sun, eight planets, Earth's Moon, visible orbit paths, labels, camera presets, and season controls.
+       </p>
+     </header>
+ 
+     <main id="main-content" class="simulator-shell">
+       <section class="viewport-panel" aria-label="Three.js solar system view">
+         <div id="scene-container" class="scene-container" aria-label="3D scene container"></div>
+         <div class="overlay-hint" aria-live="polite">
+           Drag to orbit, scroll to zoom, click any body to focus it.
+         </div>
+       </section>
+ 
+       <aside class="controls-panel" aria-label="Simulation controls">
+         <section class="control-group" aria-labelledby="simulation-controls-title">
+           <h2 id="simulation-controls-title">Simulation controls</h2>
+           <p class="section-note">
+             Seasons are simplified educational positions: Earth's tilt relative to sunlight matters more than distance from the Sun.
+           </p>
++          <p class="section-note">
++            The simulation starts in educational scale so bodies stay inspectable.
++          </p>
+           <div class="button-row">
+             <button type="button" id="play-pause-button">Pause</button>
+             <button type="button" id="spring-equinox-button">Spring equinox</button>
+             <button type="button" id="summer-solstice-button">Summer solstice</button>
+             <button type="button" id="autumn-equinox-button">Autumn equinox</button>
+             <button type="button" id="winter-solstice-button">Winter solstice</button>
+           </div>
+           <label class="control-field" for="speed-range">
+             <span>Time speed</span>
+             <input id="speed-range" type="range" min="0" max="10" step="0.1" value="1" aria-describedby="speed-value">
+             <output id="speed-value" for="speed-range">1.0×</output>
+           </label>
+           <label class="control-field" for="camera-preset">
+             <span>Camera preset</span>
+             <select id="camera-preset">
+               <option value="overview">Overview</option>
+               <option value="inner">Inner planets</option>
+               <option value="earth-moon">Earth and Moon</option>
+               <option value="outer">Outer planets</option>
+               <option value="sun">Sun view</option>
+             </select>
+           </label>
+           <div class="button-row">
+             <button type="button" id="labels-toggle">Hide labels</button>
+             <button type="button" id="orbits-toggle">Hide orbits</button>
+             <button type="button" id="scale-toggle">Realistic scale</button>
+           </div>
+         </section>
+ 
+         <section class="control-group" aria-labelledby="selected-body-title">
+           <h2 id="selected-body-title">Selected body</h2>
+           <div id="selected-body-panel" class="selected-body-panel" aria-live="polite">
+             <p class="empty-state">No body selected. Click the Sun, a planet, or the Moon to inspect it.</p>
+           </div>
+         </section>
+       </aside>
+     </main>
+ 
+     <script type="module" src="./app.js"></script>
+   </body>
+ </html>
+diff --git a/app/styles.css b/app/styles.css
+index 7dc1f47..5a8ea66 100644
+--- a/app/styles.css
++++ b/app/styles.css
+@@ -1,172 +1,181 @@
+ :root {
+   color-scheme: dark;
+   --bg: #08111f;
+   --panel: rgba(9, 16, 30, 0.86);
+   --panel-border: rgba(162, 194, 255, 0.22);
+   --text: #e8eefc;
+   --muted: #aab9d6;
+   --accent: #89b4ff;
+   --focus: #f7d77e;
+ }
+ 
+ * {
+   box-sizing: border-box;
+ }
+ 
+ html,
+ body {
+   margin: 0;
+   min-height: 100%;
+   background: radial-gradient(circle at top, #13213d 0%, var(--bg) 55%, #030712 100%);
+   color: var(--text);
+   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+ }
+ 
+ body {
+   min-height: 100vh;
+ }
+ 
+ button,
+ select,
+ input {
+   font: inherit;
+ }
+ 
+ .skip-link {
+   position: absolute;
+   left: 1rem;
+   top: -4rem;
+   z-index: 10;
+   padding: 0.75rem 1rem;
+   border-radius: 0.75rem;
+   background: #fff;
+   color: #000;
+   text-decoration: none;
+ }
+ 
+ .skip-link:focus {
+   top: 1rem;
+ }
+ 
+ .app-header {
+   display: flex;
+   justify-content: space-between;
+   gap: 1rem;
+   padding: 1rem 1rem 0.5rem;
+   align-items: end;
+ }
+ 
+ .eyebrow {
+   margin: 0 0 0.25rem;
+   color: var(--accent);
+   text-transform: uppercase;
+   letter-spacing: 0.12em;
+   font-size: 0.8rem;
+ }
+ 
+ h1,
+ h2,
+ p {
+   margin-top: 0;
+ }
+ 
+ h1 {
+   margin-bottom: 0;
+   font-size: clamp(1.4rem, 2vw, 2rem);
+ }
+ 
+ .header-note {
+   margin-bottom: 0;
+   max-width: 40rem;
+   color: var(--muted);
+ }
+ 
+ .section-note {
+   margin-bottom: 0.9rem;
+   color: var(--muted);
+   font-size: 0.94rem;
+ }
+ 
+ .simulator-shell {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+   gap: 1rem;
+   padding: 0 1rem 1rem;
+   align-items: stretch;
+ }
+ 
+ .viewport-panel,
+ .controls-panel,
+ .control-group,
+ .selected-body-panel {
+   border: 1px solid var(--panel-border);
+   border-radius: 1rem;
+   background: var(--panel);
+   backdrop-filter: blur(10px);
+ }
+ 
+ .viewport-panel {
+   position: relative;
+   min-height: calc(100vh - 7rem);
+   overflow: hidden;
+ }
+ 
+ .scene-container {
+   width: 100%;
+   height: 100%;
+   min-height: calc(100vh - 7rem);
+ }
+ 
+ .overlay-hint {
+   position: absolute;
+   left: 1rem;
+   bottom: 1rem;
+   padding: 0.5rem 0.75rem;
+   border-radius: 999px;
+   background: rgba(4, 8, 16, 0.7);
+   color: var(--text);
+   pointer-events: none;
+ }
+ 
+ .controls-panel {
+   display: grid;
+   gap: 1rem;
+   align-content: start;
+   padding: 1rem;
+ }
+ 
+ .control-group {
+   padding: 1rem;
+ }
+ 
+ .button-row {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 0.5rem;
+ }
+ 
+ button,
+ select,
+ input[type="range"] {
+   min-height: 2.5rem;
+ }
+ 
+ button,
+ select {
+   border: 1px solid rgba(162, 194, 255, 0.28);
+   border-radius: 0.75rem;
+   background: rgba(18, 29, 50, 0.95);
+   color: var(--text);
+ }
+ 
+ button {
+   padding: 0.55rem 0.8rem;
+ }
+ 
+ button:hover,
+ select:hover,
+ button:focus-visible,
+ select:focus-visible,
+ input:focus-visible {
+   outline: 2px solid var(--focus);
+   outline-offset: 2px;
+ }
+ 
+ .control-field {
+   display: grid;
+   gap: 0.45rem;
+   margin-top: 0.9rem;
+ }
+ 
+ .control-field span {
+   color: var(--muted);
+ }
+ 
+ input[type="range"] {
+   width: 100%;
+ }
+ 
+ .selected-body-panel {
+   padding: 0.9rem;
+ }
+ 
+ .selected-body-panel dl {
+   margin: 0;
+   display: grid;
+   gap: 0.75rem;
+ }
+ 
+ .selected-body-panel dt {
+   color: var(--muted);
+   font-size: 0.92rem;
+ }
+ 
+ .selected-body-panel dd {
+   margin: 0.15rem 0 0;
+ }
+ 
+ .empty-state {
+   margin-bottom: 0;
+   color: var(--muted);
+ }
+ 
+ @media (max-width: 960px) {
+   .app-header,
+   .simulator-shell {
+     grid-template-columns: 1fr;
+     flex-direction: column;
+   }
+ 
+   .app-header {
+     display: grid;
+     align-items: start;
+   }
+ 
+   .viewport-panel,
+   .scene-container {
+     min-height: 54vh;
+   }
+ }
+ 
+ @media (max-width: 600px) {
+   .app-header,
+   .simulator-shell,
+   .controls-panel {
+     padding-left: 0.75rem;
+     padding-right: 0.75rem;
+   }
+ 
+   .overlay-hint {
+     left: 0.75rem;
+     right: 0.75rem;
+     bottom: 0.75rem;
+     text-align: center;
+   }
+ }
+diff --git a/app/app.js b/app/app.js
+index 1b2d54e..f54a1ff 100644
+--- a/app/app.js
++++ b/app/app.js
+@@ -1,540 +1,597 @@
+ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+ import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+ 
+ const container = document.getElementById("scene-container");
+ const selectedBodyPanel = document.getElementById("selected-body-panel");
+ const speedRange = document.getElementById("speed-range");
+ const speedValue = document.getElementById("speed-value");
+ const playPauseButton = document.getElementById("play-pause-button");
+ const labelsToggle = document.getElementById("labels-toggle");
+ const orbitsToggle = document.getElementById("orbits-toggle");
+ const scaleToggle = document.getElementById("scale-toggle");
++const cameraPreset = document.getElementById("camera-preset");
+ 
+ const scene = new THREE.Scene();
+ scene.background = new THREE.Color(0x050816);
+ scene.fog = new THREE.Fog(0x050816, 350, 1200);
+ 
+ const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
+ camera.position.set(0, 120, 260);
+ 
+ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+ renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
+ container.appendChild(renderer.domElement);
+ 
+ const controls = new OrbitControls(camera, renderer.domElement);
+ controls.enableDamping = true;
+ controls.dampingFactor = 0.07;
+ controls.minDistance = 20;
+ controls.maxDistance = 1200;
+ 
+ const ambient = new THREE.AmbientLight(0x6f7da6, 0.55);
+ scene.add(ambient);
+ 
+ const sunLight = new THREE.PointLight(0xfff0cc, 3.2, 0, 2);
+ sunLight.position.set(0, 0, 0);
+ scene.add(sunLight);
+ 
+ const hemiLight = new THREE.HemisphereLight(0x8899ff, 0x090b14, 0.6);
+ scene.add(hemiLight);
+ 
+-const textureCanvas = document.createElement("canvas");
+-textureCanvas.width = 512;
+-textureCanvas.height = 256;
+-const textureContext = textureCanvas.getContext("2d");
+ const textureCache = new Map();
+ const bodiesByName = new Map();
+ const labels = [];
+ const orbitLines = [];
+ const selectableBodies = [];
++const bodyOrbitAnchors = new Map();
++const bodyMeshes = new Map();
++const bodyEntries = [];
++const earthOrbitAngles = {
++  spring: 0,
++  summer: Math.PI / 2,
++  autumn: Math.PI,
++  winter: (Math.PI * 3) / 2,
++};
++const orbitSegmentCount = 180;
++const minVisibleRadius = {
++  educational: 1.8,
++  realistic: 0.75,
++};
+ 
+ function clamp(value, min, max) {
+   return Math.min(max, Math.max(min, value));
+ }
+ 
+ function lerp(a, b, t) {
+   return a + (b - a) * t;
+ }
+ 
+-function addNoise(imageData, strength, tint = [255, 255, 255]) {
++function addNoise(imageData, strength, tint = [255, 255, 255]) {
+   const { data } = imageData;
+   for (let i = 0; i < data.length; i += 4) {
+-    const n = (Math.random() - 0.5) * strength;
++    const n = (Math.random() - 0.5) * strength;
+     data[i] = clamp(data[i] + n * tint[0], 0, 255);
+     data[i + 1] = clamp(data[i + 1] + n * tint[1], 0, 255);
+     data[i + 2] = clamp(data[i + 2] + n * tint[2], 0, 255);
+   }
+ }
+ 
++function makeTextureCanvas(width = 512, height = 256) {
++  const canvas = document.createElement("canvas");
++  canvas.width = width;
++  canvas.height = height;
++  return canvas;
++}
++
+ function createCanvasTexture(key, drawFn) {
+   if (textureCache.has(key)) {
+     return textureCache.get(key);
+   }
+-  textureContext.clearRect(0, 0, textureCanvas.width, textureCanvas.height);
+-  drawFn(textureContext, textureCanvas.width, textureCanvas.height);
+-  const texture = new THREE.CanvasTexture(textureCanvas.cloneNode(true));
++  const canvas = makeTextureCanvas();
++  const context = canvas.getContext("2d");
++  drawFn(context, canvas.width, canvas.height);
++  const texture = new THREE.CanvasTexture(canvas);
+   texture.colorSpace = THREE.SRGBColorSpace;
+   texture.wrapS = THREE.RepeatWrapping;
+   texture.wrapT = THREE.ClampToEdgeWrapping;
+   texture.needsUpdate = true;
+   textureCache.set(key, texture);
+   return texture;
+ }
+ 
+ function drawBaseBands(ctx, width, height, colors, bandCount = 10, noiseStrength = 18) {
+@@ -59,18 +116,18 @@ function drawBaseBands(ctx, width, height, colors, bandCount = 10, noiseStrength
+   }
+   ctx.globalAlpha = 1;
+   const imageData = ctx.getImageData(0, 0, width, height);
+   addNoise(imageData, noiseStrength, [1, 1, 1]);
+   ctx.putImageData(imageData, 0, 0);
+ }
+ 
+ function drawCraters(ctx, width, height, count = 38, tint = "rgba(255,255,255,0.15)") {
+   for (let i = 0; i < count; i += 1) {
+     const x = Math.random() * width;
+     const y = Math.random() * height;
+     const r = 4 + Math.random() * 26;
+@@ -89,7 +146,7 @@ function drawPlanetTexture(style) {
+       };
+       ctx.fillStyle = gradient;
+       ctx.fillRect(0, 0, width, height);
+       for (let i = 0; i < 120; i += 1) {
+         ctx.beginPath();
+         ctx.fillStyle = `rgba(255, ${160 + Math.random() * 80}, ${40 + Math.random() * 80}, ${0.08 + Math.random() * 0.16})`;
+         ctx.arc(Math.random() * width, Math.random() * height, 8 + Math.random() * 36, 0, Math.PI * 2);
+         ctx.fill();
+@@ -113,6 +170,7 @@ function drawPlanetTexture(style) {
+       drawBaseBands(ctx, width, height, ["#e7c79a", "#c58d54", "#9e6231", "#e0b17f"], 16, 12);
+       ctx.beginPath();
+       ctx.fillStyle = "rgba(176, 96, 55, 0.95)";
+       ctx.ellipse(width * 0.7, height * 0.6, 30, 18, -0.28, 0, Math.PI * 2);
+       ctx.fill();
+       return;
+@@ -178,6 +236,7 @@ function createLabelSprite(text) {
+   texture.colorSpace = THREE.SRGBColorSpace;
+   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+   const sprite = new THREE.Sprite(material);
+   sprite.scale.set(36, 9, 1);
+   return sprite;
+ }
+ 
+ const bodyData = [
+@@ -272,21 +331,24 @@ const bodyData = [
+     color: 0x4e6fff,
+   },
+ ];
+ 
+ function createOrbit(radius, color = 0x506080) {
+-  const points = Array.from({ length: 160 }, (_, index) => {
+-    const angle = (index / 160) * Math.PI * 2;
++  const points = Array.from({ length: orbitSegmentCount }, (_, index) => {
++    const angle = (index / orbitSegmentCount) * Math.PI * 2;
+     return new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+   });
+   const line = new THREE.LineLoop(
+     new THREE.BufferGeometry().setFromPoints(points),
+     new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 })
+   );
+   scene.add(line);
+   orbitLines.push(line);
+   return line;
+ }
+ 
+ function createBody(body) {
+   const geometry = new THREE.SphereGeometry(body.visualRadius, 32, 24);
+   const material = new THREE.MeshStandardMaterial({
+     map: drawPlanetTexture(body.textureStyle),
+@@ -296,84 +358,168 @@ function createBody(body) {
+   });
+   const mesh = new THREE.Mesh(geometry, material);
+   mesh.name = body.name;
+   mesh.userData.body = body;
+-  scene.add(mesh);
++  const anchor = new THREE.Group();
++  anchor.name = `${body.name}-anchor`;
++  anchor.userData.body = body;
++  anchor.add(mesh);
++  scene.add(anchor);
++  if (body.parent) {
++    bodyOrbitAnchors.set(body.name, anchor);
++  }
+   bodiesByName.set(body.name, mesh);
++  bodyMeshes.set(body.name, mesh);
++  bodyEntries.push({ body, mesh, anchor });
+   selectableBodies.push(mesh);
+   const label = createLabelSprite(body.name);
+   label.visible = true;
+   label.position.set(0, body.visualRadius + 5, 0);
+   mesh.add(label);
+   labels.push(label);
+   return mesh;
+ }
+ 
+ function createSaturnRings(saturn) {
+-  const ringGeometry = new THREE.RingGeometry(11, 18, 64);
++  const ringGeometry = new THREE.RingGeometry(10.6, 18, 72);
+   const ringMaterial = new THREE.MeshBasicMaterial({
+     color: 0xdccca0,
+     side: THREE.DoubleSide,
+     transparent: true,
+     opacity: 0.65,
+   });
+   const rings = new THREE.Mesh(ringGeometry, ringMaterial);
+-  rings.rotation.x = Math.PI / 2.15;
++  rings.rotation.x = Math.PI / 2.1;
++  rings.rotation.z = THREE.MathUtils.degToRad(12);
+   saturn.add(rings);
+ }
+ 
+ function updateSelectedBodyPanel(body) {
+   selectedBodyPanel.innerHTML = `
+     <dl>
+       <div><dt>Name</dt><dd>${body.name}</dd></div>
+       <div><dt>Type</dt><dd>${body.type}</dd></div>
+       <div><dt>Distance from Sun</dt><dd>${body.parent === "Earth" ? "Distance from Earth's surface: Approx. 384,400 km" : body.distanceFromSun}</dd></div>
+       <div><dt>Orbital period</dt><dd>${body.orbitalPeriod}</dd></div>
+       <div><dt>Rotation period</dt><dd>${body.rotationPeriod}</dd></div>
+       <div><dt>Description</dt><dd>${body.description}</dd></div>
+     </dl>
+   `;
+ }
+ 
+ const bodies = bodyData.map(createBody);
+-const sun = bodiesByName.get("Sun");
+-const mercury = bodiesByName.get("Mercury");
+-const venus = bodiesByName.get("Venus");
+-const earth = bodiesByName.get("Earth");
+-const moon = bodiesByName.get("Moon");
+-const mars = bodiesByName.get("Mars");
+-const jupiter = bodiesByName.get("Jupiter");
+-const saturn = bodiesByName.get("Saturn");
+-const uranus = bodiesByName.get("Uranus");
+-const neptune = bodiesByName.get("Neptune");
+-createSaturnRings(saturn);
++const moonMesh = bodyMeshes.get("Moon");
++const earthMesh = bodyMeshes.get("Earth");
++const saturnMesh = bodyMeshes.get("Saturn");
++const sunMesh = bodyMeshes.get("Sun");
+ 
+-bodyData.forEach((body) => {
+-  if (body.orbitRadius > 0) {
+-    createOrbit(body.orbitRadius, body.name === "Moon" ? 0x74829b : 0x506080);
+-  }
++bodyData.forEach((body) => {
++  if (body.name !== "Moon" && body.orbitRadius > 0) {
++    createOrbit(body.orbitRadius, body.name === "Earth" ? 0x7383a6 : 0x506080);
++  }
+ });
+ 
+ const moonPivot = new THREE.Group();
+-earth.add(moonPivot);
+-moonPivot.add(moon);
+-moon.position.set(moon.userData?.body?.orbitRadius || 10, 0, 0);
++earthMesh.add(moonPivot);
++moonPivot.add(moonMesh);
++moonMesh.position.set(moonMesh.userData?.body?.orbitRadius || 10, 0, 0);
+ moonPivot.rotation.x = THREE.MathUtils.degToRad(5);
+ 
+ const earthAxis = new THREE.Group();
+-earth.add(earthAxis);
++earthMesh.add(earthAxis);
+ const axisLine = new THREE.Line(
+   new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -7, 0), new THREE.Vector3(0, 7, 0)]),
+   new THREE.LineBasicMaterial({ color: 0xf7d77e })
+ );
+ axisLine.rotation.z = THREE.MathUtils.degToRad(23.5);
+ earthAxis.add(axisLine);
++createSaturnRings(saturnMesh);
+ 
+ let isPlaying = true;
+ let timeScale = 1;
+ let labelsVisible = true;
+ let scaleMode = "educational";
+-let selectedBody = earth;
+-let targetFocus = earth.position.clone();
+-const earthOrbitAngle = { spring: 0, summer: Math.PI / 2, autumn: Math.PI, winter: (Math.PI * 3) / 2 };
++let selectedBody = earthMesh;
++let targetFocus = new THREE.Vector3();
++let currentEarthAngle = 0;
++let currentMoonAngle = 0;
++const tempVector = new THREE.Vector3();
++const tempVector2 = new THREE.Vector3();
+ 
+ function setSelectedBody(body) {
+   selectedBody = body;
+   updateSelectedBodyPanel(body.userData.body);
+-  targetFocus.copy(body.getWorldPosition(new THREE.Vector3()));
++  targetFocus.copy(body.getWorldPosition(tempVector));
+ }
+ 
+-setSelectedBody(earth);
++setSelectedBody(earthMesh);
+ 
+ function makeStarfield(count = 2200) {
+   const geometry = new THREE.BufferGeometry();
+   const positions = new Float32Array(count * 3);
+   for (let i = 0; i < count; i += 1) {
+@@ -392,21 +538,19 @@ function makeStarfield(count = 2200) {
+   const stars = new THREE.Points(geometry, material);
+   scene.add(stars);
+ }
+ 
+ makeStarfield();
+ 
+ function applyScaleMode(mode) {
+   scaleMode = mode;
+-  const distanceScale = mode === "educational" ? 1 : 0.72;
+-  const minRadius = mode === "educational" ? 1.6 : 1.0;
+-  bodyData.forEach((body) => {
+-    const mesh = bodiesByName.get(body.name);
+-    if (mesh) {
+-      mesh.scale.setScalar(Math.max(minRadius, body.visualRadius / 4));
+-      if (body.name !== "Sun") {
+-        mesh.position.x = body.orbitRadius * distanceScale;
+-      }
+-    }
+-  });
+-  updateOrbitGeometry(distanceScale);
++  const distanceScale = mode === "educational" ? 1 : 0.72;
++  bodyEntries.forEach(({ body, mesh, anchor }) => {
++    const minRadius = minVisibleRadius[mode];
++    mesh.scale.setScalar(Math.max(minRadius, body.visualRadius / 4));
++    if (body.name === "Sun") {
++      return;
++    }
++    anchor.position.set(body.orbitRadius * distanceScale, 0, 0);
++  });
++  updateOrbitGeometry(distanceScale);
+ }
+ 
+ function updateOrbitGeometry(distanceScale) {
+   orbitLines.forEach((line, index) => {
+-    const body = bodyData.find((item) => item.orbitRadius > 0)[index];
++    const body = bodyData.filter((item) => item.orbitRadius > 0 && item.name !== "Moon")[index];
+     if (!body) return;
+     const radius = body.orbitRadius * distanceScale;
+-    const points = Array.from({ length: 160 }, (_, pointIndex) => {
+-      const angle = (pointIndex / 160) * Math.PI * 2;
++    const points = Array.from({ length: orbitSegmentCount }, (_, pointIndex) => {
++      const angle = (pointIndex / orbitSegmentCount) * Math.PI * 2;
+       return new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+     });
+     line.geometry.dispose();
+     line.geometry = new THREE.BufferGeometry().setFromPoints(points);
+   });
+ }
+ 
+ applyScaleMode("educational");
+ 
+ function resize() {
+   const width = container.clientWidth;
+   const height = container.clientHeight;
+   camera.aspect = width / height;
+   camera.updateProjectionMatrix();
+   renderer.setSize(width, height);
+ }
+ 
+ window.addEventListener("resize", resize);
+ 
+ playPauseButton.addEventListener("click", () => {
+   isPlaying = !isPlaying;
+   playPauseButton.textContent = isPlaying ? "Pause" : "Play";
+ });
+ 
+ speedRange.addEventListener("input", () => {
+   timeScale = Number(speedRange.value);
+   speedValue.textContent = `${timeScale.toFixed(1)}×`;
+ });
+ 
+ labelsToggle.addEventListener("click", () => {
+   labelsVisible = !labelsVisible;
+   labels.forEach((label) => {
+     label.visible = labelsVisible;
+   });
+   labelsToggle.textContent = labelsVisible ? "Hide labels" : "Show labels";
+ });
+ 
+ orbitsToggle.addEventListener("click", () => {
+   const hidden = orbitLines[0]?.visible;
+   orbitLines.forEach((line) => {
+     line.visible = !hidden;
+   });
+   orbitsToggle.textContent = hidden ? "Show orbits" : "Hide orbits";
+ });
+ 
+ scaleToggle.addEventListener("click", () => {
+   const nextMode = scaleMode === "educational" ? "realistic" : "educational";
+   applyScaleMode(nextMode);
+   scaleToggle.textContent = nextMode === "educational" ? "Realistic scale" : "Educational scale";
+ });
+ 
+ const presetButtons = [
+   ["spring-equinox-button", "spring"],
+   ["summer-solstice-button", "summer"],
+   ["autumn-equinox-button", "autumn"],
+   ["winter-solstice-button", "winter"],
+ ];
+ 
+ presetButtons.forEach(([id, preset]) => {
+   const button = document.getElementById(id);
+   if (!button) return;
+   button.addEventListener("click", () => {
+-    const angle = earthOrbitAngle[preset];
+-    const distanceScale = scaleMode === "educational" ? 1 : 0.72;
+-    earth.position.set(Math.cos(angle) * earth.userData.body.orbitRadius * distanceScale, 0, Math.sin(angle) * earth.userData.body.orbitRadius * distanceScale);
+-    moonPivot.rotation.y = angle;
+-    moonPivot.rotation.x = THREE.MathUtils.degToRad(5);
+-    targetFocus.copy(earth.position);
+-    setSelectedBody(earth);
++    currentEarthAngle = earthOrbitAngles[preset];
++    currentMoonAngle = currentEarthAngle;
++    updateOrbitalPositions();
++    setSelectedBody(earthMesh);
++    focusCameraOnSelected();
+   });
+ });
+ 
+-const cameraPreset = document.getElementById("camera-preset");
+ if (cameraPreset) {
+   cameraPreset.addEventListener("change", () => {
+     const presets = {
+       overview: [0, 120, 260],
+       inner: [0, 70, 150],
+@@ -416,25 +560,73 @@ if (cameraPreset) {
+     };
+     const [x, y, z] = presets[cameraPreset.value] || presets.overview;
+     camera.position.set(x, y, z);
+-    controls.target.copy(selectedBody.getWorldPosition(new THREE.Vector3()));
++    focusCameraOnSelected();
+   });
+ }
+ 
+ const raycaster = new THREE.Raycaster();
+ const pointer = new THREE.Vector2();
+ renderer.domElement.addEventListener("pointerdown", (event) => {
+   const rect = renderer.domElement.getBoundingClientRect();
+   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+   pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+   raycaster.setFromCamera(pointer, camera);
+   const intersects = raycaster.intersectObjects(selectableBodies, false);
+   if (intersects.length > 0) {
+     const picked = intersects[0].object;
+     setSelectedBody(picked);
+-    controls.target.copy(picked.getWorldPosition(new THREE.Vector3()));
++    focusCameraOnSelected();
+   }
+ });
+ 
+ const clock = new THREE.Clock();
+ let simulationTime = 0;
+ 
++function updateOrbitalPositions() {
++  const distanceScale = scaleMode === "educational" ? 1 : 0.72;
++  const orbitingBodies = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"];
++  orbitingBodies.forEach((name, index) => {
++    const body = bodyData.find((entry) => entry.name === name);
++    const mesh = bodyMeshes.get(name);
++    const anchor = bodyOrbitAnchors.get(name);
++    if (!body || !mesh || !anchor) return;
++    if (name === "Earth") {
++      anchor.position.set(Math.cos(currentEarthAngle) * body.orbitRadius * distanceScale, 0, Math.sin(currentEarthAngle) * body.orbitRadius * distanceScale);
++      earthAxis.rotation.y = currentEarthAngle;
++    } else {
++      const angle = simulationTime / (index + 1.5);
++      anchor.position.set(Math.cos(angle) * body.orbitRadius * distanceScale, 0, Math.sin(angle) * body.orbitRadius * distanceScale);
++      mesh.rotation.y += 0.01;
++    }
++  });
++  moonPivot.rotation.y = currentMoonAngle;
++  moonPivot.rotation.x = THREE.MathUtils.degToRad(5);
++  moonMesh.rotation.y += 0.02;
++  sunMesh.rotation.y += 0.01;
++}
++
++function focusCameraOnSelected() {
++  if (!selectedBody) return;
++  selectedBody.getWorldPosition(tempVector2);
++  targetFocus.copy(tempVector2);
++  controls.target.lerp(targetFocus, 0.5);
++}
++
++function updateEarthTiltMarker() {
++  earthAxis.rotation.z = THREE.MathUtils.degToRad(23.5);
++}
++
++updateEarthTiltMarker();
++updateOrbitalPositions();
++
+ function animate() {
+   requestAnimationFrame(animate);
+   const delta = clock.getDelta();
+   if (isPlaying) {
+     simulationTime += delta * timeScale;
+-    const distanceScale = scaleMode === "educational" ? 1 : 0.72;
+-    const bodiesWithOrbits = [mercury, venus, earth, mars, jupiter, saturn, uranus, neptune];
+-    bodiesWithOrbits.forEach((body, index) => {
+-      const period = body.userData.body.orbitalPeriod.includes("days") ? (index + 1) * 0.9 : (index + 1) * 2.4;
+-      const angle = simulationTime / period;
+-      body.position.x = Math.cos(angle) * body.userData.body.orbitRadius * distanceScale;
+-      body.position.z = Math.sin(angle) * body.userData.body.orbitRadius * distanceScale;
+-      body.rotation.y += delta * timeScale * 0.2;
+-    });
+-    moonPivot.rotation.y = simulationTime * 0.9;
+-    moon.rotation.y += delta * timeScale * 0.3;
+-    sun.rotation.y += delta * timeScale * 0.08;
++    updateOrbitalPositions();
+     sunLight.intensity = 3.1 + Math.sin(performance.now() * 0.001) * 0.15;
+-    targetFocus.lerp(selectedBody.getWorldPosition(new THREE.Vector3()), 0.08);
+-    controls.target.lerp(targetFocus, 0.1);
++    selectedBody.getWorldPosition(tempVector);
++    targetFocus.lerp(tempVector, 0.08);
+   }
+   labels.forEach((label) => {
+     label.visible = labelsVisible;
+   });
+   if (selectedBody) {
+-    controls.target.lerp(selectedBody.getWorldPosition(new THREE.Vector3()), 0.08);
++    selectedBody.getWorldPosition(tempVector);
++    controls.target.lerp(tempVector, 0.1);
+   }
+   controls.update();
+   renderer.render(scene, camera);
+ }
+ 
+ animate();
+diff --git a/app/README.md b/app/README.md
+index f2b4b76..f04963e 100644
+--- a/app/README.md
++++ b/app/README.md
+@@ -1,31 +1,35 @@
+ # SolarSystem3D
+ 
+ Static Three.js educational solar system simulator with procedural textures and a selectable information panel.
+ 
+ ## Run
+ 
+ This app uses browser ES modules with pinned Three.js CDN imports, so opening `index.html` directly from `file://` may be blocked in some browsers.
+ 
+ Recommended:
+ 
+ ```bash
+ cd app
+ python3 -m http.server 8000
+ ```
+ 
+ Then open `http://localhost:8000/`.
+ 
+ If your browser permits module loading from local files, you can open `index.html` directly.
+ 
+ ## Features
+ 
+ - Sun, eight planets, and Earth's Moon.
+ - Procedural Canvas textures for the Sun, rocky planets, Earth, Moon, Mars, Jupiter, Saturn, Uranus, and Neptune.
+ - Visible orbit paths for the planets and Moon.
+ - Saturn ring mesh.
+ - Play/pause and time-speed controls.
+ - Season presets for spring equinox, summer solstice, autumn equinox, and winter solstice.
+ - Camera presets for overview, inner planets, Earth and Moon, outer planets, and Sun view.
+ - Click-to-focus selection with a live selected-body panel.
+ - Label and orbit visibility toggles.
+ - Educational scale and realistic scale modes.
+ - Procedural starfield background.
+ 
+ ## Notes
+ 
+ - Three.js and OrbitControls are loaded from pinned CDN URLs.
+ - The app is static and does not require a backend, bundler, or package manager.
+ - The simulation is an educational approximation, not a precision ephemeris.
+-- Season positions are simplified simplified orbital positions used to explain Earth's axial tilt relative to sunlight.
++- Season positions are simplified orbital positions used to explain Earth's axial tilt relative to sunlight, not precision ephemerides.
++- Earth includes a visible axial tilt marker, and the Moon remains attached to Earth as it moves through season presets.
++- Scale mode starts in educational mode so all bodies remain inspectable on load.
+ 
+ ## Accessibility
+ 
+ - Core controls use semantic buttons, range inputs, and selects with visible labels.
+ - Visible focus states are provided in CSS.
+ - The layout is responsive for desktop, tablet, and mobile widths.
+ - Clicked bodies update the selected-body panel, and labels can be toggled for readability.
++- Keyboard users can reach the controls directly, and the scene supports pointer selection plus OrbitControls navigation.

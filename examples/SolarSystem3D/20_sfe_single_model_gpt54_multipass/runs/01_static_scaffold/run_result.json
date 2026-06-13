@@ -1,0 +1,422 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [],
+    "input_tokens": 189748,
+    "latency_or_wall_clock_duration": 255692,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 56271,
+    "provider": "openai-api",
+    "provider_call_count": 9,
+    "sfe_issue": {
+      "category": "physical_application_failure",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/app.js",
+      "reason": "hunk_preimage_mismatch"
+    },
+    "sfe_status": "failed",
+    "success": false,
+    "task_id": "01_static_scaffold",
+    "task_title": "Static scaffold and Three.js scene shell",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 255861
+  },
+  "sfe": {
+    "changed_files": [
+      "app/index.html",
+      "app/styles.css",
+      "app/README.md",
+      "app/app.js"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires creating and modifying specific files in the workspace under app/ to implement the static app scaffold and documentation."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": true,
+    "git_initial_commit_hash": "92486c7",
+    "issue": {
+      "category": "physical_application_failure",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/app.js",
+      "reason": "hunk_preimage_mismatch"
+    },
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/index.html",
+        "app/styles.css",
+        "app/README.md",
+        "app/app.js",
+        "app/index.html",
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "created_files_by_pass": {},
+      "enabled": true,
+      "failed_pass_id": "camera-selection-labels",
+      "failed_pass_issue": {
+        "category": "physical_application_failure",
+        "diagnostics": {
+          "created_earlier_in_run": false,
+          "executor_used_full_file_replacement": false,
+          "file_existed_before_run": true,
+          "full_content_provided": true,
+          "full_file_replacement_eligible": true,
+          "included_in_full_file_replacement_guidance": true,
+          "pass_id": "camera-selection-labels",
+          "pass_index": 6,
+          "selected_context": true,
+          "target_path": "app/app.js"
+        },
+        "pass_id": "camera-selection-labels",
+        "path": "app/app.js",
+        "reason": "hunk_preimage_mismatch"
+      },
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "scene-shell-alignment",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Align simulator shell and control structure",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "core-scene-data-model",
+          "patch_paths": [
+            "app/app.js"
+          ],
+          "promoted_files": [
+            "app/app.js"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Stabilize Three.js scene and solar-system data foundation",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/index.html"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "body-rendering-orbits-scale",
+          "patch_paths": [
+            "app/index.html",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Render full solar system with orbit guides and scale modes",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/index.html"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [
+            "app/index.html"
+          ],
+          "issue": null,
+          "pass_id": "simulation-time-controls",
+          "patch_paths": [
+            "app/index.html",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Add animation loop and simulation controls",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [
+            "app/styles.css"
+          ],
+          "issue": null,
+          "pass_id": "seasons-tilt-presets",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Implement Earth seasons presets and axial tilt explanation",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_used_files": [
+            "app/README.md"
+          ],
+          "issue": {
+            "category": "physical_application_failure",
+            "diagnostics": {
+              "created_earlier_in_run": false,
+              "executor_used_full_file_replacement": false,
+              "file_existed_before_run": true,
+              "full_content_provided": true,
+              "full_file_replacement_eligible": true,
+              "included_in_full_file_replacement_guidance": true,
+              "pass_id": "camera-selection-labels",
+              "pass_index": 6,
+              "selected_context": true,
+              "target_path": "app/app.js"
+            },
+            "pass_id": "camera-selection-labels",
+            "path": "app/app.js",
+            "reason": "hunk_preimage_mismatch"
+          },
+          "pass_id": "camera-selection-labels",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "failed",
+          "title": "Add camera navigation, presets, labels, and click focus",
+          "warnings": []
+        }
+      ],
+      "passes_completed": 5,
+      "passes_total": 8,
+      "project_summary": "Finish the static SolarSystem3D app in the scenario app/ directory by evolving the current scaffold into a simulator-first Three.js experience with complete body rendering, procedural textures, animation, seasons, camera interaction, accessible controls, responsive layout, and final documentation, while keeping all work confined to app/index.html, app/styles.css, app/app.js, and app/README.md.",
+      "promoted_files_by_pass": {
+        "body-rendering-orbits-scale": [
+          "app/index.html",
+          "app/app.js",
+          "app/README.md"
+        ],
+        "core-scene-data-model": [
+          "app/app.js"
+        ],
+        "scene-shell-alignment": [
+          "app/index.html",
+          "app/styles.css",
+          "app/README.md"
+        ],
+        "seasons-tilt-presets": [
+          "app/index.html",
+          "app/styles.css",
+          "app/app.js",
+          "app/README.md"
+        ],
+        "simulation-time-controls": [
+          "app/index.html",
+          "app/app.js",
+          "app/README.md"
+        ]
+      },
+      "safe_resume_possible": true,
+      "status": "failed"
+    },
+    "patch_applied": false,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 68,
+      "lines_added": 1632,
+      "lines_removed": 532,
+      "modified_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/README.md",
+        "app/app.js"
+      ],
+      "paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/README.md",
+        "app/app.js"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/index.html",
+      "app/styles.css",
+      "app/README.md",
+      "app/app.js",
+      "app/index.html",
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "promotion_applied": false,
+    "promotion_status": "skipped",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/01_static_scaffold.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "failed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected",
+      "large_change"
+    ]
+  }
+}
