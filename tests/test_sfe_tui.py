@@ -5054,7 +5054,7 @@ def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> Non
     assert "SFE run" in run_output
     assert "status: failed" in run_output
     assert "issue category: invalid_patch_proposal" in run_output
-    assert "issue reason: missing_diff_header" in run_output
+    assert "issue reason: executor_produced_no_files" in run_output
     assert "patch proposal output length:" not in run_output
     assert "patch proposal first line:" not in run_output
     assert "patch proposal looks like plain text:" not in run_output
@@ -5064,7 +5064,7 @@ def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> Non
     assert cleanup.cleaned is True
 
 
-def test_tui_run_json_patch_proposal_missing_diff_header_hints_unified_diff(
+def test_tui_run_json_patch_proposal_reports_no_files(
     tmp_path,
 ) -> None:
     repo = init_git_repo(tmp_path / "repo")
@@ -5096,11 +5096,7 @@ def test_tui_run_json_patch_proposal_missing_diff_header_hints_unified_diff(
     assert "SFE run" in run_output
     assert "status: failed" in run_output
     assert "issue category: invalid_patch_proposal" in run_output
-    assert "issue reason: missing_diff_header" in run_output
-    assert (
-        "hint: executor returned JSON edit instructions instead of a unified diff; "
-        "use /run-report for details or retry /run"
-    ) in run_output
+    assert "issue reason: executor_produced_no_files" in run_output
     assert "patch proposal looks like JSON:" not in run_output
     assert raw_output not in run_output
     assert app.last_run_result is not None
@@ -5187,7 +5183,7 @@ def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> N
     assert "SFE run" in run_output
     assert "status: failed" in run_output
     assert "issue category: invalid_patch_proposal" in run_output
-    assert "issue reason: missing_diff_header" in run_output
+    assert "issue reason: executor_produced_no_files" in run_output
     assert "patch proposal output length:" in run_output
     assert "patch proposal first line: # SFE Test 01" in run_output
     assert "patch proposal looks like plain text: yes" in run_output
@@ -6517,22 +6513,21 @@ def test_console_system_instruction_forbids_diffs_and_file_edits() -> None:
     assert "Do not produce a patch, diff, or file replacement JSON" in instruction
 
 
-def test_patch_system_instruction_prefers_direct_edits_with_diff_fallback() -> None:
+def test_patch_system_instruction_prefers_file_blocks_with_diff_fallback() -> None:
     instruction = PATCH_SYSTEM_INSTRUCTION
 
     assert "workspace_write executor" in instruction
-    assert "make the requested edits directly" in instruction
-    assert "Do not write outside that directory" in instruction
-    assert "trust the actual disk changes" in instruction
+    assert "text-only provider path" in instruction
+    assert "You cannot write files directly" in instruction
+    assert '<<<SFE_FILE path="app/index.html">' in instruction
+    assert "<<<END_SFE_FILE>>>" in instruction
+    assert "Do not claim files were created unless you include their SFE_FILE blocks" in instruction
+    assert "never use absolute paths or ../ traversal" in instruction
     assert "destination-directory boundary" in instruction
-    assert "If your runtime cannot edit files directly" in instruction
-    assert "return a strict unified diff/git diff" in instruction
+    assert "strict unified diff/git diff remains accepted as a compatibility path" in instruction
     assert "diff --git a/<relative-path> b/<relative-path>" in instruction
-    assert "diff response must start with a diff header" in instruction
     assert "Do not return JSON" in instruction
     assert "Do not return an edits array" in instruction
-    assert "Do not wrap the patch in a code fence" in instruction
-    assert "All paths must be relative to the workspace" in instruction
     assert "Return only one strict JSON object" not in instruction
     assert '"edits"' not in instruction
 

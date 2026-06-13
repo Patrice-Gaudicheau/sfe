@@ -1143,7 +1143,7 @@ def test_run_pipeline_reports_plain_text_patch_proposal_diagnostics(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
+    assert result.issue.reason == "executor_produced_no_files"
     assert result.patch_generated is False
     assert result.patch_applied is False
     diagnostics = result.patch_proposal_diagnostics
@@ -1210,7 +1210,7 @@ def test_run_pipeline_reports_fenced_diff_patch_proposal_diagnostics(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
+    assert result.issue.reason == "executor_produced_no_files"
     diagnostics = result.patch_proposal_diagnostics
     assert diagnostics is not None
     assert diagnostics.starts_with_markdown_fence is True
@@ -1219,6 +1219,87 @@ def test_run_pipeline_reports_fenced_diff_patch_proposal_diagnostics(
     assert diagnostics.contains_old_file_header is True
     assert diagnostics.contains_new_file_header is True
     assert diagnostics.contains_hunk_header is True
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_accepts_sfe_file_blocks_for_text_workspace_write(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/index.html">\n'
+        "<!doctype html>\n"
+        "<title>SFE</title>\n"
+        "\n"
+        "<main data-state=\"a+b\">Solar & Field</main>\n"
+        "<<<END_SFE_FILE>>>\n"
+        '<<<SFE_FILE path="app/styles.css">\n'
+        ":root { --accent: #31c48d; }\n"
+        "\n"
+        "main::before { content: \"<<not a marker>>\"; }\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create two files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("app/index.html", "app/styles.css")
+    assert result.promoted_files == ("app/index.html", "app/styles.css")
+    assert (repo / "app/index.html").read_text(encoding="utf-8") == (
+        "<!doctype html>\n"
+        "<title>SFE</title>\n"
+        "\n"
+        "<main data-state=\"a+b\">Solar & Field</main>\n"
+    )
+    assert (repo / "app/styles.css").read_text(encoding="utf-8") == (
+        ":root { --accent: #31c48d; }\n"
+        "\n"
+        "main::before { content: \"<<not a marker>>\"; }\n"
+    )
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_sfe_file_block_path_traversal(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="../escape.txt">\n'
+        "outside\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create one file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "invalid_sfe_file_path"
+    assert result.issue.path == "../escape.txt"
+    assert not (tmp_path / "escape.txt").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1554,7 +1635,7 @@ def test_run_pipeline_reports_json_looking_patch_proposal_diagnostics(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
+    assert result.issue.reason == "executor_produced_no_files"
     diagnostics = result.patch_proposal_diagnostics
     assert diagnostics is not None
     assert diagnostics.looks_like_json is True
@@ -1709,7 +1790,7 @@ def test_run_pipeline_does_not_repair_json_or_path_validation_failures(
     assert json_result.status == RUN_STATUS_FAILED
     assert json_result.issue is not None
     assert json_result.issue.category == "invalid_patch_proposal"
-    assert json_result.issue.reason == "missing_diff_header"
+    assert json_result.issue.reason == "executor_produced_no_files"
     assert json_result.patch_proposal_diagnostics is not None
     assert json_result.patch_proposal_diagnostics.looks_like_json is True
 
@@ -1995,7 +2076,7 @@ def test_run_pipeline_codexcli_prose_only_patch_fails_without_mutation(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
+    assert result.issue.reason == "executor_produced_no_files"
     assert result.executor_provider == "codexcli"
     assert result.patch_generated is False
     assert result.patch_applied is False

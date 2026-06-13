@@ -404,42 +404,34 @@ The current TUI behavior intentionally keeps these boundaries:
 
 ## DEV Patch Provider Limits
 
-Empty-workspace file creation through the DEV `/run` workspace-write path works
-in principle, but it depends on the configured executor model producing a
-mechanically valid patch response. `/run` calls the executor patch provider once,
-then parses the response as structured file-replacement JSON or a strict
-Git-style unified diff. For unified diffs, file sections must start with
-`diff --git a/<relative-path> b/<relative-path>`, new files must use normal
-`/dev/null` file headers inside that section, and hunk line counts must exactly
-match the hunk body.
+Empty-workspace file creation through the DEV `/run` workspace-write path uses a
+text-to-file transport for API providers that cannot edit the filesystem
+directly. The preferred response format is a deterministic full-file block:
 
-Some local or mid-sized models can understand the task and still produce an
-invalid unified diff. The most common observed failure in empty-workspace
-creation tasks is hunk accounting mismatch for new-file patches, for example a
-header such as `@@ -0,0 +1,87 @@` where the declared new-line count does not
-match the actual number of added `+` lines. SFE correctly rejects these patches
-instead of accepting, rewriting, or silently repairing malformed output.
+```text
+<<<SFE_FILE path="app/index.html">
+<!doctype html>
+...
+<<<END_SFE_FILE>>>
+```
 
-`/run-report` can show bounded hunk accounting diagnostics for these failures,
-including the failing path, hunk header, declared counts, actual counts, and
-whether the hunk looks like a new-file hunk. `/run` does not perform a second LLM
-repair pass for `impossible_hunk_accounting` or other invalid patch proposals.
-Invalid patch output fails explicitly and must be retried or fixed by producing a
-valid patch response.
+SFE writes those blocks into the controlled worktree, captures the actual
+created, modified, and deleted files, and then enforces the destination-directory
+boundary before promotion. Strict Git-style unified diffs remain accepted as a
+compatibility path, but SFE does not rely on hunk/preimage validation, patch
+repair, or a second LLM repair pass as promotion gates.
 
-A controlled comparison of the same empty-workspace ToDo web app task completed
-with OpenAI as the router and executor provider. That run generated and applied
-a patch successfully, promoted `index.html`, `styles.css`, `app.js`, and
-`README.md`, and did not require repair. This supports treating the strict
-unified diff protocol as viable with a stronger provider. The current
-Lemonade/Qwen3.5-35B-A3B-GGUF failures are best understood as a provider/model
-capability boundary for strict patch generation, not as evidence that the SFE
-workflow is invalid.
+If a text-only executor returns prose such as "I created the files" without
+`SFE_FILE` blocks or a valid Git diff, `/run` fails explicitly with an
+`executor_produced_no_files`-style diagnostic. The model text is not treated as
+evidence that files were created. Filesystem-capable executors may later use the
+real controlled worktree as the source of truth, but OpenAI API providers remain
+text-only and must transport file contents.
 
-For local providers, prefer smaller and simpler workspace-write tasks, or expect
-occasional patch-generation failures until a more robust workflow is
-implemented. The lightweight `SFE:` progress lines report pipeline boundaries;
-they do not change provider timeout behavior or add heartbeat logic.
+For local providers, prefer smaller and simpler workspace-write tasks, or use
+explicit batches for large scaffolds. The lightweight `SFE:` progress lines
+report pipeline boundaries; they do not change provider timeout behavior or add
+heartbeat logic.
 
 ## Current Limitations
 

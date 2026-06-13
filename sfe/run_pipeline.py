@@ -1280,6 +1280,10 @@ class RunPipeline:
         existing_update_files: tuple[str, ...] = (),
     ) -> RunPatchProposal | RunIssue:
         raw_answer = result.answer or ""
+        file_blocks = _parse_sfe_file_block_response(workspace_root, raw_answer)
+        if file_blocks is not None:
+            return file_blocks
+
         structured = parse_structured_file_patch_json(raw_answer)
         if structured.proposal is not None and structured.summary is not None:
             preview = generate_structured_file_patch_diff_preview(
@@ -1352,6 +1356,11 @@ class RunPipeline:
                         or diff_text,
                         parse_status="recovered_new_file_diff",
                     )
+            if _is_missing_file_transport_issue(diff_parsed.issue, raw_answer):
+                return RunIssue(
+                    "invalid_patch_proposal",
+                    "executor_produced_no_files",
+                )
             if _patch_hunk_count_normalization_enabled() and _is_hunk_accounting_issue(
                 diff_parsed.issue
             ):
@@ -1429,6 +1438,98 @@ class RunPipeline:
             preview=normalized_proposal.preview,
             parse_status=normalized_proposal.parse_status,
         )
+
+
+_SFE_FILE_START_RE = re.compile(r'^<<<SFE_FILE path="(?P<path>[^"]+)">[ \t]*$')
+_SFE_FILE_END = "<<<END_SFE_FILE>>>"
+
+
+def _parse_sfe_file_block_response(
+    workspace_root: Path,
+    raw_answer: str,
+) -> RunPatchProposal | RunIssue | None:
+    lines = raw_answer.splitlines(keepends=True)
+    if not any(_SFE_FILE_START_RE.match(line.rstrip("\r\n")) for line in lines):
+        return None
+
+    edits: list[StructuredFileEdit] = []
+    seen_paths: set[str] = set()
+    index = 0
+    while index < len(lines):
+        marker_line = lines[index].rstrip("\r\n")
+        start_match = _SFE_FILE_START_RE.match(marker_line)
+        if start_match is None:
+            if marker_line.strip():
+                return RunIssue(
+                    "invalid_patch_proposal",
+                    "sfe_file_block_surrounding_text",
+                )
+            index += 1
+            continue
+
+        path = start_match.group("path")
+        invalid_reason = _invalid_sfe_file_block_path_reason(path)
+        if invalid_reason is not None:
+            return RunIssue("invalid_patch_proposal", invalid_reason, path)
+        if path in seen_paths:
+            return RunIssue("invalid_patch_proposal", "duplicate_sfe_file_block", path)
+        seen_paths.add(path)
+
+        index += 1
+        content_parts: list[str] = []
+        found_end = False
+        while index < len(lines):
+            if lines[index].rstrip("\r\n") == _SFE_FILE_END:
+                found_end = True
+                index += 1
+                break
+            content_parts.append(lines[index])
+            index += 1
+        if not found_end:
+            return RunIssue("invalid_patch_proposal", "unterminated_sfe_file_block", path)
+
+        action = (
+            SUPPORTED_REPLACE_ACTION
+            if (workspace_root / path).exists()
+            else SUPPORTED_CREATE_ACTION
+        )
+        edits.append(
+            StructuredFileEdit(
+                path=path,
+                action=action,
+                content="".join(content_parts),
+            )
+        )
+
+    if not edits:
+        return RunIssue("invalid_patch_proposal", "executor_produced_no_files")
+
+    proposal = StructuredFilePatch(tuple(edits), diff_preview=raw_answer)
+    preview = generate_structured_file_patch_diff_preview(workspace_root, proposal)
+    return RunPatchProposal(
+        proposal=proposal,
+        summary=summarize_structured_file_patch(proposal),
+        preview=preview or raw_answer,
+        parse_status="sfe_file_blocks",
+    )
+
+
+def _invalid_sfe_file_block_path_reason(path: str) -> str | None:
+    if not path or path.strip() != path:
+        return "invalid_sfe_file_path"
+    parsed = Path(path)
+    if parsed.is_absolute() or ".." in parsed.parts:
+        return "invalid_sfe_file_path"
+    return None
+
+
+def _is_missing_file_transport_issue(
+    issue: PatchIssue | None,
+    raw_answer: str,
+) -> bool:
+    if issue is None or issue.reason != "missing_diff_header":
+        return False
+    return "diff --git " not in raw_answer and "<<<SFE_FILE " not in raw_answer
 
 
 def _extract_tolerated_workspace_diff(raw_answer: str) -> tuple[str, str] | None:

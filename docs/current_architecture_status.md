@@ -39,18 +39,21 @@ whether the task should produce a console answer, write workspace files, or be
 treated as an outside-workspace action. `console_output` returns a
 natural-language answer with no worktree or patch. `workspace_write` discovers
 workspace context, builds the internal routing/preflight state needed for a
-reduced executor payload, asks the configured executor to make workspace
-changes in an SFE-created Git worktree, and returns compact safe metadata. SFE
-trusts actual disk changes and then enforces one boundary: every created,
-modified, or deleted path must be inside the selected destination directory
-before promotion. It does not require human approval, diff inspection, router
-review, patch hunk/preimage validation, patch repair, syntax checks, tests, or
-lint before promotion. `external_action` is recognized but not implemented yet
-and fails cleanly before workspace work starts.
+reduced executor payload, and writes changes into an SFE-created Git worktree.
+Text-only API providers transport those changes as deterministic full-file
+`SFE_FILE` blocks; strict Git diffs remain a compatibility path. SFE then
+enforces one boundary: every created, modified, or deleted path must be inside
+the selected destination directory before promotion. It does not require human
+approval, diff inspection, router review, patch hunk/preimage validation, patch
+repair, syntax checks, tests, or lint before promotion. `external_action` is
+recognized but not implemented yet and fails cleanly before workspace work
+starts.
 
-`workspace_write` is the developer worktree execution mode. It may still accept
-a generated diff as a compatibility path, but success is based on actual
-worktree changes and the destination-directory boundary.
+`workspace_write` is the developer worktree execution mode. For text-only
+providers, model text is a file transport and audit artifact rather than a
+promotion contract: `SFE_FILE` blocks are written into the controlled worktree,
+then the resulting filesystem changes are checked against the
+destination-directory boundary.
 
 Large `workspace_write` tasks may use multi-pass execution. In that path the
 Router designs and validates the strict JSON batch plan before execution
@@ -211,9 +214,11 @@ CodexCLI model selectors. Blank or absent discovery model falls back to
 `SFE_CODEXCLI_REASONING_EFFORT`; blank or absent discovery effort falls back to
 router effort, then the shared value. The benchmark-local `openai-codexcli`
 name is retained for benchmark history and internal dispatch compatibility. In
-DEV patch mode CodexCLI proposes patch text only; SFE still owns discovery path
-validation, patch parsing, validation, worktree isolation, application, and
-rejection. Google discovery routing uses `SFE_GOOGLE_DISCOVERY_MODEL`, then
+DEV patch mode CodexCLI proposes text only; SFE still owns discovery path
+validation, text-to-file or diff parsing, worktree isolation, application, and
+rejection. Filesystem-capable executor paths can later use the real controlled
+worktree as the source of truth. Google discovery routing uses
+`SFE_GOOGLE_DISCOVERY_MODEL`, then
 `SFE_GOOGLE_MODEL`, then the Google provider default.
 
 The full CodexCLI `/run` role split is:

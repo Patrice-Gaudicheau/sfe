@@ -278,17 +278,20 @@ SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `console_output` produces a natural-language answer in the TUI with no Git
 preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
 existing discovery, context-routing, executor, and isolated worktree pipeline
-for creating, modifying, or deleting workspace files. SFE trusts the actual disk
-changes produced in the isolated worktree, then enforces one safety boundary:
-every created, modified, or deleted path must be inside the selected destination
-directory before changes are promoted. This deliberately avoids fragile patch
-hunk/preimage validation and repair loops, trading fewer false failures for a
-filesystem-scope boundary check. If the selected workspace is not yet a Git
-repository, `workspace_write` can initialize a local snapshot first; it does not
-create a remote, push, run syntax checks, run tests or lint, require diff
-inspection, require human approval, or require router review. `external_action`
-is recognized as outside-workspace work, but is not implemented yet and fails
-cleanly. Historical and debug commands such as
+for creating, modifying, or deleting workspace files. Text-only API providers
+such as OpenAI return full-file `SFE_FILE` blocks, which SFE writes into the
+controlled worktree; strict Git diffs remain accepted as a compatibility path.
+Filesystem-capable executors may later write directly in that worktree. In all
+cases, SFE then enforces one safety boundary: every created, modified, or
+deleted path must be inside the selected destination directory before changes
+are promoted. This deliberately avoids fragile patch hunk/preimage validation
+and repair loops, trading fewer false failures for a filesystem-scope boundary
+check. If the selected workspace is not yet a Git repository, `workspace_write`
+can initialize a local snapshot first; it does not create a remote, push, run
+syntax checks, run tests or lint, require diff inspection, require human
+approval, or require router review. `external_action` is recognized as
+outside-workspace work, but is not implemented yet and fails cleanly.
+Historical and debug commands such as
 `/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
 `/review-worktree` remain available, but are hidden from the default help.
 
@@ -470,7 +473,7 @@ SFE_CODEXCLI_DISCOVERY_MODEL="gpt-5.5"
 SFE_CODEXCLI_DISCOVERY_EFFORT="high"
 ```
 
-For long patch-generation tasks, especially scaffold-style workspace writes,
+For long text-generation tasks, especially scaffold-style workspace writes,
 the executor can use a longer idle supervision window without changing router or
 discovery behavior:
 
@@ -480,9 +483,9 @@ SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS=900
 
 This falls back to `SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS`, then
 `SFE_PROVIDER_IDLE_TIMEOUT_SECONDS`, then the built-in provider idle default.
-The setting only keeps a silent provider call alive longer; it does not make
-large monolithic scaffolds mechanically safer. Prefer smaller tasks or explicit
-batches when asking SFE to create many files at once.
+The setting only keeps a silent provider call alive longer. For text-only
+providers, prefer `SFE_FILE` full-file blocks or explicit batches when asking
+SFE to create many files at once.
 
 Large `workspace_write` scaffold tasks can also use core multi-pass execution.
 `SFE_WORKSPACE_WRITE_MULTIPASS=auto` enables a cautious heuristic for large

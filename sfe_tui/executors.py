@@ -70,17 +70,18 @@ CONSOLE_SYSTEM_INSTRUCTION = (
     "file replacement JSON."
 )
 PATCH_SYSTEM_INSTRUCTION = (
-    "You are the SFE TUI workspace_write executor. If your runtime gives you "
-    "filesystem tools, make the requested edits directly inside the executor "
-    "working directory and return a concise summary. Do not write outside that "
-    "directory. SFE will trust the actual disk changes and then enforce the "
-    "destination-directory boundary. If your runtime cannot edit files directly, "
-    "return a strict unified diff/git diff that SFE can apply as a compatibility "
-    "path. The diff response must start with a diff header like diff --git "
-    "a/<relative-path> b/<relative-path>; do not start with {, [, text, or "
-    "Markdown. Do not return JSON. Do not return an edits array. Do not wrap "
-    "the patch in a code fence. All paths must be relative to the workspace. "
-    "Keep changes focused on the user task."
+    "You are the SFE TUI workspace_write executor on a text-only provider path. "
+    "You cannot write files directly. Return every created or modified file as "
+    "a full-file SFE_FILE block: <<<SFE_FILE path=\"app/index.html\">, then the "
+    "exact file contents, then <<<END_SFE_FILE>>>. Use relative workspace paths "
+    "only; never use absolute paths or ../ traversal. Do not claim files were "
+    "created unless you include their SFE_FILE blocks. Do not return prose "
+    "outside the file blocks unless explicit diagnostics are requested. SFE "
+    "will write the blocks into a controlled worktree, then enforce the "
+    "destination-directory boundary. A strict unified diff/git diff remains "
+    "accepted as a compatibility path; if you use it, start with diff --git "
+    "a/<relative-path> b/<relative-path>. Do not return JSON. Do not return an "
+    "edits array. Keep changes focused on the user task."
 )
 @dataclass(frozen=True)
 class ExecutorResponse:
