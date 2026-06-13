@@ -1377,7 +1377,7 @@ def test_run_pipeline_rejects_ambiguous_multiple_fenced_patch_blocks(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
+    assert result.issue.reason == "malformed_hunk_line"
     assert result.patch_applied is False
     assert not (repo / "index.html").exists()
     assert not (repo / "two.html").exists()
@@ -1409,7 +1409,7 @@ def test_run_pipeline_rejects_ambiguous_multiple_preamble_patch_regions(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
+    assert result.issue.reason == "malformed_hunk_line"
     assert result.patch_applied is False
     assert not (repo / "index.html").exists()
     assert not (repo / "two.html").exists()
@@ -1417,12 +1417,24 @@ def test_run_pipeline_rejects_ambiguous_multiple_preamble_patch_regions(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_reports_failed_extraction_attempts_for_malformed_preamble_diff(
+def test_run_pipeline_recovers_new_files_from_malformed_preamble_diff(
     tmp_path: Path,
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
-    raw_output = f"Here is the patch:\n{_invalid_new_file_hunk_count_diff()}"
+    raw_output = "\n".join(
+        [
+            "Here is the patch:",
+            _invalid_new_file_hunk_count_diff(
+                "index.html",
+                content=("hello", "", "world"),
+            ),
+            _invalid_new_file_hunk_count_diff(
+                "styles.css",
+                content=("body {", "  color: black;", "}"),
+            ),
+        ]
+    )
 
     result = _pipeline(
         workspace_manager=manager,
@@ -1435,27 +1447,57 @@ def test_run_pipeline_reports_failed_extraction_attempts_for_malformed_preamble_
         )
     )
 
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("index.html", "styles.css")
+    assert result.promoted_files == ("index.html", "styles.css")
+    assert (repo / "index.html").read_text(encoding="utf-8") == "hello\n\nworld\n"
+    assert (repo / "styles.css").read_text(encoding="utf-8") == (
+        "body {\n  color: black;\n}\n"
+    )
+    assert "hunk_preimage_mismatch" not in str(result)
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_recovered_new_file_outside_destination_fails_boundary(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    app_dir = repo / "app"
+    app_dir.mkdir()
+    (app_dir / "context.txt").write_text("app context\n", encoding="utf-8")
+    _git(repo, "add", "app/context.txt")
+    _git(repo, "commit", "-m", "Add app context")
+    manager = _manager()
+    raw_output = (
+        "Here is the patch:\n"
+        f"{_invalid_new_file_hunk_count_diff('../outside.txt')}"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+        discovery_router=FakeDiscoveryRouter(("context.txt",)),
+    ).run(
+        RunRequest(
+            workspace_root=app_dir,
+            task="Create a recovered file outside the app destination",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
-    assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "missing_diff_header"
-    diagnostics = result.patch_proposal_diagnostics
-    assert diagnostics is not None
-    assert diagnostics.contains_diff_git_header is True
-    assert diagnostics.has_preamble_before_diff is True
-    assert diagnostics.strict_parse_succeeded is False
-    assert diagnostics.strict_parse_issue_reason == "missing_diff_header"
-    assert diagnostics.fenced_extraction_attempted is True
-    assert diagnostics.fenced_extraction_succeeded is False
-    assert diagnostics.raw_segment_extraction_attempted is True
-    assert diagnostics.raw_segment_extraction_succeeded is False
-    assert diagnostics.raw_segment_candidate_started is True
-    assert diagnostics.raw_segment_parse_issue_reason == "impossible_hunk_accounting"
-    assert diagnostics.raw_segment_extraction_failure_reason == "no_parseable_raw_segment"
-    assert diagnostics.final_extraction_succeeded is False
-    assert diagnostics.final_parse_issue_reason == "impossible_hunk_accounting"
-    assert result.patch_applied is False
-    assert not (repo / "index.html").exists()
+    assert result.issue.category == "workspace_boundary"
+    assert result.issue.reason == "changed_path_outside_destination"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["authorized_output_root"] == str(app_dir.resolve())
+    assert result.issue.diagnostics["offending_paths"] == ("outside.txt",)
+    assert not (repo / "outside.txt").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1480,7 +1522,8 @@ def test_run_pipeline_rejects_preamble_git_diff_with_unsafe_path(
 
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
-    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.category == "workspace_boundary"
+    assert result.issue.reason == "changed_path_outside_destination"
     assert result.patch_applied is False
     assert not (tmp_path / "outside.txt").exists()
     assert not (repo / "outside.txt").exists()
@@ -1521,7 +1564,7 @@ def test_run_pipeline_reports_json_looking_patch_proposal_diagnostics(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_rejects_hunk_accounting_without_second_pass(
+def test_run_pipeline_recovers_new_file_hunk_accounting_without_second_pass(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1541,31 +1584,16 @@ def test_run_pipeline_rejects_hunk_accounting_without_second_pass(
         )
     )
 
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "invalid_patch_proposal"
-    assert result.issue.reason == "impossible_hunk_accounting"
-    assert result.issue.path == "index.html"
-    diagnostics = result.issue.hunk_accounting
-    assert diagnostics is not None
-    assert diagnostics.hunk_header == "@@ -0,0 +1,5 @@"
-    assert diagnostics.declared_old_count == 0
-    assert diagnostics.declared_new_count == 5
-    assert diagnostics.actual_old_side_count == 0
-    assert diagnostics.actual_new_side_count == 3
-    assert diagnostics.actual_added_line_count == 3
-    assert diagnostics.looks_like_new_file is True
-    assert diagnostics.old_file_header_is_dev_null is True
-    assert diagnostics.hunk_body_only_added_lines is True
-    assert result.patch_generated is False
-    assert result.patch_applied is False
-    assert result.promoted_files == ()
-    assert not (repo / "index.html").exists()
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("index.html",)
     assert len(executor.patch_calls) == 1
-    proposal_diagnostics = result.patch_proposal_diagnostics
-    assert proposal_diagnostics is not None
-    assert proposal_diagnostics.contains_diff_git_header is True
-    assert proposal_diagnostics.contains_hunk_header is True
+    assert "hunk_preimage_mismatch" not in str(result)
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -1594,20 +1622,9 @@ def test_run_pipeline_normalizes_hunk_counts_when_flag_enabled(
     assert result.patch_applied is True
     assert result.promoted_files == ("index.html",)
     assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
-    diagnostics = result.patch_hunk_count_normalization
-    assert diagnostics is not None
-    assert diagnostics.applied is True
-    assert diagnostics.message == (
-        "Hunk count normalization applied: declared old/new count was 0/5, "
-        "but hunk body implies 0/3."
-    )
-    assert len(diagnostics.changes) == 1
-    assert diagnostics.changes[0].original_hunk_header == "@@ -0,0 +1,5 @@"
-    assert diagnostics.changes[0].normalized_hunk_header == "@@ -0,0 +1,3 @@"
+    assert result.patch_hunk_count_normalization is None
     rendered = render_run_result(result)
-    assert "SFE hunk count normalization" in rendered
-    assert "applied: yes" in rendered
-    assert "normalized hunk header: @@ -0,0 +1,3 @@" in rendered
+    assert "SFE hunk count normalization" not in rendered
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

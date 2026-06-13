@@ -5137,22 +5137,10 @@ def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path, monkeypatc
 
     assert app.run() == 0
     report_output = output[-1]
-    assert "SFE hunk accounting diagnostics" in report_output
-    assert "hunk path: index.html" in report_output
-    assert "hunk header: @@ -0,0 +1,5 @@" in report_output
-    assert "declared old start: 0" in report_output
-    assert "declared old count: 0" in report_output
-    assert "declared new start: 1" in report_output
-    assert "declared new count: 5" in report_output
-    assert "actual old-side count: 0" in report_output
-    assert "actual new-side count: 3" in report_output
-    assert "actual context line count: 0" in report_output
-    assert "actual removed line count: 0" in report_output
-    assert "actual added line count: 3" in report_output
-    assert "looks like new-file hunk: yes" in report_output
-    assert "old file header is /dev/null: yes" in report_output
-    assert "hunk body only added lines: yes" in report_output
-    assert "LLM-correctable in principle: yes" in report_output
+    assert "status: completed" in report_output
+    assert "SFE hunk accounting diagnostics" not in report_output
+    assert "hunk_preimage_mismatch" not in report_output
+    assert (repo / "index.html").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
     assert "SFE patch repair diagnostics" not in report_output
     assert "+one" not in report_output
     assert "+two" not in report_output

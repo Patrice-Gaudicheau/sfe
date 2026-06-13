@@ -532,7 +532,28 @@ class RunPipeline:
 
         apply_result: PatchApplyResult | None = None
         if proposal is not None:
-            apply_result = _apply_run_patch(active_workspace, proposal.proposal)
+            apply_result = _apply_run_patch_proposal(
+                active_workspace,
+                session.worktree_path,
+                proposal,
+            )
+            if (
+                apply_result.issue is not None
+                and apply_result.issue.category == "workspace_boundary"
+            ):
+                return _patch_failed_result(
+                    apply_result.issue,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=patch_result,
+                    proposal=proposal,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    execution_mode_decision=execution_mode_decision,
+                )
 
         promotion_baseline = _capture_actual_workspace_changes(session, active_workspace)
         patch_summary = (
@@ -848,7 +869,57 @@ class RunPipeline:
 
             apply_result: PatchApplyResult | None = None
             if proposal is not None:
-                apply_result = _apply_run_patch(active_workspace, proposal.proposal)
+                apply_result = _apply_run_patch_proposal(
+                    active_workspace,
+                    session.worktree_path,
+                    proposal,
+                )
+                if (
+                    apply_result.issue is not None
+                    and apply_result.issue.category == "workspace_boundary"
+                ):
+                    issue = _run_issue_from_patch(
+                        apply_result.issue,
+                        default_reason="changed_path_outside_destination",
+                    )
+                    pass_issue = _multi_pass_issue_from_run_issue(
+                        issue,
+                        pass_id=batch.id,
+                    )
+                    pass_results.append(
+                        _failed_batch_result(
+                            batch,
+                            issue=pass_issue,
+                            provider_diagnostics=provider_diagnostics,
+                            executor_contract_diagnostics=executor_contract_diagnostics,
+                        )
+                    )
+                    summary = _build_multi_pass_summary(
+                        status="failed",
+                        project_summary=parsed_plan.project_summary,
+                        passes_total=len(parsed_plan.batches),
+                        pass_results=tuple(pass_results),
+                        failed_issue=pass_issue,
+                        all_promoted_files=tuple(all_promoted_files),
+                        safe_resume_possible=bool(all_promoted_files),
+                    )
+                    return _multipass_run_result(
+                        status=RUN_STATUS_FAILED,
+                        issue=issue,
+                        execution_mode_decision=execution_mode_decision,
+                        session=session,
+                        active_workspace=active_workspace,
+                        worktree_created=worktree_created,
+                        discovery_result=discovery_result,
+                        dry_run_result=dry_run_result,
+                        patch_result=patch_result,
+                        selected_source_refs=selected_source_refs,
+                        git_preparation=git_preparation,
+                        multi_pass_summary=summary,
+                        patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                        promoted_files=tuple(all_promoted_files),
+                        patch_proposal_diagnostics=patch_proposal_diagnostics,
+                    )
             fallback_diagnostics: dict[str, object] | None = None
 
             promotion_baseline = _capture_actual_workspace_changes(
@@ -1257,7 +1328,30 @@ class RunPipeline:
             if tolerated_diff is not None:
                 diff_text, parse_status = tolerated_diff
                 diff_parsed = parse_unified_diff(diff_text)
+            else:
+                diff_suffix = _extract_workspace_diff_suffix(raw_answer)
+                if diff_suffix is not None:
+                    diff_text = diff_suffix
+                    parse_status = "malformed_extracted_unified_diff"
+                    diff_parsed = parse_unified_diff(diff_text)
         if diff_parsed.patch is None or diff_parsed.summary is None:
+            if (
+                _is_hunk_accounting_issue(diff_parsed.issue)
+                or parse_status == "malformed_extracted_unified_diff"
+            ):
+                recovered = _recover_new_file_patch_from_malformed_diff(diff_text)
+                if recovered is not None:
+                    summary = summarize_structured_file_patch(recovered)
+                    return RunPatchProposal(
+                        proposal=recovered,
+                        summary=summary,
+                        preview=generate_structured_file_patch_diff_preview(
+                            workspace_root,
+                            recovered,
+                        )
+                        or diff_text,
+                        parse_status="recovered_new_file_diff",
+                    )
             if _patch_hunk_count_normalization_enabled() and _is_hunk_accounting_issue(
                 diff_parsed.issue
             ):
@@ -1345,6 +1439,174 @@ def _extract_tolerated_workspace_diff(raw_answer: str) -> tuple[str, str] | None
     if extracted_diff is not None:
         return extracted_diff, "extracted_unified_diff"
     return None
+
+
+def _extract_workspace_diff_suffix(raw_answer: str) -> str | None:
+    lines = raw_answer.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("diff --git "):
+            return "\n".join(lines[index:])
+    return None
+
+
+_DIFF_HEADER_LINE_RE = re.compile(r"^diff --git a/(?P<old>[^ ]+) b/(?P<new>[^ ]+)$")
+
+
+def _recover_new_file_patch_from_malformed_diff(
+    diff_text: str,
+) -> StructuredFilePatch | None:
+    lines = diff_text.splitlines()
+    if not lines:
+        return None
+    header_indexes = [
+        index for index, line in enumerate(lines) if line.startswith("diff --git ")
+    ]
+    if not header_indexes:
+        return None
+    edits: list[StructuredFileEdit] = []
+    seen_paths: set[str] = set()
+    for position, start in enumerate(header_indexes):
+        end = (
+            header_indexes[position + 1]
+            if position + 1 < len(header_indexes)
+            else len(lines)
+        )
+        edit = _recover_new_file_edit_from_diff_block(lines[start:end])
+        if edit is None or edit.path in seen_paths:
+            return None
+        edits.append(edit)
+        seen_paths.add(edit.path)
+    if not edits:
+        return None
+    return StructuredFilePatch(tuple(edits), diff_preview=diff_text)
+
+
+def _recover_new_file_edit_from_diff_block(
+    block_lines: list[str],
+) -> StructuredFileEdit | None:
+    if not block_lines:
+        return None
+    header_match = _DIFF_HEADER_LINE_RE.match(block_lines[0])
+    if header_match is None:
+        return None
+    old_path = header_match.group("old")
+    new_path = header_match.group("new")
+    if old_path != new_path:
+        return None
+    old_header = f"--- /dev/null"
+    new_header = f"+++ b/{new_path}"
+    if old_header not in block_lines or new_header not in block_lines:
+        return None
+
+    added_lines: list[str] = []
+    in_hunk = False
+    saw_hunk = False
+    saw_added_line = False
+    for line in block_lines[1:]:
+        if line.startswith("@@ "):
+            in_hunk = True
+            saw_hunk = True
+            continue
+        if line.startswith("\\"):
+            continue
+        if not in_hunk:
+            if (
+                line.startswith("index ")
+                or line.startswith("new file mode ")
+                or line == old_header
+                or line == new_header
+            ):
+                continue
+            return None
+        if line.startswith("+") and not line.startswith("+++ "):
+            added_lines.append(line[1:])
+            saw_added_line = True
+            continue
+        if line.startswith("-") or line.startswith(" "):
+            return None
+        return None
+    if not saw_hunk:
+        return None
+    content = "\n".join(added_lines)
+    if saw_added_line:
+        content += "\n"
+    return StructuredFileEdit(
+        path=new_path,
+        action=SUPPORTED_CREATE_ACTION,
+        content=content,
+    )
+
+
+def _apply_run_patch_proposal(
+    workspace_root: Path,
+    worktree_root: Path,
+    proposal: RunPatchProposal,
+) -> PatchApplyResult:
+    if (
+        proposal.parse_status == "recovered_new_file_diff"
+        and isinstance(proposal.proposal, StructuredFilePatch)
+    ):
+        return _apply_recovered_new_file_patch(
+            workspace_root,
+            worktree_root,
+            proposal.proposal,
+        )
+    return _apply_run_patch(workspace_root, proposal.proposal)
+
+
+def _apply_recovered_new_file_patch(
+    workspace_root: Path,
+    worktree_root: Path,
+    proposal: StructuredFilePatch,
+) -> PatchApplyResult:
+    root = workspace_root.resolve()
+    worktree = worktree_root.resolve()
+    written: list[tuple[Path, bytes | None]] = []
+    created_dirs: list[Path] = []
+    try:
+        for edit in proposal.edits:
+            if edit.action != SUPPORTED_CREATE_ACTION:
+                return PatchApplyResult(
+                    False,
+                    PatchIssue("invalid_patch_proposal", "unrecoverable_patch_response", edit.path),
+                    None,
+                    True,
+                )
+            target = root / edit.path
+            try:
+                resolved_target = target.resolve(strict=False)
+                resolved_target.relative_to(worktree)
+            except ValueError:
+                return PatchApplyResult(
+                    False,
+                    PatchIssue("workspace_boundary", "changed_path_outside_destination", edit.path),
+                    None,
+                    True,
+                )
+            created_dirs.extend(_ensure_parent_dirs(resolved_target.parent))
+            with resolved_target.open("xb") as handle:
+                handle.write(edit.content.encode("utf-8"))
+            written.append((resolved_target, None))
+    except OSError:
+        _rollback_recovered_new_files(written)
+        _cleanup_created_dirs(created_dirs)
+        return PatchApplyResult(
+            False,
+            PatchIssue("physical_write_failure", "write_error", None),
+            None,
+            False,
+        )
+    return PatchApplyResult(True, None, summarize_structured_file_patch(proposal), True)
+
+
+def _rollback_recovered_new_files(written: list[tuple[Path, bytes | None]]) -> None:
+    for target, original_bytes in reversed(written):
+        if original_bytes is not None:
+            continue
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def _apply_run_patch(
