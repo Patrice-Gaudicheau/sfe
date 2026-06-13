@@ -1,7 +1,7 @@
 # Documentation Index
 
-This repository is a technical prototype for Spatial Field Engine for Cognition
-(`SFE`). SFE is a routing/context engine for LLM workflows: it separates context
+This repository is a technical prototype for SFE (Spatial Field Engine for Cognition)
+a routing/context engine for LLM workflows: it separates context
 selection from execution, bounds execution modes, validates results where
 possible, and records safe observability.
 
