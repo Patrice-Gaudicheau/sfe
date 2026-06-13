@@ -8,9 +8,9 @@ For technical founders, AI infrastructure teams, and research engineers running 
 
 - **Bounded Context Exposure:** Reduces repeated input-token exposure by selecting smaller, authoritative executor contexts.
 - **Architectural Role Separation:** Splits Discoverer, Router, and Executor into independent roles, allowing distinct models for each.
-- **Multi-Provider Workflows:** Mix and match OpenAI, Anthropic, Qwen, DeepSeek-compatible endpoints, Ollama, Lemonade, or CodexCLI within a single workflow.
+- **Multi-Provider Workflows:** Mix and match OpenAI, Anthropic, Qwen, DeepSeek-compatible endpoints, Ollama, or Lemonade within a single workflow.
 - **Dollar-Cost Optimization:** Treat cost as a model-allocation problem. Route with a strong reasoning model and execute with a smaller, cheaper, or specialized model.
-- **Controlled Execution Surfaces:** Support local iterative workspace-write loops through a local TUI or integrate via the built-in MCP server.
+- **Controlled Execution Surfaces:** Support local iterative workspace-write **loops** through a local TUI or integrate via the built-in MCP server.
 
 *Note: SFE is an experimental research prototype. It does not claim to make models more intelligent, nor does it guarantee universal token savings. The evidence here is early, mostly synthetic, and benchmark-specific. Treat results as a technical prototype signal, not production readiness. See [Limitations](#limitations) for details.*
 
@@ -150,7 +150,7 @@ more code-specialized when SFE has already narrowed the context to the files or
 sources most likely to matter.
 
 Router and Executor therefore do not need to share a provider. For example,
-OpenAI can be configured for routing while Qwen, Ollama, Lemonade, CodexCLI, or
+OpenAI can be configured for routing while Qwen, Ollama, Lemonade or
 another supported specialized provider is configured for execution.
 OpenAI-compatible providers such as DeepSeek may also fit this role when
 supported by the local configuration. This cross-provider role split is a
