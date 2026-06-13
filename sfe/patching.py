@@ -230,6 +230,7 @@ def parse_unified_diff(text: str) -> PatchParseResult:
     lines = text.split("\n") if text else []
     if lines and lines[-1] == "":
         lines = lines[:-1]
+    lines = _split_embedded_diff_headers(lines)
     if not lines:
         return _parse_error("empty_patch")
     if lines[0].strip() != lines[0] or not lines[0].startswith("diff --git "):
@@ -454,6 +455,7 @@ def normalize_unified_diff_hunk_counts(text: str) -> HunkCountNormalizationResul
     had_trailing_newline = bool(lines and lines[-1] == "")
     if had_trailing_newline:
         lines = lines[:-1]
+    lines = _split_embedded_diff_headers(lines)
     if not lines:
         return _hunk_count_normalization_error("empty_patch")
     if lines[0].strip() != lines[0] or not lines[0].startswith("diff --git "):
@@ -1066,12 +1068,27 @@ def _apply_file_patch(text: str, file_patch: ParsedFilePatch) -> str | PatchIssu
     cursor = 0
     for hunk in file_patch.hunks:
         start = 0 if hunk.old_start == 0 and hunk.old_count == 0 else hunk.old_start - 1
-        if start < cursor or start > len(original_lines):
-            return PatchIssue(PHYSICAL_APPLICATION_FAILURE, "hunk_location_mismatch", file_patch.new_path)
-        result_lines.extend(original_lines[cursor:start])
+        location_in_range = cursor <= start <= len(original_lines)
         preimage = [line.text for line in hunk.lines if line.kind in {" ", "-"}]
-        if original_lines[start : start + len(preimage)] != preimage:
-            return PatchIssue(PHYSICAL_APPLICATION_FAILURE, "hunk_preimage_mismatch", file_patch.new_path)
+        if (
+            not location_in_range
+            or original_lines[start : start + len(preimage)] != preimage
+        ):
+            relocated_start = _find_hunk_preimage_start(
+                original_lines,
+                preimage,
+                min_start=cursor,
+                preferred_start=start,
+            )
+            if relocated_start is None:
+                reason = (
+                    "hunk_location_mismatch"
+                    if not location_in_range
+                    else "hunk_preimage_mismatch"
+                )
+                return PatchIssue(PHYSICAL_APPLICATION_FAILURE, reason, file_patch.new_path)
+            start = relocated_start
+        result_lines.extend(original_lines[cursor:start])
         for line in hunk.lines:
             if line.kind in {" ", "+"}:
                 result_lines.append(line.text)
@@ -1081,6 +1098,54 @@ def _apply_file_patch(text: str, file_patch: ParsedFilePatch) -> str | PatchIssu
     if had_final_newline:
         new_text += "\n"
     return new_text
+
+
+def _split_embedded_diff_headers(lines: list[str]) -> list[str]:
+    repaired: list[str] = []
+    marker = "diff --git "
+    for line in lines:
+        marker_index = line.find(marker)
+        if marker_index <= 0:
+            repaired.append(line)
+            continue
+        prefix = line[:marker_index]
+        suffix = line[marker_index:]
+        if _DIFF_HEADER_RE.match(suffix) is None:
+            repaired.append(line)
+            continue
+        repaired.append(prefix)
+        repaired.append(suffix)
+    return repaired
+
+
+def _find_hunk_preimage_start(
+    original_lines: list[str],
+    preimage: list[str],
+    *,
+    min_start: int,
+    preferred_start: int,
+) -> int | None:
+    if not preimage:
+        return None
+    matches: list[int] = []
+    preimage_len = len(preimage)
+    max_start = len(original_lines) - preimage_len
+    for index in range(max(min_start, 0), max_start + 1):
+        if original_lines[index : index + preimage_len] == preimage:
+            matches.append(index)
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    ranked = sorted(
+        ((abs(index - preferred_start), index) for index in matches),
+        key=lambda item: (item[0], item[1]),
+    )
+    nearest_distance, nearest_index = ranked[0]
+    next_distance = ranked[1][0]
+    if nearest_distance <= 8 and next_distance - nearest_distance >= 20:
+        return nearest_index
+    return None
 
 
 def _parse_error(reason: str, path: str | None = None) -> PatchParseResult:

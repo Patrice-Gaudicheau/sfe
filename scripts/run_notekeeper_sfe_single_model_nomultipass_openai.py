@@ -288,9 +288,7 @@ def validate_benchmark_layout(tasks: tuple[TaskInstruction, ...]) -> None:
         if not path.is_file():
             raise NoteKeeperSFERunnerError(f"Required scenario file is missing: {_rel(path)}")
     for task in tasks:
-        run_dir = RUNS_DIR / task.task_id
-        if not run_dir.is_dir():
-            raise NoteKeeperSFERunnerError(f"Required task run directory is missing: {_rel(run_dir)}")
+        (RUNS_DIR / task.task_id).mkdir(parents=True, exist_ok=True)
     validate_scenario_app_dir()
 
 

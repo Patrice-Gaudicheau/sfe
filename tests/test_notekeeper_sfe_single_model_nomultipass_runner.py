@@ -82,6 +82,31 @@ def test_build_controlled_workspace_contains_only_brief_tasks_and_app(
     ]
 
 
+def test_validate_benchmark_layout_creates_missing_task_run_directories(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scenario_dir = tmp_path / "scenario"
+    app_dir = scenario_dir / "app"
+    runs_dir = scenario_dir / "runs"
+    app_dir.mkdir(parents=True)
+    runs_dir.mkdir()
+    token_usage_path = scenario_dir / "token_usage.json"
+    report_path = scenario_dir / "report.md"
+    token_usage_path.write_text("{}\n", encoding="utf-8")
+    report_path.write_text("# Report\n", encoding="utf-8")
+
+    monkeypatch.setattr(runner, "SCENARIO_DIR", scenario_dir)
+    monkeypatch.setattr(runner, "APP_DIR", app_dir)
+    monkeypatch.setattr(runner, "RUNS_DIR", runs_dir)
+    monkeypatch.setattr(runner, "TOKEN_USAGE_PATH", token_usage_path)
+    monkeypatch.setattr(runner, "REPORT_PATH", report_path)
+
+    runner.validate_benchmark_layout(_context().tasks)
+
+    assert (runs_dir / "01_initial_scaffold").is_dir()
+
+
 def test_validate_controlled_workspace_rejects_extra_app_file(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     runner.build_controlled_workspace(workspace, _context())

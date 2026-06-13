@@ -59,7 +59,8 @@ def test_dry_run_validate_inputs_does_not_require_openai_api_key() -> None:
     assert "discovery_model: gpt-5.4" in result.stdout
     assert "executor_model: gpt-5.4" in result.stdout
     assert "multipass_planner_model: gpt-5.4" in result.stdout
-    assert "multipass_forced_auto: true" in result.stdout
+    assert "multipass_forced_auto: false" in result.stdout
+    assert "multipass_forced_on: true" in result.stdout
     assert "api_called: false" in result.stdout
 
 
@@ -79,7 +80,7 @@ def test_validate_args_uses_one_model_for_all_roles() -> None:
     assert config["timeout"] == 12.0
 
 
-def test_force_sfe_environment_uses_openai_single_model_and_multipass_auto() -> None:
+def test_force_sfe_environment_uses_openai_single_model_and_forces_multipass() -> None:
     config = {
         "model": "gpt-5.4",
         "router_model": "gpt-5.4",
@@ -96,8 +97,8 @@ def test_force_sfe_environment_uses_openai_single_model_and_multipass_auto() -> 
     assert environ["SFE_OPENAI_ROUTER_MODEL"] == "gpt-5.4"
     assert environ["SFE_OPENAI_DISCOVERY_MODEL"] == "gpt-5.4"
     assert environ["SFE_OPENAI_EXECUTOR_MODEL"] == "gpt-5.4"
-    assert environ["SFE_WORKSPACE_WRITE_MULTIPASS"] == "auto"
-    assert os.environ["SFE_WORKSPACE_WRITE_MULTIPASS"] == "auto"
+    assert environ["SFE_WORKSPACE_WRITE_MULTIPASS"] == "true"
+    assert os.environ["SFE_WORKSPACE_WRITE_MULTIPASS"] == "true"
 
 
 def test_build_sfe_pipeline_assigns_one_model_to_all_roles() -> None:

@@ -715,7 +715,7 @@ def _build_user_prompt(executor_payload: dict[str, Any]) -> str:
     )
     task_text = str(getattr(task, "text", "") or "")
     context_parts = [
-        f"[{segment.id}]\n{segment.text}"
+        f"[{segment.id}]\nsource_ref: {segment.source_ref}\n{segment.text}"
         for segment in selected_segments
         if getattr(segment, "text", "")
     ]
@@ -755,12 +755,12 @@ def _build_multi_pass_prompt_section(value: object) -> str:
         )
         return "\n".join(
             [
-                "Multi-pass batch constraints:",
+                "Multi-pass batch guidance:",
                 f"Project summary: {value.get('project_summary') or ''}",
                 f"Batch id: {value.get('batch_id') or ''}",
                 f"Batch title: {value.get('batch_title') or ''}",
                 f"Batch goal: {value.get('batch_goal') or ''}",
-                "Allowed files for this batch:",
+                "Planned focus files for this batch:",
                 allowed_files or "- none",
                 "Already completed/promoted files:",
                 completed_files or "- none",
@@ -769,9 +769,9 @@ def _build_multi_pass_prompt_section(value: object) -> str:
                 full_file_guidance,
                 "Validation notes:",
                 validation_notes or "- none",
-                "Return a strict git diff for this batch only. Do not create, "
-                "modify, delete, rename, or mention patch entries for files "
-                "outside the allowed files list.",
+                "Return a strict git diff focused on this batch. Prefer the "
+                "planned focus files, but include related in-workspace files "
+                "when the task requires them.",
             ]
         )
     return ""

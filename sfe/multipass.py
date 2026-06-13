@@ -70,6 +70,7 @@ class MultiPassBatchResult:
     full_content_provided_files: tuple[str, ...] = ()
     full_file_replacement_eligible_files: tuple[str, ...] = ()
     full_file_replacement_used_files: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
     issue: MultiPassIssue | None = None
 
 

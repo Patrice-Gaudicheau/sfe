@@ -370,6 +370,32 @@ def test_parse_valid_multi_file_modification_diff() -> None:
     assert parsed.summary.created_paths == ()
 
 
+def test_parse_splits_embedded_diff_header_between_file_patches(tmp_path) -> None:
+    (tmp_path / "a.txt").write_text("old\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("one\n", encoding="utf-8")
+    text = _diff("a.txt").replace("+new", "+newdiff --git a/b.txt b/b.txt\n") + "\n".join(
+        [
+            "index 1111111..2222222 100644",
+            "--- a/b.txt",
+            "+++ b/b.txt",
+            "@@ -1,1 +1,1 @@",
+            "-one",
+            "+two",
+        ]
+    )
+
+    parsed = parse_unified_diff(text)
+
+    assert parsed.issue is None
+    assert parsed.patch is not None
+    assert parsed.summary is not None
+    assert parsed.summary.paths == ("a.txt", "b.txt")
+    result = apply_patch_to_workspace(tmp_path, parsed.patch)
+    assert result.applied is True
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "new\n"
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "two\n"
+
+
 def test_parse_valid_single_file_creation_diff() -> None:
     parsed = parse_unified_diff(_create_diff("new.txt", "hello"))
 
@@ -1106,6 +1132,51 @@ def test_physical_preimage_failure_writes_nothing_and_keeps_pending_patch(tmp_pa
     assert result.issue.reason == "hunk_preimage_mismatch"
     assert result.pending_patch_cleared is False
     assert source.read_text(encoding="utf-8") == "changed\n"
+
+
+def test_physical_apply_relocates_unique_misplaced_hunk_preimage(tmp_path) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("intro\nold\noutro\n", encoding="utf-8")
+    patch = _parse_ok(_diff("notes.txt"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is True
+    assert result.issue is None
+    assert source.read_text(encoding="utf-8") == "intro\nnew\noutro\n"
+
+
+def test_physical_apply_rejects_ambiguous_misplaced_hunk_preimage(tmp_path) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("intro\nold\nmiddle\nold\noutro\n", encoding="utf-8")
+    patch = _parse_ok(_diff("notes.txt"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is False
+    assert result.issue is not None
+    assert result.issue.category == PHYSICAL_APPLICATION_FAILURE
+    assert result.issue.reason == "hunk_preimage_mismatch"
+    assert source.read_text(encoding="utf-8") == "intro\nold\nmiddle\nold\noutro\n"
+
+
+def test_physical_apply_relocates_nearest_clearly_separated_hunk_preimage(
+    tmp_path,
+) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text(
+        "\n".join(["intro", "old", *[f"line-{index}" for index in range(30)], "old", "outro"])
+        + "\n",
+        encoding="utf-8",
+    )
+    patch = _parse_ok(_diff("notes.txt"))
+
+    result = apply_patch_to_workspace(tmp_path, patch)
+
+    assert result.applied is True
+    assert result.issue is None
+    assert source.read_text(encoding="utf-8").startswith("intro\nnew\n")
+    assert source.read_text(encoding="utf-8").endswith("\nold\noutro\n")
 
 
 def test_physical_decode_failure_writes_nothing_and_keeps_pending_patch(tmp_path) -> None:

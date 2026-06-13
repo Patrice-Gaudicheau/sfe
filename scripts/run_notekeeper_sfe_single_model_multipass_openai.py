@@ -2,7 +2,7 @@
 
 This runner reuses the NoteKeeper SFE benchmark helpers from the single-model
 no-multipass scenario while configuring one OpenAI model for all SFE roles and
-multipass auto mode for the scenario 40 benchmark.
+multipass forced on for the scenario 40 benchmark.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ DEFAULT_MAX_PATCH_OUTPUT_TOKENS = 30_000
 SCENARIO_NAME = "sfe_single_model_gpt54_multipass"
 SCENARIO_DESCRIPTION = (
     "SFE single-model run with gpt-5.4 for routing, discovery, multipass "
-    "planning, and execution, with multipass auto."
+    "planning, and execution, with multipass forced on."
 )
 
 NOTEKEEPER_ROOT = PROJECT_ROOT / "examples" / "NoteKeeper"
@@ -84,6 +84,7 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="notekeeper-sfe-single-model-multipass-") as tmp:
             workspace_root = Path(tmp) / "workspace"
             base.build_controlled_workspace(workspace_root, context)
+            reset_controlled_app_for_fresh_run(workspace_root)
             base.validate_controlled_workspace(workspace_root)
             if config["dry_run_validate_inputs"]:
                 _print_dry_run_success(config, context, workspace_root)
@@ -111,6 +112,14 @@ def configure_shared_paths() -> None:
     base.RUNS_DIR = RUNS_DIR
     base.TOKEN_USAGE_PATH = TOKEN_USAGE_PATH
     base.REPORT_PATH = REPORT_PATH
+
+
+def reset_controlled_app_for_fresh_run(workspace_root: Path) -> None:
+    app_dir = workspace_root / "app"
+    for filename in REQUIRED_APP_FILES:
+        path = app_dir / filename
+        if path.exists():
+            path.unlink()
 
 
 def _parse_args() -> argparse.Namespace:
@@ -188,7 +197,7 @@ def run_sfe_scenario(
     print(f"discovery_model: {config['discovery_model']}")
     print(f"executor_model: {config['executor_model']}")
     print(f"multipass_planner_model: {config['multipass_planner_model']}")
-    print("multipass: auto")
+    print("multipass: true")
     print("generated_files:")
     for path in base._final_generated_file_list():
         print(f"- {path}")
@@ -204,7 +213,7 @@ def force_sfe_environment(config: dict[str, Any]) -> dict[str, str]:
         "SFE_OPENAI_ROUTER_MODEL": config["router_model"],
         "SFE_OPENAI_DISCOVERY_MODEL": config["discovery_model"],
         "SFE_OPENAI_EXECUTOR_MODEL": config["executor_model"],
-        "SFE_WORKSPACE_WRITE_MULTIPASS": "auto",
+        "SFE_WORKSPACE_WRITE_MULTIPASS": "true",
     }
     os.environ.update(forced)
     environ.update(forced)
@@ -334,8 +343,9 @@ def execute_sfe_task(
         "validation_error": validation_error,
         "sfe_status": result.status,
         "sfe_issue": base._issue_summary(result.issue),
-        "multipass_mode": "auto",
-        "multipass_forced_auto": True,
+        "multipass_mode": "true",
+        "multipass_forced_auto": False,
+        "multipass_forced_on": True,
         "provider_call_count": len(provider_calls),
         "provider_calls_by_role": role_usage,
     }
@@ -352,7 +362,7 @@ def build_sfe_task_prompt(*, context: BenchmarkContext, task: TaskInstruction) -
         "and the current generated app under `app/`.\n\n"
         "This scenario uses split OpenAI models: router/discovery/multipass planning "
         "use the stronger router model, while patch generation uses the executor model. "
-        "Multipass is intentionally set to auto.\n\n"
+        "Multipass is intentionally forced on for this scenario.\n\n"
         "You are implementing the NoteKeeper static browser app. Edit only these "
         "workspace files:\n\n"
         "- `app/index.html`\n"
@@ -468,7 +478,7 @@ def write_token_usage(run_results: list[dict[str, Any]], config: dict[str, Any])
                 "discovery_model": config["discovery_model"],
                 "executor_model": config["executor_model"],
                 "multipass_planner_model": config["multipass_planner_model"],
-                "multipass": "auto",
+                "multipass": "true",
             },
         },
     )
@@ -484,13 +494,13 @@ def write_report(run_results: list[dict[str, Any]], config: dict[str, Any]) -> N
         "",
         "## Scenario",
         "",
-        "- Workflow: SFE single-model run with multipass auto.",
+        "- Workflow: SFE single-model run with multipass forced on.",
         f"- Provider: `{PROVIDER_NAME}`.",
         f"- Router model: `{config['router_model']}`.",
         f"- Discovery model: `{config['discovery_model']}`.",
         f"- Multipass planner model: `{config['multipass_planner_model']}`.",
         f"- Executor model: `{config['executor_model']}`.",
-        "- Multipass: `auto`.",
+        "- Multipass: `true`.",
         "- Workspace: temporary controlled workspace containing only benchmark brief, task metadata, and current scenario app files.",
         "- Project brief: `../00_project_brief/prompt.md`.",
         "- Task sequence: `../00_project_brief/task_sequence.md`.",
@@ -553,7 +563,8 @@ def _print_dry_run_success(
     print(f"required_app_files: {', '.join(REQUIRED_APP_FILES)}")
     print(f"controlled_workspace_files: {len([path for path in workspace_root.rglob('*') if path.is_file()])}")
     print("sfe_runpipeline_called: false")
-    print("multipass_forced_auto: true")
+    print("multipass_forced_auto: false")
+    print("multipass_forced_on: true")
     print("api_called: false")
 
 

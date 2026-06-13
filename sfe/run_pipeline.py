@@ -769,6 +769,8 @@ class RunPipeline:
         completed_summaries: list[PatchSummary] = []
         all_promoted_files: list[str] = []
         completed_files: list[str] = []
+        multi_pass_warnings: list[str] = []
+        out_of_scope_promoted_files: set[str] = set()
         latest_patch_result: ExecutionResult | None = None
         latest_hunk_normalization: HunkCountNormalizationDiagnostics | None = None
         current_contract = contract
@@ -783,6 +785,34 @@ class RunPipeline:
                 multi_pass_total=len(parsed_plan.batches),
                 multi_pass_id=batch.id,
             )
+            batch_warnings: list[str] = []
+            if batch.allowed_files and all(
+                path in out_of_scope_promoted_files for path in batch.allowed_files
+            ):
+                warning = (
+                    "multi_pass_skipped_already_promoted_outside_batch:"
+                    + ",".join(batch.allowed_files)
+                )
+                batch_warnings.append(warning)
+                multi_pass_warnings.append(warning)
+                pass_results.append(
+                    MultiPassBatchResult(
+                        pass_id=batch.id,
+                        title=batch.title,
+                        status="skipped",
+                        allowed_files=batch.allowed_files,
+                        warnings=tuple(batch_warnings),
+                    )
+                )
+                self._emit_progress(
+                    "multi_pass_pass_completed",
+                    f"SFE: multi-pass pass {index}/{len(parsed_plan.batches)} skipped",
+                    multi_pass_index=index,
+                    multi_pass_total=len(parsed_plan.batches),
+                    multi_pass_id=batch.id,
+                    promoted_file_count=0,
+                )
+                continue
             current_contract = _refresh_multipass_contract(
                 workspace_root=active_workspace,
                 task=request.task,
@@ -946,40 +976,10 @@ class RunPipeline:
 
             scope_issue = validate_patch_paths_in_batch(proposal.paths, batch)
             if scope_issue is not None:
-                issue = _run_issue_from_multipass(scope_issue)
-                pass_results.append(
-                    _failed_batch_result(
-                        batch,
-                        issue=scope_issue,
-                        provider_diagnostics=provider_diagnostics,
-                        executor_contract_diagnostics=executor_contract_diagnostics,
-                    )
-                )
-                summary = _build_multi_pass_summary(
-                    status="failed",
-                    project_summary=parsed_plan.project_summary,
-                    passes_total=len(parsed_plan.batches),
-                    pass_results=tuple(pass_results),
-                    failed_issue=scope_issue,
-                    all_promoted_files=tuple(all_promoted_files),
-                    safe_resume_possible=bool(all_promoted_files),
-                )
-                return _multipass_run_result(
-                    status=RUN_STATUS_FAILED,
-                    issue=issue,
-                    execution_mode_decision=execution_mode_decision,
-                    session=session,
-                    active_workspace=active_workspace,
-                    worktree_created=worktree_created,
-                    discovery_result=discovery_result,
-                    dry_run_result=dry_run_result,
-                    patch_result=patch_result,
-                    selected_source_refs=selected_source_refs,
-                    git_preparation=git_preparation,
-                    multi_pass_summary=summary,
-                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
-                    promoted_files=tuple(all_promoted_files),
-                )
+                for path in _paths_outside_batch(proposal.paths, batch):
+                    warning = f"multi_pass_path_outside_allowed_files:{path}"
+                    batch_warnings.append(warning)
+                    multi_pass_warnings.append(warning)
 
             promotion_baseline = _capture_promotion_baseline(
                 session,
@@ -1195,6 +1195,11 @@ class RunPipeline:
             completed_summaries.append(patch_summary)
             completed_files.extend(promotion_result.promoted_files)
             all_promoted_files.extend(promotion_result.promoted_files)
+            out_of_scope_promoted_files.update(
+                path
+                for path in promotion_result.promoted_files
+                if path not in set(batch.allowed_files)
+            )
             current_contract = _refresh_multipass_contract(
                 workspace_root=active_workspace,
                 task=request.task,
@@ -1226,6 +1231,7 @@ class RunPipeline:
                     full_file_replacement_used_files=executor_contract_diagnostics[
                         "full_file_replacement_used_files"
                     ],
+                    warnings=tuple(batch_warnings),
                 )
             )
             self._emit_progress(
@@ -1265,7 +1271,11 @@ class RunPipeline:
             changed_files=aggregate_summary.paths if aggregate_summary else (),
             selected_source_refs=selected_source_refs,
             executor_provider=_executor_provider(latest_patch_result),
-            warnings=_warnings_for_summary(aggregate_summary),
+            warnings=tuple(
+                dict.fromkeys(
+                    (*_warnings_for_summary(aggregate_summary), *multi_pass_warnings)
+                )
+            ),
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
@@ -2093,6 +2103,14 @@ def _existing_plan_files(workspace_root: Path, plan: MultiPassPlan) -> frozenset
     return frozenset(paths)
 
 
+def _paths_outside_batch(
+    paths: tuple[str, ...],
+    batch: MultiPassBatch,
+) -> tuple[str, ...]:
+    allowed = set(batch.allowed_files)
+    return tuple(path for path in paths if path not in allowed)
+
+
 FULL_FILE_REPLACEMENT_REVIEW_MAX_BYTES = 128_000
 FULL_FILE_REPLACEMENT_REVIEW_HUNK_MISMATCH_REASONS = {
     "hunk_preimage_mismatch",
@@ -2108,23 +2126,41 @@ def _retry_small_file_preimage_mismatch(
 ) -> PatchRetryResult | None:
     if (
         issue is None
-        or issue.reason != "hunk_preimage_mismatch"
+        or issue.reason
+        not in {"hunk_preimage_mismatch", "hunk_location_mismatch"}
+        or issue.path is None
         or not isinstance(proposal.proposal, ParsedPatch)
     ):
         return None
-    edits: list[StructuredFileEdit] = []
+    files: list[ParsedFilePatch] = []
+    replaced = False
     for file_patch in proposal.proposal.files:
-        replacement = _small_file_replacement_from_patch(workspace_root, file_patch)
+        if file_patch.new_path != issue.path:
+            files.append(file_patch)
+            continue
+        replacement = _small_file_replacement_file_patch(workspace_root, file_patch)
         if replacement is None:
             return None
-        edits.append(replacement)
-    structured = StructuredFilePatch(tuple(edits), proposal.preview)
-    retry_apply = apply_structured_file_patch(workspace_root, structured)
-    if not retry_apply.applied:
+        files.append(replacement)
+        replaced = True
+    if not replaced:
         return None
+    retry_patch = ParsedPatch(tuple(files))
+    retry_apply = _apply_run_patch(workspace_root, retry_patch)
+    if not retry_apply.applied:
+        return PatchRetryResult(
+            proposal=RunPatchProposal(
+                proposal=retry_patch,
+                summary=summarize_patch(retry_patch),
+                preview=proposal.preview,
+                parse_status=proposal.parse_status + "_small_file_replacement_retry",
+                hunk_count_normalization=proposal.hunk_count_normalization,
+            ),
+            apply_result=retry_apply,
+        )
     retry_proposal = RunPatchProposal(
-        proposal=structured,
-        summary=summarize_structured_file_patch(structured),
+        proposal=retry_patch,
+        summary=summarize_patch(retry_patch),
         preview=proposal.preview,
         parse_status=proposal.parse_status + "_small_file_replacement_retry",
         hunk_count_normalization=proposal.hunk_count_normalization,
@@ -2309,10 +2345,10 @@ def _full_file_replacement_review_diagnostics(
     }
 
 
-def _small_file_replacement_from_patch(
+def _small_file_replacement_file_patch(
     workspace_root: Path,
     file_patch: ParsedFilePatch,
-) -> StructuredFileEdit | None:
+) -> ParsedFilePatch | None:
     path = file_patch.new_path
     if not _is_small_replacement_candidate_path(path):
         return None
@@ -2330,10 +2366,17 @@ def _small_file_replacement_from_patch(
         current_line_count=len(current_text.splitlines()),
     )
     if replacement_lines is None and path == "composer.json":
-        return _composer_json_merge_replacement_from_patch(
+        replacement_edit = _composer_json_merge_replacement_from_patch(
             path,
             current_text=current_text,
             file_patch=file_patch,
+        )
+        if replacement_edit is None:
+            return None
+        return _replacement_edit_as_file_patch(
+            path=path,
+            current_text=current_text,
+            replacement_text=replacement_edit.content,
         )
     if replacement_lines is None:
         return None
@@ -2347,10 +2390,37 @@ def _small_file_replacement_from_patch(
             return None
         if not isinstance(parsed_json, dict):
             return None
-    return StructuredFileEdit(
+    return _replacement_edit_as_file_patch(
         path=path,
-        action=SUPPORTED_REPLACE_ACTION,
-        content=replacement_text,
+        current_text=current_text,
+        replacement_text=replacement_text,
+    )
+
+
+def _replacement_edit_as_file_patch(
+    *,
+    path: str,
+    current_text: str,
+    replacement_text: str,
+) -> ParsedFilePatch:
+    current_lines = current_text.splitlines()
+    replacement_lines = replacement_text.splitlines()
+    return ParsedFilePatch(
+        old_path=path,
+        new_path=path,
+        hunks=(
+            ParsedHunk(
+                old_start=1 if current_lines else 0,
+                old_count=len(current_lines),
+                new_start=1 if replacement_lines else 0,
+                new_count=len(replacement_lines),
+                lines=tuple(
+                    [*(PatchLine("-", line) for line in current_lines)]
+                    + [*(PatchLine("+", line) for line in replacement_lines)]
+                ),
+            ),
+        ),
+        operation=PATCH_OPERATION_MODIFY,
     )
 
 
@@ -2451,6 +2521,8 @@ def _full_file_replacement_lines_from_patch(
 def _is_small_replacement_candidate_path(path: str) -> bool:
     pure = PurePosixPath(path)
     if path in {"composer.json", "README.md", ".env.example", "phpunit.xml.dist"}:
+        return True
+    if pure.suffix.lower() in {".css", ".html", ".js", ".jsx", ".md", ".ts", ".tsx"}:
         return True
     return (
         len(pure.parts) >= 2

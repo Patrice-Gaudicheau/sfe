@@ -26,9 +26,11 @@ The core flow is:
 1. SFE routes the task to `workspace_write`.
 2. SFE discovers context as usual.
 3. The Router produces and validates a strict JSON multi-pass plan.
-4. The plan contains batches with explicit `allowed_files`.
+4. The plan contains batches with explicit `allowed_files` guidance.
 5. For each validated batch, the Executor produces one strict git diff.
-6. SFE rejects patches that touch files outside that batch's `allowed_files`.
+6. SFE reports patches that touch files outside that batch's `allowed_files` as
+   warnings, as long as all paths remain inside the workspace and avoid blocked
+   internal directories.
 7. SFE parses and validates the patch using the normal strict patch machinery.
 8. SFE applies and promotes the batch.
 9. SFE refreshes lightweight workspace state so later batches can see files
@@ -62,7 +64,7 @@ default is `10`.
 `SFE_FULL_FILE_REPLACEMENT_REVIEW` controls the optional LLM-reviewed full-file
 replacement fallback after `hunk_preimage_mismatch`:
 
-- `false`: never use the reviewer fallback.
+- `false`: never use the reviewer fallback. This is the default.
 - `auto`: use it only when deterministic invariants pass.
 - `true`: currently equivalent to `auto`.
 
@@ -107,6 +109,11 @@ The mode was validated through Antigravity / SFE MCP on a Symfony-style
 - passes: 8
 - promoted application files: 31
 - no `vendor/` directory generated
+
+`allowed_files` is intentionally not the main safety boundary. It keeps planning
+and reporting understandable, but the hard write boundary is the declared
+workspace/worktree plus blocked internal directories such as `.git` and
+`.sfe-worktrees`.
 
 This was a live provider validation, not only a mocked unit test.
 

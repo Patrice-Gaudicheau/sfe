@@ -6586,7 +6586,7 @@ def test_build_user_prompt_marks_empty_selected_context_as_none() -> None:
     assert "Selected context:\nnone" in prompt
 
 
-def test_build_user_prompt_includes_only_multipass_batch_constraints() -> None:
+def test_build_user_prompt_includes_multipass_batch_guidance() -> None:
     prompt = _build_user_prompt(
         {
             "instructions": [],
@@ -6605,10 +6605,10 @@ def test_build_user_prompt_includes_only_multipass_batch_constraints() -> None:
         }
     )
 
-    assert "Multi-pass batch constraints:" in prompt
+    assert "Multi-pass batch guidance:" in prompt
     assert "Batch id: foundation" in prompt
-    assert "Allowed files for this batch:\n- composer.json" in prompt
-    assert "Return a strict git diff for this batch only" in prompt
+    assert "Planned focus files for this batch:\n- composer.json" in prompt
+    assert "Return a strict git diff focused on this batch" in prompt
     assert "Multi-pass planning request:" not in prompt
     assert "Return exactly one JSON object" not in prompt
 
@@ -6723,6 +6723,7 @@ def test_build_user_prompt_includes_full_file_replacement_guidance_for_eligible_
     )
 
     assert "Full-file replacement preferred files:" in prompt
+
     assert "- src/Entity/Todo.php (full current content provided, 1200 bytes)" in prompt
     assert (
         "- src/Controller/TodoController.php (full current content provided, 4200 bytes)"
@@ -6739,6 +6740,26 @@ def test_build_user_prompt_includes_full_file_replacement_guidance_for_eligible_
     assert "Do not emit approximate partial hunks for these files." in prompt
     assert "Do not emit partial hunks for non-trivial edits" in prompt
     assert "output the complete new file content for that path" in prompt
+
+
+def test_build_user_prompt_labels_selected_context_sources() -> None:
+    prompt = _build_user_prompt(
+        {
+            "instructions": [],
+            "task": ProtectedText(id="task_current", text="Update app files"),
+            "selected_context_segments": [
+                ContextSegment(
+                    id="ctx_app_js",
+                    source_ref="app/app.js",
+                    text="const notes = [];",
+                )
+            ],
+        }
+    )
+
+    assert "[ctx_app_js]" in prompt
+    assert "source_ref: app/app.js" in prompt
+    assert "const notes = [];" in prompt
 
 
 def test_build_user_prompt_omits_full_file_replacement_guidance_without_eligible_files() -> None:
@@ -7781,6 +7802,67 @@ def test_local_segment_router_boosts_source_ref_relevance() -> None:
     assert result.selected_segment_ids[0] == "ctx_router"
     assert result.score_categories_by_segment_id["ctx_router"] == "medium"
     assert result.score_categories_by_segment_id["ctx_notes"] == "low"
+
+
+def test_local_segment_router_includes_explicitly_named_existing_app_files() -> None:
+    segments = [
+        ContextSegment(
+            id="ctx_prompt",
+            source_ref="brief/prompt.md",
+            text="notes persistence CRUD editing deletion storage " * 20,
+            approx_size=900,
+            approx_tokens=225,
+        ),
+        ContextSegment(
+            id="ctx_acceptance",
+            source_ref="brief/acceptance_criteria.md",
+            text="notes persistence CRUD editing deletion storage " * 20,
+            approx_size=900,
+            approx_tokens=225,
+        ),
+        ContextSegment(
+            id="ctx_index",
+            source_ref="app/index.html",
+            text="<main>Existing app shell</main>",
+            approx_size=31,
+            approx_tokens=8,
+        ),
+        ContextSegment(
+            id="ctx_js",
+            source_ref="app/app.js",
+            text="const notes = [];",
+            approx_size=17,
+            approx_tokens=5,
+        ),
+        ContextSegment(
+            id="ctx_css",
+            source_ref="app/styles.css",
+            text=".note-card { display: block; }",
+            approx_size=30,
+            approx_tokens=8,
+        ),
+        ContextSegment(
+            id="ctx_readme",
+            source_ref="app/README.md",
+            text="# NoteKeeper",
+            approx_size=12,
+            approx_tokens=3,
+        ),
+    ]
+
+    result = LocalSegmentRouter().route(
+        "Implement persistence and CRUD. Edit only `app/index.html`, "
+        "`app/styles.css`, `app/app.js`, and `app/README.md`.",
+        segments,
+    )
+
+    selected = set(result.selected_segment_ids)
+    assert {
+        "ctx_index",
+        "ctx_js",
+        "ctx_css",
+        "ctx_readme",
+    }.issubset(selected)
 
 
 def test_local_segment_router_expands_existing_symfony_completion_context() -> None:

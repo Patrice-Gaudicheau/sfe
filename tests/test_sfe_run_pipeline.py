@@ -748,6 +748,32 @@ def test_run_pipeline_creates_first_file_in_empty_workspace(tmp_path: Path) -> N
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_rejects_create_diff_for_existing_file(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(_create_file_proposal("context.txt")),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update context.txt",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "physical_write_failure"
+    assert result.issue.reason == "target_already_exists"
+    assert result.issue.path == "context.txt"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "old context\n"
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_unknown_token_reduction_progress_uses_unknown_label(
     tmp_path: Path,
 ) -> None:
@@ -2485,7 +2511,7 @@ def test_direct_backend_does_not_mark_file_without_full_content_as_full_file_rep
     assert guidance["large_files"] == ()
 
 
-def test_run_pipeline_multipass_rescues_hunk_location_mismatch_with_full_file_replacement(
+def test_run_pipeline_multipass_rescues_readme_hunk_location_mismatch_deterministically(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -2545,14 +2571,9 @@ def test_run_pipeline_multipass_rescues_hunk_location_mismatch_with_full_file_re
     )
 
     assert result.status == RUN_STATUS_COMPLETED
-    assert reviewer.calls[0].target_path == "README.md"
+    assert reviewer.calls == []
     assert "Updated docs" in (repo / "README.md").read_text(encoding="utf-8")
-    diagnostics = result.multi_pass_summary.pass_results[0].fallback_diagnostics
-    assert diagnostics["reviewer_approve"] is True
-    assert diagnostics["final_outcome"] == "applied"
-    assert result.multi_pass_summary.pass_results[0].full_file_replacement_used_files == (
-        "README.md",
-    )
+    assert result.multi_pass_summary.pass_results[0].fallback_diagnostics is None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -2906,6 +2927,127 @@ def test_run_pipeline_multipass_merges_composer_dependency_from_stale_hunk(
     composer = json.loads((repo / "composer.json").read_text(encoding="utf-8"))
     assert composer["require"]["php"] == ">=8.2"
     assert composer["require"]["symfony/form"] == "^7.1"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_retries_small_frontend_file_preimage_mismatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "app").mkdir()
+    (repo / "app" / "styles.css").write_text(
+        "body { color: blue; }\n.old {}\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "app/styles.css")
+    _git(repo, "commit", "-m", "Add styles")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"styles": ["app/styles.css"]}))
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            "\n".join(
+                [
+                    "diff --git a/app/styles.css b/app/styles.css",
+                    "--- a/app/styles.css",
+                    "+++ b/app/styles.css",
+                    "@@ -1,2 +1,2 @@",
+                    "-body { color: red; }",
+                    "-.old {}",
+                    "+body { color: green; }",
+                    "+.new {}",
+                ]
+            )
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("app/styles.css",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update app/styles.css",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert (repo / "app" / "styles.css").read_text(encoding="utf-8") == (
+        "body { color: green; }\n.new {}\n"
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_retries_failed_small_file_inside_mixed_patch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "app").mkdir()
+    (repo / "app" / "styles.css").write_text(
+        "body { color: blue; }\n.old {}\n",
+        encoding="utf-8",
+    )
+    (repo / "app" / "app.js").write_text(
+        "const state = 'old';\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "app/styles.css", "app/app.js")
+    _git(repo, "commit", "-m", "Add frontend files")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json({"frontend": ["app/styles.css", "app/app.js"]})
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[
+            "\n".join(
+                [
+                    "diff --git a/app/styles.css b/app/styles.css",
+                    "--- a/app/styles.css",
+                    "+++ b/app/styles.css",
+                    "@@ -1,2 +1,2 @@",
+                    "-body { color: red; }",
+                    "-.old {}",
+                    "+body { color: green; }",
+                    "+.new {}",
+                    "diff --git a/app/app.js b/app/app.js",
+                    "--- a/app/app.js",
+                    "+++ b/app/app.js",
+                    "@@ -1,1 +1,1 @@",
+                    "-const state = 'old';",
+                    "+const state = 'new';",
+                ]
+            )
+        ],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("app/styles.css", "app/app.js")),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Update app/styles.css and app/app.js",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert (repo / "app" / "styles.css").read_text(encoding="utf-8") == (
+        "body { color: green; }\n.new {}\n"
+    )
+    assert (repo / "app" / "app.js").read_text(encoding="utf-8") == (
+        "const state = 'new';\n"
+    )
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -3319,7 +3461,7 @@ def test_run_pipeline_multipass_reviewer_failure_blocks_replacement(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_multipass_rejects_patch_outside_batch_scope(
+def test_run_pipeline_multipass_warns_for_patch_outside_batch_scope(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -3347,14 +3489,66 @@ def test_run_pipeline_multipass_rejects_patch_outside_batch_scope(
         )
     )
 
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "multi_pass_patch_scope"
-    assert result.issue.reason == "path_outside_batch_allowed_files"
-    assert result.issue.path == "README.md"
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
     assert result.multi_pass_summary is not None
-    assert result.multi_pass_summary.failed_pass_id == "foundation"
-    assert not (repo / "README.md").exists()
+    assert result.multi_pass_summary.failed_pass_id is None
+    assert result.multi_pass_summary.pass_results[0].warnings == (
+        "multi_pass_path_outside_allowed_files:README.md",
+    )
+    assert "multi_pass_path_outside_allowed_files:README.md" in result.warnings
+    assert (repo / "README.md").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_multipass_skips_pass_already_promoted_outside_batch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "foundation": ["index.html"],
+                "docs": ["README.md"],
+            }
+        )
+    )
+    executor = FakeExecutor(
+        multipass_patch_answers=[_valid_new_file_diff("README.md")],
+    )
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create a scaffold",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.multi_pass_summary is not None
+    assert len(executor.patch_calls) == 1
+    first_pass, second_pass = result.multi_pass_summary.pass_results
+    assert first_pass.status == "completed"
+    assert first_pass.warnings == (
+        "multi_pass_path_outside_allowed_files:README.md",
+    )
+    assert second_pass.status == "skipped"
+    assert second_pass.warnings == (
+        "multi_pass_skipped_already_promoted_outside_batch:README.md",
+    )
+    assert result.multi_pass_summary.passes_completed == 1
+    assert result.promoted_files == ("README.md",)
+    assert (repo / "README.md").read_text(encoding="utf-8") == "one\ntwo\nthree\n"
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

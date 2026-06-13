@@ -96,14 +96,20 @@ class LocalSegmentRouter:
             scored.append((score, index, segment))
 
         max_segments = _max_selected_segments(task, eligible)
-        selected = [
+        explicitly_referenced = [
+            segment for segment in eligible if _source_ref_is_explicitly_named(task, segment.source_ref)
+        ]
+        explicit_ids = {segment.id for segment in explicitly_referenced}
+        ranked = [
             segment
             for score, _index, segment in sorted(
                 scored,
                 key=lambda item: (-item[0], item[1]),
             )
-            if score > 0
-        ][:max_segments]
+            if score > 0 and segment.id not in explicit_ids
+        ]
+        selection_limit = max_segments + len(explicitly_referenced)
+        selected = [*explicitly_referenced, *ranked][:selection_limit]
         input_tokens = sum(segment.approx_tokens for segment in context_segments)
         selected_tokens = sum(segment.approx_tokens for segment in selected)
         fallback_reason = _fallback_reason(eligible=eligible, selected=selected)
@@ -136,6 +142,14 @@ def _tokenize(text: str) -> set[str]:
         for normalized in (_normalize_token(token),)
         if normalized and normalized not in _STOP_WORDS
     }
+
+
+def _source_ref_is_explicitly_named(task: str, source_ref: str) -> bool:
+    normalized_task = task.casefold()
+    normalized_ref = source_ref.casefold()
+    if normalized_ref in normalized_task:
+        return True
+    return normalized_ref.replace("/", "\\") in normalized_task
 
 
 def _normalize_token(token: str) -> str:
