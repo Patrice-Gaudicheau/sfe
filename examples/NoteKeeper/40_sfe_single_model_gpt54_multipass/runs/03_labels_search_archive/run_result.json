@@ -1,0 +1,294 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/index.html",
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/styles.css",
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/app.js",
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/README.md"
+    ],
+    "input_tokens": 56027,
+    "latency_or_wall_clock_duration": 53130,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 10785,
+    "provider": "openai-api",
+    "provider_call_count": 6,
+    "provider_calls_by_role": {
+      "discovery": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 996,
+        "latency_ms": 1128,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 77,
+        "success_count": 1
+      },
+      "executor": {
+        "cached_input_tokens": 0,
+        "calls": 3,
+        "failure_count": 0,
+        "input_tokens": 41437,
+        "latency_ms": 44486,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 9991,
+        "success_count": 3
+      },
+      "multipass_planner": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 12983,
+        "latency_ms": 6566,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 683,
+        "success_count": 1
+      },
+      "router": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 611,
+        "latency_ms": 950,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 34,
+        "success_count": 1
+      }
+    },
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
+    "task_id": "03_labels_search_archive",
+    "task_title": "Labels, search, and archive",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 53201
+  },
+  "sfe": {
+    "changed_files": [
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires implementing app features by editing specific files in the workspace."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": false,
+    "git_initial_commit_hash": null,
+    "issue": null,
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "created_files_by_pass": {},
+      "enabled": true,
+      "failed_pass_id": null,
+      "failed_pass_issue": null,
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "app-logic-archive-search",
+          "patch_paths": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Complete archive and search state logic",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/index.html"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html"
+          ],
+          "full_file_replacement_used_files": [
+            "app/index.html"
+          ],
+          "issue": null,
+          "pass_id": "ui-markup-copy-archive",
+          "patch_paths": [
+            "app/index.html"
+          ],
+          "promoted_files": [
+            "app/index.html"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Align interface markup and copy with archive workflow",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/styles.css"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/styles.css"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/styles.css"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "styles-archive-empty-states",
+          "patch_paths": [
+            "app/styles.css"
+          ],
+          "promoted_files": [
+            "app/styles.css"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Polish archive and filtered-note presentation",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "readme-task3-features",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "skipped",
+          "title": "Update README for labels, search, and archive",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+          ]
+        }
+      ],
+      "passes_completed": 3,
+      "passes_total": 4,
+      "project_summary": "Implement task 3 for the static NoteKeeper app by completing labels/search/archive behavior on top of the existing browser-only CRUD baseline, updating the UI copy and rendering so active and archived notes are separated, searchable, and show helpful empty states, while keeping the app self-contained in the four required app files.",
+      "promoted_files_by_pass": {
+        "app-logic-archive-search": [
+          "app/app.js",
+          "app/README.md"
+        ],
+        "styles-archive-empty-states": [
+          "app/styles.css"
+        ],
+        "ui-markup-copy-archive": [
+          "app/index.html"
+        ]
+      },
+      "safe_resume_possible": false,
+      "status": "completed"
+    },
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 23,
+      "lines_added": 315,
+      "lines_removed": 81,
+      "modified_paths": [
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "paths": [
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/03_labels_search_archive.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "completed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected",
+      "multi_pass_path_outside_allowed_files:app/README.md",
+      "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+    ]
+  }
+}

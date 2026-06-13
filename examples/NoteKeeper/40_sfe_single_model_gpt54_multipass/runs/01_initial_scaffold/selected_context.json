@@ -2,8 +2,8 @@
   "audit": {
     "eligible_segment_count": 4,
     "estimated_input_tokens": 3156,
-    "estimated_reduction_pct": 3.04,
-    "estimated_selected_tokens": 3060,
+    "estimated_reduction_pct": 0.0,
+    "estimated_selected_tokens": 3156,
     "executor_token_estimate": null,
     "fallback_reason": null,
     "input_segment_count": 4,
@@ -31,19 +31,20 @@
     },
     "router_token_estimate": null,
     "router_unavailable_reason": null,
-    "selected_segment_count": 3,
+    "selected_segment_count": 4,
     "selected_segment_ids": [
       "ctx_6b066f699633ae75",
       "ctx_69c46bba9c805598",
-      "ctx_0b5e763802101376"
+      "ctx_0b5e763802101376",
+      "ctx_d70479cade49d835"
     ],
     "selector_mode": "local_lexical_preview"
   },
   "router_preview": {
     "eligible_segment_count": 4,
     "estimated_input_tokens": 3156,
-    "estimated_reduction_pct": 3.04,
-    "estimated_selected_tokens": 3060,
+    "estimated_reduction_pct": 0.0,
+    "estimated_selected_tokens": 3156,
     "fallback_reason": null,
     "input_segment_count": 4,
     "router_available": true,
@@ -68,17 +69,19 @@
       "medium": 0,
       "zero": 0
     },
-    "selected_segment_count": 3,
+    "selected_segment_count": 4,
     "selected_segment_ids": [
       "ctx_6b066f699633ae75",
       "ctx_69c46bba9c805598",
-      "ctx_0b5e763802101376"
+      "ctx_0b5e763802101376",
+      "ctx_d70479cade49d835"
     ]
   },
   "selected_segment_ids": [
     "ctx_0b5e763802101376",
     "ctx_69c46bba9c805598",
-    "ctx_6b066f699633ae75"
+    "ctx_6b066f699633ae75",
+    "ctx_d70479cade49d835"
   ],
   "selected_segments": [
     {
@@ -98,6 +101,12 @@
       "approx_tokens": 439,
       "id": "ctx_0b5e763802101376",
       "source_ref": "brief/task_sequence.md"
+    },
+    {
+      "approx_size": 382,
+      "approx_tokens": 96,
+      "id": "ctx_d70479cade49d835",
+      "source_ref": "tasks/01_initial_scaffold.md"
     }
   ]
 }

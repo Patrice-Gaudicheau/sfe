@@ -1,6 +1,6 @@
 # SFE single-model gpt-5.4 no-multipass report
 
-Generated at: `2026-06-13T09:52:27+00:00`
+Generated at: `2026-06-13T12:11:00+00:00`
 
 ## Scenario
 
@@ -24,8 +24,11 @@ Generated at: `2026-06-13T09:52:27+00:00`
 
 | Task | Success | Provider calls | Input tokens | Cached input tokens | Output tokens | Latency ms | Error |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `01_initial_scaffold` | `true` | 3 | 4844 | 0 | 3785 | 20528 |  |
-| `02_persistence_and_crud` | `false` | 3 | 4972 | 0 | 5428 | 24639 | target_already_exists |
+| `01_initial_scaffold` | `true` | 3 | 5048 | 0 | 4716 | 25938 |  |
+| `02_persistence_and_crud` | `true` | 3 | 9164 | 0 | 8196 | 36797 |  |
+| `03_labels_search_archive` | `true` | 3 | 11044 | 0 | 9703 | 40292 |  |
+| `04_checklists_and_pinning` | `true` | 3 | 14057 | 0 | 8212 | 32584 |  |
+| `05_responsive_polish` | `false` | 3 | 14683 | 0 | 10194 | 42093 | hunk_preimage_mismatch |
 
 ## Generated Files
 
@@ -37,58 +40,3 @@ Generated at: `2026-06-13T09:52:27+00:00`
 ## Notes
 
 Task-level SFE prompts, progress events, provider call records, discovery summaries, selected context summaries, patch responses, and run metadata are stored under `runs/<task>/`.
-
-## Post-run audit
-
-The scenario was run exactly once with:
-
-```bash
-python3 scripts/run_notekeeper_sfe_single_model_openai.py --model gpt-5.4
-```
-
-Note: this is the historical command used for the run. The runner and scenario folder were later renamed from `single_model` to `single_model_nomultipass` for benchmark clarity.
-
-The run used the real SFE `RunPipeline` / `RunRequest` path. Multipass was forced off intentionally for scenario 20 to isolate SFE routing, discovery, context selection, and executor behavior without testing the multi-pass scaffold workflow. A future scenario named `40_sfe_single_model_gpt54_multipass` will test the same model with multipass enabled.
-
-The command exited with code `1`.
-
-Task outcome:
-
-- `01_initial_scaffold`: success
-- `02_persistence_and_crud`: failed
-- `03_labels_search_archive`: not run
-- `04_checklists_and_pinning`: not run
-- `05_responsive_polish`: not run
-
-Failure details:
-
-- Category: `physical_application_failure`
-- Reason: `target_already_exists`
-- Path: `app/index.html`
-
-Interpretation: SFE successfully routed the task, discovered context, prepared executor prompts, and executed the patch/worktree flow, but native patch application failed because the task 2 patch attempted to create a file that already existed.
-
-This failed result is committed as a raw benchmark artifact, without manual repair.
-
-Token usage summary:
-
-| Role | Calls | Input tokens | Cached input tokens | Output tokens | Latency ms |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Router | 2 | 1133 | 0 | 99 | 4023 |
-| Discovery | 2 | 1742 | 0 | 143 | 2863 |
-| Executor | 2 | 6941 | 0 | 8971 | 38281 |
-
-Totals:
-
-- `input_tokens`: 9816
-- `cached_input_tokens`: 0
-- `output_tokens`: 9213
-- `latency_or_wall_clock_duration`: 45167
-- `total_estimated_cost`: `null`
-
-Caveats:
-
-- The app visible in `app/` is only the task 1 scaffold.
-- It is not a completed NoteKeeper implementation.
-- The generated app should not be manually corrected.
-- The failure is useful for documenting current SFE patch mechanics limitations.

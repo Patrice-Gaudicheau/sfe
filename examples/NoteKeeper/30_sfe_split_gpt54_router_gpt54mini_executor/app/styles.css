@@ -1,0 +1,385 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f3ee;
+  --surface: #ffffff;
+  --surface-soft: #f2ece4;
+  --border: #d8cfc2;
+  --text: #1f1b16;
+  --muted: #6f655a;
+  --accent: #6b4f36;
+  --accent-strong: #4e3927;
+  --success: #246b4b;
+  --shadow: 0 16px 40px rgba(41, 28, 18, 0.08);
+  --radius: 18px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #fbf8f4 0%, var(--bg) 100%);
+  color: var(--text);
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-shell {
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.app-header {
+  display: grid;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow, .subtitle, .notes-summary, .view-state, .panel-heading p, .placeholder-text {
+  color: var(--muted);
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+}
+
+h1, h2, h3, p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0.35rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.subtitle {
+  margin-bottom: 0;
+  max-width: 58ch;
+}
+
+.header-tools, .panel, .note-card, .search-field input, .note-form input, .note-form textarea, .note-form select {
+  background: var(--surface);
+}
+
+.header-tools, .panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.header-tools {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.search-field, .field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.field-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+input, textarea, select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  padding: 0.8rem 0.9rem;
+  background: var(--surface);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 3px solid rgba(107, 79, 54, 0.35);
+  outline-offset: 2px;
+}
+
+.view-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.view-button, .primary-button, .secondary-button, .icon-button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.view-button.is-active, .primary-button {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.view-button.is-active:hover, .primary-button:hover {
+  background: var(--accent-strong);
+}
+
+.app-main {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.panel {
+  padding: 1.1rem;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.panel-heading {
+  margin-bottom: 1rem;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.field-label-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.checklist-panel {
+  padding: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  background: #fcfaf7;
+}
+
+.checklist-items {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.checklist-item-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+}
+
+.item-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.notes-heading-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.notes-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.note-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1rem;
+  background: var(--surface);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.note-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.note-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.note-meta {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.pin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: #f3eadf;
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.note-body {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.label-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.label-list li {
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: #f6efe6;
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+}
+
+.checklist-display {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.checklist-display li {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.checklist-display input {
+  margin-top: 0.2rem;
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.empty-card {
+  text-align: center;
+  color: var(--muted);
+  background: #faf7f2;
+}
+
+.empty-title {
+  margin-bottom: 0.35rem;
+}
+
+.empty-body {
+  margin-bottom: 0;
+}
+
+.secondary-button, .icon-button {
+  background: #f7f1e8;
+}
+
+.secondary-button:hover, .icon-button:hover, .view-button:hover {
+  background: #efe6da;
+}
+
+.icon-button {
+  padding-inline: 0.85rem;
+}
+
+.icon-button.danger {
+  color: #8d3326;
+}
+
+.card-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.card-editing {
+  border-color: rgba(107, 79, 54, 0.35);
+  box-shadow: 0 0 0 3px rgba(107, 79, 54, 0.08);
+}
+
+.checklist-item-row input[type="text"] {
+  min-width: 0;
+}
+
+.checklist-item-row .checklist-complete {
+  width: auto;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width: 720px) {
+  .app-header {
+    grid-template-columns: 1.4fr 1fr;
+    align-items: start;
+  }
+
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .notes-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) {
+  .notes-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

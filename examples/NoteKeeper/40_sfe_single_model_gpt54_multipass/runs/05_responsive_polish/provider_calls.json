@@ -1,0 +1,79 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 608,
+      "latency": 1019,
+      "latency_ms": 1019,
+      "model": "gpt-5.4",
+      "output_tokens": 41,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "05_responsive_polish",
+      "total_tokens": 649
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 993,
+      "latency": 1138,
+      "latency_ms": 1138,
+      "model": "gpt-5.4",
+      "output_tokens": 76,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "05_responsive_polish",
+      "total_tokens": 1069
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 15787,
+      "latency": 5057,
+      "latency_ms": 5057,
+      "model": "gpt-5.4",
+      "output_tokens": 623,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "multipass_planner",
+      "success": true,
+      "task_id": "05_responsive_polish",
+      "total_tokens": 16410
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 16575,
+      "latency": 31698,
+      "latency_ms": 31698,
+      "model": "gpt-5.4",
+      "output_tokens": 7993,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "05_responsive_polish",
+      "total_tokens": 24568
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 16923,
+      "latency": 30134,
+      "latency_ms": 30134,
+      "model": "gpt-5.4",
+      "output_tokens": 7278,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "05_responsive_polish",
+      "total_tokens": 24201
+    }
+  ]
+}

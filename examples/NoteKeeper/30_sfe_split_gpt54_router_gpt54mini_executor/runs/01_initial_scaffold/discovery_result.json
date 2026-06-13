@@ -10,7 +10,7 @@
       "source_ref": "brief/prompt.md"
     },
     {
-      "approx_bytes": 3868,
+      "approx_bytes": 4055,
       "reasons": [
         "llm_router_selected"
       ],
@@ -47,8 +47,8 @@
       "warning_reason": null
     },
     {
-      "approx_chars": 3868,
-      "approx_tokens": 967,
+      "approx_chars": 4055,
+      "approx_tokens": 1014,
       "loaded": true,
       "reason": null,
       "size_bucket": "2049-8192",

@@ -1,52 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NoteKeeper</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <div class="app-shell">
-    <header class="site-header">
-      <div>
-        <p class="eyebrow">Local notes</p>
-        <h1>NoteKeeper</h1>
-      </div>
-      <form class="search-form" role="search">
-        <label for="search-input">Search notes</label>
-        <input
-          id="search-input"
-          name="search"
-          type="search"
-          placeholder="Search titles, text, labels, or checklist items"
-          disabled
-        >
-      </form>
-    </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NoteKeeper</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Local notes workspace</p>
+          <h1>NoteKeeper</h1>
+          <p class="header-copy">
+            Capture ideas, lists, and reminders in a lightweight browser app.
+          </p>
+        </div>
 
-    <main class="layout">
-      <aside class="sidebar">
-        <nav class="view-switcher" aria-label="Note views">
-          <button type="button" class="view-button is-active" aria-pressed="true">
-            Active notes
-          </button>
-          <button type="button" class="view-button" aria-pressed="false">
-            Archived notes
-          </button>
-        </nav>
+        <div class="toolbar" aria-label="Search and note views">
+          <label class="search-field">
+            <span>Search notes</span>
+            <input
+              id="search-input"
+              name="search"
+              type="search"
+              placeholder="Search title, body, checklist items, or labels"
+            />
+          </label>
+          <p class="assistive-copy">Search matches titles, note text, checklist items, and labels.</p>
 
-        <section class="composer card-panel" aria-labelledby="create-note-heading">
-          <div class="section-heading">
-            <h2 id="create-note-heading">Create a note</h2>
-            <p>Static scaffold for the NoteKeeper workflow.</p>
-          </div>
+          <nav class="view-switcher" aria-label="Note views">
+            <button
+              type="button"
+              class="view-button is-active"
+              data-view="active"
+              aria-pressed="true"
+            >
+              Active notes
+            </button>
+            <button
+              type="button"
+              class="view-button"
+              data-view="archived"
+              aria-pressed="false"
+            >
+              Archived
+            </button>
+          </nav>
+        </div>
+      </header>
 
+      <main class="layout">
+        <section class="composer-panel" aria-labelledby="compose-heading">
+          <h2 id="compose-heading">Create or edit a note</h2>
           <form class="note-form">
-            <div class="field-group">
-              <label for="note-title">Title</label>
-              <input id="note-title" name="title" type="text" placeholder="Optional title">
-            </div>
+            <input id="editing-note-id" name="editingNoteId" type="hidden" value="" />
 
             <div class="field-group">
               <label for="note-type">Note type</label>
@@ -57,44 +65,106 @@
             </div>
 
             <div class="field-group">
+              <label for="note-title">Title</label>
+              <input
+                id="note-title"
+                name="title"
+                type="text"
+                placeholder="Optional note title"
+              />
+            </div>
+
+            <div class="field-group" id="note-body-group">
               <label for="note-body">Body</label>
               <textarea
                 id="note-body"
                 name="body"
-                rows="5"
-                placeholder="Write a quick note"
+                rows="6"
+                placeholder="Write your note here"
               ></textarea>
             </div>
 
-            <div class="field-group">
+            <div class="field-group" id="note-labels-group">
               <label for="note-labels">Labels</label>
               <input
                 id="note-labels"
                 name="labels"
                 type="text"
-                placeholder="Ideas, Work, Personal"
-              >
+                placeholder="Examples: work, ideas, personal"
+              />
             </div>
 
-            <div class="checklist-placeholder" aria-live="polite">
-              <p>Checklist items will appear here when checklist support is added.</p>
+            <div class="field-group checklist-editor" id="checklist-editor" hidden>
+              <div class="checklist-heading">
+                <label for="new-checklist-item">Checklist items</label>
+                <button type="button" class="secondary-button" id="add-checklist-item-button">
+                  Add item
+                </button>
+              </div>
+              <div class="checklist-add-row">
+                <input
+                  id="new-checklist-item"
+                  name="newChecklistItem"
+                  type="text"
+                  placeholder="Add a checklist item"
+                />
+              </div>
+              <div id="checklist-items-editor" class="checklist-items-editor"></div>
             </div>
 
-            <button type="submit" class="primary-button">Save note</button>
+            <div class="form-helper">
+              Notes are saved in your browser with localStorage and remain available after a reload.
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="primary-button">Save note</button>
+              <button type="button" class="secondary-button" id="cancel-edit-button" hidden>
+                Cancel edit
+              </button>
+            </div>
           </form>
         </section>
-      </aside>
 
-      <section class="content-area" aria-labelledby="notes-heading">
-        <div class="section-heading">
-          <h2 id="notes-heading">Notes</h2>
-          <p>Saved note cards will appear here in a responsive grid.</p>
-        </div>
-        <div id="notes-region" class="notes-grid" aria-live="polite"></div>
-      </section>
-    </main>
-  </div>
+        <section class="notes-panel" aria-labelledby="notes-heading">
+          <div class="section-heading">
+            <h2 id="notes-heading">Notes</h2>
+            <p id="notes-summary">Saved notes appear here.</p>
+          </div>
 
-  <script src="app.js"></script>
-</body>
+          <div
+            id="storage-status"
+            class="storage-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></div>
+
+          <div id="notes-grid" class="notes-grid" aria-live="polite"></div>
+
+          <template id="note-card-template">
+            <article class="note-card">
+              <div class="note-card-meta">
+                <span class="status-badge subtle note-state-badge">Active</span>
+                <span class="status-badge pin-badge" hidden>Pinned</span>
+                <span class="status-badge subtle note-type-badge">Text note</span>
+                <span class="status-badge subtle note-updated-badge">Just now</span>
+              </div>
+              <h3 class="note-card-title"></h3>
+              <p class="note-card-body"></p>
+              <ul class="note-card-checklist" hidden></ul>
+              <div class="note-card-labels" hidden></div>
+              <div class="card-actions">
+                <button type="button" class="edit-note-button">Edit</button>
+                <button type="button" class="pin-note-button">Pin</button>
+                <button type="button" class="archive-note-button">Archive</button>
+                <button type="button" class="danger-button delete-note-button">Delete</button>
+              </div>
+            </article>
+          </template>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
 </html>

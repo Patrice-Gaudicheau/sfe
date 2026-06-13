@@ -4,46 +4,46 @@
       "cached_input_tokens": 0,
       "error": null,
       "input_tokens": 561,
-      "latency": 1311,
-      "latency_ms": 1311,
+      "latency": 2383,
+      "latency_ms": 2383,
       "model": "gpt-5.4",
-      "output_tokens": 45,
+      "output_tokens": 43,
       "provider": "openai-api",
       "retry_count": 0,
       "role": "router",
       "success": true,
       "task_id": "02_persistence_and_crud",
-      "total_tokens": 606
+      "total_tokens": 604
     },
     {
       "cached_input_tokens": 0,
       "error": null,
       "input_tokens": 946,
-      "latency": 1493,
-      "latency_ms": 1493,
+      "latency": 1148,
+      "latency_ms": 1148,
       "model": "gpt-5.4",
-      "output_tokens": 81,
+      "output_tokens": 75,
       "provider": "openai-api",
       "retry_count": 0,
       "role": "discovery",
       "success": true,
       "task_id": "02_persistence_and_crud",
-      "total_tokens": 1027
+      "total_tokens": 1021
     },
     {
       "cached_input_tokens": 0,
       "error": null,
-      "input_tokens": 3465,
-      "latency": 21835,
-      "latency_ms": 21835,
+      "input_tokens": 7657,
+      "latency": 33266,
+      "latency_ms": 33266,
       "model": "gpt-5.4",
-      "output_tokens": 5302,
+      "output_tokens": 8078,
       "provider": "openai-api",
       "retry_count": 0,
       "role": "executor",
       "success": true,
       "task_id": "02_persistence_and_crud",
-      "total_tokens": 8767
+      "total_tokens": 15735
     }
   ]
 }

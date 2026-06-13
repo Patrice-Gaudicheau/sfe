@@ -1,751 +1,1119 @@
 diff --git a/app/index.html b/app/index.html
-new file mode 100644
---- /dev/null
+index 6af8618..717d7f0 100644
+--- a/app/index.html
 +++ b/app/index.html
-@@ -0,0 +1,66 @@
-+<!DOCTYPE html>
-+<html lang="en">
-+  <head>
-+    <meta charset="UTF-8" />
-+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-+    <title>NoteKeeper</title>
-+    <link rel="stylesheet" href="styles.css" />
-+  </head>
-+  <body>
-+    <div class="app-shell">
-+      <header class="app-header">
-+        <div>
-+          <h1>NoteKeeper</h1>
-+          <p class="tagline">Simple local notes that stay in your browser.</p>
-+        </div>
-+        <div class="view-toggle" role="tablist" aria-label="Note views">
-+          <button type="button" class="view-button is-active" data-view="active" aria-pressed="true">
-+            Active notes
-+          </button>
-+          <button type="button" class="view-button" data-view="archived" aria-pressed="false">
-+            Archived notes
-+          </button>
-+        </div>
-+      </header>
+@@ -1,154 +1,128 @@
+ <!DOCTYPE html>
+ <html lang="en">
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     <title>NoteKeeper</title>
+     <link rel="stylesheet" href="styles.css" />
+   </head>
+   <body>
+     <div class="app-shell">
+       <header class="app-header">
+         <div>
+           <p class="eyebrow">Local notes workspace</p>
+           <h1>NoteKeeper</h1>
+           <p class="header-copy">
+             Capture ideas, lists, and reminders in a lightweight browser app.
+           </p>
+         </div>
+ 
+         <div class="toolbar" aria-label="Search and note views">
+           <label class="search-field">
+             <span>Search notes</span>
+             <input
+               id="search-input"
+               name="search"
+               type="search"
+-              placeholder="Search title, content, labels"
+-              aria-describedby="search-help"
++              placeholder="Search title or note content"
+             />
+           </label>
+-          <p id="search-help" class="assistive-copy">
+-            Search will be enabled in the next task.
++          <p class="assistive-copy">
++            Search and archive controls are visible now and will become interactive in later tasks.
+           </p>
+ 
+           <nav class="view-switcher" aria-label="Note views">
+-            <button type="button" class="view-button is-active" aria-pressed="true">
++            <button
++              type="button"
++              class="view-button is-active"
++              data-view="active"
++              aria-pressed="true"
++            >
+               Active notes
+             </button>
+-            <button type="button" class="view-button" aria-pressed="false">
+-              Archive
++            <button
++              type="button"
++              class="view-button"
++              data-view="archived"
++              aria-pressed="false"
++            >
++              Archived
+             </button>
+           </nav>
+         </div>
+       </header>
+ 
+       <main class="layout">
+         <section class="composer-panel" aria-labelledby="compose-heading">
+-          <h2 id="compose-heading">Create a note</h2>
++          <h2 id="compose-heading">Create or edit a text note</h2>
+           <form class="note-form">
++            <input id="editing-note-id" name="editingNoteId" type="hidden" value="" />
 +
-+      <main class="layout">
-+        <section class="composer-panel" aria-labelledby="composer-heading">
-+          <h2 id="composer-heading">Create or edit a note</h2>
-+          <form id="note-form" class="note-form">
-+            <input type="hidden" id="note-id" />
-+
-+            <label for="note-title">Title</label>
-+            <input id="note-title" name="title" type="text" maxlength="120" placeholder="Optional title" />
-+
-+            <label for="note-body">Note</label>
-+            <textarea
-+              id="note-body"
-+              name="body"
-+              rows="8"
-+              placeholder="Write your note here..."
-+            ></textarea>
-+
+             <div class="field-group">
+               <label for="note-title">Title</label>
+               <input
+                 id="note-title"
+                 name="title"
+                 type="text"
+                 placeholder="Optional note title"
+               />
+             </div>
+ 
+             <div class="field-group">
+               <label for="note-body">Body</label>
+               <textarea
+                 id="note-body"
+                 name="body"
+                 rows="6"
+                 placeholder="Write your note here"
+               ></textarea>
+             </div>
+ 
+-            <div class="field-row">
+-              <div class="field-group">
+-                <label for="note-type">Note type</label>
+-                <select id="note-type" name="type">
+-                  <option value="text">Text note</option>
+-                  <option value="checklist">Checklist note</option>
+-                </select>
+-              </div>
+-
+-              <div class="field-group">
+-                <label for="note-labels">Labels</label>
+-                <input
+-                  id="note-labels"
+-                  name="labels"
+-                  type="text"
+-                  placeholder="work, ideas, errands"
+-                />
+-              </div>
++            <div class="form-helper">
++              Plain text notes are saved in your browser with localStorage and remain available
++              after a reload.
+             </div>
+ 
+-            <div class="checklist-placeholder" aria-live="polite">
+-              Checklist item controls will appear here in a later task.
 +            <div class="form-actions">
 +              <button type="submit" class="primary-button">Save note</button>
-+              <button type="button" id="cancel-edit-button" class="secondary-button" hidden>
++              <button type="button" class="secondary-button" id="cancel-edit-button" hidden>
 +                Cancel edit
 +              </button>
-+            </div>
-+          </form>
-+        </section>
+             </div>
+-
+-            <button type="submit" class="primary-button">Save note</button>
+           </form>
+         </section>
+ 
+         <section class="notes-panel" aria-labelledby="notes-heading">
+           <div class="section-heading">
+             <h2 id="notes-heading">Notes</h2>
+-            <p>Preview of the card layout for active and archived notes.</p>
++            <p id="notes-summary">Saved text notes appear here.</p>
+           </div>
+ 
+-          <div class="notes-grid" aria-live="polite">
+-            <article class="note-card note-card-pinned">
+-              <div class="note-card-meta">
+-                <span class="status-badge">Pinned</span>
+-                <span class="status-badge subtle">Active</span>
+-              </div>
+-              <h3>Planning notes</h3>
+-              <p>
+-                Sketch a simple weekly review format and collect follow-up ideas
+-                for the next project check-in.
+-              </p>
+-              <ul class="label-list" aria-label="Labels">
+-                <li>planning</li>
+-                <li>work</li>
+-              </ul>
+-              <div class="card-actions">
+-                <button type="button">Edit</button>
+-                <button type="button">Unpin</button>
+-                <button type="button">Archive</button>
+-                <button type="button" class="danger-button">Delete</button>
+-              </div>
+-            </article>
+-
+-            <article class="note-card">
+-              <div class="note-card-meta">
+-                <span class="status-badge subtle">Checklist</span>
+-              </div>
+-              <h3>Weekend errands</h3>
+-              <ul class="checklist-preview">
+-                <li><span class="checkmark" aria-hidden="true">✓</span> Pick up groceries</li>
+-                <li><span class="checkmark" aria-hidden="true">○</span> Drop off library books</li>
+-                <li><span class="checkmark" aria-hidden="true">○</span> Water the plants</li>
+-              </ul>
+-              <ul class="label-list" aria-label="Labels">
+-                <li>home</li>
+-                <li>errands</li>
+-              </ul>
+-              <div class="card-actions">
+-                <button type="button">Edit</button>
+-                <button type="button">Pin</button>
+-                <button type="button">Archive</button>
+-                <button type="button" class="danger-button">Delete</button>
+-              </div>
+-            </article>
+-
+-            <article class="empty-state">
+-              <h3>Your saved notes will appear here</h3>
+-              <p>
+-                This scaffold includes the app shell, creation form, navigation,
+-                and sample cards. Interactive note saving arrives in the next
+-                task.
+-              </p>
+-            </article>
+-          </div>
++          <div
++            id="storage-status"
++            class="storage-status"
++            role="status"
++            aria-live="polite"
++            hidden
++          ></div>
 +
-+        <section class="notes-panel" aria-labelledby="notes-heading">
-+          <div class="notes-panel-header">
-+            <div>
-+              <h2 id="notes-heading">Notes</h2>
-+              <p id="notes-summary" class="notes-summary">No notes yet.</p>
-+            </div>
-+          </div>
++          <div id="notes-grid" class="notes-grid" aria-live="polite"></div>
 +
-+          <div id="status-message" class="status-message" aria-live="polite"></div>
-+
-+          <div id="empty-state" class="empty-state">
-+            Create your first note to get started.
-+          </div>
-+          <div id="notes-list" class="notes-list" aria-live="polite"></div>
-+        </section>
-+      </main>
-+    </div>
-+    <script src="app.js"></script>
-+  </body>
-+</html>
++          <template id="note-card-template">
++            <article class="note-card">
++              <div class="note-card-meta">
++                <span class="status-badge subtle note-state-badge">Active</span>
++                <span class="status-badge subtle note-updated-badge">Just now</span>
++              </div>
++              <h3 class="note-card-title"></h3>
++              <p class="note-card-body"></p>
++              <div class="card-actions">
++                <button type="button" class="edit-note-button">Edit</button>
++                <button type="button" class="archive-note-button">Archive</button>
++                <button type="button" class="danger-button delete-note-button">Delete</button>
++              </div>
++            </article>
++          </template>
+         </section>
+       </main>
+     </div>
+ 
+     <script src="app.js"></script>
+   </body>
+ </html>
 diff --git a/app/styles.css b/app/styles.css
-new file mode 100644
---- /dev/null
+index 8d72d7d..2df2f88 100644
+--- a/app/styles.css
 +++ b/app/styles.css
-@@ -0,0 +1,295 @@
-+:root {
-+  color-scheme: light;
-+  --bg: #f4f1ea;
-+  --panel: #fffdf9;
-+  --panel-strong: #ffffff;
-+  --border: #d8d1c5;
-+  --border-strong: #bcae97;
-+  --text: #2c241b;
-+  --muted: #6f6355;
-+  --accent: #6f4e37;
-+  --accent-strong: #553927;
-+  --danger: #a33d30;
-+  --shadow: 0 12px 30px rgba(44, 36, 27, 0.08);
-+}
-+
-+* {
-+  box-sizing: border-box;
-+}
-+
-+body {
-+  margin: 0;
-+  font-family: Arial, Helvetica, sans-serif;
-+  background: linear-gradient(180deg, #f7f3ec 0%, #f1ede5 100%);
-+  color: var(--text);
-+}
-+
-+button,
-+input,
-+textarea {
-+  font: inherit;
-+}
-+
-+button:focus-visible,
-+input:focus-visible,
-+textarea:focus-visible {
-+  outline: 3px solid rgba(111, 78, 55, 0.3);
-+  outline-offset: 2px;
-+}
-+
-+.app-shell {
-+  max-width: 1100px;
-+  margin: 0 auto;
-+  padding: 24px 16px 40px;
-+}
-+
-+.app-header {
-+  display: flex;
-+  justify-content: space-between;
-+  gap: 16px;
-+  align-items: flex-start;
-+  margin-bottom: 24px;
-+}
-+
-+.app-header h1 {
-+  margin: 0 0 6px;
-+  font-size: 2rem;
-+}
-+
-+.tagline {
-+  margin: 0;
-+  color: var(--muted);
-+}
-+
-+.view-toggle {
-+  display: flex;
-+  gap: 8px;
-+  flex-wrap: wrap;
-+}
-+
-+.view-button,
-+.secondary-button,
+@@ -1,312 +1,332 @@
+ :root {
+   color-scheme: light;
+   --bg: #f4f1ea;
+   --panel: #fffdf9;
+   --panel-strong: #ffffff;
+   --border: #d8d0c2;
+   --border-strong: #b9ad99;
+   --text: #2f261d;
+   --muted: #6a5c4a;
+   --accent: #6f5bd3;
+   --accent-strong: #5945bc;
+   --accent-soft: #ede9ff;
+   --danger: #9a3d37;
+   --danger-soft: #fbe7e5;
++  --success: #2f6f4f;
++  --success-soft: #e5f5eb;
++  --warning: #8a5b10;
++  --warning-soft: #fbf0d6;
+   --shadow: 0 14px 32px rgba(58, 43, 26, 0.08);
+   --radius-lg: 20px;
+   --radius-md: 14px;
+   --radius-sm: 10px;
+ }
+ 
+ * {
+   box-sizing: border-box;
+ }
+ 
+ html {
+   font-family: Arial, Helvetica, sans-serif;
+   background: var(--bg);
+   color: var(--text);
+ }
+ 
+ body {
+   margin: 0;
+   min-height: 100vh;
+ }
+ 
+ button,
+ input,
+ textarea,
+ select {
+   font: inherit;
+ }
+ 
+ button {
+   cursor: pointer;
+ }
+ 
+ button:focus-visible,
+ input:focus-visible,
+ textarea:focus-visible,
+ select:focus-visible {
+   outline: 3px solid rgba(111, 91, 211, 0.35);
+   outline-offset: 2px;
+ }
+ 
+ .app-shell {
+   width: min(1180px, calc(100% - 2rem));
+   margin: 0 auto;
+   padding: 1.5rem 0 2rem;
+ }
+ 
+ .app-header {
+   display: grid;
+   grid-template-columns: 1.3fr 1fr;
+   gap: 1.5rem;
+   align-items: start;
+   margin-bottom: 1.5rem;
+ }
+ 
+ .eyebrow {
+   margin: 0 0 0.35rem;
+   color: var(--accent-strong);
+   font-size: 0.8rem;
+   font-weight: 700;
+   letter-spacing: 0.08em;
+   text-transform: uppercase;
+ }
+ 
+ h1,
+ h2,
+ h3,
+ p {
+   margin-top: 0;
+ }
+ 
+ h1 {
+   margin-bottom: 0.5rem;
+   font-size: clamp(2rem, 4vw, 3rem);
+ }
+ 
+ .header-copy {
+   max-width: 38rem;
+   margin-bottom: 0;
+   color: var(--muted);
+   line-height: 1.5;
+ }
+ 
+ .toolbar,
+ .composer-panel,
+ .notes-panel {
+   background: var(--panel);
+   border: 1px solid var(--border);
+   border-radius: var(--radius-lg);
+   box-shadow: var(--shadow);
+ }
+ 
+ .toolbar {
+   padding: 1rem;
+ }
+ 
+ .search-field,
+ .field-group {
+   display: flex;
+   flex-direction: column;
+   gap: 0.45rem;
+ }
+ 
+ .search-field span,
+ .field-group label {
+   font-weight: 700;
+ }
+ 
+ .search-field input,
+ .field-group input,
+ .field-group textarea,
+ .field-group select {
+   width: 100%;
+   padding: 0.8rem 0.95rem;
+   border: 1px solid var(--border);
+   border-radius: var(--radius-sm);
+   background: var(--panel-strong);
+   color: var(--text);
+ }
+ 
+ .search-field input::placeholder,
+ .field-group input::placeholder,
+ .field-group textarea::placeholder {
+   color: #907f6a;
+ }
+ 
+ .assistive-copy {
+   margin: 0.65rem 0 0;
+   color: var(--muted);
+   font-size: 0.92rem;
+ }
+ 
+ .view-switcher {
+   display: inline-flex;
+   gap: 0.75rem;
+   flex-wrap: wrap;
+   margin-top: 1rem;
+ }
+ 
+ .view-button,
+ .card-actions button,
+-.primary-button {
 +.primary-button,
-+.note-card button {
-+  border: 1px solid var(--border-strong);
-+  background: var(--panel-strong);
-+  color: var(--text);
-+  border-radius: 999px;
-+  padding: 0.65rem 1rem;
-+  cursor: pointer;
++.secondary-button {
+   min-height: 2.75rem;
+   padding: 0.7rem 1rem;
+   border: 1px solid var(--border-strong);
+   border-radius: 999px;
+   background: #fff;
+   color: var(--text);
+ }
+ 
+ .view-button.is-active,
+ .primary-button {
+   border-color: var(--accent);
+   background: var(--accent);
+   color: #fff;
+ }
+ 
+ .primary-button:hover,
+ .view-button.is-active:hover {
+   background: var(--accent-strong);
+ }
+ 
++.secondary-button {
++  background: #faf7f1;
 +}
 +
-+.view-button.is-active,
-+.primary-button {
-+  background: var(--accent);
-+  color: #fff;
-+  border-color: var(--accent);
-+}
-+
-+.layout {
-+  display: grid;
-+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-+  gap: 20px;
-+  align-items: start;
-+}
-+
-+.composer-panel,
-+.notes-panel {
-+  background: var(--panel);
-+  border: 1px solid var(--border);
-+  border-radius: 18px;
-+  box-shadow: var(--shadow);
-+}
-+
-+.composer-panel {
-+  padding: 20px;
-+  position: sticky;
-+  top: 16px;
-+}
-+
-+.composer-panel h2,
-+.notes-panel h2 {
-+  margin-top: 0;
-+  margin-bottom: 8px;
-+}
-+
-+.note-form {
-+  display: grid;
-+  gap: 10px;
-+}
-+
-+.note-form label {
-+  font-weight: 700;
-+}
-+
-+.note-form input,
-+.note-form textarea {
-+  width: 100%;
-+  border: 1px solid var(--border);
-+  border-radius: 12px;
-+  background: #fff;
-+  color: var(--text);
-+  padding: 0.85rem 0.95rem;
-+}
-+
-+.note-form textarea {
-+  resize: vertical;
-+  min-height: 180px;
+ .layout {
+   display: grid;
+   grid-template-columns: minmax(280px, 360px) 1fr;
+   gap: 1.5rem;
+ }
+ 
+ .composer-panel,
+ .notes-panel {
+   padding: 1.25rem;
+ }
+ 
+ .note-form {
+   display: grid;
+   gap: 1rem;
+ }
+ 
+-.field-row {
+-  display: grid;
+-  grid-template-columns: 1fr 1fr;
+-  gap: 1rem;
+-}
+-
+ .field-group textarea {
+   resize: vertical;
+   min-height: 8rem;
+ }
+ 
+-.checklist-placeholder {
++.form-helper {
+   padding: 0.95rem 1rem;
+   border: 1px dashed var(--border-strong);
+   border-radius: var(--radius-md);
+   background: #faf7f1;
+   color: var(--muted);
++  line-height: 1.5;
 +}
 +
 +.form-actions {
 +  display: flex;
-+  gap: 10px;
 +  flex-wrap: wrap;
-+  margin-top: 8px;
-+}
-+
-+.notes-panel {
-+  padding: 20px;
-+}
-+
-+.notes-panel-header {
-+  display: flex;
-+  justify-content: space-between;
-+  gap: 16px;
-+  align-items: start;
-+  margin-bottom: 12px;
-+}
-+
-+.notes-summary {
-+  margin: 0;
-+  color: var(--muted);
-+}
-+
-+.status-message {
-+  min-height: 1.5rem;
-+  color: var(--muted);
-+  margin-bottom: 8px;
-+}
-+
-+.empty-state {
-+  border: 1px dashed var(--border-strong);
-+  border-radius: 16px;
-+  padding: 24px;
-+  text-align: center;
-+  color: var(--muted);
-+  background: rgba(255, 255, 255, 0.55);
-+}
-+
-+.empty-state[hidden] {
-+  display: none;
-+}
-+
-+.notes-list {
-+  display: grid;
-+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-+  gap: 16px;
-+}
-+
-+.note-card {
-+  background: var(--panel-strong);
++  gap: 0.75rem;
+ }
+ 
+ .section-heading {
+   display: flex;
+   justify-content: space-between;
+   gap: 1rem;
+   align-items: end;
+   margin-bottom: 1rem;
+ }
+ 
+ .section-heading p {
+   margin-bottom: 0;
+   color: var(--muted);
+ }
+ 
++.storage-status {
++  margin-bottom: 1rem;
++  padding: 0.85rem 1rem;
 +  border: 1px solid var(--border);
-+  border-radius: 16px;
-+  padding: 16px;
-+  display: grid;
-+  gap: 12px;
-+  min-width: 0;
++  border-radius: var(--radius-md);
++  background: var(--warning-soft);
++  color: var(--warning);
 +}
 +
-+.note-card h3 {
-+  margin: 0;
-+  font-size: 1.05rem;
++.storage-status.is-success {
++  border-color: #b7d9c4;
++  background: var(--success-soft);
++  color: var(--success);
 +}
 +
-+.note-card p {
-+  margin: 0;
-+  line-height: 1.5;
+ .notes-grid {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+   gap: 1rem;
+ }
+ 
+ .note-card,
+ .empty-state {
+   padding: 1rem;
+   border: 1px solid var(--border);
+   border-radius: var(--radius-md);
+   background: var(--panel-strong);
+ }
+ 
+ .note-card {
+   display: flex;
+   flex-direction: column;
+   gap: 0.9rem;
+   min-height: 100%;
+ }
+ 
+-.note-card-pinned {
+-  border-color: #c9b7ff;
+-  background: linear-gradient(180deg, #f7f4ff 0%, #fffdf9 100%);
+-}
+-
+ .note-card-meta {
+   display: flex;
+   gap: 0.5rem;
+   flex-wrap: wrap;
+ }
+ 
+ .status-badge {
+   display: inline-flex;
+   align-items: center;
+   min-height: 1.8rem;
+   padding: 0.2rem 0.65rem;
+   border-radius: 999px;
+   background: var(--accent-soft);
+   color: var(--accent-strong);
+   font-size: 0.88rem;
+   font-weight: 700;
+ }
+ 
+ .status-badge.subtle {
+   background: #f2eee7;
+   color: var(--muted);
+ }
+ 
+ .note-card h3,
+ .empty-state h3 {
+   margin-bottom: 0;
+ }
+ 
+ .note-card p,
+ .empty-state p {
+   margin-bottom: 0;
+   color: var(--muted);
+   line-height: 1.5;
+ }
+ 
+-.label-list,
+-.checklist-preview {
+-  margin: 0;
+-  padding: 0;
+-  list-style: none;
+-}
+-
+-.label-list {
+-  display: flex;
+-  flex-wrap: wrap;
+-  gap: 0.5rem;
+-}
+-
+-.label-list li {
+-  padding: 0.3rem 0.65rem;
+-  border-radius: 999px;
+-  background: #f1ece3;
+-  color: #4f4336;
+-  font-size: 0.88rem;
+-}
+-
+-.checklist-preview {
+-  display: grid;
+-  gap: 0.55rem;
+-  color: var(--muted);
+-}
+-
+-.checklist-preview li {
+-  display: flex;
+-  gap: 0.5rem;
+-  align-items: center;
++.note-card-title.is-untitled {
++  color: var(--muted);
+ }
+ 
+-.checkmark {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  width: 1.25rem;
+-  color: var(--accent-strong);
+-  font-weight: 700;
++.note-card-body {
 +  white-space: pre-wrap;
-+  overflow-wrap: anywhere;
-+}
-+
-+.note-card-header {
-+  display: flex;
-+  justify-content: space-between;
-+  gap: 12px;
-+  align-items: start;
-+}
-+
-+.note-card-date {
-+  color: var(--muted);
-+  font-size: 0.9rem;
-+}
-+
-+.note-card-actions {
-+  display: flex;
-+  gap: 8px;
-+  flex-wrap: wrap;
-+}
-+
-+.note-card .delete-button {
-+  color: var(--danger);
-+  border-color: rgba(163, 61, 48, 0.35);
-+}
-+
-+.note-card .archive-button {
-+  color: var(--accent-strong);
-+}
-+
-+.body-placeholder {
-+  color: var(--muted);
-+  font-style: italic;
-+}
-+
-+.card-footer {
-+  border-top: 1px solid var(--border);
-+  padding-top: 10px;
-+  color: var(--muted);
-+  font-size: 0.9rem;
-+}
-+
-+@media (max-width: 820px) {
-+  .layout {
-+    grid-template-columns: 1fr;
-+  }
-+
-+  .composer-panel {
-+    position: static;
-+  }
-+}
-+
-+@media (max-width: 560px) {
-+  .app-shell {
-+    padding: 16px 12px 32px;
-+  }
-+
++  word-break: break-word;
+ }
+ 
+ .card-actions {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 0.6rem;
+   margin-top: auto;
+ }
+ 
+ .card-actions button {
+   background: #faf7f1;
+ }
+ 
+ .card-actions button:hover,
+-.view-button:hover {
++.view-button:hover,
++.secondary-button:hover {
+   background: #f2ede4;
+ }
+ 
+ .danger-button {
+   border-color: #d6a8a4;
+   background: var(--danger-soft) !important;
+   color: var(--danger);
+ }
+ 
+ .empty-state {
+   display: flex;
+   flex-direction: column;
+   justify-content: center;
+   min-height: 14rem;
+   border-style: dashed;
+   text-align: left;
+ }
+ 
+ @media (max-width: 900px) {
+-  .app-header,
+-  .layout,
+-  .field-row {
 +  .app-header,
-+  .notes-panel-header,
-+  .note-card-header {
-+    flex-direction: column;
-+  }
-+
-+  .view-toggle,
-+  .form-actions,
-+  .note-card-actions {
-+    width: 100%;
-+  }
-+
-+  .view-button,
-+  .secondary-button,
-+  .primary-button,
-+  .note-card button {
-+    width: 100%;
-+    text-align: center;
-+  }
-+
-+  .notes-list {
++  .layout {
+     grid-template-columns: 1fr;
+   }
+ 
+   .section-heading {
+     align-items: start;
+     flex-direction: column;
+@@ -321,8 +341,9 @@
+     padding-top: 1rem;
+   }
+ 
+   .toolbar,
+   .composer-panel,
+   .notes-panel {
+     padding: 1rem;
+     border-radius: 16px;
+   }
+@@ -333,6 +354,11 @@
+     grid-template-columns: 1fr 1fr;
+   }
+ 
++  .form-actions {
++    display: grid;
 +    grid-template-columns: 1fr;
 +  }
-+}
 +
-+@media (prefers-reduced-motion: no-preference) {
-+  .view-button,
-+  .secondary-button,
-+  .primary-button,
-+  .note-card,
-+  .note-card button,
-+  .note-form input,
-+  .note-form textarea {
-+    transition:
-+      background-color 0.2s ease,
-+      border-color 0.2s ease,
-+      transform 0.2s ease,
-+      box-shadow 0.2s ease;
-+  }
+   .view-button,
+   .card-actions button,
+   .primary-button {
+     width: 100%;
+     justify-content: center;
+@@ -340,6 +366,10 @@
+ 
+   .notes-grid {
+     grid-template-columns: 1fr;
+   }
 +
-+  .note-card:hover {
-+    transform: translateY(-2px);
++  .secondary-button {
++    width: 100%;
 +  }
-+
-+  .view-button:hover,
-+  .secondary-button:hover,
-+  .primary-button:hover,
-+  .note-card button:hover {
-+    border-color: var(--accent);
-+  }
-+}
+ }
+ 
+ @media (prefers-reduced-motion: reduce) {
+   *,
+   *::before,
 diff --git a/app/app.js b/app/app.js
-new file mode 100644
---- /dev/null
+index 2b9d060..e712d7a 100644
+--- a/app/app.js
 +++ b/app/app.js
-@@ -0,0 +1,294 @@
-+const STORAGE_KEY = "notekeeper.notes";
+@@ -1,39 +1,309 @@
+ (function () {
+   "use strict";
+ 
+   const form = document.querySelector(".note-form");
++  const editingNoteIdInput = document.getElementById("editing-note-id");
++  const titleInput = document.getElementById("note-title");
++  const bodyInput = document.getElementById("note-body");
+   const searchInput = document.getElementById("search-input");
+   const viewButtons = document.querySelectorAll(".view-button");
+-
+-  if (form) {
+-    form.addEventListener("submit", function (event) {
+-      event.preventDefault();
+-      window.alert(
+-        "This is the initial NoteKeeper scaffold. Interactive note saving will be added in the next task."
+-      );
+-    });
++  const notesGrid = document.getElementById("notes-grid");
++  const noteTemplate = document.getElementById("note-card-template");
++  const notesSummary = document.getElementById("notes-summary");
++  const storageStatus = document.getElementById("storage-status");
++  const cancelEditButton = document.getElementById("cancel-edit-button");
++  const STORAGE_KEY = "notekeeper.notes";
 +
-+const state = {
-+  notes: [],
-+  currentView: "active",
-+  editingNoteId: null,
-+};
++  const state = {
++    notes: [],
++    currentView: "active",
++    storageRecovered: false
++  };
 +
-+const elements = {
-+  form: document.getElementById("note-form"),
-+  noteId: document.getElementById("note-id"),
-+  title: document.getElementById("note-title"),
-+  body: document.getElementById("note-body"),
-+  notesList: document.getElementById("notes-list"),
-+  emptyState: document.getElementById("empty-state"),
-+  notesSummary: document.getElementById("notes-summary"),
-+  statusMessage: document.getElementById("status-message"),
-+  cancelEditButton: document.getElementById("cancel-edit-button"),
-+  viewButtons: Array.from(document.querySelectorAll(".view-button")),
-+};
-+
-+function loadNotes() {
-+  const stored = localStorage.getItem(STORAGE_KEY);
-+
-+  if (!stored) {
-+    state.notes = [];
-+    return;
++  function createId() {
++    return "note-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 +  }
 +
-+  try {
-+    const parsed = JSON.parse(stored);
-+    state.notes = Array.isArray(parsed)
-+      ? parsed
-+          .filter((note) => note && typeof note === "object")
-+          .map((note) => ({
++  function loadNotes() {
++    const storedValue = window.localStorage.getItem(STORAGE_KEY);
++
++    if (!storedValue) {
++      return [];
++    }
++
++    try {
++      const parsed = JSON.parse(storedValue);
++
++      if (!Array.isArray(parsed)) {
++        state.storageRecovered = true;
++        return [];
++      }
++
++      return parsed
++        .filter(function (note) {
++          return note && typeof note === "object";
++        })
++        .map(function (note) {
++          return {
 +            id: typeof note.id === "string" ? note.id : createId(),
 +            title: typeof note.title === "string" ? note.title : "",
 +            body: typeof note.body === "string" ? note.body : "",
++            type: "text",
 +            archived: Boolean(note.archived),
-+            createdAt: typeof note.createdAt === "string" ? note.createdAt : new Date().toISOString(),
-+            updatedAt: typeof note.updatedAt === "string" ? note.updatedAt : new Date().toISOString(),
-+          }))
-+      : [];
-+  } catch (error) {
-+    state.notes = [];
-+    localStorage.removeItem(STORAGE_KEY);
-+    setStatus("Stored notes were unreadable, so NoteKeeper started with an empty list.");
-+  }
-+}
-+
-+function saveNotes() {
-+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.notes));
-+}
-+
-+function createId() {
-+  return `note-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-+}
-+
-+function setStatus(message) {
-+  elements.statusMessage.textContent = message;
-+}
-+
-+function clearStatus() {
-+  setStatus("");
-+}
-+
-+function resetForm() {
-+  state.editingNoteId = null;
-+  elements.noteId.value = "";
-+  elements.form.reset();
-+  elements.cancelEditButton.hidden = true;
-+}
-+
-+function startEdit(noteId) {
-+  const note = state.notes.find((item) => item.id === noteId);
-+
-+  if (!note) {
-+    return;
++            createdAt:
++              typeof note.createdAt === "string" ? note.createdAt : new Date().toISOString(),
++            updatedAt:
++              typeof note.updatedAt === "string" ? note.updatedAt : new Date().toISOString()
++          };
++        });
++    } catch (error) {
++      state.storageRecovered = true;
++      return [];
++    }
 +  }
 +
-+  state.editingNoteId = note.id;
-+  elements.noteId.value = note.id;
-+  elements.title.value = note.title;
-+  elements.body.value = note.body;
-+  elements.cancelEditButton.hidden = false;
-+  elements.title.focus();
-+  setStatus("Editing note.");
-+}
-+
-+function deleteNote(noteId) {
-+  state.notes = state.notes.filter((note) => note.id !== noteId);
-+
-+  if (state.editingNoteId === noteId) {
-+    resetForm();
++  function saveNotes() {
++    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.notes));
 +  }
 +
-+  saveNotes();
-+  render();
-+  setStatus("Note deleted.");
-+}
-+
-+function toggleArchive(noteId) {
-+  const note = state.notes.find((item) => item.id === noteId);
-+
-+  if (!note) {
-+    return;
-+  }
-+
-+  note.archived = !note.archived;
-+  note.updatedAt = new Date().toISOString();
-+
-+  if (state.editingNoteId === noteId) {
-+    resetForm();
-+  }
-+
-+  saveNotes();
-+  render();
-+  setStatus(note.archived ? "Note archived." : "Note restored to active notes.");
-+}
-+
-+function getVisibleNotes() {
-+  return state.notes
-+    .filter((note) => (state.currentView === "archived" ? note.archived : !note.archived))
-+    .sort((first, second) => new Date(second.updatedAt) - new Date(first.updatedAt));
-+}
-+
-+function formatDate(value) {
-+  const date = new Date(value);
-+
-+  if (Number.isNaN(date.getTime())) {
-+    return "Unknown date";
-+  }
-+
-+  return date.toLocaleString([], {
-+    year: "numeric",
-+    month: "short",
-+    day: "numeric",
-+    hour: "numeric",
-+    minute: "2-digit",
-+  });
-+}
-+
-+function render() {
-+  const visibleNotes = getVisibleNotes();
-+  elements.notesList.innerHTML = "";
-+
-+  elements.notesSummary.textContent =
-+    state.currentView === "archived"
-+      ? `${visibleNotes.length} archived ${visibleNotes.length === 1 ? "note" : "notes"}`
-+      : `${visibleNotes.length} active ${visibleNotes.length === 1 ? "note" : "notes"}`;
-+
-+  if (visibleNotes.length === 0) {
-+    elements.emptyState.hidden = false;
-+    elements.emptyState.textContent =
-+      state.currentView === "archived"
-+        ? "No archived notes yet. Archive notes to store them out of the main view."
-+        : "No active notes yet. Create a note to get started.";
-+    return;
-+  }
-+
-+  elements.emptyState.hidden = true;
-+
-+  visibleNotes.forEach((note) => {
-+    const article = document.createElement("article");
-+    article.className = "note-card";
-+
-+    const title = note.title.trim() || "Untitled note";
-+    const bodyContent = note.body.trim();
-+    const bodyMarkup = bodyContent
-+      ? `<p>${escapeHtml(bodyContent)}</p>`
-+      : '<p class="body-placeholder">No note text.</p>';
-+
-+    article.innerHTML = `
-+      <div class="note-card-header">
-+        <div>
-+          <h3>${escapeHtml(title)}</h3>
-+        </div>
-+        <div class="note-card-date">Updated ${escapeHtml(formatDate(note.updatedAt))}</div>
-+      </div>
-+      ${bodyMarkup}
-+      <div class="note-card-actions">
-+        <button type="button" data-action="edit" data-id="${note.id}">Edit</button>
-+        <button type="button" class="archive-button" data-action="archive" data-id="${note.id}">
-+          ${note.archived ? "Restore" : "Archive"}
-+        </button>
-+        <button type="button" class="delete-button" data-action="delete" data-id="${note.id}">
-+          Delete
-+        </button>
-+      </div>
-+      <div class="card-footer">Created ${escapeHtml(formatDate(note.createdAt))}</div>
-+    `;
-+
-+    elements.notesList.appendChild(article);
-+  });
-+}
-+
-+function escapeHtml(value) {
-+  const replacements = {
-+    "&": "&amp;",
-+    "<": "&lt;",
-+    ">": "&gt;",
-+    '"': "&quot;",
-+    "'": "&#39;",
-+  };
-+
-+  return value.replace(/[&<>"']/g, (character) => replacements[character]);
-+}
-+
-+function handleSubmit(event) {
-+  event.preventDefault();
-+
-+  const title = elements.title.value.trim();
-+  const body = elements.body.value.trim();
-+  const timestamp = new Date().toISOString();
-+
-+  if (!title && !body) {
-+    setStatus("Enter a title, note text, or both before saving.");
-+    elements.body.focus();
-+    return;
-+  }
-+
-+  if (state.editingNoteId) {
-+    const note = state.notes.find((item) => item.id === state.editingNoteId);
-+
-+    if (!note) {
-+      resetForm();
-+      render();
-+      setStatus("The note being edited was not found.");
++  function setStorageStatus(message, type) {
++    if (!storageStatus) {
 +      return;
 +    }
 +
-+    note.title = title;
-+    note.body = body;
-+    note.updatedAt = timestamp;
-+    setStatus("Note updated.");
-+  } else {
-+    state.notes.unshift({
-+      id: createId(),
-+      title,
-+      body,
-+      archived: false,
-+      createdAt: timestamp,
-+      updatedAt: timestamp,
++    if (!message) {
++      storageStatus.hidden = true;
++      storageStatus.textContent = "";
++      storageStatus.classList.remove("is-success");
++      return;
++    }
++
++    storageStatus.hidden = false;
++    storageStatus.textContent = message;
++    storageStatus.classList.toggle("is-success", type === "success");
++  }
++
++  function formatUpdatedLabel(value) {
++    const date = new Date(value);
++
++    if (Number.isNaN(date.getTime())) {
++      return "Saved recently";
++    }
++
++    return "Updated " + date.toLocaleString();
++  }
++
++  function getVisibleNotes() {
++    return state.notes
++      .filter(function (note) {
++        return state.currentView === "archived" ? note.archived : !note.archived;
++      })
++      .sort(function (left, right) {
++        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
++      });
++  }
++
++  function createEmptyState(title, description) {
++    const article = document.createElement("article");
++    const heading = document.createElement("h3");
++    const copy = document.createElement("p");
++
++    article.className = "empty-state";
++    heading.textContent = title;
++    copy.textContent = description;
++
++    article.appendChild(heading);
++    article.appendChild(copy);
++
++    return article;
++  }
++
++  function renderNotes() {
++    if (!notesGrid || !noteTemplate) {
++      return;
++    }
++
++    const visibleNotes = getVisibleNotes();
++    notesGrid.innerHTML = "";
++
++    if (notesSummary) {
++      notesSummary.textContent =
++        state.currentView === "archived"
++          ? "Archived notes are stored locally in this browser."
++          : "Saved text notes appear here and persist after a reload.";
++    }
++
++    if (visibleNotes.length === 0) {
++      notesGrid.appendChild(
++        createEmptyState(
++          state.currentView === "archived" ? "No archived notes yet" : "No saved notes yet",
++          state.currentView === "archived"
++            ? "Archived notes will appear here once you archive them from the active view."
++            : "Create a text note with a title, body, or both. Your notes are saved in localStorage."
++        )
++      );
++      return;
++    }
++
++    visibleNotes.forEach(function (note) {
++      const fragment = noteTemplate.content.cloneNode(true);
++      const card = fragment.querySelector(".note-card");
++      const stateBadge = fragment.querySelector(".note-state-badge");
++      const updatedBadge = fragment.querySelector(".note-updated-badge");
++      const title = fragment.querySelector(".note-card-title");
++      const body = fragment.querySelector(".note-card-body");
++      const editButton = fragment.querySelector(".edit-note-button");
++      const archiveButton = fragment.querySelector(".archive-note-button");
++      const deleteButton = fragment.querySelector(".delete-note-button");
++
++      card.dataset.noteId = note.id;
++      stateBadge.textContent = note.archived ? "Archived" : "Active";
++      updatedBadge.textContent = formatUpdatedLabel(note.updatedAt);
++
++      if (note.title.trim()) {
++        title.textContent = note.title;
++        title.classList.remove("is-untitled");
++      } else {
++        title.textContent = "Untitled note";
++        title.classList.add("is-untitled");
++      }
++
++      body.textContent = note.body.trim() ? note.body : "No body text";
++      archiveButton.textContent = note.archived ? "Restore" : "Archive";
++      archiveButton.setAttribute(
++        "aria-label",
++        (note.archived ? "Restore" : "Archive") + " note " + (note.title.trim() || "Untitled note")
++      );
++      editButton.setAttribute("aria-label", "Edit note " + (note.title.trim() || "Untitled note"));
++      deleteButton.setAttribute(
++        "aria-label",
++        "Delete note " + (note.title.trim() || "Untitled note")
++      );
++
++      notesGrid.appendChild(fragment);
 +    });
-+    setStatus("Note created.");
+   }
+ 
+-  if (searchInput) {
+-    searchInput.addEventListener("input", function () {
+-      searchInput.setAttribute(
+-        "aria-description",
+-        "Search is part of a later implementation task."
+-      );
++  function resetForm() {
++    form.reset();
++    editingNoteIdInput.value = "";
++    cancelEditButton.hidden = true;
 +  }
 +
-+  saveNotes();
-+  resetForm();
-+  render();
-+}
++  function handleSubmit(event) {
++    event.preventDefault();
 +
-+function handleListClick(event) {
-+  const button = event.target.closest("button[data-action]");
++    const title = titleInput.value.trim();
++    const body = bodyInput.value.trim();
 +
-+  if (!button) {
-+    return;
-+  }
++    if (!title && !body) {
++      setStorageStatus("Add a note title, body, or both before saving.", "warning");
++      titleInput.focus();
++      return;
++    }
 +
-+  const { action, id } = button.dataset;
++    const now = new Date().toISOString();
++    const existingId = editingNoteIdInput.value;
 +
-+  if (action === "edit") {
-+    startEdit(id);
-+    return;
-+  }
++    if (existingId) {
++      state.notes = state.notes.map(function (note) {
++        if (note.id !== existingId) {
++          return note;
++        }
 +
-+  if (action === "archive") {
-+    toggleArchive(id);
-+    return;
-+  }
++        return {
++          id: note.id,
++          title: title,
++          body: body,
++          type: "text",
++          archived: note.archived,
++          createdAt: note.createdAt,
++          updatedAt: now
++        };
++      });
++      saveNotes();
++      setStorageStatus("Note updated and saved in this browser.", "success");
++    } else {
++      state.notes.unshift({
++        id: createId(),
++        title: title,
++        body: body,
++        type: "text",
++        archived: false,
++        createdAt: now,
++        updatedAt: now
++      });
++      saveNotes();
++      setStorageStatus("Note saved in this browser.", "success");
++    }
 +
-+  if (action === "delete") {
-+    deleteNote(id);
-+  }
-+}
-+
-+function handleViewChange(event) {
-+  const button = event.currentTarget;
-+  const nextView = button.dataset.view;
-+
-+  if (!nextView || nextView === state.currentView) {
-+    return;
-+  }
-+
-+  state.currentView = nextView;
-+
-+  elements.viewButtons.forEach((viewButton) => {
-+    const isActive = viewButton.dataset.view === nextView;
-+    viewButton.classList.toggle("is-active", isActive);
-+    viewButton.setAttribute("aria-pressed", String(isActive));
-+  });
-+
-+  clearStatus();
-+  render();
-+}
-+
-+function bindEvents() {
-+  elements.form.addEventListener("submit", handleSubmit);
-+  elements.notesList.addEventListener("click", handleListClick);
-+  elements.cancelEditButton.addEventListener("click", () => {
 +    resetForm();
-+    setStatus("Edit canceled.");
-+  });
-+  elements.viewButtons.forEach((button) => {
-+    button.addEventListener("click", handleViewChange);
-+  });
-+}
++    renderNotes();
++  }
 +
-+function init() {
-+  loadNotes();
-+  bindEvents();
-+  render();
-+}
++  function startEditing(noteId) {
++    const note = state.notes.find(function (item) {
++      return item.id === noteId;
+     });
 +
-+init();
++    if (!note) {
++      return;
++    }
++
++    editingNoteIdInput.value = note.id;
++    titleInput.value = note.title;
++    bodyInput.value = note.body;
++    cancelEditButton.hidden = false;
++    titleInput.focus();
++    setStorageStatus("Editing note. Save to keep your changes.", "success");
++  }
++
++  function toggleArchive(noteId) {
++    state.notes = state.notes.map(function (note) {
++      if (note.id !== noteId) {
++        return note;
++      }
++
++      return {
++        id: note.id,
++        title: note.title,
++        body: note.body,
++        type: "text",
++        archived: !note.archived,
++        createdAt: note.createdAt,
++        updatedAt: new Date().toISOString()
++      };
++    });
++
++    saveNotes();
++    renderNotes();
++    setStorageStatus("Note status updated and saved.", "success");
+   }
+ 
+-  viewButtons.forEach(function (button) {
+-    button.addEventListener("click", function () {
+-      viewButtons.forEach(function (item) {
+-        item.classList.remove("is-active");
+-        item.setAttribute("aria-pressed", "false");
++  function deleteNote(noteId) {
++    state.notes = state.notes.filter(function (note) {
++      return note.id !== noteId;
++    });
++
++    if (editingNoteIdInput.value === noteId) {
++      resetForm();
++    }
++
++    saveNotes();
++    renderNotes();
++    setStorageStatus("Note deleted from this browser.", "success");
++  }
++
++  function handleCardAction(event) {
++    const target = event.target;
++    const card = target.closest(".note-card");
++
++    if (!card) {
++      return;
++    }
++
++    const noteId = card.dataset.noteId;
++
++    if (target.classList.contains("edit-note-button")) {
++      startEditing(noteId);
++    } else if (target.classList.contains("archive-note-button")) {
++      toggleArchive(noteId);
++    } else if (target.classList.contains("delete-note-button")) {
++      deleteNote(noteId);
++    }
++  }
++
++  function setupViewButtons() {
++    viewButtons.forEach(function (button) {
++      button.addEventListener("click", function () {
++        state.currentView = button.dataset.view || "active";
++
++        viewButtons.forEach(function (item) {
++          item.classList.remove("is-active");
++          item.setAttribute("aria-pressed", "false");
++        });
++
++        button.classList.add("is-active");
++        button.setAttribute("aria-pressed", "true");
++        renderNotes();
+       });
+-      button.classList.add("is-active");
+-      button.setAttribute("aria-pressed", "true");
+     });
+-  });
++  }
++
++  state.notes = loadNotes();
++
++  if (state.storageRecovered) {
++    setStorageStatus(
++      "Saved notes could not be read, so NoteKeeper started with an empty list.",
++      "warning"
++    );
++    saveNotes();
++  }
++
++  if (form) {
++    form.addEventListener("submit", handleSubmit);
++  }
++
++  if (cancelEditButton) {
++    cancelEditButton.addEventListener("click", function () {
++      resetForm();
++      setStorageStatus("", "");
++    });
++  }
++
++  if (notesGrid) {
++    notesGrid.addEventListener("click", handleCardAction);
++  }
++
++  if (searchInput) {
++    searchInput.disabled = true;
++  }
++
++  setupViewButtons();
++  renderNotes();
+ })();
 diff --git a/app/README.md b/app/README.md
-new file mode 100644
---- /dev/null
+index cfa2ccd..1aa7384 100644
+--- a/app/README.md
 +++ b/app/README.md
-@@ -0,0 +1,29 @@
-+# NoteKeeper
-+
-+NoteKeeper is a small browser-only notes app that runs directly from the `app/` folder with no build step, server, or dependencies.
-+
-+## Run the app
-+
-+1. Open `index.html` in a modern browser.
-+2. Start creating notes immediately.
-+
+@@ -1,20 +1,30 @@
+ # NoteKeeper
+ 
+-NoteKeeper is a small browser-only notes app scaffold built as a static application. It is designed to run directly from local files without a server, build step, or external dependencies.
++NoteKeeper is a small browser-only notes app built as a static application. It runs directly from local files with no server, build step, or external dependencies.
+ 
+ ## Run locally
+ 
+ 1. Open the `app/` folder.
+ 2. Double-click `index.html`, or open it directly in a modern browser.
+ 
+-## What's included in this scaffold
 +## Current features
-+
+ 
+-- NoteKeeper app name and header
+-- Search input placeholder
+-- Active and archive view controls
+-- Note creation form with title, body, note type, and labels fields
+-- Checklist area placeholder for later implementation
+-- Sample note cards showing text and checklist layouts
+-- Baseline responsive styling for phone, tablet, and desktop widths
 +- Create plain text notes with an optional title and body
 +- Edit existing notes
 +- Delete notes
-+- Archive and restore notes
-+- Persist notes in `localStorage` using the `notekeeper.notes` key
-+- Recover safely if stored note data is missing or malformed
-+- Switch between active notes and archived notes
++- Archive active notes and restore them from the archived view
++- Persist notes in browser `localStorage` under the NoteKeeper-specific key `notekeeper.notes`
++- Recover safely to an empty note list if stored data is missing, invalid, or malformed
++- Open directly from `index.html` with no installation required
++- Responsive layout that remains usable on smaller screens
+ 
+-## Current status
++## Storage behavior
+ 
+-This task delivers the initial static scaffold only. The interface is intentionally non-persistent at this stage. Later tasks will add note creation, editing, deletion, localStorage persistence, search, archive handling, checklist behavior, and pinning.
++Notes are stored locally in the current browser profile using `localStorage`. If you close the tab and reopen `index.html` in the same browser, saved notes should still be available.
+ 
+-For a quick manual check, open `index.html`, review the layout, tab through the controls, resize the browser window, and confirm the app remains usable without horizontal scrolling at smaller widths.
++If stored data cannot be parsed, NoteKeeper resets to an empty list instead of crashing.
 +
 +## Manual verification
 +
-+1. Open `index.html`.
++1. Open `index.html` in a modern browser.
 +2. Create a note with a title and body, then save it.
-+3. Create another note with only a title or only body text and confirm it still renders correctly.
-+4. Edit an existing note and save the changes.
-+5. Archive a note and switch to the archived view to confirm it appears there.
-+6. Restore the archived note back to active notes.
++3. Create another note with only a title or only a body and confirm it renders correctly.
++4. Edit a saved note and confirm the updated content appears on the card.
++5. Archive a note, switch to the archived view, and confirm it appears there.
++6. Restore an archived note and confirm it returns to the active view.
 +7. Delete a note and confirm it is removed.
-+8. Reload the page and confirm the remaining notes are still present.
-+9. Optionally, inspect browser storage and confirm NoteKeeper uses the `notekeeper.notes` localStorage entry.
++8. Reload the page and confirm previously saved notes remain available.
++9. If desired, inspect browser storage tools and confirm notes are stored under `notekeeper.notes`.

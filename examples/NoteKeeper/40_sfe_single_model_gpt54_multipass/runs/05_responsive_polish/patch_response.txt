@@ -1,0 +1,868 @@
+diff --git a/app/index.html b/app/index.html
+index c4e1cad..461ffca 100644
+--- a/app/index.html
++++ b/app/index.html
+@@ -1,126 +1,135 @@
+ <!DOCTYPE html>
+ <html lang="en">
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     <title>NoteKeeper</title>
+     <link rel="stylesheet" href="styles.css" />
+   </head>
+   <body>
+     <a class="skip-link" href="#main-content">Skip to main content</a>
+ 
+     <div class="app-shell">
+-      <header class="app-header">
++      <header class="app-header" role="banner">
+         <div class="brand-block">
+           <p class="eyebrow">Local notes workspace</p>
+           <h1>NoteKeeper</h1>
+           <p class="app-intro">
+             Capture text notes and checklists, search everything, pin important items, and archive the rest in a lightweight browser-only app.
+           </p>
+         </div>
+ 
+-        <section class="toolbar" aria-label="Primary controls">
++        <section class="toolbar" aria-label="Primary controls">
+           <div class="field-group search-group">
+             <label for="search-input">Search notes</label>
+             <input
+               id="search-input"
+               name="search"
+               type="search"
+               placeholder="Search titles, text, labels, or checklist items"
+               autocomplete="off"
++              aria-describedby="search-helper"
+             />
++            <p class="helper-text" id="search-helper">
++              Search updates the visible note list as you type.
++            </p>
+           </div>
+ 
+           <nav class="view-switcher" aria-label="Note views">
+             <button
+               type="button"
+               class="view-button is-active"
+               data-view="active"
+               aria-pressed="true"
+               aria-controls="notes-area"
++              aria-describedby="notes-status"
+             >
+               Active notes
+             </button>
+             <button
+               type="button"
+               class="view-button"
+               data-view="archived"
+               aria-pressed="false"
+               aria-controls="notes-area"
++              aria-describedby="notes-status"
+             >
+               Archived notes
+             </button>
+           </nav>
+         </section>
+       </header>
+ 
+       <main id="main-content" class="app-main">
+         <section class="composer-panel" aria-labelledby="composer-title">
+           <div class="section-heading">
+             <h2 id="composer-title">Create a note</h2>
+             <p id="composer-description">
+               Create a text note or a checklist with multiple editable items, organize it with labels, and keep everything saved locally in this browser.
+             </p>
+           </div>
+ 
+           <form id="note-form" class="note-form" aria-describedby="composer-description">
+             <div class="field-group">
+               <label for="note-title">Title</label>
+               <input id="note-title" name="title" type="text" placeholder="Optional note title" autocomplete="off" />
+             </div>
+ 
+             <div class="field-group">
+               <label for="note-body">Body</label>
+               <textarea
+                 id="note-body"
+                 name="body"
+                 rows="5"
+                 placeholder="Write a quick note, reminder, or checklist summary"
+               ></textarea>
+             </div>
+ 
+             <div class="form-row">
+               <div class="field-group">
+                 <label for="note-labels">Labels</label>
+                 <input
+                   id="note-labels"
+                   name="labels"
+                   type="text"
+                   placeholder="Comma-separated labels"
+                   autocomplete="off"
++                  aria-describedby="labels-helper"
+                 />
++                <p class="helper-text" id="labels-helper">Separate labels with commas, for example: work, errands, ideas.</p>
+               </div>
+ 
+               <div class="field-group">
+                 <label for="note-type">Note type</label>
+                 <select id="note-type" name="type" aria-controls="checklist-builder">
+                   <option value="text">Text note</option>
+                   <option value="checklist">Checklist note</option>
+                 </select>
+               </div>
+             </div>
+ 
+             <fieldset
+               class="checklist-builder"
+               id="checklist-builder"
+               hidden
+               aria-describedby="checklist-helper-text"
+             >
+               <legend>Checklist items</legend>
+               <p class="helper-text" id="checklist-helper-text">
+                 Add, check, uncheck, remove, and edit checklist items before saving your note.
+               </p>
+ 
+-              <div class="checklist-items" id="checklist-items" aria-live="polite"></div>
++              <div class="checklist-items" id="checklist-items" role="list" aria-live="polite"></div>
+ 
+               <button type="button" id="add-checklist-item" class="secondary-button" aria-label="Add a checklist item">
+                 Add checklist item
+               </button>
+             </fieldset>
+ 
+             <div class="form-actions">
+               <button type="submit" class="primary-button">Save note</button>
+-              <button type="reset" class="secondary-button">Clear form</button>
++              <button type="reset" class="secondary-button">Clear form</button>
+             </div>
+           </form>
+         </section>
+ 
+         <section class="notes-panel" aria-labelledby="notes-title" aria-describedby="notes-helper notes-status">
+           <div class="section-heading">
+             <h2 id="notes-title">Notes</h2>
+             <p id="notes-status" role="status">Showing active notes saved in this browser.</p>
+             <p class="helper-text" id="notes-helper">
+               Use search to filter by title, body text, labels, or checklist items. Pin important active notes to keep them visually highlighted and sorted first, and archive notes to move them out of the active view until you restore them from Archived notes.
+             </p>
+           </div>
+ 
+-          <div id="notes-area" class="notes-grid" aria-live="polite" aria-label="Saved notes list"></div>
++          <div id="notes-area" class="notes-grid" aria-live="polite" aria-label="Saved notes list" tabindex="-1"></div>
+         </section>
+       </main>
+     </div>
+ 
+     <script src="app.js"></script>
+   </body>
+ </html>
+diff --git a/app/app.js b/app/app.js
+index 4e266fc..51989a3 100644
+--- a/app/app.js
++++ b/app/app.js
+@@ -1,680 +1,782 @@
+ (function () {
+   const STORAGE_KEY = "notekeeper.notes";
+ 
+   const noteForm = document.querySelector("#note-form");
+   const noteTitleField = document.querySelector("#note-title");
+   const noteBodyField = document.querySelector("#note-body");
+   const noteLabelsField = document.querySelector("#note-labels");
+   const noteTypeField = document.querySelector("#note-type");
+   const composerDescription = document.querySelector("#composer-description");
+   const checklistBuilder = document.querySelector("#checklist-builder");
+   const checklistItems = document.querySelector("#checklist-items");
+   const addChecklistItemButton = document.querySelector("#add-checklist-item");
+   const viewButtons = document.querySelectorAll(".view-button");
+   const searchInput = document.querySelector("#search-input");
+   const noteTypeLabel = document.querySelector('label[for="note-type"]');
+   const composerTitle = document.querySelector("#composer-title");
+   const notesStatus = document.querySelector("#notes-status");
+   const notesArea = document.querySelector("#notes-area");
+   const submitButton = noteForm ? noteForm.querySelector('button[type="submit"]') : null;
+ 
+   const state = {
+     activeView: "active",
+     editingNoteId: null,
+     notes: loadNotes()
+   };
+ 
++  function setStatus(message) {
++    if (notesStatus) {
++      notesStatus.textContent = message;
++    }
++  }
++
+   function updateChecklistVisibility() {
+-    if (!noteTypeField || !checklistBuilder) {
++    if (!noteTypeField || !checklistBuilder || !noteBodyField) {
+       return;
+     }
+ 
+     const isChecklist = noteTypeField.value === "checklist";
+     checklistBuilder.hidden = !isChecklist;
+     noteBodyField.placeholder = isChecklist
+       ? "Optional checklist summary or context"
+       : "Write a quick note, reminder, or checklist summary";
+     noteBodyField.setAttribute("aria-describedby", isChecklist ? "composer-description checklist-helper-text" : "composer-description");
+   }
+ 
+   function createChecklistItemId() {
+     return "item-" + Date.now() + "-" + Math.random().toString(16).slice(2, 8);
+   }
+ 
+   function createNoteId() {
+     return "note-" + Date.now() + "-" + Math.random().toString(16).slice(2, 10);
+   }
+ 
+-  function createChecklistRow(item) {
++  function getChecklistPositionLabel(row) {
++    if (!row || !row.parentElement) {
++      return "Checklist item";
++    }
++
++    const rows = Array.from(row.parentElement.querySelectorAll(".checklist-item-row"));
++    const position = rows.indexOf(row) + 1;
++    return "Checklist item " + position;
++  }
++
++  function refreshChecklistAccessibility() {
++    if (!checklistItems) {
++      return;
++    }
++
++    const rows = Array.from(checklistItems.querySelectorAll(".checklist-item-row"));
++    rows.forEach(function (row, index) {
++      row.setAttribute("role", "listitem");
++
++      const checkbox = row.querySelector(".checklist-item-checkbox");
++      const textInput = row.querySelector('.checklist-item-text');
++      const removeButton = row.querySelector(".checklist-item-remove");
++      const positionLabel = "Checklist item " + (index + 1);
++
++      if (checkbox) {
++        checkbox.setAttribute("aria-label", "Mark " + positionLabel.toLowerCase() + " complete");
++      }
++
++      if (textInput) {
++        textInput.setAttribute("aria-label", positionLabel + " text");
++      }
++
++      if (removeButton) {
++        removeButton.setAttribute("aria-label", "Remove " + positionLabel.toLowerCase());
++      }
++    });
++  }
++
++  function createChecklistRow(item, options) {
++    const settings = options || {};
+     const row = document.createElement("div");
+     row.className = "checklist-item-row";
+     row.dataset.checklistItemId =
+       item && typeof item.id === "string" && item.id.trim() !== ""
+         ? item.id
+         : createChecklistItemId();
+ 
+     const checkbox = document.createElement("input");
+     checkbox.type = "checkbox";
+     checkbox.className = "checklist-item-checkbox";
+-    checkbox.setAttribute("aria-label", "Mark checklist item complete");
+     checkbox.checked = Boolean(item && item.checked);
+ 
+     const textInput = document.createElement("input");
+     textInput.type = "text";
++    textInput.className = "checklist-item-text";
+     textInput.autocomplete = "off";
+     textInput.placeholder = "Checklist item text";
+-    textInput.setAttribute("aria-label", "Checklist item text");
+     textInput.value = item && typeof item.text === "string" ? item.text : "";
+ 
+     const removeButton = document.createElement("button");
+     removeButton.type = "button";
+-    removeButton.className = "secondary-button";
+-    removeButton.setAttribute("aria-label", "Remove checklist item");
++    removeButton.className = "secondary-button checklist-item-remove";
+     removeButton.textContent = "Remove";
+     removeButton.addEventListener("click", function () {
+       if (!checklistItems) {
+         return;
+       }
+ 
+       if (checklistItems.children.length === 1) {
+         checkbox.checked = false;
+         textInput.value = "";
+         textInput.focus();
++        setStatus("Checklist item cleared.");
+         return;
+       }
+ 
+       checklistItems.removeChild(row);
++      refreshChecklistAccessibility();
++      setStatus(getChecklistPositionLabel(row) + " removed.");
+     });
+ 
+     row.appendChild(checkbox);
+     row.appendChild(textInput);
+     row.appendChild(removeButton);
++    refreshChecklistAccessibility();
++
++    if (settings.focusTextInput) {
++      window.setTimeout(function () {
++        textInput.focus();
++      }, 0);
++    }
+ 
+     return row;
+   }
+ 
+   function ensureChecklistRow() {
+     if (!checklistItems) {
+       return;
+     }
+ 
+     if (!checklistItems.children.length) {
+       checklistItems.appendChild(createChecklistRow());
++      refreshChecklistAccessibility();
+     }
+   }
+ 
+   function renderChecklistBuilder(items) {
+     if (!checklistItems) {
+       return;
+@@ -87,8 +189,10 @@
+     if (Array.isArray(items) && items.length) {
+       items.forEach(function (item) {
+         checklistItems.appendChild(createChecklistRow(item));
+       });
+     } else {
+       checklistItems.appendChild(createChecklistRow());
+     }
++
++    refreshChecklistAccessibility();
+   }
+ 
+   function normalizeLabels(rawLabels) {
+     if (!Array.isArray(rawLabels)) {
+       return [];
+@@ -227,6 +331,14 @@
+     renderChecklistBuilder();
+   }
+ 
+   function updateComposerMode() {
+     if (composerTitle) {
+       composerTitle.textContent = state.editingNoteId ? "Edit note" : "Create a note";
+@@ -243,6 +355,16 @@
+     if (submitButton) {
+       submitButton.textContent = state.editingNoteId ? "Update note" : "Save note";
+     }
++
++    if (noteForm) {
++      noteForm.setAttribute("aria-label", state.editingNoteId ? "Edit existing note" : "Create a new note");
++    }
++  }
++
++  function focusNotesRegion() {
++    if (notesArea) {
++      notesArea.focus();
++    }
+   }
+ 
+   function resetForm() {
+     if (!noteForm) {
+       return;
+@@ -339,9 +461,19 @@
+   function renderEmptyState() {
+     const emptyState = document.createElement("article");
+     emptyState.className = "empty-state";
++    emptyState.setAttribute("role", "status");
+ 
+     const hasSearch = getCurrentSearchQuery() !== "";
+     const headline = document.createElement("strong");
+     const description = document.createElement("p");
+ 
+     if (hasSearch) {
+@@ -365,11 +497,18 @@
+     notesArea.appendChild(emptyState);
+   }
+ 
+-  function createActionButton(label, className, handler) {
++  function createActionButton(label, className, handler, accessibleLabel) {
+     const button = document.createElement("button");
+     button.type = "button";
+     button.className = className;
+     button.textContent = label;
++    if (accessibleLabel) {
++      button.setAttribute("aria-label", accessibleLabel);
++      button.title = accessibleLabel;
++    }
+     button.addEventListener("click", handler);
+     return button;
+   }
+ 
+   function renderNotes() {
+@@ -381,22 +520,25 @@
+     const hasSearch = getCurrentSearchQuery() !== "";
+ 
+     if (hasSearch) {
+-      notesStatus.textContent =
++      setStatus(
+         "Showing " +
+         visibleNotes.length +
+         " matching " +
+         (visibleNotes.length === 1 ? "note" : "notes") +
+         " in " +
+         (state.activeView === "archived" ? "archived notes." : "active notes.") +
+-        " view.";
++        " view."
++      );
+     } else {
+-      notesStatus.textContent =
++      setStatus(
+         state.activeView === "archived"
+           ? "Showing archived notes saved in this browser."
+-          : "Showing active notes saved in this browser, with pinned notes first.";
++          : "Showing active notes saved in this browser, with pinned notes first."
++      );
+     }
+ 
+     notesArea.innerHTML = "";
++    notesArea.setAttribute("data-view", state.activeView);
+ 
+     if (!visibleNotes.length) {
+       renderEmptyState();
+       return;
+@@ -408,12 +550,16 @@
+       card.className = "note-card";
+       card.dataset.noteType = note.type;
+       card.dataset.noteArchived = String(Boolean(note.archived));
+       card.dataset.notePinned = String(Boolean(note.pinned && !note.archived));
+       card.setAttribute("aria-label", noteTitle);
++      card.setAttribute("tabindex", "-1");
+ 
+       const header = document.createElement("div");
+       header.className = "note-card-header";
+ 
+       const headingGroup = document.createElement("div");
++      const cardHeadingId = "note-heading-" + note.id;
++      const cardMetaId = "note-meta-" + note.id;
+ 
+       const title = document.createElement("h3");
++      title.id = cardHeadingId;
+       title.textContent = noteTitle;
+       headingGroup.appendChild(title);
+ 
+       const meta = document.createElement("p");
+       meta.className = "note-meta";
++      meta.id = cardMetaId;
+       meta.textContent = formatDate(note.updatedAt);
+       headingGroup.appendChild(meta);
+ 
+       const badge = document.createElement("p");
+       badge.className = "note-badge";
+@@ -435,35 +581,45 @@
+       const actions = document.createElement("div");
+       actions.className = "note-actions";
++      actions.setAttribute("role", "group");
++      actions.setAttribute("aria-label", "Actions for " + noteTitle);
+ 
+-      const editButton = createActionButton("Edit", "secondary-button", function () {
+-        startEditing(note.id);
+-      });
+-      editButton.setAttribute("aria-label", "Edit note " + noteTitle);
++      const editButton = createActionButton(
++        "Edit",
++        "secondary-button",
++        function () {
++          startEditing(note.id);
++        },
++        "Edit note " + noteTitle
++      );
+ 
+       actions.appendChild(editButton);
+ 
+       if (!note.archived) {
+-        const pinButton = createActionButton(note.pinned ? "Unpin" : "Pin", 
++        const pinButton = createActionButton(
++          note.pinned ? "Unpin" : "Pin",
+           "secondary-button is-pin-toggle",
+           function () {
+             togglePinned(note.id);
+-          }
++          },
++          note.pinned ? "Unpin note " + noteTitle : "Pin note " + noteTitle
+         );
+-        pinButton.setAttribute(
+-          "aria-label",
+-          note.pinned ? "Unpin note " + noteTitle : "Pin note " + noteTitle
+-        );
+         pinButton.setAttribute("aria-pressed", String(Boolean(note.pinned)));
+         actions.appendChild(pinButton);
+       }
+ 
+       const archiveButton = createActionButton(
+         note.archived ? "Restore" : "Archive",
+         "secondary-button is-archive",
+         function () {
+           if (note.archived) {
+             restoreNote(note.id);
+           } else {
+             archiveNote(note.id);
+           }
+-        }
++        },
++        (note.archived ? "Restore note " : "Archive note ") + noteTitle
+       );
+-      archiveButton.setAttribute("aria-label", (note.archived ? "Restore note " : "Archive note ") + noteTitle);
+ 
+-      const deleteButton = createActionButton("Delete", "secondary-button is-danger", function () {
+-        deleteNote(note.id);
+-      });
++      const deleteButton = createActionButton(
++        "Delete",
++        "secondary-button is-danger",
++        function () {
++          deleteNote(note.id);
++        },
++        "Delete note " + noteTitle
++      );
+ 
+       actions.appendChild(archiveButton);
+       actions.appendChild(deleteButton);
+       header.appendChild(actions);
+@@ -480,6 +636,7 @@
+       if (note.type === "checklist") {
+         const checklistPreview = document.createElement("ul");
+         checklistPreview.className = "checklist-preview";
++        checklistPreview.setAttribute("aria-label", "Checklist preview");
+ 
+         note.checklistItems.forEach(function (item) {
+           const itemElement = document.createElement("li");
+           itemElement.dataset.checked = String(Boolean(item.checked));
+@@ -499,6 +656,7 @@
+       if (note.labels.length) {
+         const labelList = document.createElement("ul");
+         labelList.className = "label-list";
++        labelList.setAttribute("aria-label", "Labels");
+ 
+         note.labels.forEach(function (label) {
+           const labelItem = document.createElement("li");
+           labelItem.textContent = label;
+@@ -523,6 +681,9 @@
+     if (!note || !noteForm) {
+       return;
+     }
+ 
+     state.editingNoteId = note.id;
++    if (noteForm) {
++      noteForm.scrollIntoView({ block: "start", behavior: "smooth" });
++    }
+ 
+     if (noteTitleField) {
+       noteTitleField.value = note.title;
+@@ -547,11 +708,11 @@
+       noteTitleField.focus();
+     }
+ 
+-    if (notesStatus) {
+-      notesStatus.textContent = "Editing note. Update the fields and save your changes.";
+-    }
++    setStatus("Editing " + (note.title || "untitled note") + ". Update the fields and save your changes.");
+ 
+-    window.scrollTo({ top: 0, behavior: "smooth" });
++    if (submitButton) {
++      submitButton.setAttribute("aria-label", "Save changes to " + (note.title || "untitled note"));
++    }
+   }
+ 
+   function upsertNote(noteData) {
+     const timestamp = new Date().toISOString();
+@@ -576,7 +737,7 @@
+           updatedAt: timestamp
+         };
+       });
+ 
+-      notesStatus.textContent = "Note updated and saved to this browser.";
++      setStatus("Note updated and saved to this browser.");
+     } else {
+       state.notes.unshift({
+         id: createNoteId(),
+@@ -591,7 +752,7 @@
+         createdAt: timestamp,
+         updatedAt: timestamp
+       });
+ 
+-      notesStatus.textContent = "Note saved to this browser.";
++      setStatus("Note saved to this browser.");
+     }
+   }
+ 
+   function persistAndRender(successMessage, failureMessage) {
+     const didSave = saveNotes();
+     renderNotes();
+-    notesStatus.textContent = didSave ? successMessage : failureMessage;
++    setStatus(didSave ? successMessage : failureMessage);
+   }
+ 
+   function togglePinned(noteId) {
+     let changedNote = null;
+@@ -647,7 +808,6 @@
+     updateComposerMode();
+   }
+ 
+   function findEditingNote() {
+     return (
+       state.notes.find(function (note) {
+@@ -673,14 +833,15 @@
+     }
+ 
+     if (!saveNotes()) {
+-      notesStatus.textContent = "Note deleted in memory, but local storage was not available.";
++      setStatus("Note deleted in memory, but local storage was not available.");
+       renderNotes();
++      focusNotesRegion();
+       return;
+     }
+ 
+     renderNotes();
+-    notesStatus.textContent = "Note deleted.";
++    setStatus("Note deleted.");
++    focusNotesRegion();
+   }
+ 
+   function setActiveView(viewName) {
+     state.activeView = viewName;
+@@ -691,6 +852,8 @@
+       button.setAttribute("aria-pressed", String(isActive));
+     });
+ 
+     renderNotes();
++    setStatus(viewName === "archived" ? "Archived notes view selected." : "Active notes view selected.");
++    focusNotesRegion();
+   }
+ 
+   if (noteTypeField && checklistBuilder) {
+     noteTypeField.addEventListener("change", updateChecklistVisibility);
+@@ -699,10 +862,9 @@
+ 
+   if (addChecklistItemButton && checklistItems) {
+     addChecklistItemButton.addEventListener("click", function () {
+-      const row = createChecklistRow();
++      const row = createChecklistRow(null, { focusTextInput: true });
+       checklistItems.appendChild(row);
+-      const textInput = row.querySelector('input[type="text"]');
+-      if (textInput) {
+-        textInput.focus();
+-      }
++      refreshChecklistAccessibility();
++      setStatus(getChecklistPositionLabel(row) + " added.");
+     });
+   }
+ 
+@@ -722,20 +884,20 @@
+       const didSave = saveNotes();
+ 
+       if (!didSave) {
+-        notesStatus.textContent = wasEditing
++        setStatus(
++          wasEditing
+           ? "Note updated in memory, but saving to local storage was not available."
+-          : "Note saved in memory, but local storage was not available.";
++          : "Note saved in memory, but local storage was not available."
++        );
+       } else {
+-        notesStatus.textContent = wasEditing ? "Note updated and saved to this browser." : "Note saved to this browser.";
++        setStatus(wasEditing ? "Note updated and saved to this browser." : "Note saved to this browser.");
+       }
+       renderNotes();
+       resetForm();
+     });
+ 
+     noteForm.addEventListener("reset", function () {
+       window.setTimeout(function () {
+         resetChecklistBuilder();
+         if (noteBodyField) {
+           noteBodyField.placeholder = "Write a quick note, reminder, or checklist summary";
+           noteBodyField.setAttribute("aria-describedby", "composer-description");
+@@ -745,9 +907,10 @@
+         }
+         updateChecklistVisibility();
+         state.editingNoteId = null;
+         updateComposerMode();
+-        notesStatus.textContent =
+-          "Form cleared. Create a new note or choose an existing note to edit.";
++        if (submitButton) {
++          submitButton.removeAttribute("aria-label");
++        }
++        setStatus("Form cleared. Create a new note or choose an existing note to edit.");
+       }, 0);
+     });
+   }
+@@ -760,7 +923,6 @@
+   }
+ 
+   updateComposerMode();
+   renderNotes();
+   setActiveView("active");
+ })();
+diff --git a/app/styles.css b/app/styles.css
+index 938ca0a..9906821 100644
+--- a/app/styles.css
++++ b/app/styles.css
+@@ -1,3 +1,4 @@
+ :root {
+   color-scheme: light;
+   --page-bg: #f4f1ea;
+@@ -54,6 +55,7 @@ button:focus-visible,
+ input:focus-visible,
+ textarea:focus-visible,
+ select:focus-visible {
++  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.9);
+   outline: 3px solid var(--focus-ring);
+   outline-offset: 2px;
+ }
+@@ -112,6 +114,7 @@ input,
+ textarea,
+ select {
+   width: 100%;
++  max-width: 100%;
+   padding: 0.85rem 0.95rem;
+   border: 1px solid var(--panel-border);
+   background: #ffffff;
+@@ -205,6 +208,7 @@ textarea {
+   border-radius: var(--radius-lg);
+   box-shadow: var(--panel-shadow);
+   padding: 1.25rem;
++  overflow: hidden;
+   min-width: 0;
+ }
+ 
+@@ -257,6 +261,7 @@ textarea {
+   gap: 0.75rem;
+   align-items: center;
+   min-width: 0;
++  grid-template-columns: auto minmax(0, 1fr) auto;
+ }
+ 
+ .checklist-item-row input[type="checkbox"] {
+@@ -321,6 +326,7 @@ textarea {
+   border-radius: var(--radius-md);
+   background: linear-gradient(180deg, #fffefb 0%, #faf6ef 100%);
+   min-width: 0;
++  align-content: start;
+   overflow: hidden;
+ }
+ 
+@@ -384,6 +390,7 @@ textarea {
+   gap: 0.5rem;
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+   width: 100%;
++  align-items: stretch;
+ }
+ 
+ .note-actions button {
+@@ -448,7 +455,12 @@ textarea {
+   .checklist-item-row {
+     grid-template-columns: minmax(0, 1fr);
+   }
+ 
++  .checklist-item-row .secondary-button {
++    width: 100%;
++  }
++
+   .checklist-item-row input[type="checkbox"] {
+     width: 1.25rem;
+     height: 1.25rem;
+   }
+@@ -463,6 +475,10 @@ textarea {
+ 
+ @media (min-width: 700px) {
+   .app-header {
+     grid-template-columns: 1.1fr 0.9fr;
+     align-items: end;
+   }
++
++  .toolbar {
++    align-content: end;
++  }
+ 
+   .form-row {
+     grid-template-columns: 1.4fr 0.8fr;
+diff --git a/app/README.md b/app/README.md
+index b13a95c..661ebf8 100644
+--- a/app/README.md
++++ b/app/README.md
+@@ -1,50 +1,57 @@
+ # NoteKeeper
+ 
+ NoteKeeper is a small browser-only notes app for quick local note capture. It runs directly from the filesystem with no server, build step, package manager, or external dependency.
+ 
+ ## Run the app
+ 
+ 1. Open the `app/` folder in your file browser.
+ 2. Double-click `index.html`, or open `index.html` directly in a modern browser.
+ 3. Use the note form to create text notes or checklist notes.
+ 4. Use search, pinning, archiving, restoring, editing, and deleting directly in the page.
+ 5. Reload the tab to verify that saved notes remain available in this browser.
+ 
+ No installation, package manager, or local server is required.
+ 
+ ## Features
+ 
+ - Create text notes and checklist notes with an optional title, body, and comma-separated labels.
+ - Edit existing notes and save changes in place.
+ - Delete notes immediately.
+ - Pin and unpin active notes, with pinned notes shown before other active notes.
+ - Archive active notes and restore archived notes from the archived view.
+ - Search notes by title, body, labels, and checklist item text using case-insensitive substring matching.
+ - Add multiple checklist items, edit item text, toggle checked state, and remove items before saving.
+ - View clear empty states when there are no visible active notes, archived notes, or search matches.
+-- Use the app with keyboard-accessible controls, visible focus styles, and touch-friendly actions.
+-- Use the app responsively at phone, tablet, and desktop widths without horizontal scrolling.
++- Use keyboard-accessible controls with semantic buttons, visible focus styles, labeled form fields, and live status updates.
++- Use the app responsively at phone, tablet, and desktop widths without horizontal scrolling.
+ 
+ ## Storage notes
+ 
+ NoteKeeper stores data locally in the current browser under the `notekeeper.notes` localStorage key.
+ 
+ Saved note data includes:
+ 
+ - title
+ - body
+ - note type
+ - labels
+ - checklist items and checked states
+ - pinned state
+ - archived state
+ - created and updated timestamps
+ 
+ If stored data is missing, blank, malformed, or not an array, the app safely falls back to an empty note list instead of crashing.
++
++Because the app uses browser localStorage, saved notes stay in the same browser profile on the same device. Moving the files to another folder or opening them in a different browser will not automatically move saved notes with them.
++
++## Accessibility and responsive behavior
++
++- A skip link is available to jump directly to the main content.
++- Search, note fields, and checklist controls have visible labels or accessible names.
++- Action buttons on note cards are keyboard reachable and use descriptive names.
++- Status text updates as views change, notes are edited, and checklist rows are added or removed.
++- The layout is designed for small phones, tablet widths, and wider desktop screens without hover-only actions.
+ 
+ ## Manual review steps
+ 
+ 1. Open `index.html` and confirm the page title and visible app name are NoteKeeper.
+ 2. Create a text note with a title and body, save it, and confirm a note card appears.
+ 3. Create another text note with only a title or only body text and confirm empty fields do not break rendering.
+@@ -61,4 +68,8 @@ If stored data is missing, blank, malformed, or not an array, the app safely fa
+ 16. Resize the browser to about 360px wide and confirm the page remains usable without horizontal scrolling.
+ 17. Resize to around 768px and confirm the layout expands cleanly for tablet width.
+ 18. Resize to a wider desktop viewport and confirm notes appear in a simple multi-column card grid.
+ 19. Use only the keyboard to tab through search, view buttons, form fields, save actions, and note card actions, and confirm visible focus styles appear throughout.
++20. Use the skip link at the top of the page and confirm it moves focus to the main content area.
++21. Switch between Active notes and Archived notes and confirm the status message updates clearly.
++22. Add and remove checklist rows using only the keyboard and confirm focus remains usable after each action.
++23. Search for notes and confirm the empty-state messaging stays understandable when no results match.

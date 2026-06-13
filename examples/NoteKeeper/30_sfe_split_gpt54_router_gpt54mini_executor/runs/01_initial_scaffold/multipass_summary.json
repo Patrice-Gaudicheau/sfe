@@ -1,71 +1,78 @@
 {
   "all_promoted_files": [
     "app/index.html",
-    "app/styles.css"
+    "app/styles.css",
+    "app/app.js",
+    "app/README.md"
   ],
   "created_files_by_pass": {
-    "app-shell-html": [
-      "app/index.html"
-    ],
-    "baseline-styles": [
-      "app/styles.css"
+    "html-app-shell": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
     ]
   },
   "enabled": true,
-  "failed_pass_id": "scaffold-behavior-js",
-  "failed_pass_issue": {
-    "category": "multi_pass_patch_scope",
-    "diagnostics": null,
-    "pass_id": "scaffold-behavior-js",
-    "path": "app/index.html",
-    "reason": "path_outside_batch_allowed_files"
-  },
+  "failed_pass_id": null,
+  "failed_pass_issue": null,
   "pass_results": [
     {
       "allowed_files": [
         "app/index.html"
       ],
       "created_files": [
-        "app/index.html"
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
       ],
       "fallback_diagnostics": null,
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
       "issue": null,
-      "pass_id": "app-shell-html",
+      "pass_id": "html-app-shell",
       "patch_paths": [
-        "app/index.html"
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
       ],
       "promoted_files": [
-        "app/index.html"
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
       ],
       "provider_diagnostics": null,
       "status": "completed",
-      "title": "Create semantic app shell HTML"
+      "title": "Create NoteKeeper app shell HTML",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/styles.css",
+        "multi_pass_path_outside_allowed_files:app/app.js",
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
     },
     {
       "allowed_files": [
         "app/styles.css"
       ],
-      "created_files": [
-        "app/styles.css"
-      ],
+      "created_files": [],
       "fallback_diagnostics": null,
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
       "issue": null,
       "pass_id": "baseline-styles",
-      "patch_paths": [
-        "app/styles.css"
-      ],
-      "promoted_files": [
-        "app/styles.css"
-      ],
+      "patch_paths": [],
+      "promoted_files": [],
       "provider_diagnostics": null,
-      "status": "completed",
-      "title": "Add baseline responsive styling"
+      "status": "skipped",
+      "title": "Add responsive baseline styles",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/styles.css"
+      ]
     },
     {
       "allowed_files": [
@@ -76,32 +83,49 @@
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
-      "issue": {
-        "category": "multi_pass_patch_scope",
-        "diagnostics": null,
-        "pass_id": "scaffold-behavior-js",
-        "path": "app/index.html",
-        "reason": "path_outside_batch_allowed_files"
-      },
-      "pass_id": "scaffold-behavior-js",
+      "issue": null,
+      "pass_id": "js-scaffold-init",
       "patch_paths": [],
       "promoted_files": [],
       "provider_diagnostics": null,
-      "status": "failed",
-      "title": "Wire minimal scaffold behavior"
+      "status": "skipped",
+      "title": "Add minimal JavaScript scaffold behavior",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/app.js"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/README.md"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "readme-scaffold",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "skipped",
+      "title": "Document scaffold usage and scope",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+      ]
     }
   ],
-  "passes_completed": 2,
+  "passes_completed": 1,
   "passes_total": 4,
-  "project_summary": "Build the initial static NoteKeeper browser-only app scaffold in app/ with a direct-open HTML shell, baseline responsive styling, a note creation form, active/archive view controls, placeholder notes area, and README documentation, limited to the four required runtime files.",
+  "project_summary": "Build the initial static NoteKeeper browser app scaffold in app/ with a direct-open HTML shell, original baseline styling, placeholder note creation and archive navigation UI, minimal JavaScript initialization for future enhancement, and a README describing local static use and current scaffold scope.",
   "promoted_files_by_pass": {
-    "app-shell-html": [
-      "app/index.html"
-    ],
-    "baseline-styles": [
-      "app/styles.css"
+    "html-app-shell": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
     ]
   },
-  "safe_resume_possible": true,
-  "status": "failed"
+  "safe_resume_possible": false,
+  "status": "completed"
 }

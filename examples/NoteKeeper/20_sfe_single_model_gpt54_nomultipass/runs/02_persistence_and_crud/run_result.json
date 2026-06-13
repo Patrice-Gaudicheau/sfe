@@ -2,9 +2,14 @@
   "run": {
     "cached_input_tokens": 0,
     "currency": null,
-    "generated_or_modified_files": [],
-    "input_tokens": 4972,
-    "latency_or_wall_clock_duration": 24639,
+    "generated_or_modified_files": [
+      "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/index.html",
+      "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/styles.css",
+      "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/app.js",
+      "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/README.md"
+    ],
+    "input_tokens": 9164,
+    "latency_or_wall_clock_duration": 36797,
     "manual_verification_notes": null,
     "models": {
       "discovery": "gpt-5.4",
@@ -14,26 +19,25 @@
       "router": "gpt-5.4"
     },
     "multipass_forced_off": true,
-    "output_tokens": 5428,
+    "output_tokens": 8196,
     "provider": "openai-api",
     "provider_call_count": 3,
-    "sfe_issue": {
-      "category": "physical_application_failure",
-      "diagnostics": null,
-      "hunk_accounting": null,
-      "path": "app/index.html",
-      "reason": "target_already_exists"
-    },
-    "sfe_status": "failed",
-    "success": false,
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
     "task_id": "02_persistence_and_crud",
     "task_title": "LocalStorage persistence and CRUD",
     "total_estimated_cost": null,
     "validation_error": null,
-    "wall_clock_duration_ms": 28694
+    "wall_clock_duration_ms": 36879
   },
   "sfe": {
-    "changed_files": [],
+    "changed_files": [
+      "app/README.md",
+      "app/app.js",
+      "app/index.html",
+      "app/styles.css"
+    ],
     "execution_mode_decision": {
       "confidence": 0.99,
       "execution_mode": "workspace_write",
@@ -41,37 +45,62 @@
       "model": "gpt-5.4",
       "provider_calls_made": 1,
       "provider_name": "openai",
-      "reason": "The task requires implementing app functionality by modifying specific files in the workspace under app/, including persistence and CRUD behavior in the browser app."
+      "reason": "The task requires implementing app functionality by editing specific files in the workspace, including persistence and CRUD logic in the browser app."
     },
     "executor_provider": "openai",
     "git_auto_init": false,
     "git_initial_commit_hash": null,
-    "issue": {
-      "category": "physical_application_failure",
-      "diagnostics": null,
-      "hunk_accounting": null,
-      "path": "app/index.html",
-      "reason": "target_already_exists"
-    },
+    "issue": null,
     "multi_pass_summary": null,
-    "patch_applied": false,
-    "patch_generated": false,
-    "patch_summary": null,
-    "promoted_files": [],
-    "promotion_applied": false,
-    "promotion_status": "skipped",
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 7,
+      "lines_added": 479,
+      "lines_removed": 174,
+      "modified_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
     "selected_source_refs": [
       "brief/prompt.md",
       "brief/acceptance_criteria.md",
-      "brief/task_sequence.md"
+      "brief/task_sequence.md",
+      "tasks/02_persistence_and_crud.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
     ],
-    "status": "failed",
+    "status": "completed",
     "warnings": [
       "no_router_review_run",
       "no_worktree_review_run",
       "no_tests_run",
       "no_lint_run",
-      "diff_not_inspected"
+      "diff_not_inspected",
+      "large_change"
     ]
   }
 }

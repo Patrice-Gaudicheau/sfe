@@ -1,117 +1,9 @@
-diff --git a/app/app.js b/app/app.js
---- a/app/app.js
-+++ b/app/app.js
-@@ -0,0 +1,147 @@
-+document.addEventListener('DOMContentLoaded', () => {
-+  const form = document.getElementById('note-form');
-+  const titleInput = document.getElementById('note-title');
-+  const bodyInput = document.getElementById('note-body');
-+  const labelsInput = document.getElementById('note-labels');
-+  const noteTypeInputs = Array.from(document.querySelectorAll('input[name="note-type"]'));
-+  const checklistEditor = document.getElementById('checklist-editor');
-+  const checklistList = document.getElementById('checklist-items');
-+  const addChecklistItemButton = document.getElementById('add-checklist-item');
-+  const notesStatus = document.getElementById('notes-status');
-+  const notesGrid = document.getElementById('notes-grid');
-+  const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
-+
-+  let currentView = 'active';
-+
-+  function updateChecklistVisibility() {
-+    const selectedType = noteTypeInputs.find((input) => input.checked)?.value || 'text';
-+    checklistEditor.hidden = selectedType !== 'checklist';
-+  }
-+
-+  function renderStatus() {
-+    notesStatus.textContent =
-+      currentView === 'active'
-+        ? 'Active notes are shown below. Checklist controls appear when checklist is selected.'
-+        : 'Archive view is active. Archived notes will appear here.';
-+  }
-+
-+  function renderNotes() {
-+    notesGrid.innerHTML = `
-+      <article class="note-card note-card--placeholder">
-+        <h3>Notes will appear here</h3>
-+        <p>This initial scaffold reserves space for future note cards, search, and actions.</p>
-+      </article>
-+    `;
-+  }
-+
-+  function renderChecklistItems() {
-+    checklistList.innerHTML = `
-+      <li class="checklist-item">
-+        <label>
-+          <input type="checkbox" />
-+          <span class="sr-only">Checklist item complete</span>
-+        </label>
-+        <input type="text" placeholder="Checklist item" />
-+        <button type="button">Remove</button>
-+      </li>
-+    `;
-+  }
-+
-+  function addChecklistItem() {
-+    const item = document.createElement('li');
-+    item.className = 'checklist-item';
-+    item.innerHTML = `
-+      <label>
-+        <input type="checkbox" />
-+        <span class="sr-only">Checklist item complete</span>
-+      </label>
-+      <input type="text" placeholder="Checklist item" />
-+      <button type="button">Remove</button>
-+    `;
-+    checklistList.appendChild(item);
-+  }
-+
-+  function setView(view) {
-+    currentView = view;
-+    viewButtons.forEach((button) => {
-+      const active = button.dataset.view === view;
-+      button.classList.toggle('is-active', active);
-+      button.setAttribute('aria-pressed', String(active));
-+    });
-+    renderStatus();
-+  }
-+
-+  noteTypeInputs.forEach((input) => {
-+    input.addEventListener('change', updateChecklistVisibility);
-+  });
-+
-+  viewButtons.forEach((button) => {
-+    button.addEventListener('click', () => setView(button.dataset.view));
-+  });
-+
-+  addChecklistItemButton.addEventListener('click', addChecklistItem);
-+
-+  checklistList.addEventListener('click', (event) => {
-+    const removeButton = event.target.closest('button');
-+    if (!removeButton) return;
-+    const item = removeButton.closest('.checklist-item');
-+    if (item && checklistList.children.length > 1) {
-+      item.remove();
-+    }
-+  });
-+
-+  form.addEventListener('submit', (event) => {
-+    event.preventDefault();
-+    form.reset();
-+    noteTypeInputs[0].checked = true;
-+    updateChecklistVisibility();
-+    renderChecklistItems();
-+  });
-+
-+  updateChecklistVisibility();
-+  renderChecklistItems();
-+  renderNotes();
-+  renderStatus();
-+  setView('active');
-+});
 diff --git a/app/index.html b/app/index.html
---- a/app/index.html
+new file mode 100644
+index 0000000..c6c7cb9
+--- /dev/null
 +++ b/app/index.html
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,94 @@
 +<!DOCTYPE html>
 +<html lang="en">
 +<head>
@@ -124,53 +16,96 @@ diff --git a/app/index.html b/app/index.html
 +  <div class="app-shell">
 +    <header class="app-header">
 +      <div>
-+        <p class="eyebrow">NoteKeeper</p>
-+        <h1>Simple notes for local use</h1>
++        <p class="eyebrow">Local notes workspace</p>
++        <h1>NoteKeeper</h1>
++        <p class="subtitle">Capture notes, checklists, labels, and archive what you do not need right now.</p>
 +      </div>
-+      <nav class="view-switcher" aria-label="Note views">
-+        <button type="button" class="view-button is-active" data-view="active" aria-pressed="true">Active</button>
-+        <button type="button" class="view-button" data-view="archive" aria-pressed="false">Archive</button>
-+      </nav>
++      <div class="header-tools" aria-label="Search and view controls">
++        <label class="search-field">
++          <span class="field-label">Search notes</span>
++          <input type="search" id="search-input" name="search" placeholder="Search title, body, labels">
++        </label>
++        <div class="view-toggle" role="tablist" aria-label="Switch note view">
++          <button type="button" class="view-button is-active" aria-pressed="true" aria-controls="notes-list">Active notes</button>
++          <button type="button" class="view-button" aria-pressed="false" aria-controls="notes-list">Archive</button>
++        </div>
++      </div>
 +    </header>
 +
 +    <main class="app-main">
-+      <section class="composer" aria-labelledby="composer-title">
-+        <h2 id="composer-title">Create a note</h2>
-+        <form id="note-form" class="note-form">
-+          <div class="field">
-+            <label for="note-title">Title</label>
-+            <input id="note-title" name="title" type="text" placeholder="Optional note title">
-+          </div>
-+          <div class="field">
-+            <label for="note-body">Body</label>
-+            <textarea id="note-body" name="body" rows="5" placeholder="Write your note here"></textarea>
-+          </div>
-+          <div class="field">
-+            <label for="note-labels">Labels</label>
-+            <input id="note-labels" name="labels" type="text" placeholder="work, ideas, home">
-+          </div>
-+          <fieldset class="field">
-+            <legend>Note type</legend>
-+            <label><input type="radio" name="note-type" value="text" checked> Plain text</label>
-+            <label><input type="radio" name="note-type" value="checklist"> Checklist</label>
-+          </fieldset>
-+          <div id="checklist-editor" class="checklist-editor" hidden>
-+            <div class="checklist-editor-header">
-+              <h3>Checklist items</h3>
-+              <button type="button" id="add-checklist-item">Add item</button>
++      <section class="panel create-panel" aria-labelledby="create-note-heading">
++        <div class="panel-heading">
++          <h2 id="create-note-heading">Create a note</h2>
++          <p>Start with a title and body, then organize it with labels or checklist items.</p>
++        </div>
++
++        <form class="note-form" aria-describedby="create-note-help">
++          <p id="create-note-help" class="sr-only">Create a plain text note or checklist note.</p>
++          <div class="form-grid">
++            <label class="field">
++              <span class="field-label">Title</span>
++              <input type="text" name="title" autocomplete="off" placeholder="Shopping ideas">
++            </label>
++
++            <label class="field">
++              <span class="field-label">Note type</span>
++              <select name="noteType">
++                <option value="text">Plain text</option>
++                <option value="checklist">Checklist</option>
++              </select>
++            </label>
++
++            <label class="field field-wide">
++              <span class="field-label">Body</span>
++              <textarea name="body" rows="5" placeholder="Capture the note details here."></textarea>
++            </label>
++
++            <label class="field field-wide">
++              <span class="field-label">Labels</span>
++              <input type="text" name="labels" autocomplete="off" placeholder="work, ideas, home">
++            </label>
++
++            <div class="field field-wide checklist-placeholder" aria-labelledby="checklist-items-heading">
++              <div class="field-label-row">
++                <span class="field-label" id="checklist-items-heading">Checklist items</span>
++                <button type="button" class="secondary-button">Add item</button>
++              </div>
++              <div class="checklist-items" aria-live="polite" aria-label="Checklist item editor placeholder">
++                <p class="placeholder-text">Checklist items will appear here when editing a checklist note.</p>
++                <div class="checklist-item-row">
++                  <label class="item-check">
++                    <input type="checkbox" disabled>
++                    <span>Item complete</span>
++                  </label>
++                  <input type="text" disabled value="Example checklist item">
++                  <button type="button" class="icon-button" disabled aria-label="Remove checklist item">Remove</button>
++                </div>
++              </div>
 +            </div>
-+            <ul id="checklist-items" class="checklist-items" aria-live="polite"></ul>
 +          </div>
-+          <button type="submit" class="primary-action">Save note</button>
++
++          <div class="form-actions">
++            <button type="submit" class="primary-button">Save note</button>
++            <button type="reset" class="secondary-button">Clear form</button>
++          </div>
 +        </form>
 +      </section>
 +
-+      <section class="board" aria-labelledby="notes-title">
-+        <div class="board-header">
-+          <h2 id="notes-title">Notes</h2>
-+          <p id="notes-status" class="status-message"></p>
++      <section class="panel notes-panel" aria-labelledby="notes-heading">
++        <div class="panel-heading notes-heading-row">
++          <div>
++            <h2 id="notes-heading">Notes</h2>
++            <p class="notes-summary">Your active and archived notes will appear here.</p>
++          </div>
++          <p class="view-state" aria-live="polite">Showing active notes</p>
 +        </div>
-+        <div id="notes-grid" class="notes-grid" aria-live="polite"></div>
++
++        <div id="notes-list" class="notes-grid" role="list" aria-label="Note cards">
++          <article class="note-card empty-card" role="listitem">
++            <h3>No notes yet</h3>
++            <p>Create your first note above. It will stay in your browser on this device.</p>
++          </article>
++        </div>
 +      </section>
 +    </main>
 +  </div>
@@ -178,32 +113,308 @@ diff --git a/app/index.html b/app/index.html
 +  <script src="app.js"></script>
 +</body>
 +</html>
+diff --git a/app/styles.css b/app/styles.css
+new file mode 100644
+index 0000000..3f4c8fd
+--- /dev/null
++++ b/app/styles.css
+@@ -0,0 +1,201 @@
++:root {
++  color-scheme: light;
++  --bg: #f6f3ee;
++  --surface: #ffffff;
++  --surface-soft: #f2ece4;
++  --border: #d8cfc2;
++  --text: #1f1b16;
++  --muted: #6f655a;
++  --accent: #6b4f36;
++  --accent-strong: #4e3927;
++  --shadow: 0 16px 40px rgba(41, 28, 18, 0.08);
++  --radius: 18px;
++}
++
++* {
++  box-sizing: border-box;
++}
++
++html, body {
++  margin: 0;
++  min-height: 100%;
++}
++
++body {
++  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
++  background: linear-gradient(180deg, #fbf8f4 0%, var(--bg) 100%);
++  color: var(--text);
++}
++
++button, input, textarea, select {
++  font: inherit;
++}
++
++button {
++  cursor: pointer;
++}
++
++.app-shell {
++  width: min(1120px, calc(100% - 2rem));
++  margin: 0 auto;
++  padding: 2rem 0 3rem;
++}
++
++.app-header {
++  display: grid;
++  gap: 1.25rem;
++  margin-bottom: 1.5rem;
++}
++
++.eyebrow, .subtitle, .notes-summary, .view-state, .panel-heading p, .placeholder-text {
++  color: var(--muted);
++}
++
++.eyebrow {
++  margin: 0 0 0.35rem;
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  font-size: 0.78rem;
++}
++
++h1, h2, h3, p {
++  margin-top: 0;
++}
++
++h1 {
++  margin-bottom: 0.35rem;
++  font-size: clamp(2rem, 4vw, 3rem);
++}
++
++.subtitle {
++  margin-bottom: 0;
++  max-width: 58ch;
++}
++
++.header-tools, .panel, .note-card, .search-field input, .note-form input, .note-form textarea, .note-form select {
++  background: var(--surface);
++}
++
++.header-tools, .panel {
++  border: 1px solid var(--border);
++  border-radius: var(--radius);
++  box-shadow: var(--shadow);
++}
++
++.header-tools {
++  display: grid;
++  gap: 1rem;
++  padding: 1rem;
++}
++
++.search-field, .field {
++  display: grid;
++  gap: 0.45rem;
++}
++
++.field-label {
++  font-size: 0.92rem;
++  font-weight: 600;
++}
++
++input, textarea, select {
++  width: 100%;
++  border: 1px solid var(--border);
++  border-radius: 12px;
++  color: var(--text);
++  padding: 0.8rem 0.9rem;
++}
++
++textarea {
++  resize: vertical;
++  min-height: 120px;
++}
++
++input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
++  outline: 3px solid rgba(107, 79, 54, 0.35);
++  outline-offset: 2px;
++}
++
++.view-toggle {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
++}
++
++.view-button, .primary-button, .secondary-button, .icon-button {
++  border: 1px solid var(--border);
++  border-radius: 999px;
++  padding: 0.75rem 1rem;
++  background: var(--surface-soft);
++  color: var(--text);
++}
++
++.view-button.is-active, .primary-button {
++  background: var(--accent);
++  color: #fff;
++  border-color: var(--accent);
++}
++
++.app-main {
++  display: grid;
++  gap: 1.25rem;
++}
++
++.panel {
++  padding: 1.1rem;
++}
++
++.panel-heading {
++  margin-bottom: 1rem;
++}
++
++.form-grid {
++  display: grid;
++  gap: 1rem;
++}
++
++.field-wide {
++  grid-column: 1 / -1;
++}
++
++.field-label-row {
++  display: flex;
++  justify-content: space-between;
++  gap: 1rem;
++  align-items: center;
++}
++
++.checklist-placeholder {
++  padding: 1rem;
++  border: 1px dashed var(--border);
++  border-radius: 16px;
++  background: #fcfaf7;
++}
++
++.checklist-items {
++  display: grid;
++  gap: 0.75rem;
++  margin-top: 0.75rem;
++}
++
++.checklist-item-row {
++  display: grid;
++  gap: 0.75rem;
++  grid-template-columns: auto 1fr auto;
++  align-items: center;
++}
++
++.item-check {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.5rem;
++}
++
++.form-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.75rem;
++  margin-top: 1rem;
++}
++
++.notes-heading-row {
++  display: flex;
++  justify-content: space-between;
++  gap: 1rem;
++  align-items: end;
++  flex-wrap: wrap;
++}
++
++.notes-grid {
++  display: grid;
++  gap: 1rem;
++}
++
++.note-card {
++  border: 1px solid var(--border);
++  border-radius: 16px;
++  padding: 1rem;
++}
++
++.empty-card {
++  text-align: center;
++  color: var(--muted);
++  background: #faf7f2;
++}
++
++.sr-only {
++  position: absolute;
++  width: 1px;
++  height: 1px;
++  padding: 0;
++  margin: -1px;
++  overflow: hidden;
++  clip: rect(0, 0, 0, 0);
++  white-space: nowrap;
++  border: 0;
++}
++
++@media (min-width: 720px) {
++  .app-header {
++    grid-template-columns: 1.4fr 1fr;
++    align-items: start;
++  }
++
++  .form-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  .notes-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++}
++
++@media (min-width: 1040px) {
++  .notes-grid {
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++  }
++}
+diff --git a/app/app.js b/app/app.js
+new file mode 100644
+index 0000000..8bd7bd3
+--- /dev/null
++++ b/app/app.js
+@@ -0,0 +1,6 @@
++const appState = {
++  view: 'active',
++  search: '',
++};
++
++document.documentElement.dataset.appReady = 'true';
 diff --git a/app/README.md b/app/README.md
---- a/app/README.md
+new file mode 100644
+index 0000000..dcaa4b1
+--- /dev/null
 +++ b/app/README.md
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,22 @@
 +# NoteKeeper
 +
-+NoteKeeper is a browser-only notes scaffold. Open `index.html` directly in a modern browser to view the app shell, create-note form, active/archive controls, and placeholder note area.
++NoteKeeper is a small browser-only notes app scaffold. It is designed to open directly by double-clicking `index.html` or by loading the file in a browser from the `app/` folder.
 +
 +## Run
 +
-+1. Open `index.html` from the `app/` folder in your browser.
-+2. No server, build step, or external dependencies are required.
++1. Open `index.html` in a modern browser.
++2. No server, build step, or external dependency is required.
 +
-+## Included UI
++## Current scaffold
 +
-+- App header with the NoteKeeper name
-+- Active and archive view controls
-+- Note creation form
-+- Optional labels field
-+- Plain text and checklist note type selection
-+- Placeholder notes area
++- App shell with the NoteKeeper name
++- Search field and active/archive view controls
++- Note creation form with title, body, labels, and note type controls
++- Placeholder checklist editing area
++- Empty-state note card area
++- Baseline responsive styling
 +
-+## Manual check
++## Manual review
 +
-+- Open the page directly from disk.
-+- Switch between Active and Archive views.
-+- Select Checklist to show the checklist editor.
-+- Confirm the placeholder note area is visible.
-+- Submit the form to reset the scaffold state.
++- Confirm the page opens directly without a server.
++- Check that the header, form, controls, and note list are visible.
++- Resize the browser to verify the layout stays readable on narrow and wide screens.
++- Verify the visible product name is NoteKeeper.

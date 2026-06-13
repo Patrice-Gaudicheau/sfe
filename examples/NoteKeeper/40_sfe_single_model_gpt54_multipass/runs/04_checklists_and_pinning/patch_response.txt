@@ -1,0 +1,209 @@
+diff --git a/app/index.html b/app/index.html
+index 1c5ebfc..ac25e6e 100644
+--- a/app/index.html
++++ b/app/index.html
+@@ -1,114 +1,114 @@
+ <!DOCTYPE html>
+ <html lang="en">
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     <title>NoteKeeper</title>
+     <link rel="stylesheet" href="styles.css" />
+   </head>
+   <body>
+     <div class="app-shell">
+       <header class="app-header">
+         <div class="brand-block">
+           <p class="eyebrow">Local notes workspace</p>
+           <h1>NoteKeeper</h1>
+           <p class="app-intro">
+-            Capture, organize, search, pin, and archive notes in a lightweight browser-only app.
++            Capture text notes and checklists, search everything, pin important items, and archive the rest in a lightweight browser-only app.
+           </p>
+         </div>
+ 
+         <section class="toolbar" aria-label="Primary controls">
+           <div class="field-group search-group">
+             <label for="search-input">Search notes</label>
+             <input
+               id="search-input"
+               name="search"
+               type="search"
+               placeholder="Search titles, text, labels, or checklist items"
+             />
+           </div>
+ 
+           <nav class="view-switcher" aria-label="Note views">
+             <button type="button" class="view-button is-active" data-view="active" aria-pressed="true">
+               Active notes
+             </button>
+             <button type="button" class="view-button" data-view="archived" aria-pressed="false">
+               Archived notes
+             </button>
+           </nav>
+         </section>
+       </header>
+ 
+       <main class="app-main">
+         <section class="composer-panel" aria-labelledby="composer-title">
+           <div class="section-heading">
+             <h2 id="composer-title">Create a note</h2>
+             <p id="composer-description">
+-              Create a text or checklist note, organize it with labels, and keep everything saved locally in this browser.
++              Create a text note or a checklist with multiple editable items, organize it with labels, and keep everything saved locally in this browser.
+             </p>
+           </div>
+ 
+           <form id="note-form" class="note-form" aria-describedby="composer-description">
+             <div class="field-group">
+               <label for="note-title">Title</label>
+               <input id="note-title" name="title" type="text" placeholder="Optional note title" />
+             </div>
+ 
+             <div class="field-group">
+               <label for="note-body">Body</label>
+               <textarea
+                 id="note-body"
+                 name="body"
+                 rows="5"
+-                placeholder="Write a quick note, reminder, or idea"
++                placeholder="Write a quick note, reminder, or checklist summary"
+               ></textarea>
+             </div>
+ 
+             <div class="form-row">
+               <div class="field-group">
+                 <label for="note-labels">Labels</label>
+                 <input
+                   id="note-labels"
+                   name="labels"
+                   type="text"
+                   placeholder="Comma-separated labels"
+                 />
+               </div>
+ 
+               <div class="field-group">
+                 <label for="note-type">Note type</label>
+                 <select id="note-type" name="type">
+                   <option value="text">Text note</option>
+                   <option value="checklist">Checklist note</option>
+                 </select>
+               </div>
+             </div>
+ 
+             <fieldset
+               class="checklist-builder"
+               id="checklist-builder"
+               hidden
+               aria-describedby="checklist-helper-text"
+             >
+               <legend>Checklist items</legend>
+               <p class="helper-text" id="checklist-helper-text">
+-                Add, remove, and edit checklist items before saving your note.
++                Add, check, uncheck, remove, and edit checklist items before saving your note.
+               </p>
+ 
+               <div class="checklist-items" id="checklist-items" aria-live="polite"></div>
+ 
+               <button type="button" id="add-checklist-item" class="secondary-button">
+                 Add checklist item
+               </button>
+             </fieldset>
+ 
+             <div class="form-actions">
+               <button type="submit" class="primary-button">Save note</button>
+               <button type="reset" class="secondary-button">Clear form</button>
+             </div>
+           </form>
+         </section>
+ 
+         <section class="notes-panel" aria-labelledby="notes-title">
+           <div class="section-heading">
+             <h2 id="notes-title">Notes</h2>
+             <p id="notes-status" role="status">Showing active notes saved in this browser.</p>
+             <p class="helper-text" id="notes-helper">
+-              Use search to filter by title, body text, labels, or checklist items. Pin important active notes to keep them first, and archive notes to move them out of the active view until you restore them from Archived notes.
++              Use search to filter by title, body text, labels, or checklist items. Pin important active notes to keep them visually highlighted and sorted first, and archive notes to move them out of the active view until you restore them from Archived notes.
+             </p>
+           </div>
+ 
+           <div id="notes-area" class="notes-grid" aria-live="polite"></div>
+         </section>
+       </main>
+     </div>
+ 
+     <script src="app.js"></script>
+   </body>
+ </html>
+diff --git a/app/README.md b/app/README.md
+index 7e0dfc9..85cb9a1 100644
+--- a/app/README.md
++++ b/app/README.md
+@@ -1,38 +1,42 @@
+ # NoteKeeper
+ 
+ NoteKeeper is a small browser-only notes app that runs directly from the filesystem with no server, build step, or dependency setup.
+ 
+ ## Run the app
+ 
+ 1. Open the `app/` folder.
+ 2. Double-click `index.html`, or open it directly in a modern browser.
+-3. Create, edit, search, pin, archive, and restore notes in the page.
++3. Create text notes and checklist notes, edit them, search them, pin important active notes, and archive or restore notes in the page.
+ 4. Reload the browser tab to confirm saved notes persist in this browser.
+ 
+ No installation, package manager, or local server is required.
+ 
+ ## Supported features in this task
+ 
+-- create text notes and checklist notes with an optional title, body, and comma-separated labels
++- create text notes and checklist notes with an optional title, body, and comma-separated labels
+ - render saved notes as readable cards in the page immediately after saving
+ - edit an existing saved note and update it in place
+ - delete notes immediately
+-- pin and unpin active notes, with pinned notes displayed before other active notes
++- pin and unpin active notes, with pinned notes visually distinguished and displayed before other active notes
+ - archive active notes and restore archived notes from the Archived notes view
+ - persist notes in browser `localStorage` under the `notekeeper.notes` key
+ - restore saved notes after a browser reload
+ - recover safely when stored data is missing, empty, unparseable, or not the expected array shape
+ - search saved notes by title, body, labels, and checklist item text with case-insensitive substring matching
+ - switch between Active notes and Archived notes views with empty states for no notes and no filtered matches
+-- create checklist notes with multiple items, edit item text, toggle checked state, and remove items
++- create checklist notes with multiple items, edit item text, toggle checked and unchecked state, and remove items
++- preserve checklist item state, pinned state, and archived state after reload
+ - keep the app usable by keyboard with labeled controls and visible focus styles
+ 
+ ## Storage notes
+ 
+-The app stores note data locally in the browser under the `notekeeper.notes` key. If the stored value is missing, blank, malformed JSON, or parses to something other than an array, NoteKeeper falls back to an empty note list so the page remains usable instead of crashing.
++The app stores note data locally in the browser under the `notekeeper.notes` key. Saved note data includes note title, body, type, labels, checklist items, checked states, pinned state, archived state, and timestamps used for rendering and sorting. If the stored value is missing, blank, malformed JSON, or parses to something other than an array, NoteKeeper falls back to an empty note list so the page remains usable instead of crashing.
+ 
+ ## Manual review steps
+ 
+ 1. Open `index.html` and confirm the page title and visible app name are NoteKeeper.
+ 2. Create a text note with a title and body, save it, and confirm a note card appears.
+ 3. Create another text note with only a title or only body text and confirm empty fields do not break rendering.
+ 4. Add comma-separated labels to a note and confirm they save and render on the note card.
+-5. Create a checklist note with multiple items, toggle some items checked, remove one item, save it, and confirm the checklist content renders correctly on the card.
+-6. Click Edit on that checklist note and confirm all checklist items and checked states are repopulated for editing.
+-7. Click Pin on an active note and confirm it becomes visually distinct and moves ahead of unpinned active notes. Click Unpin and confirm the reverse.
+-8. Type into the search field and confirm notes filter by title, body, labels, and checklist item text.
+-9. Click Edit on a note, change the content, labels, or checklist items, save it, and confirm the card updates and remains visible after reload.
+-10. Click Archive on an active note and confirm it disappears from Active notes.
+-11. Switch to Archived notes and confirm the archived note appears there, with Restore available and pinning not shown for archived notes.
+-12. Click Restore on an archived note and confirm it returns to Active notes without losing content or labels.
+-13. Click Delete on a note and confirm it disappears immediately.
+-14. Reload the browser tab or reopen `index.html` and confirm saved notes, checklist states, pinned state, and archived state persist.
++5. Create a checklist note with multiple items, toggle some items checked, leave others unchecked, remove one item, save it, and confirm the checklist content renders correctly on the card.
++6. Click Edit on that checklist note and confirm all checklist items and checked states are repopulated for editing.
++7. Edit the same checklist note again, change item text, change checked states, save it, and confirm the card updates immediately.
++8. Create at least one additional active note, click Pin on one note, and confirm it becomes visually distinct and moves ahead of unpinned active notes.
++9. Click Unpin on that same note and confirm it loses the pinned styling and returns to normal active-note ordering.
++10. Type into the search field and confirm notes filter by title, body, labels, and checklist item text.
++11. Click Archive on an active note and confirm it disappears from Active notes.
++12. Switch to Archived notes and confirm the archived note appears there, with Restore available and pinning not shown for archived notes.
++13. Click Restore on an archived note and confirm it returns to Active notes without losing content, labels, or checklist items.
++14. Click Delete on a note and confirm it disappears immediately.
++15. Reload the browser tab or reopen `index.html` and confirm saved notes, checklist states, checked and unchecked item state, pinned state, and archived state persist.

@@ -1,6 +1,6 @@
 {
   "run": {
-    "cached_input_tokens": 0,
+    "cached_input_tokens": 3328,
     "currency": null,
     "generated_or_modified_files": [
       "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/index.html",
@@ -8,8 +8,8 @@
       "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/app.js",
       "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/README.md"
     ],
-    "input_tokens": 19426,
-    "latency_or_wall_clock_duration": 37957,
+    "input_tokens": 8707,
+    "latency_or_wall_clock_duration": 32012,
     "manual_verification_notes": null,
     "models": {
       "discovery": "gpt-5.4",
@@ -19,58 +19,59 @@
       "reviewer": null,
       "router": "gpt-5.4"
     },
-    "multipass_forced_auto": true,
-    "multipass_mode": "auto",
-    "output_tokens": 6720,
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 5969,
     "provider": "openai-api",
-    "provider_call_count": 7,
+    "provider_call_count": 4,
     "provider_calls_by_role": {
       "discovery": {
         "cached_input_tokens": 0,
         "calls": 1,
         "failure_count": 0,
-        "input_tokens": 835,
-        "latency_ms": 1640,
+        "input_tokens": 837,
+        "latency_ms": 1604,
         "models": [
           "gpt-5.4"
         ],
-        "output_tokens": 62,
+        "output_tokens": 60,
         "success_count": 1
       },
       "executor": {
         "cached_input_tokens": 0,
-        "calls": 4,
-        "failure_count": 0,
-        "input_tokens": 14500,
-        "latency_ms": 28605,
-        "models": [
-          "gpt-5.4"
-        ],
-        "output_tokens": 5959,
-        "success_count": 4
-      },
-      "multipass_planner": {
-        "cached_input_tokens": 0,
         "calls": 1,
         "failure_count": 0,
-        "input_tokens": 3480,
-        "latency_ms": 5798,
+        "input_tokens": 3775,
+        "latency_ms": 22688,
         "models": [
           "gpt-5.4"
         ],
-        "output_tokens": 661,
+        "output_tokens": 5179,
+        "success_count": 1
+      },
+      "multipass_planner": {
+        "cached_input_tokens": 3328,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 3482,
+        "latency_ms": 6594,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 694,
         "success_count": 1
       },
       "router": {
         "cached_input_tokens": 0,
         "calls": 1,
         "failure_count": 0,
-        "input_tokens": 611,
-        "latency_ms": 1914,
+        "input_tokens": 613,
+        "latency_ms": 1126,
         "models": [
           "gpt-5.4"
         ],
-        "output_tokens": 38,
+        "output_tokens": 36,
         "success_count": 1
       }
     },
@@ -81,7 +82,7 @@
     "task_title": "Initial static scaffold",
     "total_estimated_cost": null,
     "validation_error": null,
-    "wall_clock_duration_ms": 47425
+    "wall_clock_duration_ms": 32087
   },
   "sfe": {
     "changed_files": [
@@ -97,11 +98,11 @@
       "model": "gpt-5.4",
       "provider_calls_made": 1,
       "provider_name": "openai",
-      "reason": "The task is to create and modify specific files in the workspace for the static app scaffold."
+      "reason": "The task requires creating and editing specific files in the workspace for a static app scaffold."
     },
     "executor_provider": "openai",
     "git_auto_init": true,
-    "git_initial_commit_hash": "763abfb",
+    "git_initial_commit_hash": "83b4dc1",
     "issue": null,
     "multi_pass_summary": {
       "all_promoted_files": [
@@ -111,17 +112,11 @@
         "app/README.md"
       ],
       "created_files_by_pass": {
-        "app-shell-html": [
-          "app/index.html"
-        ],
-        "baseline-styles": [
-          "app/styles.css"
-        ],
-        "readme-scaffold": [
+        "html-scaffold": [
+          "app/index.html",
+          "app/styles.css",
+          "app/app.js",
           "app/README.md"
-        ],
-        "scaffold-behavior": [
-          "app/app.js"
         ]
       },
       "enabled": true,
@@ -133,109 +128,108 @@
             "app/index.html"
           ],
           "created_files": [
-            "app/index.html"
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
           ],
           "fallback_diagnostics": null,
           "full_content_provided_files": [],
           "full_file_replacement_eligible_files": [],
           "full_file_replacement_used_files": [],
           "issue": null,
-          "pass_id": "app-shell-html",
+          "pass_id": "html-scaffold",
           "patch_paths": [
-            "app/index.html"
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
           ],
           "promoted_files": [
-            "app/index.html"
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
           ],
           "provider_diagnostics": null,
           "status": "completed",
-          "title": "Create semantic NoteKeeper app shell"
+          "title": "Create semantic app shell",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/styles.css",
+            "multi_pass_path_outside_allowed_files:app/app.js",
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
         },
         {
           "allowed_files": [
             "app/styles.css"
           ],
-          "created_files": [
-            "app/styles.css"
-          ],
+          "created_files": [],
           "fallback_diagnostics": null,
           "full_content_provided_files": [],
           "full_file_replacement_eligible_files": [],
           "full_file_replacement_used_files": [],
           "issue": null,
           "pass_id": "baseline-styles",
-          "patch_paths": [
-            "app/styles.css"
-          ],
-          "promoted_files": [
-            "app/styles.css"
-          ],
+          "patch_paths": [],
+          "promoted_files": [],
           "provider_diagnostics": null,
-          "status": "completed",
-          "title": "Add original responsive baseline styling"
+          "status": "skipped",
+          "title": "Add original responsive baseline styling",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/styles.css"
+          ]
         },
         {
           "allowed_files": [
             "app/app.js"
           ],
-          "created_files": [
-            "app/app.js"
-          ],
+          "created_files": [],
           "fallback_diagnostics": null,
           "full_content_provided_files": [],
           "full_file_replacement_eligible_files": [],
           "full_file_replacement_used_files": [],
           "issue": null,
-          "pass_id": "scaffold-behavior",
-          "patch_paths": [
-            "app/app.js"
-          ],
-          "promoted_files": [
-            "app/app.js"
-          ],
+          "pass_id": "scaffold-ui-behavior",
+          "patch_paths": [],
+          "promoted_files": [],
           "provider_diagnostics": null,
-          "status": "completed",
-          "title": "Wire initial client-side scaffold interactions"
+          "status": "skipped",
+          "title": "Wire minimal static interactions",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/app.js"
+          ]
         },
         {
           "allowed_files": [
             "app/README.md"
           ],
-          "created_files": [
-            "app/README.md"
-          ],
+          "created_files": [],
           "fallback_diagnostics": null,
           "full_content_provided_files": [],
           "full_file_replacement_eligible_files": [],
           "full_file_replacement_used_files": [],
           "issue": null,
           "pass_id": "readme-scaffold",
-          "patch_paths": [
-            "app/README.md"
-          ],
-          "promoted_files": [
-            "app/README.md"
-          ],
+          "patch_paths": [],
+          "promoted_files": [],
           "provider_diagnostics": null,
-          "status": "completed",
-          "title": "Document scaffold usage and current scope"
+          "status": "skipped",
+          "title": "Document static app usage and scaffold scope",
+          "warnings": [
+            "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+          ]
         }
       ],
-      "passes_completed": 4,
+      "passes_completed": 1,
       "passes_total": 4,
-      "project_summary": "Build the initial NoteKeeper static app scaffold in app/ with a browser-openable HTML shell, original baseline styling, a note creation form that supports text and checklist modes, active/archive view controls, placeholder notes area, minimal client-side interaction for scaffold usability, and README run/feature notes aligned with the benchmark's first task while preserving room for later CRUD and persistence passes.",
+      "project_summary": "Build the initial static NoteKeeper browser app scaffold inside app/ with a direct-open HTML shell, original baseline styling, a note creation form that includes text and checklist inputs, active/archive view controls, a placeholder notes area, minimal client-side UI wiring for scaffold behavior, and README instructions for running and reviewing the static app.",
       "promoted_files_by_pass": {
-        "app-shell-html": [
-          "app/index.html"
-        ],
-        "baseline-styles": [
-          "app/styles.css"
-        ],
-        "readme-scaffold": [
+        "html-scaffold": [
+          "app/index.html",
+          "app/styles.css",
+          "app/app.js",
           "app/README.md"
-        ],
-        "scaffold-behavior": [
-          "app/app.js"
         ]
       },
       "safe_resume_possible": false,
@@ -252,7 +246,7 @@
       ],
       "file_count": 4,
       "hunk_count": 4,
-      "lines_added": 786,
+      "lines_added": 683,
       "lines_removed": 0,
       "modified_paths": [],
       "paths": [
@@ -275,7 +269,8 @@
     "selected_source_refs": [
       "brief/prompt.md",
       "brief/acceptance_criteria.md",
-      "brief/task_sequence.md"
+      "brief/task_sequence.md",
+      "tasks/01_initial_scaffold.md"
     ],
     "status": "completed",
     "warnings": [
@@ -285,7 +280,13 @@
       "no_lint_run",
       "diff_not_inspected",
       "large_change",
-      "multiple_creations"
+      "multiple_creations",
+      "multi_pass_path_outside_allowed_files:app/styles.css",
+      "multi_pass_path_outside_allowed_files:app/app.js",
+      "multi_pass_path_outside_allowed_files:app/README.md",
+      "multi_pass_skipped_already_promoted_outside_batch:app/styles.css",
+      "multi_pass_skipped_already_promoted_outside_batch:app/app.js",
+      "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
     ]
   }
 }

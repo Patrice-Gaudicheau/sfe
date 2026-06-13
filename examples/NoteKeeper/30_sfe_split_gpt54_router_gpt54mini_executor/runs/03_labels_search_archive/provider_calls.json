@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 609,
+      "latency": 1301,
+      "latency_ms": 1301,
+      "model": "gpt-5.4",
+      "output_tokens": 33,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "03_labels_search_archive",
+      "total_tokens": 642
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 994,
+      "latency": 1312,
+      "latency_ms": 1312,
+      "model": "gpt-5.4",
+      "output_tokens": 84,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "03_labels_search_archive",
+      "total_tokens": 1078
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 10293,
+      "latency": 29382,
+      "latency_ms": 29382,
+      "model": "gpt-5.4-mini",
+      "output_tokens": 6825,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "03_labels_search_archive",
+      "total_tokens": 17118
+    }
+  ]
+}

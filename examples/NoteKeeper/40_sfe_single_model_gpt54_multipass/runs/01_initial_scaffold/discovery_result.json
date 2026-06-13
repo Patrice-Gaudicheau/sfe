@@ -82,7 +82,7 @@
   "router_model": "gpt-5.4",
   "router_provider_calls_made": 1,
   "router_provider_name": "openai",
-  "router_reason": "These benchmark docs define the scaffold requirements, acceptance criteria, and task scope for the current initial static app task.",
+  "router_reason": "These benchmark docs define the current scaffold task, requirements, and acceptance criteria for the allowed app files.",
   "scanned_file_count": 9,
   "skipped_candidate_count": 0,
   "skipped_reason_counts": {

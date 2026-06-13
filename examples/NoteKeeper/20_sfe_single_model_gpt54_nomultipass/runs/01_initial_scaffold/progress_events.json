@@ -40,17 +40,17 @@
     "name": "context_candidates_inspected"
   },
   {
-    "message": "SFE: relevant context selected: 3 files",
+    "message": "SFE: relevant context selected: 4 files",
     "metadata": {
-      "selected_context_count": 3,
-      "selected_segment_count": 3
+      "selected_context_count": 4,
+      "selected_segment_count": 4
     },
     "name": "relevant_context_selected"
   },
   {
-    "message": "SFE: estimated token reduction: 3.1%",
+    "message": "SFE: estimated token reduction: 0.0%",
     "metadata": {
-      "estimated_token_reduction": "3.1%"
+      "estimated_token_reduction": "0.0%"
     },
     "name": "estimated_token_reduction"
   },

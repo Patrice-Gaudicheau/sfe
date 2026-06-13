@@ -2,9 +2,14 @@
   "run": {
     "cached_input_tokens": 0,
     "currency": null,
-    "generated_or_modified_files": [],
-    "input_tokens": 5134,
-    "latency_or_wall_clock_duration": 20323,
+    "generated_or_modified_files": [
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/index.html",
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/styles.css",
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/app.js",
+      "examples/NoteKeeper/40_sfe_single_model_gpt54_multipass/app/README.md"
+    ],
+    "input_tokens": 62085,
+    "latency_or_wall_clock_duration": 113648,
     "manual_verification_notes": null,
     "models": {
       "discovery": "gpt-5.4",
@@ -14,66 +19,78 @@
       "reviewer": null,
       "router": "gpt-5.4"
     },
-    "multipass_forced_auto": true,
-    "multipass_mode": "auto",
-    "output_tokens": 4516,
+    "multipass_forced_auto": false,
+    "multipass_forced_on": true,
+    "multipass_mode": "true",
+    "output_tokens": 27137,
     "provider": "openai-api",
-    "provider_call_count": 3,
+    "provider_call_count": 7,
     "provider_calls_by_role": {
       "discovery": {
         "cached_input_tokens": 0,
         "calls": 1,
         "failure_count": 0,
-        "input_tokens": 984,
-        "latency_ms": 1473,
+        "input_tokens": 987,
+        "latency_ms": 1670,
         "models": [
           "gpt-5.4"
         ],
-        "output_tokens": 73,
+        "output_tokens": 79,
         "success_count": 1
       },
       "executor": {
         "cached_input_tokens": 0,
-        "calls": 1,
+        "calls": 4,
         "failure_count": 0,
-        "input_tokens": 3550,
-        "latency_ms": 17797,
+        "input_tokens": 51815,
+        "latency_ms": 104278,
         "models": [
           "gpt-5.4"
         ],
-        "output_tokens": 4399,
+        "output_tokens": 26336,
+        "success_count": 4
+      },
+      "multipass_planner": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 8681,
+        "latency_ms": 6456,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 679,
         "success_count": 1
       },
       "router": {
         "cached_input_tokens": 0,
         "calls": 1,
         "failure_count": 0,
-        "input_tokens": 600,
-        "latency_ms": 1053,
+        "input_tokens": 602,
+        "latency_ms": 1244,
         "models": [
           "gpt-5.4"
         ],
-        "output_tokens": 44,
+        "output_tokens": 43,
         "success_count": 1
       }
     },
-    "sfe_issue": {
-      "category": "physical_application_failure",
-      "diagnostics": null,
-      "hunk_accounting": null,
-      "path": "app/index.html",
-      "reason": "target_already_exists"
-    },
-    "sfe_status": "failed",
-    "success": false,
+    "sfe_issue": null,
+    "sfe_status": "completed",
+    "success": true,
     "task_id": "02_persistence_and_crud",
     "task_title": "LocalStorage persistence and CRUD",
     "total_estimated_cost": null,
     "validation_error": null,
-    "wall_clock_duration_ms": 24558
+    "wall_clock_duration_ms": 113739
   },
   "sfe": {
-    "changed_files": [],
+    "changed_files": [
+      "app/app.js",
+      "app/index.html",
+      "app/README.md",
+      "app/styles.css"
+    ],
     "execution_mode_decision": {
       "confidence": 0.99,
       "execution_mode": "workspace_write",
@@ -81,37 +98,269 @@
       "model": "gpt-5.4",
       "provider_calls_made": 1,
       "provider_name": "openai",
-      "reason": "The task is to implement app functionality by editing specified files in the workspace, including persistence and CRUD logic in the browser app."
+      "reason": "The task requires implementing app functionality by modifying specific files in the workspace, including persistence and CRUD behavior in the app source."
     },
     "executor_provider": "openai",
     "git_auto_init": false,
     "git_initial_commit_hash": null,
-    "issue": {
-      "category": "physical_application_failure",
-      "diagnostics": null,
-      "hunk_accounting": null,
-      "path": "app/index.html",
-      "reason": "target_already_exists"
+    "issue": null,
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/app.js",
+        "app/index.html",
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md",
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "created_files_by_pass": {},
+      "enabled": true,
+      "failed_pass_id": null,
+      "failed_pass_issue": null,
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "state-and-storage-foundation",
+          "patch_paths": [
+            "app/app.js"
+          ],
+          "promoted_files": [
+            "app/app.js"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Add note state and localStorage foundation",
+          "warnings": []
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/index.html"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [
+            "app/index.html"
+          ],
+          "issue": null,
+          "pass_id": "plain-text-form-crud",
+          "patch_paths": [
+            "app/index.html",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Wire form submission, editing, and deletion for text notes",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/app.js",
+            "app/index.html",
+            "app/styles.css"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "full_file_replacement_used_files": [
+            "app/styles.css"
+          ],
+          "issue": null,
+          "pass_id": "render-notes-and-empty-states",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Render saved notes into the workspace",
+          "warnings": [
+            "multi_pass_path_outside_allowed_files:app/README.md"
+          ]
+        },
+        {
+          "allowed_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_eligible_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "full_file_replacement_used_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js"
+          ],
+          "issue": null,
+          "pass_id": "ux-polish-and-readme-update",
+          "patch_paths": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "promoted_files": [
+            "app/index.html",
+            "app/styles.css",
+            "app/app.js",
+            "app/README.md"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Align scaffold messaging, basic accessibility, and documentation",
+          "warnings": []
+        }
+      ],
+      "passes_completed": 4,
+      "passes_total": 4,
+      "project_summary": "Implement NoteKeeper task 2 by turning the existing static scaffold into a browser-only plain-text notes app with safe localStorage-backed CRUD, while preserving the existing shell and keeping checklist-specific features as non-functional scaffold for later tasks.",
+      "promoted_files_by_pass": {
+        "plain-text-form-crud": [
+          "app/index.html",
+          "app/app.js",
+          "app/README.md"
+        ],
+        "render-notes-and-empty-states": [
+          "app/index.html",
+          "app/styles.css",
+          "app/app.js",
+          "app/README.md"
+        ],
+        "state-and-storage-foundation": [
+          "app/app.js"
+        ],
+        "ux-polish-and-readme-update": [
+          "app/index.html",
+          "app/styles.css",
+          "app/app.js",
+          "app/README.md"
+        ]
+      },
+      "safe_resume_possible": false,
+      "status": "completed"
     },
-    "multi_pass_summary": null,
-    "patch_applied": false,
-    "patch_generated": false,
-    "patch_summary": null,
-    "promoted_files": [],
-    "promotion_applied": false,
-    "promotion_status": "skipped",
+    "patch_applied": true,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 29,
+      "lines_added": 712,
+      "lines_removed": 180,
+      "modified_paths": [
+        "app/app.js",
+        "app/index.html",
+        "app/README.md",
+        "app/styles.css"
+      ],
+      "paths": [
+        "app/app.js",
+        "app/index.html",
+        "app/README.md",
+        "app/styles.css"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/app.js",
+      "app/index.html",
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "promotion_applied": true,
+    "promotion_status": "applied",
     "selected_source_refs": [
       "brief/prompt.md",
       "brief/acceptance_criteria.md",
-      "brief/task_sequence.md"
+      "brief/task_sequence.md",
+      "tasks/02_persistence_and_crud.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
     ],
-    "status": "failed",
+    "status": "completed",
     "warnings": [
       "no_router_review_run",
       "no_worktree_review_run",
       "no_tests_run",
       "no_lint_run",
-      "diff_not_inspected"
+      "diff_not_inspected",
+      "large_change",
+      "multi_pass_path_outside_allowed_files:app/README.md"
     ]
   }
 }

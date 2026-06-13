@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 599,
+      "latency": 1021,
+      "latency_ms": 1021,
+      "model": "gpt-5.4",
+      "output_tokens": 51,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "router",
+      "success": true,
+      "task_id": "04_checklists_and_pinning",
+      "total_tokens": 650
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 984,
+      "latency": 1437,
+      "latency_ms": 1437,
+      "model": "gpt-5.4",
+      "output_tokens": 81,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "discovery",
+      "success": true,
+      "task_id": "04_checklists_and_pinning",
+      "total_tokens": 1065
+    },
+    {
+      "cached_input_tokens": 0,
+      "error": null,
+      "input_tokens": 10280,
+      "latency": 24796,
+      "latency_ms": 24796,
+      "model": "gpt-5.4-mini",
+      "output_tokens": 7052,
+      "provider": "openai-api",
+      "retry_count": 0,
+      "role": "executor",
+      "success": true,
+      "task_id": "04_checklists_and_pinning",
+      "total_tokens": 17332
+    }
+  ]
+}

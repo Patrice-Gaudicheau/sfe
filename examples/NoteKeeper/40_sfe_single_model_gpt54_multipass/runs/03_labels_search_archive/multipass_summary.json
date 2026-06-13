@@ -1,0 +1,135 @@
+{
+  "all_promoted_files": [
+    "app/app.js",
+    "app/README.md",
+    "app/index.html",
+    "app/styles.css"
+  ],
+  "created_files_by_pass": {},
+  "enabled": true,
+  "failed_pass_id": null,
+  "failed_pass_issue": null,
+  "pass_results": [
+    {
+      "allowed_files": [
+        "app/app.js"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [
+        "app/app.js"
+      ],
+      "full_file_replacement_eligible_files": [
+        "app/app.js"
+      ],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "app-logic-archive-search",
+      "patch_paths": [
+        "app/app.js",
+        "app/README.md"
+      ],
+      "promoted_files": [
+        "app/app.js",
+        "app/README.md"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Complete archive and search state logic",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
+    },
+    {
+      "allowed_files": [
+        "app/index.html"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [
+        "app/index.html"
+      ],
+      "full_file_replacement_eligible_files": [
+        "app/index.html"
+      ],
+      "full_file_replacement_used_files": [
+        "app/index.html"
+      ],
+      "issue": null,
+      "pass_id": "ui-markup-copy-archive",
+      "patch_paths": [
+        "app/index.html"
+      ],
+      "promoted_files": [
+        "app/index.html"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Align interface markup and copy with archive workflow",
+      "warnings": []
+    },
+    {
+      "allowed_files": [
+        "app/styles.css"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [
+        "app/styles.css"
+      ],
+      "full_file_replacement_eligible_files": [
+        "app/styles.css"
+      ],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "styles-archive-empty-states",
+      "patch_paths": [
+        "app/styles.css"
+      ],
+      "promoted_files": [
+        "app/styles.css"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Polish archive and filtered-note presentation",
+      "warnings": []
+    },
+    {
+      "allowed_files": [
+        "app/README.md"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "readme-task3-features",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "skipped",
+      "title": "Update README for labels, search, and archive",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+      ]
+    }
+  ],
+  "passes_completed": 3,
+  "passes_total": 4,
+  "project_summary": "Implement task 3 for the static NoteKeeper app by completing labels/search/archive behavior on top of the existing browser-only CRUD baseline, updating the UI copy and rendering so active and archived notes are separated, searchable, and show helpful empty states, while keeping the app self-contained in the four required app files.",
+  "promoted_files_by_pass": {
+    "app-logic-archive-search": [
+      "app/app.js",
+      "app/README.md"
+    ],
+    "styles-archive-empty-states": [
+      "app/styles.css"
+    ],
+    "ui-markup-copy-archive": [
+      "app/index.html"
+    ]
+  },
+  "safe_resume_possible": false,
+  "status": "completed"
+}

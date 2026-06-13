@@ -8,8 +8,8 @@
       "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/app.js",
       "examples/NoteKeeper/20_sfe_single_model_gpt54_nomultipass/app/README.md"
     ],
-    "input_tokens": 4844,
-    "latency_or_wall_clock_duration": 20528,
+    "input_tokens": 5048,
+    "latency_or_wall_clock_duration": 25938,
     "manual_verification_notes": null,
     "models": {
       "discovery": "gpt-5.4",
@@ -19,7 +19,7 @@
       "router": "gpt-5.4"
     },
     "multipass_forced_off": true,
-    "output_tokens": 3785,
+    "output_tokens": 4716,
     "provider": "openai-api",
     "provider_call_count": 3,
     "sfe_issue": null,
@@ -29,7 +29,7 @@
     "task_title": "Initial static scaffold",
     "total_estimated_cost": null,
     "validation_error": null,
-    "wall_clock_duration_ms": 25073
+    "wall_clock_duration_ms": 26039
   },
   "sfe": {
     "changed_files": [
@@ -42,11 +42,11 @@
       "model": "gpt-5.4",
       "provider_calls_made": 1,
       "provider_name": "openai",
-      "reason": "The task is to create and edit specific files in the workspace for a static app scaffold, so it requires modifying workspace contents rather than only printing text or taking an external action."
+      "reason": "The task requires creating and editing specific application files in the workspace to implement the static scaffold."
     },
     "executor_provider": "openai",
     "git_auto_init": true,
-    "git_initial_commit_hash": "0e0ea0c",
+    "git_initial_commit_hash": "c5da921",
     "issue": null,
     "multi_pass_summary": null,
     "patch_applied": true,
@@ -60,7 +60,7 @@
       ],
       "file_count": 4,
       "hunk_count": 4,
-      "lines_added": 513,
+      "lines_added": 633,
       "lines_removed": 0,
       "modified_paths": [],
       "paths": [
@@ -83,7 +83,8 @@
     "selected_source_refs": [
       "brief/prompt.md",
       "brief/acceptance_criteria.md",
-      "brief/task_sequence.md"
+      "brief/task_sequence.md",
+      "tasks/01_initial_scaffold.md"
     ],
     "status": "completed",
     "warnings": [

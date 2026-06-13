@@ -6,17 +6,11 @@
     "app/README.md"
   ],
   "created_files_by_pass": {
-    "app-shell-html": [
-      "app/index.html"
-    ],
-    "baseline-styles": [
-      "app/styles.css"
-    ],
-    "readme-scaffold": [
+    "html-scaffold": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
       "app/README.md"
-    ],
-    "scaffold-behavior": [
-      "app/app.js"
     ]
   },
   "enabled": true,
@@ -28,109 +22,108 @@
         "app/index.html"
       ],
       "created_files": [
-        "app/index.html"
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
       ],
       "fallback_diagnostics": null,
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
       "issue": null,
-      "pass_id": "app-shell-html",
+      "pass_id": "html-scaffold",
       "patch_paths": [
-        "app/index.html"
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
       ],
       "promoted_files": [
-        "app/index.html"
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
       ],
       "provider_diagnostics": null,
       "status": "completed",
-      "title": "Create semantic NoteKeeper app shell"
+      "title": "Create semantic app shell",
+      "warnings": [
+        "multi_pass_path_outside_allowed_files:app/styles.css",
+        "multi_pass_path_outside_allowed_files:app/app.js",
+        "multi_pass_path_outside_allowed_files:app/README.md"
+      ]
     },
     {
       "allowed_files": [
         "app/styles.css"
       ],
-      "created_files": [
-        "app/styles.css"
-      ],
+      "created_files": [],
       "fallback_diagnostics": null,
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
       "issue": null,
       "pass_id": "baseline-styles",
-      "patch_paths": [
-        "app/styles.css"
-      ],
-      "promoted_files": [
-        "app/styles.css"
-      ],
+      "patch_paths": [],
+      "promoted_files": [],
       "provider_diagnostics": null,
-      "status": "completed",
-      "title": "Add original responsive baseline styling"
+      "status": "skipped",
+      "title": "Add original responsive baseline styling",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/styles.css"
+      ]
     },
     {
       "allowed_files": [
         "app/app.js"
       ],
-      "created_files": [
-        "app/app.js"
-      ],
+      "created_files": [],
       "fallback_diagnostics": null,
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
       "issue": null,
-      "pass_id": "scaffold-behavior",
-      "patch_paths": [
-        "app/app.js"
-      ],
-      "promoted_files": [
-        "app/app.js"
-      ],
+      "pass_id": "scaffold-ui-behavior",
+      "patch_paths": [],
+      "promoted_files": [],
       "provider_diagnostics": null,
-      "status": "completed",
-      "title": "Wire initial client-side scaffold interactions"
+      "status": "skipped",
+      "title": "Wire minimal static interactions",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/app.js"
+      ]
     },
     {
       "allowed_files": [
         "app/README.md"
       ],
-      "created_files": [
-        "app/README.md"
-      ],
+      "created_files": [],
       "fallback_diagnostics": null,
       "full_content_provided_files": [],
       "full_file_replacement_eligible_files": [],
       "full_file_replacement_used_files": [],
       "issue": null,
       "pass_id": "readme-scaffold",
-      "patch_paths": [
-        "app/README.md"
-      ],
-      "promoted_files": [
-        "app/README.md"
-      ],
+      "patch_paths": [],
+      "promoted_files": [],
       "provider_diagnostics": null,
-      "status": "completed",
-      "title": "Document scaffold usage and current scope"
+      "status": "skipped",
+      "title": "Document static app usage and scaffold scope",
+      "warnings": [
+        "multi_pass_skipped_already_promoted_outside_batch:app/README.md"
+      ]
     }
   ],
-  "passes_completed": 4,
+  "passes_completed": 1,
   "passes_total": 4,
-  "project_summary": "Build the initial NoteKeeper static app scaffold in app/ with a browser-openable HTML shell, original baseline styling, a note creation form that supports text and checklist modes, active/archive view controls, placeholder notes area, minimal client-side interaction for scaffold usability, and README run/feature notes aligned with the benchmark's first task while preserving room for later CRUD and persistence passes.",
+  "project_summary": "Build the initial static NoteKeeper browser app scaffold inside app/ with a direct-open HTML shell, original baseline styling, a note creation form that includes text and checklist inputs, active/archive view controls, a placeholder notes area, minimal client-side UI wiring for scaffold behavior, and README instructions for running and reviewing the static app.",
   "promoted_files_by_pass": {
-    "app-shell-html": [
-      "app/index.html"
-    ],
-    "baseline-styles": [
-      "app/styles.css"
-    ],
-    "readme-scaffold": [
+    "html-scaffold": [
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
       "app/README.md"
-    ],
-    "scaffold-behavior": [
-      "app/app.js"
     ]
   },
   "safe_resume_possible": false,

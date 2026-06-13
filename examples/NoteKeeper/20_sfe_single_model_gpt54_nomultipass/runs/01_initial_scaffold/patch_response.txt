@@ -2,63 +2,64 @@ diff --git a/app/index.html b/app/index.html
 new file mode 100644
 --- /dev/null
 +++ b/app/index.html
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,95 @@
 +<!DOCTYPE html>
 +<html lang="en">
-+<head>
-+  <meta charset="UTF-8">
-+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-+  <title>NoteKeeper</title>
-+  <link rel="stylesheet" href="styles.css">
-+</head>
-+<body>
-+  <div class="app-shell">
-+    <header class="site-header">
-+      <div>
-+        <p class="eyebrow">Local notes</p>
-+        <h1>NoteKeeper</h1>
-+      </div>
-+      <form class="search-form" role="search">
-+        <label for="search-input">Search notes</label>
-+        <input
-+          id="search-input"
-+          name="search"
-+          type="search"
-+          placeholder="Search titles, text, labels, or checklist items"
-+          disabled
-+        >
-+      </form>
-+    </header>
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>NoteKeeper</title>
++    <link rel="stylesheet" href="styles.css" />
++  </head>
++  <body>
++    <div class="app-shell">
++      <header class="app-header">
++        <div>
++          <p class="eyebrow">Local notes workspace</p>
++          <h1>NoteKeeper</h1>
++          <p class="header-copy">
++            Capture ideas, lists, and reminders in a lightweight browser app.
++          </p>
++        </div>
 +
-+    <main class="layout">
-+      <aside class="sidebar">
-+        <nav class="view-switcher" aria-label="Note views">
-+          <button type="button" class="view-button is-active" aria-pressed="true">
-+            Active notes
-+          </button>
-+          <button type="button" class="view-button" aria-pressed="false">
-+            Archived notes
-+          </button>
-+        </nav>
++        <div class="toolbar" aria-label="Search and note views">
++          <label class="search-field">
++            <span>Search notes</span>
++            <input
++              id="search-input"
++              name="search"
++              type="search"
++              placeholder="Search title, content, labels"
++              aria-describedby="search-help"
++            />
++          </label>
++          <p id="search-help" class="assistive-copy">
++            Search will be enabled in the next task.
++          </p>
 +
-+        <section class="composer card-panel" aria-labelledby="create-note-heading">
-+          <div class="section-heading">
-+            <h2 id="create-note-heading">Create a note</h2>
-+            <p>Static scaffold for the NoteKeeper workflow.</p>
-+          </div>
++          <nav class="view-switcher" aria-label="Note views">
++            <button type="button" class="view-button is-active" aria-pressed="true">
++              Active notes
++            </button>
++            <button type="button" class="view-button" aria-pressed="false">
++              Archive
++            </button>
++          </nav>
++        </div>
++      </header>
 +
++      <main class="layout">
++        <section class="composer-panel" aria-labelledby="compose-heading">
++          <h2 id="compose-heading">Create a note</h2>
 +          <form class="note-form">
 +            <div class="field-group">
 +              <label for="note-title">Title</label>
-+              <input id="note-title" name="title" type="text" placeholder="Optional title">
-+            </div>
-+
-+            <div class="field-group">
-+              <label for="note-type">Note type</label>
-+              <select id="note-type" name="type">
-+                <option value="text">Text note</option>
-+                <option value="checklist">Checklist note</option>
-+              </select>
++              <input
++                id="note-title"
++                name="title"
++                type="text"
++                placeholder="Optional note title"
++              />
 +            </div>
 +
 +            <div class="field-group">
@@ -66,468 +67,587 @@ new file mode 100644
 +              <textarea
 +                id="note-body"
 +                name="body"
-+                rows="5"
-+                placeholder="Write a quick note"
++                rows="6"
++                placeholder="Write your note here"
 +              ></textarea>
 +            </div>
 +
-+            <div class="field-group">
-+              <label for="note-labels">Labels</label>
-+              <input
-+                id="note-labels"
-+                name="labels"
-+                type="text"
-+                placeholder="Ideas, Work, Personal"
-+              >
++            <div class="field-row">
++              <div class="field-group">
++                <label for="note-type">Note type</label>
++                <select id="note-type" name="type">
++                  <option value="text">Text note</option>
++                  <option value="checklist">Checklist note</option>
++                </select>
++              </div>
++
++              <div class="field-group">
++                <label for="note-labels">Labels</label>
++                <input
++                  id="note-labels"
++                  name="labels"
++                  type="text"
++                  placeholder="work, ideas, errands"
++                />
++              </div>
 +            </div>
 +
 +            <div class="checklist-placeholder" aria-live="polite">
-+              <p>Checklist items will appear here when checklist support is added.</p>
++              Checklist item controls will appear here in a later task.
 +            </div>
 +
 +            <button type="submit" class="primary-button">Save note</button>
 +          </form>
 +        </section>
-+      </aside>
 +
-+      <section class="content-area" aria-labelledby="notes-heading">
-+        <div class="section-heading">
-+          <h2 id="notes-heading">Notes</h2>
-+          <p>Saved note cards will appear here in a responsive grid.</p>
-+        </div>
-+        <div id="notes-region" class="notes-grid" aria-live="polite"></div>
-+      </section>
-+    </main>
-+  </div>
++        <section class="notes-panel" aria-labelledby="notes-heading">
++          <div class="section-heading">
++            <h2 id="notes-heading">Notes</h2>
++            <p>Preview of the card layout for active and archived notes.</p>
++          </div>
 +
-+  <script src="app.js"></script>
-+</body>
++          <div class="notes-grid" aria-live="polite">
++            <article class="note-card note-card-pinned">
++              <div class="note-card-meta">
++                <span class="status-badge">Pinned</span>
++                <span class="status-badge subtle">Active</span>
++              </div>
++              <h3>Planning notes</h3>
++              <p>
++                Sketch a simple weekly review format and collect follow-up ideas
++                for the next project check-in.
++              </p>
++              <ul class="label-list" aria-label="Labels">
++                <li>planning</li>
++                <li>work</li>
++              </ul>
++              <div class="card-actions">
++                <button type="button">Edit</button>
++                <button type="button">Unpin</button>
++                <button type="button">Archive</button>
++                <button type="button" class="danger-button">Delete</button>
++              </div>
++            </article>
++
++            <article class="note-card">
++              <div class="note-card-meta">
++                <span class="status-badge subtle">Checklist</span>
++              </div>
++              <h3>Weekend errands</h3>
++              <ul class="checklist-preview">
++                <li><span class="checkmark" aria-hidden="true">✓</span> Pick up groceries</li>
++                <li><span class="checkmark" aria-hidden="true">○</span> Drop off library books</li>
++                <li><span class="checkmark" aria-hidden="true">○</span> Water the plants</li>
++              </ul>
++              <ul class="label-list" aria-label="Labels">
++                <li>home</li>
++                <li>errands</li>
++              </ul>
++              <div class="card-actions">
++                <button type="button">Edit</button>
++                <button type="button">Pin</button>
++                <button type="button">Archive</button>
++                <button type="button" class="danger-button">Delete</button>
++              </div>
++            </article>
++
++            <article class="empty-state">
++              <h3>Your saved notes will appear here</h3>
++              <p>
++                This scaffold includes the app shell, creation form, navigation,
++                and sample cards. Interactive note saving arrives in the next
++                task.
++              </p>
++            </article>
++          </div>
++        </section>
++      </main>
++    </div>
++
++    <script src="app.js"></script>
++  </body>
 +</html>
 diff --git a/app/styles.css b/app/styles.css
 new file mode 100644
 --- /dev/null
 +++ b/app/styles.css
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,386 @@
 +:root {
 +  color-scheme: light;
-+  --bg: #f5f7fb;
-+  --panel: #ffffff;
-+  --panel-alt: #eef3ff;
-+  --border: #d8deeb;
-+  --border-strong: #b8c3da;
-+  --text: #1f2937;
-+  --muted: #5b6474;
-+  --accent: #3159d8;
-+  --accent-soft: #e7edff;
-+  --shadow: 0 14px 30px rgba(31, 41, 55, 0.08);
-+  --radius: 18px;
++  --bg: #f4f1ea;
++  --panel: #fffdf9;
++  --panel-strong: #ffffff;
++  --border: #d8d0c2;
++  --border-strong: #b9ad99;
++  --text: #2f261d;
++  --muted: #6a5c4a;
++  --accent: #6f5bd3;
++  --accent-strong: #5945bc;
++  --accent-soft: #ede9ff;
++  --danger: #9a3d37;
++  --danger-soft: #fbe7e5;
++  --shadow: 0 14px 32px rgba(58, 43, 26, 0.08);
++  --radius-lg: 20px;
++  --radius-md: 14px;
++  --radius-sm: 10px;
 +}
 +
 +* {
 +  box-sizing: border-box;
 +}
 +
-+html,
-+body {
-+  margin: 0;
-+  min-height: 100%;
++html {
 +  font-family: Arial, Helvetica, sans-serif;
-+  background: linear-gradient(180deg, #f8faff 0%, #f3f6fb 100%);
++  background: var(--bg);
 +  color: var(--text);
 +}
 +
 +body {
-+  padding: 20px;
++  margin: 0;
++  min-height: 100vh;
 +}
 +
 +button,
 +input,
-+select,
-+textarea {
++textarea,
++select {
 +  font: inherit;
 +}
 +
-+button,
-+input,
-+select,
-+textarea {
-+  border-radius: 12px;
++button {
++  cursor: pointer;
 +}
 +
 +button:focus-visible,
 +input:focus-visible,
-+select:focus-visible,
-+textarea:focus-visible {
-+  outline: 3px solid rgba(49, 89, 216, 0.28);
++textarea:focus-visible,
++select:focus-visible {
++  outline: 3px solid rgba(111, 91, 211, 0.35);
 +  outline-offset: 2px;
 +}
 +
 +.app-shell {
-+  max-width: 1200px;
++  width: min(1180px, calc(100% - 2rem));
 +  margin: 0 auto;
++  padding: 1.5rem 0 2rem;
 +}
 +
-+.site-header {
-+  display: flex;
-+  flex-wrap: wrap;
-+  justify-content: space-between;
-+  align-items: end;
-+  gap: 16px;
-+  margin-bottom: 24px;
++.app-header {
++  display: grid;
++  grid-template-columns: 1.3fr 1fr;
++  gap: 1.5rem;
++  align-items: start;
++  margin-bottom: 1.5rem;
 +}
 +
 +.eyebrow {
-+  margin: 0 0 6px;
-+  color: var(--accent);
-+  font-size: 0.9rem;
++  margin: 0 0 0.35rem;
++  color: var(--accent-strong);
++  font-size: 0.8rem;
 +  font-weight: 700;
-+  text-transform: uppercase;
 +  letter-spacing: 0.08em;
++  text-transform: uppercase;
 +}
 +
 +h1,
 +h2,
++h3,
 +p {
 +  margin-top: 0;
 +}
 +
 +h1 {
++  margin-bottom: 0.5rem;
++  font-size: clamp(2rem, 4vw, 3rem);
++}
++
++.header-copy {
++  max-width: 38rem;
 +  margin-bottom: 0;
-+  font-size: clamp(2rem, 4vw, 2.8rem);
++  color: var(--muted);
++  line-height: 1.5;
 +}
 +
-+.search-form {
-+  display: grid;
-+  gap: 8px;
-+  min-width: min(100%, 340px);
++.toolbar,
++.composer-panel,
++.notes-panel {
++  background: var(--panel);
++  border: 1px solid var(--border);
++  border-radius: var(--radius-lg);
++  box-shadow: var(--shadow);
 +}
 +
-+.search-form label,
++.toolbar {
++  padding: 1rem;
++}
++
++.search-field,
++.field-group {
++  display: flex;
++  flex-direction: column;
++  gap: 0.45rem;
++}
++
++.search-field span,
 +.field-group label {
 +  font-weight: 700;
-+  color: var(--muted);
 +}
 +
-+.search-form input,
++.search-field input,
 +.field-group input,
-+.field-group select,
-+.field-group textarea {
++.field-group textarea,
++.field-group select {
 +  width: 100%;
++  padding: 0.8rem 0.95rem;
 +  border: 1px solid var(--border);
-+  background: var(--panel);
++  border-radius: var(--radius-sm);
++  background: var(--panel-strong);
 +  color: var(--text);
-+  padding: 12px 14px;
 +}
 +
-+.search-form input:disabled {
-+  background: #f0f3f9;
-+  color: #7a8496;
++.search-field input::placeholder,
++.field-group input::placeholder,
++.field-group textarea::placeholder {
++  color: #907f6a;
 +}
 +
-+.layout {
-+  display: grid;
-+  gap: 24px;
-+}
-+
-+.sidebar,
-+.content-area {
-+  display: grid;
-+  gap: 20px;
-+}
-+
-+.card-panel {
-+  background: var(--panel);
-+  border: 1px solid var(--border);
-+  border-radius: var(--radius);
-+  box-shadow: var(--shadow);
-+  padding: 20px;
++.assistive-copy {
++  margin: 0.65rem 0 0;
++  color: var(--muted);
++  font-size: 0.92rem;
 +}
 +
 +.view-switcher {
-+  display: flex;
++  display: inline-flex;
++  gap: 0.75rem;
 +  flex-wrap: wrap;
-+  gap: 12px;
++  margin-top: 1rem;
 +}
 +
 +.view-button,
-+.primary-button,
-+.secondary-button {
++.card-actions button,
++.primary-button {
++  min-height: 2.75rem;
++  padding: 0.7rem 1rem;
 +  border: 1px solid var(--border-strong);
-+  background: var(--panel);
++  border-radius: 999px;
++  background: #fff;
 +  color: var(--text);
-+  padding: 11px 16px;
-+  cursor: pointer;
 +}
 +
 +.view-button.is-active,
 +.primary-button {
-+  background: var(--accent);
 +  border-color: var(--accent);
-+  color: #ffffff;
++  background: var(--accent);
++  color: #fff;
 +}
 +
 +.primary-button:hover,
-+.view-button:hover,
-+.secondary-button:hover {
-+  filter: brightness(0.98);
++.view-button.is-active:hover {
++  background: var(--accent-strong);
 +}
 +
-+.section-heading p {
-+  color: var(--muted);
-+  margin-bottom: 0;
++.layout {
++  display: grid;
++  grid-template-columns: minmax(280px, 360px) 1fr;
++  gap: 1.5rem;
++}
++
++.composer-panel,
++.notes-panel {
++  padding: 1.25rem;
 +}
 +
 +.note-form {
 +  display: grid;
-+  gap: 16px;
++  gap: 1rem;
 +}
 +
-+.field-group {
++.field-row {
 +  display: grid;
-+  gap: 8px;
++  grid-template-columns: 1fr 1fr;
++  gap: 1rem;
 +}
 +
 +.field-group textarea {
 +  resize: vertical;
-+  min-height: 120px;
++  min-height: 8rem;
 +}
 +
 +.checklist-placeholder {
++  padding: 0.95rem 1rem;
 +  border: 1px dashed var(--border-strong);
-+  background: var(--panel-alt);
-+  border-radius: 14px;
-+  padding: 14px;
++  border-radius: var(--radius-md);
++  background: #faf7f1;
++  color: var(--muted);
++}
++
++.section-heading {
++  display: flex;
++  justify-content: space-between;
++  gap: 1rem;
++  align-items: end;
++  margin-bottom: 1rem;
++}
++
++.section-heading p {
++  margin-bottom: 0;
 +  color: var(--muted);
 +}
 +
 +.notes-grid {
 +  display: grid;
-+  gap: 16px;
-+  grid-template-columns: 1fr;
++  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
++  gap: 1rem;
++}
++
++.note-card,
++.empty-state {
++  padding: 1rem;
++  border: 1px solid var(--border);
++  border-radius: var(--radius-md);
++  background: var(--panel-strong);
 +}
 +
 +.note-card {
-+  display: grid;
-+  gap: 14px;
-+  background: var(--panel);
-+  border: 1px solid var(--border);
-+  border-radius: var(--radius);
-+  box-shadow: var(--shadow);
-+  padding: 18px;
-+}
-+
-+.note-card.is-pinned {
-+  border-color: #f0b64a;
-+  background: linear-gradient(180deg, #fffdf6 0%, #ffffff 100%);
-+}
-+
-+.note-card header {
 +  display: flex;
-+  justify-content: space-between;
-+  gap: 12px;
-+  align-items: start;
++  flex-direction: column;
++  gap: 0.9rem;
++  min-height: 100%;
 +}
 +
-+.note-meta {
-+  color: var(--muted);
-+  font-size: 0.95rem;
++.note-card-pinned {
++  border-color: #c9b7ff;
++  background: linear-gradient(180deg, #f7f4ff 0%, #fffdf9 100%);
 +}
 +
-+.tag-row {
++.note-card-meta {
 +  display: flex;
++  gap: 0.5rem;
 +  flex-wrap: wrap;
-+  gap: 8px;
 +}
 +
-+.tag {
++.status-badge {
 +  display: inline-flex;
 +  align-items: center;
-+  min-height: 30px;
-+  padding: 4px 10px;
++  min-height: 1.8rem;
++  padding: 0.2rem 0.65rem;
 +  border-radius: 999px;
 +  background: var(--accent-soft);
-+  color: var(--accent);
-+  font-size: 0.92rem;
++  color: var(--accent-strong);
++  font-size: 0.88rem;
++  font-weight: 700;
++}
++
++.status-badge.subtle {
++  background: #f2eee7;
++  color: var(--muted);
++}
++
++.note-card h3,
++.empty-state h3 {
++  margin-bottom: 0;
++}
++
++.note-card p,
++.empty-state p {
++  margin-bottom: 0;
++  color: var(--muted);
++  line-height: 1.5;
++}
++
++.label-list,
++.checklist-preview {
++  margin: 0;
++  padding: 0;
++  list-style: none;
++}
++
++.label-list {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
++}
++
++.label-list li {
++  padding: 0.3rem 0.65rem;
++  border-radius: 999px;
++  background: #f1ece3;
++  color: #4f4336;
++  font-size: 0.88rem;
++}
++
++.checklist-preview {
++  display: grid;
++  gap: 0.55rem;
++  color: var(--muted);
++}
++
++.checklist-preview li {
++  display: flex;
++  gap: 0.5rem;
++  align-items: center;
++}
++
++.checkmark {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 1.25rem;
++  color: var(--accent-strong);
++  font-weight: 700;
 +}
 +
 +.card-actions {
 +  display: flex;
 +  flex-wrap: wrap;
-+  gap: 10px;
++  gap: 0.6rem;
++  margin-top: auto;
++}
++
++.card-actions button {
++  background: #faf7f1;
++}
++
++.card-actions button:hover,
++.view-button:hover {
++  background: #f2ede4;
++}
++
++.danger-button {
++  border-color: #d6a8a4;
++  background: var(--danger-soft) !important;
++  color: var(--danger);
 +}
 +
 +.empty-state {
-+  background: var(--panel);
-+  border: 1px dashed var(--border-strong);
-+  border-radius: var(--radius);
-+  padding: 28px 20px;
-+  text-align: center;
-+  color: var(--muted);
++  display: flex;
++  flex-direction: column;
++  justify-content: center;
++  min-height: 14rem;
++  border-style: dashed;
++  text-align: left;
 +}
 +
-+@media (min-width: 768px) {
-+  .layout {
-+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
++@media (max-width: 900px) {
++  .app-header,
++  .layout,
++  .field-row {
++    grid-template-columns: 1fr;
++  }
++
++  .section-heading {
 +    align-items: start;
-+  }
-+
-+  .notes-grid {
-+    grid-template-columns: repeat(2, minmax(0, 1fr));
++    flex-direction: column;
 +  }
 +}
 +
-+@media (min-width: 1080px) {
-+  .notes-grid {
-+    grid-template-columns: repeat(3, minmax(0, 1fr));
-+  }
-+}
-+
-+@media (max-width: 480px) {
-+  body {
-+    padding: 14px;
++@media (max-width: 600px) {
++  .app-shell {
++    width: min(100% - 1rem, 100%);
++    padding-top: 1rem;
 +  }
 +
-+  .card-panel,
-+  .note-card,
-+  .empty-state {
-+    padding: 16px;
-+  }
-+
-+  .site-header {
-+    align-items: stretch;
++  .toolbar,
++  .composer-panel,
++  .notes-panel {
++    padding: 1rem;
++    border-radius: 16px;
 +  }
 +
 +  .view-switcher,
 +  .card-actions {
-+    flex-direction: column;
++    display: grid;
++    grid-template-columns: 1fr 1fr;
 +  }
 +
 +  .view-button,
-+  .primary-button,
-+  .secondary-button {
++  .card-actions button,
++  .primary-button {
 +    width: 100%;
++    justify-content: center;
 +  }
 +
-+  .note-card header {
-+    flex-direction: column;
++  .notes-grid {
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    scroll-behavior: auto !important;
++    transition: none !important;
 +  }
 +}
 diff --git a/app/app.js b/app/app.js
 new file mode 100644
 --- /dev/null
 +++ b/app/app.js
-@@ -0,0 +1,81 @@
-+const notesRegion = document.getElementById('notes-region');
+@@ -0,0 +1,33 @@
++(function () {
++  "use strict";
 +
-+const sampleNotes = [
-+  {
-+    title: 'Welcome to NoteKeeper',
-+    type: 'Text note',
-+    body: 'This static scaffold sets up the local-first notes workspace. Creating, editing, persistence, and search will be added in the next tasks.',
-+    labels: ['Welcome', 'Scaffold'],
-+    pinned: true,
-+    actions: ['Edit', 'Archive', 'Delete']
-+  },
-+  {
-+    title: 'Checklist preview',
-+    type: 'Checklist note',
-+    body: 'Milk\nProject outline\nCall mom',
-+    labels: ['Home', 'Preview'],
-+    pinned: false,
-+    actions: ['Edit', 'Pin', 'Archive', 'Delete']
++  const form = document.querySelector(".note-form");
++  const searchInput = document.getElementById("search-input");
++  const viewButtons = document.querySelectorAll(".view-button");
++
++  if (form) {
++    form.addEventListener("submit", function (event) {
++      event.preventDefault();
++      window.alert(
++        "This is the initial NoteKeeper scaffold. Interactive note saving will be added in the next task."
++      );
++    });
 +  }
-+];
 +
-+function createButton(label) {
-+  const button = document.createElement('button');
-+  button.type = 'button';
-+  button.className = 'secondary-button';
-+  button.textContent = label;
-+  return button;
-+}
++  if (searchInput) {
++    searchInput.addEventListener("input", function () {
++      searchInput.setAttribute(
++        "aria-description",
++        "Search is part of a later implementation task."
++      );
++    });
++  }
 +
-+function renderTags(labels) {
-+  const tagRow = document.createElement('div');
-+  tagRow.className = 'tag-row';
-+
-+  labels.forEach((label) => {
-+    const tag = document.createElement('span');
-+    tag.className = 'tag';
-+    tag.textContent = label;
-+    tagRow.appendChild(tag);
++  viewButtons.forEach(function (button) {
++    button.addEventListener("click", function () {
++      viewButtons.forEach(function (item) {
++        item.classList.remove("is-active");
++        item.setAttribute("aria-pressed", "false");
++      });
++      button.classList.add("is-active");
++      button.setAttribute("aria-pressed", "true");
++    });
 +  });
-+
-+  return tagRow;
-+}
-+
-+function renderNoteCard(note) {
-+  const article = document.createElement('article');
-+  article.className = `note-card${note.pinned ? ' is-pinned' : ''}`;
-+
-+  const title = note.title || 'Untitled note';
-+  const pinStatus = note.pinned ? 'Pinned' : 'Unpinned';
-+
-+  article.innerHTML = `
-+    <header>
-+      <div>
-+        <h3>${title}</h3>
-+        <p class="note-meta">${note.type} · ${pinStatus}</p>
-+      </div>
-+    </header>
-+    <p>${note.body.replace(/\n/g, '<br>')}</p>
-+  `;
-+
-+  article.appendChild(renderTags(note.labels));
-+
-+  const actions = document.createElement('div');
-+  actions.className = 'card-actions';
-+  note.actions.forEach((label) => actions.appendChild(createButton(label)));
-+  article.appendChild(actions);
-+
-+  return article;
-+}
-+
-+function renderScaffold() {
-+  if (!notesRegion) {
-+    return;
-+  }
-+
-+  notesRegion.innerHTML = '';
-+
-+  if (sampleNotes.length === 0) {
-+    notesRegion.innerHTML = '<div class="empty-state"><p>No notes yet. Create your first note to get started.</p></div>';
-+    return;
-+  }
-+
-+  sampleNotes.forEach((note) => notesRegion.appendChild(renderNoteCard(note)));
-+}
-+
-+renderScaffold();
++})();
 diff --git a/app/README.md b/app/README.md
 new file mode 100644
 --- /dev/null
 +++ b/app/README.md
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,23 @@
 +# NoteKeeper
 +
-+NoteKeeper is a small browser-only notes app scaffold designed to run directly from local files. This initial task provides the static shell, note creation form, view navigation, placeholder card area, and baseline responsive styling.
++NoteKeeper is a small browser-only notes app scaffold built as a static application. It is designed to run directly from local files without a server, build step, or external dependencies.
 +
-+## Run
++## Run locally
 +
 +1. Open the `app/` folder.
 +2. Double-click `index.html`, or open it directly in a modern browser.
-+3. No server, build step, package manager, or external dependency is required.
 +
-+## Included in this scaffold
++## What's included in this scaffold
 +
-+- NoteKeeper app header and product naming
-+- Search field placeholder
-+- Active and archived note view controls
-+- Note creation form with title, note type, body, and labels fields
-+- Checklist placeholder area for future checklist editing
-+- Sample note cards showing the planned layout and actions
-+- Responsive baseline styling for phone, tablet, and desktop widths
++- NoteKeeper app name and header
++- Search input placeholder
++- Active and archive view controls
++- Note creation form with title, body, note type, and labels fields
++- Checklist area placeholder for later implementation
++- Sample note cards showing text and checklist layouts
++- Baseline responsive styling for phone, tablet, and desktop widths
 +
-+## Next implementation steps
++## Current status
 +
-+Future tasks add working note creation, editing, deletion, archive handling, checklist behavior, search, pinning, and `localStorage` persistence.
++This task delivers the initial static scaffold only. The interface is intentionally non-persistent at this stage. Later tasks will add note creation, editing, deletion, localStorage persistence, search, archive handling, checklist behavior, and pinning.
++
++For a quick manual check, open `index.html`, review the layout, tab through the controls, resize the browser window, and confirm the app remains usable without horizontal scrolling at smaller widths.

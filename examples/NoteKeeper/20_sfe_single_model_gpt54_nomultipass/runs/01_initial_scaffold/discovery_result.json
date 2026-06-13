@@ -10,7 +10,7 @@
       "source_ref": "brief/prompt.md"
     },
     {
-      "approx_bytes": 3868,
+      "approx_bytes": 4055,
       "reasons": [
         "llm_router_selected"
       ],
@@ -47,8 +47,8 @@
       "warning_reason": null
     },
     {
-      "approx_chars": 3868,
-      "approx_tokens": 967,
+      "approx_chars": 4055,
+      "approx_tokens": 1014,
       "loaded": true,
       "reason": null,
       "size_bucket": "2049-8192",
@@ -82,7 +82,7 @@
   "router_model": "gpt-5.4",
   "router_provider_calls_made": 1,
   "router_provider_name": "openai",
-  "router_reason": "These benchmark brief files define the current scaffold task, requirements, and acceptance criteria needed before editing the app files.",
+  "router_reason": "These benchmark docs define the current scaffold requirements and acceptance criteria for the allowed app files.",
   "scanned_file_count": 9,
   "skipped_candidate_count": 0,
   "skipped_reason_counts": {

@@ -1,0 +1,142 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [],
+    "input_tokens": 11949,
+    "latency_or_wall_clock_duration": 30039,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4-mini",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": true,
+    "multipass_mode": "auto",
+    "output_tokens": 8191,
+    "provider": "openai-api",
+    "provider_call_count": 3,
+    "provider_calls_by_role": {
+      "discovery": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 991,
+        "latency_ms": 1247,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 78,
+        "success_count": 1
+      },
+      "executor": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 10352,
+        "latency_ms": 27670,
+        "models": [
+          "gpt-5.4-mini"
+        ],
+        "output_tokens": 8072,
+        "success_count": 1
+      },
+      "router": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 606,
+        "latency_ms": 1122,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 41,
+        "success_count": 1
+      }
+    },
+    "sfe_issue": {
+      "category": "physical_application_failure",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/app.js",
+      "reason": "hunk_preimage_mismatch"
+    },
+    "sfe_status": "failed",
+    "success": false,
+    "task_id": "05_responsive_polish",
+    "task_title": "Responsive polish, accessibility pass, and README",
+    "total_estimated_cost": null,
+    "validation_error": null,
+    "wall_clock_duration_ms": 30087
+  },
+  "sfe": {
+    "changed_files": [],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task requires modifying specified app files in the workspace to implement responsive UI, accessibility improvements, and README updates."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": false,
+    "git_initial_commit_hash": null,
+    "issue": {
+      "category": "physical_application_failure",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/app.js",
+      "reason": "hunk_preimage_mismatch"
+    },
+    "multi_pass_summary": null,
+    "patch_applied": false,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [],
+      "file_count": 4,
+      "hunk_count": 14,
+      "lines_added": 130,
+      "lines_removed": 83,
+      "modified_paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "paths": [
+        "app/index.html",
+        "app/styles.css",
+        "app/app.js",
+        "app/README.md"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [],
+    "promotion_applied": false,
+    "promotion_status": "skipped",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md",
+      "tasks/05_responsive_polish.md",
+      "app/index.html",
+      "app/styles.css",
+      "app/app.js",
+      "app/README.md"
+    ],
+    "status": "failed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected"
+    ]
+  }
+}
