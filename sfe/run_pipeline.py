@@ -1253,17 +1253,10 @@ class RunPipeline:
             and diff_parsed.issue is not None
             and diff_parsed.issue.reason == "missing_diff_header"
         ):
-            fenced_diff = extract_single_fenced_git_diff(raw_answer)
-            if fenced_diff is not None:
-                diff_text = fenced_diff
-                parse_status = "fenced_unified_diff"
+            tolerated_diff = _extract_tolerated_workspace_diff(raw_answer)
+            if tolerated_diff is not None:
+                diff_text, parse_status = tolerated_diff
                 diff_parsed = parse_unified_diff(diff_text)
-            else:
-                extracted_diff = extract_first_parseable_git_diff_segment(raw_answer)
-                if extracted_diff is not None:
-                    diff_text = extracted_diff
-                    parse_status = "extracted_unified_diff"
-                    diff_parsed = parse_unified_diff(diff_text)
         if diff_parsed.patch is None or diff_parsed.summary is None:
             if _patch_hunk_count_normalization_enabled() and _is_hunk_accounting_issue(
                 diff_parsed.issue
@@ -1342,6 +1335,17 @@ class RunPipeline:
             preview=normalized_proposal.preview,
             parse_status=normalized_proposal.parse_status,
         )
+
+
+def _extract_tolerated_workspace_diff(raw_answer: str) -> tuple[str, str] | None:
+    fenced_diff = extract_single_fenced_git_diff(raw_answer)
+    if fenced_diff is not None:
+        return fenced_diff, "fenced_unified_diff"
+    extracted_diff = extract_first_parseable_git_diff_segment(raw_answer)
+    if extracted_diff is not None:
+        return extracted_diff, "extracted_unified_diff"
+    return None
+
 
 def _apply_run_patch(
     workspace_root: Path,

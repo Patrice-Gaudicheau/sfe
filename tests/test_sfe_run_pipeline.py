@@ -2244,6 +2244,72 @@ def test_run_pipeline_forced_multipass_promotes_each_batch(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_forced_multipass_accepts_leading_prose_before_diff(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "scaffold-html-structure": (
+                    "index.html",
+                    "styles.css",
+                    "app.js",
+                    "README.md",
+                )
+            }
+        )
+    )
+    minisite_diff = (
+        _valid_minisite_diff()
+        .replace("style.css", "styles.css")
+        .replace("script.js", "app.js")
+    )
+    raw_output = (
+        "I'll create the initial scaffold in app/ with HTML, CSS, JS, and README.\n"
+        f"{minisite_diff}"
+    )
+    executor = FakeExecutor(multipass_patch_answers=[raw_output])
+
+    result = RunPipeline(
+        backend=DirectBackend(executor=executor),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(("index.html",)),
+        execution_mode_router=FakeExecutionModeRouter(),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create the initial static app scaffold",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.changed_files == ("index.html", "styles.css", "app.js", "README.md")
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.passes_completed == 1
+    assert result.multi_pass_summary.failed_pass_issue is None
+    assert result.multi_pass_summary.pass_results[0].patch_paths == (
+        "index.html",
+        "styles.css",
+        "app.js",
+        "README.md",
+    )
+    assert "hunk_preimage_mismatch" not in str(result.multi_pass_summary)
+    assert (repo / "index.html").exists()
+    assert (repo / "styles.css").exists()
+    assert (repo / "app.js").exists()
+    assert (repo / "README.md").exists()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_multipass_refreshes_state_for_later_updates(
     tmp_path: Path,
     monkeypatch,
