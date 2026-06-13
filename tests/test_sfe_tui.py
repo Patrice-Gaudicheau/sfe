@@ -6526,6 +6526,7 @@ def test_patch_system_instruction_prefers_file_blocks_with_diff_fallback() -> No
     assert "Close every file block with exactly <<<END_SFE_FILE>>>" in instruction
     assert "Do not use XML tags such as </SFE_FILE>" in instruction
     assert "Do not claim files were created unless you include their SFE_FILE blocks" in instruction
+    assert "SFE ignores prose outside file blocks" in instruction
     assert "never use absolute paths or ../ traversal" in instruction
     assert "destination-directory boundary" in instruction
     assert "strict unified diff/git diff remains accepted as a compatibility path" in instruction

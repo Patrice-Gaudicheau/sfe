@@ -1470,11 +1470,9 @@ def _parse_sfe_file_block_response(
         marker_line = lines[index].rstrip("\r\n")
         start_match = SFE_FILE_START_RE.match(marker_line)
         if start_match is None:
-            if marker_line.strip():
-                return RunIssue(
-                    "invalid_patch_proposal",
-                    "sfe_file_block_surrounding_text",
-                )
+            # SFE_FILE is an extraction protocol, not a whole-response grammar.
+            # Ignore prose outside blocks and enforce structure only after a
+            # valid block start marker has been found.
             index += 1
             continue
 

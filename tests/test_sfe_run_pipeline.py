@@ -1308,6 +1308,55 @@ def test_run_pipeline_accepts_sfe_file_blocks_for_text_workspace_write(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_scans_sfe_file_blocks_around_prose(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        "I will create the first file now.\n\n"
+        '<<<SFE_FILE path="app/index.html">\n'
+        "<!doctype html>\n"
+        "<title>Scanner</title>\n"
+        "<<<END_SFE_FILE>>>\n"
+        "\nThe first file is done; here is the second.\n\n"
+        '<<<SFE_FILE path="app/styles.css">\n'
+        "body {\n"
+        "  margin: 0;\n"
+        "}\n"
+        "<<<END_SFE_FILE>>>\n"
+        "\nAll files are included above.\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create two files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("app/index.html", "app/styles.css")
+    assert (repo / "app/index.html").read_text(encoding="utf-8") == (
+        "<!doctype html>\n"
+        "<title>Scanner</title>\n"
+    )
+    assert (repo / "app/styles.css").read_text(encoding="utf-8") == (
+        "body {\n"
+        "  margin: 0;\n"
+        "}\n"
+    )
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_recovers_noncanonical_sfe_file_closing_markers(
     tmp_path: Path,
 ) -> None:
@@ -1354,6 +1403,37 @@ def test_run_pipeline_recovers_noncanonical_sfe_file_closing_markers(
         "\n"
         "Closing marker recovery keeps blank lines.\n"
     )
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_treats_standalone_noncanonical_closer_as_block_end(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/notes.txt">\n'
+        "first line\n"
+        "</SFE_FILE>\n"
+        "this prose is outside the block and ignored\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create one file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert "noncanonical_sfe_file_closing_marker_recovered" in result.warnings
+    assert (repo / "app/notes.txt").read_text(encoding="utf-8") == "first line\n"
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
