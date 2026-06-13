@@ -1,0 +1,258 @@
+{
+  "run": {
+    "cached_input_tokens": 0,
+    "currency": null,
+    "generated_or_modified_files": [],
+    "input_tokens": 15548,
+    "latency_or_wall_clock_duration": 32713,
+    "manual_verification_notes": null,
+    "models": {
+      "discovery": "gpt-5.4",
+      "executor": "gpt-5.4-mini",
+      "multipass_planner": "gpt-5.4",
+      "primary": "gpt-5.4",
+      "reviewer": null,
+      "router": "gpt-5.4"
+    },
+    "multipass_forced_auto": true,
+    "multipass_mode": "auto",
+    "output_tokens": 5774,
+    "provider": "openai-api",
+    "provider_call_count": 6,
+    "provider_calls_by_role": {
+      "discovery": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 835,
+        "latency_ms": 1444,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 58,
+        "success_count": 1
+      },
+      "executor": {
+        "cached_input_tokens": 0,
+        "calls": 3,
+        "failure_count": 0,
+        "input_tokens": 10672,
+        "latency_ms": 21715,
+        "models": [
+          "gpt-5.4-mini"
+        ],
+        "output_tokens": 5038,
+        "success_count": 3
+      },
+      "multipass_planner": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 3430,
+        "latency_ms": 7220,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 639,
+        "success_count": 1
+      },
+      "router": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "failure_count": 0,
+        "input_tokens": 611,
+        "latency_ms": 2334,
+        "models": [
+          "gpt-5.4"
+        ],
+        "output_tokens": 39,
+        "success_count": 1
+      }
+    },
+    "sfe_issue": {
+      "category": "multi_pass_patch_scope",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/index.html",
+      "reason": "path_outside_batch_allowed_files"
+    },
+    "sfe_status": "failed",
+    "success": false,
+    "task_id": "01_initial_scaffold",
+    "task_title": "Initial static scaffold",
+    "total_estimated_cost": null,
+    "validation_error": "Missing required app files in controlled workspace: app.js, README.md",
+    "wall_clock_duration_ms": 39272
+  },
+  "sfe": {
+    "changed_files": [
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "execution_mode_decision": {
+      "confidence": 0.99,
+      "execution_mode": "workspace_write",
+      "invalid_response_preview": null,
+      "model": "gpt-5.4",
+      "provider_calls_made": 1,
+      "provider_name": "openai",
+      "reason": "The task is to implement and edit specific app files in the workspace to create the initial static scaffold."
+    },
+    "executor_provider": "openai",
+    "git_auto_init": true,
+    "git_initial_commit_hash": "8bfb56b",
+    "issue": {
+      "category": "multi_pass_patch_scope",
+      "diagnostics": null,
+      "hunk_accounting": null,
+      "path": "app/index.html",
+      "reason": "path_outside_batch_allowed_files"
+    },
+    "multi_pass_summary": {
+      "all_promoted_files": [
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "created_files_by_pass": {
+        "app-shell-html": [
+          "app/index.html"
+        ],
+        "baseline-styles": [
+          "app/styles.css"
+        ]
+      },
+      "enabled": true,
+      "failed_pass_id": "scaffold-behavior-js",
+      "failed_pass_issue": {
+        "category": "multi_pass_patch_scope",
+        "diagnostics": null,
+        "pass_id": "scaffold-behavior-js",
+        "path": "app/index.html",
+        "reason": "path_outside_batch_allowed_files"
+      },
+      "pass_results": [
+        {
+          "allowed_files": [
+            "app/index.html"
+          ],
+          "created_files": [
+            "app/index.html"
+          ],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "app-shell-html",
+          "patch_paths": [
+            "app/index.html"
+          ],
+          "promoted_files": [
+            "app/index.html"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Create semantic app shell HTML"
+        },
+        {
+          "allowed_files": [
+            "app/styles.css"
+          ],
+          "created_files": [
+            "app/styles.css"
+          ],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": null,
+          "pass_id": "baseline-styles",
+          "patch_paths": [
+            "app/styles.css"
+          ],
+          "promoted_files": [
+            "app/styles.css"
+          ],
+          "provider_diagnostics": null,
+          "status": "completed",
+          "title": "Add baseline responsive styling"
+        },
+        {
+          "allowed_files": [
+            "app/app.js"
+          ],
+          "created_files": [],
+          "fallback_diagnostics": null,
+          "full_content_provided_files": [],
+          "full_file_replacement_eligible_files": [],
+          "full_file_replacement_used_files": [],
+          "issue": {
+            "category": "multi_pass_patch_scope",
+            "diagnostics": null,
+            "pass_id": "scaffold-behavior-js",
+            "path": "app/index.html",
+            "reason": "path_outside_batch_allowed_files"
+          },
+          "pass_id": "scaffold-behavior-js",
+          "patch_paths": [],
+          "promoted_files": [],
+          "provider_diagnostics": null,
+          "status": "failed",
+          "title": "Wire minimal scaffold behavior"
+        }
+      ],
+      "passes_completed": 2,
+      "passes_total": 4,
+      "project_summary": "Build the initial static NoteKeeper browser-only app scaffold in app/ with a direct-open HTML shell, baseline responsive styling, a note creation form, active/archive view controls, placeholder notes area, and README documentation, limited to the four required runtime files.",
+      "promoted_files_by_pass": {
+        "app-shell-html": [
+          "app/index.html"
+        ],
+        "baseline-styles": [
+          "app/styles.css"
+        ]
+      },
+      "safe_resume_possible": true,
+      "status": "failed"
+    },
+    "patch_applied": false,
+    "patch_generated": true,
+    "patch_summary": {
+      "created_paths": [
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "file_count": 2,
+      "hunk_count": 2,
+      "lines_added": 404,
+      "lines_removed": 0,
+      "modified_paths": [],
+      "paths": [
+        "app/index.html",
+        "app/styles.css"
+      ],
+      "refused_paths": [],
+      "refused_reasons": []
+    },
+    "promoted_files": [
+      "app/index.html",
+      "app/styles.css"
+    ],
+    "promotion_applied": false,
+    "promotion_status": "skipped",
+    "selected_source_refs": [
+      "brief/prompt.md",
+      "brief/acceptance_criteria.md",
+      "brief/task_sequence.md"
+    ],
+    "status": "failed",
+    "warnings": [
+      "no_router_review_run",
+      "no_worktree_review_run",
+      "no_tests_run",
+      "no_lint_run",
+      "diff_not_inspected",
+      "multiple_creations"
+    ]
+  }
+}

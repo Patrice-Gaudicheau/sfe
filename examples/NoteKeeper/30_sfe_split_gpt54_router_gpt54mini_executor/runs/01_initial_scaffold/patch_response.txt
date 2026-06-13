@@ -1,0 +1,209 @@
+diff --git a/app/app.js b/app/app.js
+--- a/app/app.js
++++ b/app/app.js
+@@ -0,0 +1,147 @@
++document.addEventListener('DOMContentLoaded', () => {
++  const form = document.getElementById('note-form');
++  const titleInput = document.getElementById('note-title');
++  const bodyInput = document.getElementById('note-body');
++  const labelsInput = document.getElementById('note-labels');
++  const noteTypeInputs = Array.from(document.querySelectorAll('input[name="note-type"]'));
++  const checklistEditor = document.getElementById('checklist-editor');
++  const checklistList = document.getElementById('checklist-items');
++  const addChecklistItemButton = document.getElementById('add-checklist-item');
++  const notesStatus = document.getElementById('notes-status');
++  const notesGrid = document.getElementById('notes-grid');
++  const viewButtons = Array.from(document.querySelectorAll('[data-view]'));
++
++  let currentView = 'active';
++
++  function updateChecklistVisibility() {
++    const selectedType = noteTypeInputs.find((input) => input.checked)?.value || 'text';
++    checklistEditor.hidden = selectedType !== 'checklist';
++  }
++
++  function renderStatus() {
++    notesStatus.textContent =
++      currentView === 'active'
++        ? 'Active notes are shown below. Checklist controls appear when checklist is selected.'
++        : 'Archive view is active. Archived notes will appear here.';
++  }
++
++  function renderNotes() {
++    notesGrid.innerHTML = `
++      <article class="note-card note-card--placeholder">
++        <h3>Notes will appear here</h3>
++        <p>This initial scaffold reserves space for future note cards, search, and actions.</p>
++      </article>
++    `;
++  }
++
++  function renderChecklistItems() {
++    checklistList.innerHTML = `
++      <li class="checklist-item">
++        <label>
++          <input type="checkbox" />
++          <span class="sr-only">Checklist item complete</span>
++        </label>
++        <input type="text" placeholder="Checklist item" />
++        <button type="button">Remove</button>
++      </li>
++    `;
++  }
++
++  function addChecklistItem() {
++    const item = document.createElement('li');
++    item.className = 'checklist-item';
++    item.innerHTML = `
++      <label>
++        <input type="checkbox" />
++        <span class="sr-only">Checklist item complete</span>
++      </label>
++      <input type="text" placeholder="Checklist item" />
++      <button type="button">Remove</button>
++    `;
++    checklistList.appendChild(item);
++  }
++
++  function setView(view) {
++    currentView = view;
++    viewButtons.forEach((button) => {
++      const active = button.dataset.view === view;
++      button.classList.toggle('is-active', active);
++      button.setAttribute('aria-pressed', String(active));
++    });
++    renderStatus();
++  }
++
++  noteTypeInputs.forEach((input) => {
++    input.addEventListener('change', updateChecklistVisibility);
++  });
++
++  viewButtons.forEach((button) => {
++    button.addEventListener('click', () => setView(button.dataset.view));
++  });
++
++  addChecklistItemButton.addEventListener('click', addChecklistItem);
++
++  checklistList.addEventListener('click', (event) => {
++    const removeButton = event.target.closest('button');
++    if (!removeButton) return;
++    const item = removeButton.closest('.checklist-item');
++    if (item && checklistList.children.length > 1) {
++      item.remove();
++    }
++  });
++
++  form.addEventListener('submit', (event) => {
++    event.preventDefault();
++    form.reset();
++    noteTypeInputs[0].checked = true;
++    updateChecklistVisibility();
++    renderChecklistItems();
++  });
++
++  updateChecklistVisibility();
++  renderChecklistItems();
++  renderNotes();
++  renderStatus();
++  setView('active');
++});
+diff --git a/app/index.html b/app/index.html
+--- a/app/index.html
++++ b/app/index.html
+@@ -0,0 +1,72 @@
++<!DOCTYPE html>
++<html lang="en">
++<head>
++  <meta charset="UTF-8">
++  <meta name="viewport" content="width=device-width, initial-scale=1.0">
++  <title>NoteKeeper</title>
++  <link rel="stylesheet" href="styles.css">
++</head>
++<body>
++  <div class="app-shell">
++    <header class="app-header">
++      <div>
++        <p class="eyebrow">NoteKeeper</p>
++        <h1>Simple notes for local use</h1>
++      </div>
++      <nav class="view-switcher" aria-label="Note views">
++        <button type="button" class="view-button is-active" data-view="active" aria-pressed="true">Active</button>
++        <button type="button" class="view-button" data-view="archive" aria-pressed="false">Archive</button>
++      </nav>
++    </header>
++
++    <main class="app-main">
++      <section class="composer" aria-labelledby="composer-title">
++        <h2 id="composer-title">Create a note</h2>
++        <form id="note-form" class="note-form">
++          <div class="field">
++            <label for="note-title">Title</label>
++            <input id="note-title" name="title" type="text" placeholder="Optional note title">
++          </div>
++          <div class="field">
++            <label for="note-body">Body</label>
++            <textarea id="note-body" name="body" rows="5" placeholder="Write your note here"></textarea>
++          </div>
++          <div class="field">
++            <label for="note-labels">Labels</label>
++            <input id="note-labels" name="labels" type="text" placeholder="work, ideas, home">
++          </div>
++          <fieldset class="field">
++            <legend>Note type</legend>
++            <label><input type="radio" name="note-type" value="text" checked> Plain text</label>
++            <label><input type="radio" name="note-type" value="checklist"> Checklist</label>
++          </fieldset>
++          <div id="checklist-editor" class="checklist-editor" hidden>
++            <div class="checklist-editor-header">
++              <h3>Checklist items</h3>
++              <button type="button" id="add-checklist-item">Add item</button>
++            </div>
++            <ul id="checklist-items" class="checklist-items" aria-live="polite"></ul>
++          </div>
++          <button type="submit" class="primary-action">Save note</button>
++        </form>
++      </section>
++
++      <section class="board" aria-labelledby="notes-title">
++        <div class="board-header">
++          <h2 id="notes-title">Notes</h2>
++          <p id="notes-status" class="status-message"></p>
++        </div>
++        <div id="notes-grid" class="notes-grid" aria-live="polite"></div>
++      </section>
++    </main>
++  </div>
++
++  <script src="app.js"></script>
++</body>
++</html>
+diff --git a/app/README.md b/app/README.md
+--- a/app/README.md
++++ b/app/README.md
+@@ -0,0 +1,24 @@
++# NoteKeeper
++
++NoteKeeper is a browser-only notes scaffold. Open `index.html` directly in a modern browser to view the app shell, create-note form, active/archive controls, and placeholder note area.
++
++## Run
++
++1. Open `index.html` from the `app/` folder in your browser.
++2. No server, build step, or external dependencies are required.
++
++## Included UI
++
++- App header with the NoteKeeper name
++- Active and archive view controls
++- Note creation form
++- Optional labels field
++- Plain text and checklist note type selection
++- Placeholder notes area
++
++## Manual check
++
++- Open the page directly from disk.
++- Switch between Active and Archive views.
++- Select Checklist to show the checklist editor.
++- Confirm the placeholder note area is visible.
++- Submit the form to reset the scaffold state.

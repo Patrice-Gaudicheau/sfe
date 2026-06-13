@@ -1,0 +1,107 @@
+{
+  "all_promoted_files": [
+    "app/index.html",
+    "app/styles.css"
+  ],
+  "created_files_by_pass": {
+    "app-shell-html": [
+      "app/index.html"
+    ],
+    "baseline-styles": [
+      "app/styles.css"
+    ]
+  },
+  "enabled": true,
+  "failed_pass_id": "scaffold-behavior-js",
+  "failed_pass_issue": {
+    "category": "multi_pass_patch_scope",
+    "diagnostics": null,
+    "pass_id": "scaffold-behavior-js",
+    "path": "app/index.html",
+    "reason": "path_outside_batch_allowed_files"
+  },
+  "pass_results": [
+    {
+      "allowed_files": [
+        "app/index.html"
+      ],
+      "created_files": [
+        "app/index.html"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "app-shell-html",
+      "patch_paths": [
+        "app/index.html"
+      ],
+      "promoted_files": [
+        "app/index.html"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Create semantic app shell HTML"
+    },
+    {
+      "allowed_files": [
+        "app/styles.css"
+      ],
+      "created_files": [
+        "app/styles.css"
+      ],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": null,
+      "pass_id": "baseline-styles",
+      "patch_paths": [
+        "app/styles.css"
+      ],
+      "promoted_files": [
+        "app/styles.css"
+      ],
+      "provider_diagnostics": null,
+      "status": "completed",
+      "title": "Add baseline responsive styling"
+    },
+    {
+      "allowed_files": [
+        "app/app.js"
+      ],
+      "created_files": [],
+      "fallback_diagnostics": null,
+      "full_content_provided_files": [],
+      "full_file_replacement_eligible_files": [],
+      "full_file_replacement_used_files": [],
+      "issue": {
+        "category": "multi_pass_patch_scope",
+        "diagnostics": null,
+        "pass_id": "scaffold-behavior-js",
+        "path": "app/index.html",
+        "reason": "path_outside_batch_allowed_files"
+      },
+      "pass_id": "scaffold-behavior-js",
+      "patch_paths": [],
+      "promoted_files": [],
+      "provider_diagnostics": null,
+      "status": "failed",
+      "title": "Wire minimal scaffold behavior"
+    }
+  ],
+  "passes_completed": 2,
+  "passes_total": 4,
+  "project_summary": "Build the initial static NoteKeeper browser-only app scaffold in app/ with a direct-open HTML shell, baseline responsive styling, a note creation form, active/archive view controls, placeholder notes area, and README documentation, limited to the four required runtime files.",
+  "promoted_files_by_pass": {
+    "app-shell-html": [
+      "app/index.html"
+    ],
+    "baseline-styles": [
+      "app/styles.css"
+    ]
+  },
+  "safe_resume_possible": true,
+  "status": "failed"
+}

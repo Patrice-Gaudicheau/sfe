@@ -1,114 +1,95 @@
 {
-  "scenario": "sfe_split_gpt54_router_gpt54mini_executor",
-  "description": "SFE run with gpt-5.4 for router/discovery and gpt-5.4-mini for executor.",
+  "configuration": {
+    "discovery_model": "gpt-5.4",
+    "executor_model": "gpt-5.4-mini",
+    "multipass": "auto",
+    "multipass_planner_model": "gpt-5.4",
+    "router_model": "gpt-5.4"
+  },
+  "description": "SFE split-model run with gpt-5.4 for routing/discovery/planning and gpt-5.4-mini for execution.",
   "runs": [
     {
+      "cached_input_tokens": 0,
+      "currency": null,
+      "generated_or_modified_files": [],
+      "input_tokens": 15548,
+      "latency_or_wall_clock_duration": 32713,
+      "manual_verification_notes": null,
+      "models": {
+        "discovery": "gpt-5.4",
+        "executor": "gpt-5.4-mini",
+        "multipass_planner": "gpt-5.4",
+        "primary": "gpt-5.4",
+        "reviewer": null,
+        "router": "gpt-5.4"
+      },
+      "output_tokens": 5774,
+      "provider": "openai-api",
+      "provider_call_count": 6,
+      "provider_calls_by_role": {
+        "discovery": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 835,
+          "latency_ms": 1444,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 58,
+          "success_count": 1
+        },
+        "executor": {
+          "cached_input_tokens": 0,
+          "calls": 3,
+          "failure_count": 0,
+          "input_tokens": 10672,
+          "latency_ms": 21715,
+          "models": [
+            "gpt-5.4-mini"
+          ],
+          "output_tokens": 5038,
+          "success_count": 3
+        },
+        "multipass_planner": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 3430,
+          "latency_ms": 7220,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 639,
+          "success_count": 1
+        },
+        "router": {
+          "cached_input_tokens": 0,
+          "calls": 1,
+          "failure_count": 0,
+          "input_tokens": 611,
+          "latency_ms": 2334,
+          "models": [
+            "gpt-5.4"
+          ],
+          "output_tokens": 39,
+          "success_count": 1
+        }
+      },
+      "sfe_status": "failed",
+      "success": false,
       "task_id": "01_initial_scaffold",
-      "provider": null,
-      "models": {
-        "primary": null,
-        "router": "gpt-5.4",
-        "discovery": "gpt-5.4",
-        "executor": "gpt-5.4-mini",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
       "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
-    },
-    {
-      "task_id": "02_persistence_and_crud",
-      "provider": null,
-      "models": {
-        "primary": null,
-        "router": "gpt-5.4",
-        "discovery": "gpt-5.4",
-        "executor": "gpt-5.4-mini",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
-    },
-    {
-      "task_id": "03_labels_search_archive",
-      "provider": null,
-      "models": {
-        "primary": null,
-        "router": "gpt-5.4",
-        "discovery": "gpt-5.4",
-        "executor": "gpt-5.4-mini",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
-    },
-    {
-      "task_id": "04_checklists_and_pinning",
-      "provider": null,
-      "models": {
-        "primary": null,
-        "router": "gpt-5.4",
-        "discovery": "gpt-5.4",
-        "executor": "gpt-5.4-mini",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
-    },
-    {
-      "task_id": "05_responsive_polish",
-      "provider": null,
-      "models": {
-        "primary": null,
-        "router": "gpt-5.4",
-        "discovery": "gpt-5.4",
-        "executor": "gpt-5.4-mini",
-        "reviewer": null
-      },
-      "input_tokens": null,
-      "cached_input_tokens": null,
-      "output_tokens": null,
-      "total_estimated_cost": null,
-      "currency": null,
-      "latency_or_wall_clock_duration": null,
-      "success": null,
-      "generated_or_modified_files": [],
-      "manual_verification_notes": null
+      "validation_error": "Missing required app files in controlled workspace: app.js, README.md"
     }
   ],
+  "scenario": "sfe_split_gpt54_router_gpt54mini_executor",
   "totals": {
-    "input_tokens": null,
-    "cached_input_tokens": null,
-    "output_tokens": null,
-    "total_estimated_cost": null,
+    "cached_input_tokens": 0,
     "currency": null,
-    "latency_or_wall_clock_duration": null
+    "input_tokens": 15548,
+    "latency_or_wall_clock_duration": 32713,
+    "output_tokens": 5774,
+    "total_estimated_cost": null
   }
 }
