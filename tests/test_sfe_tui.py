@@ -6521,8 +6521,10 @@ def test_patch_system_instruction_prefers_file_blocks_with_diff_fallback() -> No
     assert "workspace_write executor" in instruction
     assert "text-only provider path" in instruction
     assert "cannot write files directly" in instruction
-    assert '<<<SFE_FILE path="app/index.html">' in instruction
+    assert '<<<SFE_FILE path="relative/path">' in instruction
     assert "<<<END_SFE_FILE>>>" in instruction
+    assert "Close every file block with exactly <<<END_SFE_FILE>>>" in instruction
+    assert "Do not use XML tags such as </SFE_FILE>" in instruction
     assert "Do not claim files were created unless you include their SFE_FILE blocks" in instruction
     assert "never use absolute paths or ../ traversal" in instruction
     assert "destination-directory boundary" in instruction

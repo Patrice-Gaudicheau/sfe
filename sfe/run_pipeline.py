@@ -92,9 +92,9 @@ from sfe.workspace_isolation import (
     WorkspaceStatusResult,
 )
 from sfe.workspace_write_transport import (
-    SFE_FILE_END_MARKER,
     SFE_FILE_START_RE,
     is_invalid_sfe_file_path,
+    sfe_file_closing_marker_kind,
 )
 
 
@@ -173,6 +173,12 @@ class RunPatchProposal:
         if isinstance(self.proposal, ParsedPatch):
             return tuple(file_patch.new_path for file_patch in self.proposal.files)
         return self.proposal.paths
+
+    @property
+    def transport_warnings(self) -> tuple[str, ...]:
+        if self.parse_status.startswith("noncanonical_sfe_file_closing_marker_recovered"):
+            return ("noncanonical_sfe_file_closing_marker_recovered",)
+        return ()
 
 
 @dataclass(frozen=True)
@@ -653,7 +659,7 @@ class RunPipeline:
             changed_files=changed_files,
             selected_source_refs=selected_source_refs,
             executor_provider=_executor_provider(patch_result),
-            warnings=_warnings_for_summary(patch_summary),
+            warnings=_warnings_for_summary_and_proposal(patch_summary, proposal),
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
@@ -865,6 +871,9 @@ class RunPipeline:
                 proposal,
             )
             if proposal is not None:
+                for warning in proposal.transport_warnings:
+                    batch_warnings.append(warning)
+                    multi_pass_warnings.append(warning)
                 scope_issue = validate_patch_paths_in_batch(proposal.paths, batch)
                 if scope_issue is not None:
                     for path in _paths_outside_batch(proposal.paths, batch):
@@ -1455,6 +1464,7 @@ def _parse_sfe_file_block_response(
 
     edits: list[StructuredFileEdit] = []
     seen_paths: set[str] = set()
+    noncanonical_closing_recovered = False
     index = 0
     while index < len(lines):
         marker_line = lines[index].rstrip("\r\n")
@@ -1480,14 +1490,30 @@ def _parse_sfe_file_block_response(
         content_parts: list[str] = []
         found_end = False
         while index < len(lines):
-            if lines[index].rstrip("\r\n") == SFE_FILE_END_MARKER:
+            content_line = lines[index].rstrip("\r\n")
+            closing_kind = sfe_file_closing_marker_kind(content_line)
+            if closing_kind is not None:
                 found_end = True
+                if closing_kind == "noncanonical":
+                    noncanonical_closing_recovered = True
                 index += 1
                 break
+            if SFE_FILE_START_RE.match(content_line):
+                return RunIssue(
+                    "invalid_patch_proposal",
+                    "malformed_sfe_file_block",
+                    path,
+                    diagnostics={"detail": "new_sfe_file_start_before_closing_marker"},
+                )
             content_parts.append(lines[index])
             index += 1
         if not found_end:
-            return RunIssue("invalid_patch_proposal", "unterminated_sfe_file_block", path)
+            return RunIssue(
+                "invalid_patch_proposal",
+                "malformed_sfe_file_block",
+                path,
+                diagnostics={"detail": "missing_sfe_file_closing_marker"},
+            )
 
         action = (
             SUPPORTED_REPLACE_ACTION
@@ -1511,7 +1537,11 @@ def _parse_sfe_file_block_response(
         proposal=proposal,
         summary=summarize_structured_file_patch(proposal),
         preview=preview or raw_answer,
-        parse_status="sfe_file_blocks",
+        parse_status=(
+            "noncanonical_sfe_file_closing_marker_recovered"
+            if noncanonical_closing_recovered
+            else "canonical_sfe_file_blocks_used"
+        ),
     )
 
 
@@ -1746,7 +1776,7 @@ def _patch_failed_result(
         patch_summary=proposal.summary,
         selected_source_refs=selected_source_refs,
         executor_provider=_executor_provider(patch_result),
-        warnings=_warnings_for_summary(proposal.summary),
+        warnings=_warnings_for_summary_and_proposal(proposal.summary, proposal),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
@@ -1788,7 +1818,10 @@ def _promotion_failed_result(
         changed_files=changed_files,
         selected_source_refs=selected_source_refs,
         executor_provider=_executor_provider(patch_result),
-        warnings=_warnings_for_summary(patch_summary or proposal.summary),
+        warnings=_warnings_for_summary_and_proposal(
+            patch_summary or proposal.summary,
+            proposal,
+        ),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
@@ -1835,7 +1868,7 @@ def _workspace_write_failed_result(
         changed_files=changed_files,
         selected_source_refs=selected_source_refs,
         executor_provider=_executor_provider(patch_result),
-        warnings=_warnings_for_summary(patch_summary),
+        warnings=_warnings_for_summary_and_proposal(patch_summary, proposal),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
@@ -2817,6 +2850,20 @@ def _warnings_for_summary(summary: PatchSummary | None) -> tuple[str, ...]:
     if any(_is_sensitive_path(path) for path in summary.paths):
         warnings.append("sensitive_path_touched")
     return tuple(dict.fromkeys(warnings))
+
+
+def _warnings_for_summary_and_proposal(
+    summary: PatchSummary | None,
+    proposal: RunPatchProposal | None,
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *_warnings_for_summary(summary),
+                *(proposal.transport_warnings if proposal is not None else ()),
+            )
+        )
+    )
 
 
 def _base_warnings() -> tuple[str, ...]:

@@ -1292,6 +1292,7 @@ def test_run_pipeline_accepts_sfe_file_blocks_for_text_workspace_write(
     assert result.patch_summary is not None
     assert result.patch_summary.created_paths == ("app/index.html", "app/styles.css")
     assert result.promoted_files == ("app/index.html", "app/styles.css")
+    assert "noncanonical_sfe_file_closing_marker_recovered" not in result.warnings
     assert (repo / "app/index.html").read_text(encoding="utf-8") == (
         "<!doctype html>\n"
         "<title>SFE</title>\n"
@@ -1302,6 +1303,56 @@ def test_run_pipeline_accepts_sfe_file_blocks_for_text_workspace_write(
         ":root { --accent: #31c48d; }\n"
         "\n"
         "main::before { content: \"<<not a marker>>\"; }\n"
+    )
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_recovers_noncanonical_sfe_file_closing_markers(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/app.js">\n'
+        "const inlineMarker = '</SFE_FILE> is not a closing line';\n"
+        "\n"
+        "export const answer = 42;\n"
+        "</SFE_FILE>>>\n"
+        '<<<SFE_FILE path="app/README.md">\n'
+        "# App\n"
+        "\n"
+        "Closing marker recovery keeps blank lines.\n"
+        "</SFE_FILE>\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create two files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("app/app.js", "app/README.md")
+    assert set(result.promoted_files) == {"app/app.js", "app/README.md"}
+    assert "noncanonical_sfe_file_closing_marker_recovered" in result.warnings
+    assert (repo / "app/app.js").read_text(encoding="utf-8") == (
+        "const inlineMarker = '</SFE_FILE> is not a closing line';\n"
+        "\n"
+        "export const answer = 42;\n"
+    )
+    assert (repo / "app/README.md").read_text(encoding="utf-8") == (
+        "# App\n"
+        "\n"
+        "Closing marker recovery keeps blank lines.\n"
     )
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
@@ -1345,6 +1396,35 @@ def test_core_run_pipeline_accepts_sfe_file_blocks_without_tui_executor(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_rejects_absolute_sfe_file_block_path(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="/tmp/escape.txt">\n'
+        "outside\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create one file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "invalid_sfe_file_path"
+    assert result.issue.path == "/tmp/escape.txt"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_rejects_sfe_file_block_path_traversal(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
@@ -1371,6 +1451,72 @@ def test_run_pipeline_rejects_sfe_file_block_path_traversal(tmp_path: Path) -> N
     assert result.issue.reason == "invalid_sfe_file_path"
     assert result.issue.path == "../escape.txt"
     assert not (tmp_path / "escape.txt").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_unrecoverable_sfe_file_block(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/one.txt">\n'
+        "one\n"
+        '<<<SFE_FILE path="app/two.txt">\n'
+        "two\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "malformed_sfe_file_block"
+    assert result.issue.path == "app/one.txt"
+    assert result.issue.diagnostics == {
+        "detail": "new_sfe_file_start_before_closing_marker"
+    }
+    assert not (repo / "app/one.txt").exists()
+    assert not (repo / "app/two.txt").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_unclosed_sfe_file_block_at_eof(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/app.js">\n'
+        "console.log('unfinished');\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create one file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "invalid_patch_proposal"
+    assert result.issue.reason == "malformed_sfe_file_block"
+    assert result.issue.path == "app/app.js"
+    assert result.issue.diagnostics == {"detail": "missing_sfe_file_closing_marker"}
+    assert not (repo / "app/app.js").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
