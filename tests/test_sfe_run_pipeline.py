@@ -1571,7 +1571,7 @@ def test_run_pipeline_rejects_unrecoverable_sfe_file_block(tmp_path: Path) -> No
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_rejects_unclosed_sfe_file_block_at_eof(tmp_path: Path) -> None:
+def test_run_pipeline_recovers_unclosed_sfe_file_block_at_eof(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
     raw_output = (
@@ -1590,13 +1590,78 @@ def test_run_pipeline_rejects_unclosed_sfe_file_block_at_eof(tmp_path: Path) -> 
         )
     )
 
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is True
+    assert result.patch_applied is True
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("app/app.js",)
+    assert set(result.promoted_files) == {"app/app.js"}
+    assert "eof_sfe_file_closing_marker_recovered" in result.warnings
+    assert (repo / "app/app.js").read_text(encoding="utf-8") == "console.log('unfinished');\n"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_empty_unclosed_sfe_file_block_at_eof(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = '<<<SFE_FILE path="app/app.js">\n'
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create one file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.category == "invalid_patch_proposal"
     assert result.issue.reason == "malformed_sfe_file_block"
     assert result.issue.path == "app/app.js"
     assert result.issue.diagnostics == {"detail": "missing_sfe_file_closing_marker"}
+    assert "eof_sfe_file_closing_marker_recovered" not in result.warnings
     assert not (repo / "app/app.js").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_reports_noncanonical_and_eof_sfe_file_warnings(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/first.txt">\n'
+        "first\n"
+        "</SFE_FILE>\n"
+        "The next file follows.\n"
+        '<<<SFE_FILE path="app/second.txt">\n'
+        "second\n"
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=FakeExecutor(raw_output),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create two files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("app/first.txt", "app/second.txt")
+    assert "noncanonical_sfe_file_closing_marker_recovered" in result.warnings
+    assert "eof_sfe_file_closing_marker_recovered" in result.warnings
+    assert (repo / "app/first.txt").read_text(encoding="utf-8") == "first\n"
+    assert (repo / "app/second.txt").read_text(encoding="utf-8") == "second\n"
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 

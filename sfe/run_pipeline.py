@@ -176,9 +176,12 @@ class RunPatchProposal:
 
     @property
     def transport_warnings(self) -> tuple[str, ...]:
-        if self.parse_status.startswith("noncanonical_sfe_file_closing_marker_recovered"):
-            return ("noncanonical_sfe_file_closing_marker_recovered",)
-        return ()
+        warnings: list[str] = []
+        if "noncanonical" in self.parse_status:
+            warnings.append("noncanonical_sfe_file_closing_marker_recovered")
+        if "eof" in self.parse_status:
+            warnings.append("eof_sfe_file_closing_marker_recovered")
+        return tuple(warnings)
 
 
 @dataclass(frozen=True)
@@ -1465,6 +1468,7 @@ def _parse_sfe_file_block_response(
     edits: list[StructuredFileEdit] = []
     seen_paths: set[str] = set()
     noncanonical_closing_recovered = False
+    eof_closing_recovered = False
     index = 0
     while index < len(lines):
         marker_line = lines[index].rstrip("\r\n")
@@ -1506,12 +1510,15 @@ def _parse_sfe_file_block_response(
             content_parts.append(lines[index])
             index += 1
         if not found_end:
-            return RunIssue(
-                "invalid_patch_proposal",
-                "malformed_sfe_file_block",
-                path,
-                diagnostics={"detail": "missing_sfe_file_closing_marker"},
-            )
+            if index == len(lines) and "".join(content_parts):
+                eof_closing_recovered = True
+            else:
+                return RunIssue(
+                    "invalid_patch_proposal",
+                    "malformed_sfe_file_block",
+                    path,
+                    diagnostics={"detail": "missing_sfe_file_closing_marker"},
+                )
 
         action = (
             SUPPORTED_REPLACE_ACTION
@@ -1531,15 +1538,19 @@ def _parse_sfe_file_block_response(
 
     proposal = StructuredFilePatch(tuple(edits), diff_preview=raw_answer)
     preview = generate_structured_file_patch_diff_preview(workspace_root, proposal)
+    parse_status = "canonical_sfe_file_blocks_used"
+    if noncanonical_closing_recovered and eof_closing_recovered:
+        parse_status = "noncanonical_and_eof_sfe_file_closing_marker_recovered"
+    elif noncanonical_closing_recovered:
+        parse_status = "noncanonical_sfe_file_closing_marker_recovered"
+    elif eof_closing_recovered:
+        parse_status = "eof_sfe_file_closing_marker_recovered"
+
     return RunPatchProposal(
         proposal=proposal,
         summary=summarize_structured_file_patch(proposal),
         preview=preview or raw_answer,
-        parse_status=(
-            "noncanonical_sfe_file_closing_marker_recovered"
-            if noncanonical_closing_recovered
-            else "canonical_sfe_file_blocks_used"
-        ),
+        parse_status=parse_status,
     )
 
 
