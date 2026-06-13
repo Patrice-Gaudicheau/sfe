@@ -278,20 +278,22 @@ SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `console_output` produces a natural-language answer in the TUI with no Git
 preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
 existing discovery, context-routing, executor, and isolated worktree pipeline
-for creating, modifying, or deleting workspace files. Text-only API providers
-such as OpenAI return full-file `SFE_FILE` blocks, which SFE writes into the
-controlled worktree; strict Git diffs remain accepted as a compatibility path.
-Filesystem-capable executors may later write directly in that worktree. In all
-cases, SFE then enforces one safety boundary: every created, modified, or
-deleted path must be inside the selected destination directory before changes
-are promoted. This deliberately avoids fragile patch hunk/preimage validation
-and repair loops, trading fewer false failures for a filesystem-scope boundary
-check. If the selected workspace is not yet a Git repository, `workspace_write`
-can initialize a local snapshot first; it does not create a remote, push, run
-syntax checks, run tests or lint, require diff inspection, require human
-approval, or require router review. `external_action` is recognized as
-outside-workspace work, but is not implemented yet and fails cleanly.
-Historical and debug commands such as
+for creating, modifying, or deleting workspace files. Text-returning API
+providers such as OpenAI, Anthropic, Google, Alibaba, Lemonade, Ollama, and
+similar endpoints return full-file `SFE_FILE` blocks, which core SFE writes into
+the controlled worktree; strict Git diffs remain accepted as a compatibility
+path. Filesystem-capable local or CLI executors are a separate path and may use
+real worktree filesystem changes when they actually run with `cwd` inside the
+controlled worktree. In all cases, SFE then enforces one safety boundary: every
+created, modified, or deleted path must be inside the selected destination
+directory before changes are promoted. This deliberately avoids fragile patch
+hunk/preimage validation and repair loops, trading fewer false failures for a
+filesystem-scope boundary check. If the selected workspace is not yet a Git
+repository, `workspace_write` can initialize a local snapshot first; it does not
+create a remote, push, run syntax checks, run tests or lint, require diff
+inspection, require human approval, or require router review. `external_action`
+is recognized as outside-workspace work, but is not implemented yet and fails
+cleanly. Historical and debug commands such as
 `/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
 `/review-worktree` remain available, but are hidden from the default help.
 

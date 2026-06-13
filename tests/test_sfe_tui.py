@@ -90,6 +90,7 @@ from sfe_tui.patch_review import (
 )
 from sfe.workspace_review import WorkspaceReviewDecision
 from sfe.run_pipeline import RunResult
+from sfe.workspace_write_transport import WORKSPACE_WRITE_TEXT_TRANSPORT_INSTRUCTION
 from sfe_tui.renderer import (
     color_sfe_output,
     render_advanced_help,
@@ -6516,9 +6517,10 @@ def test_console_system_instruction_forbids_diffs_and_file_edits() -> None:
 def test_patch_system_instruction_prefers_file_blocks_with_diff_fallback() -> None:
     instruction = PATCH_SYSTEM_INSTRUCTION
 
+    assert instruction == WORKSPACE_WRITE_TEXT_TRANSPORT_INSTRUCTION
     assert "workspace_write executor" in instruction
     assert "text-only provider path" in instruction
-    assert "You cannot write files directly" in instruction
+    assert "cannot write files directly" in instruction
     assert '<<<SFE_FILE path="app/index.html">' in instruction
     assert "<<<END_SFE_FILE>>>" in instruction
     assert "Do not claim files were created unless you include their SFE_FILE blocks" in instruction

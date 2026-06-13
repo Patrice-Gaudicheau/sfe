@@ -51,6 +51,7 @@ from sfe.provider_config import (
     OLLAMA_SFE_PROVIDER,
     resolve_sfe_executor_provider,
 )
+from sfe.workspace_write_transport import WORKSPACE_WRITE_TEXT_TRANSPORT_INSTRUCTION
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1500
@@ -69,20 +70,9 @@ CONSOLE_SYSTEM_INSTRUCTION = (
     "claim to have changed the workspace. Do not produce a patch, diff, or "
     "file replacement JSON."
 )
-PATCH_SYSTEM_INSTRUCTION = (
-    "You are the SFE TUI workspace_write executor on a text-only provider path. "
-    "You cannot write files directly. Return every created or modified file as "
-    "a full-file SFE_FILE block: <<<SFE_FILE path=\"app/index.html\">, then the "
-    "exact file contents, then <<<END_SFE_FILE>>>. Use relative workspace paths "
-    "only; never use absolute paths or ../ traversal. Do not claim files were "
-    "created unless you include their SFE_FILE blocks. Do not return prose "
-    "outside the file blocks unless explicit diagnostics are requested. SFE "
-    "will write the blocks into a controlled worktree, then enforce the "
-    "destination-directory boundary. A strict unified diff/git diff remains "
-    "accepted as a compatibility path; if you use it, start with diff --git "
-    "a/<relative-path> b/<relative-path>. Do not return JSON. Do not return an "
-    "edits array. Keep changes focused on the user task."
-)
+PATCH_SYSTEM_INSTRUCTION = WORKSPACE_WRITE_TEXT_TRANSPORT_INSTRUCTION
+
+
 @dataclass(frozen=True)
 class ExecutorResponse:
     answer: str | None

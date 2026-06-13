@@ -405,8 +405,10 @@ The current TUI behavior intentionally keeps these boundaries:
 ## DEV Patch Provider Limits
 
 Empty-workspace file creation through the DEV `/run` workspace-write path uses a
-text-to-file transport for API providers that cannot edit the filesystem
-directly. The preferred response format is a deterministic full-file block:
+core text-to-file transport for API providers that cannot edit the filesystem
+directly. This includes OpenAI, Anthropic, Google, Alibaba, Lemonade, Ollama,
+and similar text-returning endpoints. The preferred response format is a
+deterministic full-file block:
 
 ```text
 <<<SFE_FILE path="app/index.html">
@@ -421,12 +423,14 @@ boundary before promotion. Strict Git-style unified diffs remain accepted as a
 compatibility path, but SFE does not rely on hunk/preimage validation, patch
 repair, or a second LLM repair pass as promotion gates.
 
-If a text-only executor returns prose such as "I created the files" without
+If a text-returning executor returns prose such as "I created the files" without
 `SFE_FILE` blocks or a valid Git diff, `/run` fails explicitly with an
 `executor_produced_no_files`-style diagnostic. The model text is not treated as
 evidence that files were created. Filesystem-capable executors may later use the
-real controlled worktree as the source of truth, but OpenAI API providers remain
-text-only and must transport file contents.
+real controlled worktree as the source of truth, but text-returning API
+providers must transport file contents. Because the transport is implemented in
+core SFE, TUI, MCP, scripts, tests, and direct `RunPipeline` usage share the same
+behavior.
 
 For local providers, prefer smaller and simpler workspace-write tasks, or use
 explicit batches for large scaffolds. The lightweight `SFE:` progress lines

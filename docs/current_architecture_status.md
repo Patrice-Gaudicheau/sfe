@@ -40,10 +40,13 @@ treated as an outside-workspace action. `console_output` returns a
 natural-language answer with no worktree or patch. `workspace_write` discovers
 workspace context, builds the internal routing/preflight state needed for a
 reduced executor payload, and writes changes into an SFE-created Git worktree.
-Text-only API providers transport those changes as deterministic full-file
-`SFE_FILE` blocks; strict Git diffs remain a compatibility path. SFE then
-enforces one boundary: every created, modified, or deleted path must be inside
-the selected destination directory before promotion. It does not require human
+Text-returning API providers, including OpenAI, Anthropic, Google, Alibaba,
+Lemonade, Ollama, and similar endpoints, transport those changes as
+deterministic full-file `SFE_FILE` blocks; strict Git diffs remain a
+compatibility path. This transport contract is defined in core SFE and shared by
+TUI, MCP, scripts, and direct `RunPipeline` usage. SFE then enforces one
+boundary: every created, modified, or deleted path must be inside the selected
+destination directory before promotion. It does not require human
 approval, diff inspection, router review, patch hunk/preimage validation, patch
 repair, syntax checks, tests, or lint before promotion. `external_action` is
 recognized but not implemented yet and fails cleanly before workspace work

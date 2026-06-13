@@ -69,7 +69,7 @@ effective behavior for:
   behavior;
 - discovery and context loading;
 - executor prompt preparation;
-- patch proposal parsing;
+- core `SFE_FILE` text transport and compatible Git diff parsing;
 - mechanical path validation;
 - Git repository preparation;
 - Git worktree creation and reuse;
@@ -224,6 +224,13 @@ boundaries:
 Before enabling workspace writes through MCP, implementation tests must show
 that `sfe_run` uses the same validation and patch/worktree machinery as TUI
 `/run`.
+
+Text-returning API providers, including OpenAI, Anthropic, Google, Alibaba,
+Lemonade, Ollama, and similar endpoints, use the core `SFE_FILE` full-file block
+transport for `workspace_write`. MCP does not implement its own parser or prompt
+contract; it reaches the same `RuntimeSession` and `RunPipeline` path as the TUI.
+Filesystem-capable local or CLI executors are a separate path when they actually
+write files inside the controlled worktree.
 
 ## Git Worktree And Promotion Expectations
 

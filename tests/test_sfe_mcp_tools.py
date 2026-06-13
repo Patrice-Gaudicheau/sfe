@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import threading
 import tomllib
@@ -15,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sfe.contracts import SFEContract  # noqa: E402
+from sfe.discovery_router import DiscoveryRouterSelection  # noqa: E402
 from sfe.execution_backend import ExecutionResult  # noqa: E402
 from sfe.execution_mode_router import (  # noqa: E402
     EXECUTION_MODE_CONSOLE_OUTPUT,
@@ -37,6 +39,7 @@ from sfe.run_pipeline import (  # noqa: E402
 )
 from sfe.runtime_session import (  # noqa: E402
     RunReportResult,
+    RuntimeSession,
     RuntimeWorkspaceStatus,
     SessionRunResult,
     TargetDirectoryResult,
@@ -49,6 +52,8 @@ from sfe.workspace_isolation import (  # noqa: E402
 )
 from sfe_mcp.progress import create_mcp_progress_callback  # noqa: E402
 from sfe_mcp.tools import SfeMcpToolHandlers, V1_TOOL_NAMES  # noqa: E402
+from sfe_tui.backends import DirectBackend  # noqa: E402
+from sfe_tui.executors import ExecutorResponse  # noqa: E402
 
 
 FORBIDDEN_TOOL_NAMES = {
@@ -130,6 +135,62 @@ class FakeRuntimeSession:
     def workspace_status(self) -> RuntimeWorkspaceStatus:
         self.calls.append(("workspace_status", None))
         return self.workspace_status_result
+
+
+class FakeWorkspaceWriteRouter:
+    provider_name = "fake-router"
+    model = "fake-model"
+
+    def decide(self, *, task: str) -> ExecutionModeDecision:
+        return ExecutionModeDecision(
+            execution_mode=EXECUTION_MODE_WORKSPACE_WRITE,
+            reason="The task writes workspace files.",
+            confidence=0.9,
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
+        )
+
+
+class FakeDiscoveryRouter:
+    provider_name = "fake-discovery-router"
+    model = "fake-discovery-model"
+
+    def select_files(
+        self,
+        *,
+        task: str,
+        workspace_map: list[dict[str, object]],
+        max_files: int,
+    ) -> DiscoveryRouterSelection:
+        return DiscoveryRouterSelection(
+            files_to_inspect=(),
+            reason="New-file task needs no existing file context.",
+            provider_name=self.provider_name,
+            model=self.model,
+            provider_calls_made=1,
+        )
+
+
+class GenericTextExecutor:
+    provider_name = "generic-text-provider"
+
+    def __init__(self, patch_answer: str) -> None:
+        self.patch_answer = patch_answer
+
+    def answer_console(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        return ExecutorResponse("unused", None, 1, provider_name=self.provider_name)
+
+    def execute(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        return ExecutorResponse("unused", None, 1, provider_name=self.provider_name)
+
+    def propose_patch(self, executor_payload: dict[str, object]) -> ExecutorResponse:
+        return ExecutorResponse(
+            self.patch_answer,
+            None,
+            1,
+            provider_name=self.provider_name,
+        )
 
 
 def make_run_result(
@@ -314,6 +375,58 @@ def test_run_without_task_failure_is_surfaced_actionably() -> None:
     assert result["issue"]["reason"] == "missing_task"
     assert result["action_hint"] == "call_sfe_set_task"
     assert session.calls == [("run", None)]
+
+
+def test_mcp_workspace_write_uses_core_sfe_file_transport(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "sfe@example.test"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "SFE Test"],
+        cwd=repo,
+        check=True,
+    )
+    (repo / ".gitkeep").write_text("", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    patch_answer = (
+        '<<<SFE_FILE path="app/index.html">\n'
+        "<!doctype html>\n"
+        "<title>MCP transport</title>\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+    session = RuntimeSession(
+        backend=DirectBackend(executor=GenericTextExecutor(patch_answer)),
+        cwd=tmp_path,
+        discovery_router=FakeDiscoveryRouter(),
+        execution_mode_router=FakeWorkspaceWriteRouter(),
+    )
+    handlers = SfeMcpToolHandlers(session)
+
+    assert handlers.sfe_set_target_directory(str(repo))["ok"] is True
+    assert handlers.sfe_set_task("Patch context and create index file")["ok"] is True
+    result = handlers.sfe_run()
+
+    assert result["ok"] is True
+    assert result["status"] == RUN_STATUS_COMPLETED
+    assert result["execution_mode"] == EXECUTION_MODE_WORKSPACE_WRITE
+    assert result["changed_files"] == ["app/index.html"]
+    assert result["promoted_files"] == ["app/index.html"]
+    assert result["promotion"]["status"] == "applied"
+    assert (repo / "app/index.html").read_text(encoding="utf-8") == (
+        "<!doctype html>\n"
+        "<title>MCP transport</title>\n"
+    )
 
 
 def test_run_report_without_previous_run_is_surfaced() -> None:

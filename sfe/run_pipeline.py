@@ -91,6 +91,11 @@ from sfe.workspace_isolation import (
     WorkspaceSession,
     WorkspaceStatusResult,
 )
+from sfe.workspace_write_transport import (
+    SFE_FILE_END_MARKER,
+    SFE_FILE_START_RE,
+    is_invalid_sfe_file_path,
+)
 
 
 RUN_STATUS_COMPLETED = "completed"
@@ -1440,16 +1445,12 @@ class RunPipeline:
         )
 
 
-_SFE_FILE_START_RE = re.compile(r'^<<<SFE_FILE path="(?P<path>[^"]+)">[ \t]*$')
-_SFE_FILE_END = "<<<END_SFE_FILE>>>"
-
-
 def _parse_sfe_file_block_response(
     workspace_root: Path,
     raw_answer: str,
 ) -> RunPatchProposal | RunIssue | None:
     lines = raw_answer.splitlines(keepends=True)
-    if not any(_SFE_FILE_START_RE.match(line.rstrip("\r\n")) for line in lines):
+    if not any(SFE_FILE_START_RE.match(line.rstrip("\r\n")) for line in lines):
         return None
 
     edits: list[StructuredFileEdit] = []
@@ -1457,7 +1458,7 @@ def _parse_sfe_file_block_response(
     index = 0
     while index < len(lines):
         marker_line = lines[index].rstrip("\r\n")
-        start_match = _SFE_FILE_START_RE.match(marker_line)
+        start_match = SFE_FILE_START_RE.match(marker_line)
         if start_match is None:
             if marker_line.strip():
                 return RunIssue(
@@ -1479,7 +1480,7 @@ def _parse_sfe_file_block_response(
         content_parts: list[str] = []
         found_end = False
         while index < len(lines):
-            if lines[index].rstrip("\r\n") == _SFE_FILE_END:
+            if lines[index].rstrip("\r\n") == SFE_FILE_END_MARKER:
                 found_end = True
                 index += 1
                 break
@@ -1515,10 +1516,7 @@ def _parse_sfe_file_block_response(
 
 
 def _invalid_sfe_file_block_path_reason(path: str) -> str | None:
-    if not path or path.strip() != path:
-        return "invalid_sfe_file_path"
-    parsed = Path(path)
-    if parsed.is_absolute() or ".." in parsed.parts:
+    if is_invalid_sfe_file_path(path):
         return "invalid_sfe_file_path"
     return None
 

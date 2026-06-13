@@ -27,8 +27,8 @@ The core flow is:
 2. SFE discovers context as usual.
 3. The Router produces and validates a strict JSON multi-pass plan.
 4. The plan contains batches with explicit `allowed_files` guidance.
-5. For each validated batch, text-only Executors return full-file `SFE_FILE`
-   blocks; strict Git diffs remain accepted as a compatibility path.
+5. For each validated batch, text-returning API Executors return full-file
+   `SFE_FILE` blocks; strict Git diffs remain accepted as a compatibility path.
 6. SFE reports patches that touch files outside that batch's `allowed_files` as
    warnings, as long as all paths remain inside the workspace and avoid blocked
    internal directories.
@@ -39,8 +39,9 @@ The core flow is:
 10. MCP and TUI reports expose one consolidated run result.
 
 The JSON plan is not repaired by another LLM. The executor response is not
-repaired by another LLM; text-only providers must return deterministic
-`SFE_FILE` blocks or a valid strict Git diff.
+repaired by another LLM; text-returning API providers such as OpenAI,
+Anthropic, Google, Alibaba, Lemonade, Ollama, and similar endpoints must return
+deterministic `SFE_FILE` blocks or a valid strict Git diff.
 
 ## Configuration
 
@@ -124,5 +125,7 @@ batches were promoted, SFE reports `safe_resume_possible`, the failed pass id,
 and promoted files, but it does not yet resume the run automatically.
 
 Multi-pass also remains bounded by provider quality: the Router planner must
-produce valid strict JSON, and text-only Executors must return `SFE_FILE` blocks
-or a valid strict Git diff for each batch.
+produce valid strict JSON, and text-returning Executors must return `SFE_FILE`
+blocks or a valid strict Git diff for each batch. Filesystem-capable local or
+CLI executors are a separate path when they actually write files inside the
+controlled worktree.

@@ -30,6 +30,7 @@ from sfe.execution_mode_router import (
     ExecutionModeRouterError,
     create_configured_execution_mode_router,
 )
+from sfe.execution_backend import ExecutionResult
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.full_file_replacement_review import (
     FullFileReplacementReviewDecision,
@@ -113,6 +114,38 @@ class FakeExecutor:
                 return answer
             return ExecutorResponse(answer, None, 1, provider_name=self.provider_name)
         return ExecutorResponse(self.patch_answer, None, 1, provider_name=self.provider_name)
+
+
+class GenericTextWorkspaceWriteBackend:
+    name = "generic-text"
+
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
+
+    def dry_run(self, contract):
+        return ExecutionResult(
+            backend=self.name,
+            status="ok",
+            provider_calls_made=0,
+            summary={},
+            contract=contract,
+        )
+
+    def console(self, contract):
+        raise NotImplementedError
+
+    def patch(self, contract):
+        return ExecutionResult(
+            backend=self.name,
+            status="ok",
+            provider_calls_made=1,
+            summary={"executor_provider": "generic-text-provider"},
+            contract=contract,
+            answer=self.answer,
+        )
+
+    def patch_multipass_batch(self, contract, *, plan, batch, completed_files):
+        return self.patch(contract)
 
 
 class DirectMutationExecutor(FakeExecutor):
@@ -1269,6 +1302,44 @@ def test_run_pipeline_accepts_sfe_file_blocks_for_text_workspace_write(
         ":root { --accent: #31c48d; }\n"
         "\n"
         "main::before { content: \"<<not a marker>>\"; }\n"
+    )
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_core_run_pipeline_accepts_sfe_file_blocks_without_tui_executor(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    raw_output = (
+        '<<<SFE_FILE path="app/index.html">\n'
+        "<!doctype html>\n"
+        "<title>Core transport</title>\n"
+        "<<<END_SFE_FILE>>>\n"
+    )
+
+    result = RunPipeline(
+        backend=GenericTextWorkspaceWriteBackend(raw_output),
+        workspace_manager=manager,
+        discovery_router=FakeDiscoveryRouter(()),
+        execution_mode_router=FakeExecutionModeRouter(),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.executor_provider == "generic-text-provider"
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("app/index.html",)
+    assert result.promoted_files == ("app/index.html",)
+    assert (repo / "app/index.html").read_text(encoding="utf-8") == (
+        "<!doctype html>\n"
+        "<title>Core transport</title>\n"
     )
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
