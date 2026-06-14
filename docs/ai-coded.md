@@ -2,18 +2,16 @@
 
 SFE is a human-directed, AI-coded project.
 
-The human maintainer defines the product direction, major architecture choices, validation decisions, release decisions, and the overall intent of the project.
+The project maintainer defines the product direction, major architecture choices, validation decisions, release decisions, and the overall intent of the project.
 
 The implementation work has been produced overwhelmingly through AI coding workflows, mainly ChatGPT, Codex CLI, and Codex App.
 
-"AI-Coded: 95%+" does not mean autonomous software development. It means that, in practical terms, almost all implementation work has been written through AI-assisted coding sessions under human direction.
+"AI-Coded: 95%+" means that, in practical terms, almost all implementation work has been written through interactive AI coding sessions under maintainer direction.
 
-This is not presented as a philosophical claim. This is not presented as marketing fiction. This is simply the current state of how the project has been built.
-
-The badge is intended as a transparent description of the production model behind SFE.
+It does not mean autonomous software development. SFE does not develop itself. The badge is a transparent description of the production model behind the project.
 
 ## Methodology
 
-This percentage is a practical estimate based on the maintainer's development history, not an automated line-by-line authorship audit.
+The percentage is a practical estimate based on the maintainer's development history, not an automated line-by-line authorship audit.
 
-It refers to implementation work produced through interactive AI coding sessions, then reviewed, tested, integrated, and directed by the human maintainer.
+It refers to implementation work produced through AI coding sessions, then reviewed, tested, integrated, and directed by the project maintainer.
