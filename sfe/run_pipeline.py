@@ -33,6 +33,8 @@ from sfe.execution_mode_router import (
     create_configured_execution_mode_router,
 )
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
+from sfe.filesystem_executor import FilesystemExecutor, FilesystemExecutionResult
+from sfe.aider_filesystem_executor import AiderFilesystemExecutor
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.multipass import (
     MultiPassBatch,
@@ -95,6 +97,12 @@ from sfe.workspace_write_transport import (
     SFE_FILE_START_RE,
     is_invalid_sfe_file_path,
     sfe_file_closing_marker_kind,
+)
+from sfe.workspace_write_executor import (
+    WORKSPACE_WRITE_EXECUTOR_AIDER,
+    WORKSPACE_WRITE_EXECUTOR_TEXT,
+    WorkspaceWriteExecutorConfigError,
+    resolve_workspace_write_executor,
 )
 
 
@@ -213,6 +221,7 @@ class RunResult:
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
     patch_hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
     multi_pass_summary: MultiPassRunSummary | None = None
+    filesystem_result: FilesystemExecutionResult | None = None
 
 
 class GitWorkspacePreparer:
@@ -292,6 +301,7 @@ class RunPipeline:
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
         multipass_planner: MultiPassPlanner | None = None,
+        filesystem_executor: FilesystemExecutor | None = None,
         full_file_replacement_reviewer: object | None = None,
         git_preparer: GitWorkspacePreparer | None = None,
         progress_callback: RunProgressCallback | None = None,
@@ -306,6 +316,7 @@ class RunPipeline:
             execution_mode_router or create_configured_execution_mode_router()
         )
         self.multipass_planner = multipass_planner or create_configured_multipass_planner()
+        self.filesystem_executor = filesystem_executor or AiderFilesystemExecutor()
         self.git_preparer = git_preparer or GitWorkspacePreparer()
         self.progress_callback = progress_callback
 
@@ -464,10 +475,39 @@ class RunPipeline:
         )
         multipass_config = resolve_multipass_config()
         multipass_requested = should_use_multipass(request.task, multipass_config)
+        try:
+            workspace_write_executor = resolve_workspace_write_executor()
+        except WorkspaceWriteExecutorConfigError as exc:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue(
+                    "workspace_write_executor",
+                    "unsupported_workspace_write_executor",
+                    diagnostics={
+                        "configured_value": exc.value,
+                        "supported_values": (
+                            WORKSPACE_WRITE_EXECUTOR_AIDER,
+                            WORKSPACE_WRITE_EXECUTOR_TEXT,
+                        ),
+                    },
+                ),
+                execution_mode_decision=execution_mode_decision,
+                workspace_session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                warnings=_base_warnings(),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+            )
         if (
             dry_run_result.contract.context_segments
             and not selected_ids
             and not multipass_requested
+            and workspace_write_executor == WORKSPACE_WRITE_EXECUTOR_TEXT
         ):
             return RunResult(
                 status=RUN_STATUS_FAILED,
@@ -498,6 +538,19 @@ class RunPipeline:
                 selected_source_refs=selected_source_refs,
                 contract=contract,
                 config=multipass_config,
+            )
+
+        if workspace_write_executor == WORKSPACE_WRITE_EXECUTOR_AIDER:
+            return self._run_workspace_write_filesystem(
+                request=request,
+                execution_mode_decision=execution_mode_decision,
+                git_preparation=git_preparation,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
             )
 
         self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
@@ -673,6 +726,126 @@ class RunPipeline:
             patch_hunk_count_normalization=(
                 proposal.hunk_count_normalization if proposal is not None else None
             ),
+        )
+
+    def _run_workspace_write_filesystem(
+        self,
+        *,
+        request: RunRequest,
+        execution_mode_decision: ExecutionModeDecision,
+        git_preparation: GitPreparationResult,
+        session: WorkspaceSession,
+        active_workspace: Path,
+        worktree_created: bool,
+        discovery_result: DiscoveryResult,
+        dry_run_result: ExecutionResult,
+        selected_source_refs: tuple[str, ...],
+    ) -> RunResult:
+        from sfe.filesystem_executor import FilesystemExecutionRequest
+
+        self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
+        self._emit_progress(
+            "filesystem_worktree_execution_started",
+            "SFE: Aider filesystem execution started",
+        )
+        fs_result = self.filesystem_executor.execute(
+            FilesystemExecutionRequest(
+                cwd=active_workspace,
+                task=request.task,
+                expected_paths=(),
+                context_paths=selected_source_refs,
+                metadata={
+                    "workspace_session_id": session.session_id,
+                    "source_path": str(session.source_path.resolve()),
+                    "worktree_path": str(session.worktree_path.resolve()),
+                },
+            )
+        )
+        if fs_result.status != "completed":
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+            )
+
+        promotion_baseline = _capture_actual_workspace_changes(session, active_workspace)
+        patch_summary = _summary_from_promotion_baseline(promotion_baseline)
+        changed_files = _promotion_baseline_paths(promotion_baseline)
+        self._emit_progress(
+            "workspace_boundary_check_completed",
+            "SFE: workspace boundary check completed",
+            changed_file_count=len(changed_files),
+            destination_root=str(session.source_path.resolve()),
+        )
+        if promotion_baseline.issue is not None:
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=promotion_baseline.issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+            )
+
+        promotion_result = _promote_actual_workspace_changes(promotion_baseline)
+        if promotion_result.status not in {"applied", "skipped"}:
+            issue = promotion_result.issue or RunIssue("promotion", "promotion_not_applied")
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                promotion_result=promotion_result,
+            )
+
+        self._emit_progress(
+            "promotion_completed",
+            "SFE: promotion completed",
+            promoted_file_count=len(promotion_result.promoted_files),
+        )
+        return RunResult(
+            status=RUN_STATUS_COMPLETED,
+            execution_mode_decision=execution_mode_decision,
+            workspace_session=session,
+            active_workspace=active_workspace,
+            worktree_created=worktree_created,
+            discovery_result=discovery_result,
+            dry_run_result=dry_run_result,
+            patch_result=None,
+            patch_generated=False,
+            patch_applied=False,
+            patch_summary=patch_summary,
+            changed_files=changed_files,
+            selected_source_refs=selected_source_refs,
+            executor_provider=fs_result.executor_name,
+            warnings=_warnings_for_summary(patch_summary),
+            git_auto_init=git_preparation.auto_initialized,
+            git_initial_commit_hash=git_preparation.initial_commit_hash,
+            git_init_warning=git_preparation.warning,
+            promotion_status=promotion_result.status,
+            promotion_applied=promotion_result.status == "applied",
+            promoted_files=promotion_result.promoted_files,
+            filesystem_result=fs_result,
         )
 
     def _run_workspace_write_multipass(
@@ -1892,6 +2065,61 @@ def _workspace_write_failed_result(
     )
 
 
+def _filesystem_workspace_write_failed_result(
+    filesystem_result: FilesystemExecutionResult,
+    *,
+    execution_mode_decision: ExecutionModeDecision,
+    session: WorkspaceSession,
+    active_workspace: Path,
+    worktree_created: bool,
+    discovery_result: DiscoveryResult,
+    dry_run_result: ExecutionResult,
+    selected_source_refs: tuple[str, ...],
+    git_preparation: GitPreparationResult,
+    issue: RunIssue | None = None,
+    patch_summary: PatchSummary | None = None,
+    changed_files: tuple[str, ...] = (),
+    promotion_result: PromotionResult | None = None,
+) -> RunResult:
+    effective_issue = issue or RunIssue(
+        "workspace_write_executor",
+        filesystem_result.error_category or "filesystem_execution_failed",
+        diagnostics={
+            "executor_name": filesystem_result.executor_name,
+            "install_guidance": filesystem_result.metadata.get("install_guidance"),
+            "diagnostics": _filesystem_diagnostics_dict(
+                filesystem_result.diagnostics
+            ),
+        },
+    )
+    return RunResult(
+        status=RUN_STATUS_FAILED,
+        issue=effective_issue,
+        execution_mode_decision=execution_mode_decision,
+        workspace_session=session,
+        active_workspace=active_workspace,
+        worktree_created=worktree_created,
+        discovery_result=discovery_result,
+        dry_run_result=dry_run_result,
+        patch_result=None,
+        patch_generated=False,
+        patch_applied=False,
+        patch_summary=patch_summary,
+        changed_files=changed_files,
+        selected_source_refs=selected_source_refs,
+        executor_provider=filesystem_result.executor_name,
+        warnings=_warnings_for_summary(patch_summary),
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
+        promotion_status=promotion_result.status if promotion_result else "skipped",
+        promotion_applied=False,
+        promoted_files=promotion_result.promoted_files if promotion_result else (),
+        promotion_issue=effective_issue if issue is not None else None,
+        filesystem_result=filesystem_result,
+    )
+
+
 def _multipass_run_result(
     *,
     status: str,
@@ -2378,6 +2606,25 @@ def _executor_provider(result: ExecutionResult | None) -> str | None:
         return None
     provider = result.summary.get("executor_provider")
     return str(provider) if provider is not None else None
+
+
+def _filesystem_diagnostics_dict(
+    diagnostics: object,
+) -> dict[str, object]:
+    if not hasattr(diagnostics, "executor_name"):
+        return {}
+    return {
+        "executor_name": getattr(diagnostics, "executor_name", None),
+        "cwd": getattr(diagnostics, "cwd", None),
+        "command": list(getattr(diagnostics, "command", ()) or ()),
+        "return_code": getattr(diagnostics, "return_code", None),
+        "stdout_length": getattr(diagnostics, "stdout_length", 0),
+        "stderr_length": getattr(diagnostics, "stderr_length", 0),
+        "stdout_preview": getattr(diagnostics, "stdout_preview", None),
+        "stderr_preview": getattr(diagnostics, "stderr_preview", None),
+        "elapsed_ms": getattr(diagnostics, "elapsed_ms", 0),
+        "metadata": dict(getattr(diagnostics, "metadata", {}) or {}),
+    }
 
 
 def _is_hunk_accounting_issue(issue: PatchIssue | None) -> bool:

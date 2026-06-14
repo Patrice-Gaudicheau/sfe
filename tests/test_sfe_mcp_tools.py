@@ -377,7 +377,11 @@ def test_run_without_task_failure_is_surfaced_actionably() -> None:
     assert session.calls == [("run", None)]
 
 
-def test_mcp_workspace_write_uses_core_sfe_file_transport(tmp_path: Path) -> None:
+def test_mcp_workspace_write_uses_core_sfe_file_transport(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)

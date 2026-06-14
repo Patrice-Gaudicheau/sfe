@@ -46,11 +46,7 @@ def serialize_run_result(
             else None
         ),
         "issue": (
-            {
-                "category": issue.category,
-                "reason": issue.reason,
-                "path": issue.path,
-            }
+            _serialize_run_issue(issue)
             if issue is not None
             else None
         ),
@@ -98,6 +94,43 @@ def serialize_run_result(
     if include_diagnostics:
         data["diagnostics"] = _serialize_run_diagnostics(result)
     return data
+
+
+def _serialize_run_issue(issue: Any) -> dict[str, Any]:
+    serialized = {
+        "category": issue.category,
+        "reason": issue.reason,
+        "path": issue.path,
+    }
+    diagnostics = getattr(issue, "diagnostics", None)
+    if issue.category == "workspace_write_executor" and isinstance(diagnostics, dict):
+        serialized["diagnostics"] = _safe_workspace_write_executor_diagnostics(
+            diagnostics
+        )
+    return serialized
+
+
+def _safe_workspace_write_executor_diagnostics(
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    install_guidance = diagnostics.get("install_guidance")
+    if isinstance(install_guidance, tuple | list):
+        safe["install_guidance"] = [
+            item for item in install_guidance if isinstance(item, str)
+        ]
+    configured_value = diagnostics.get("configured_value")
+    if isinstance(configured_value, str):
+        safe["configured_value"] = configured_value
+    supported_values = diagnostics.get("supported_values")
+    if isinstance(supported_values, tuple | list):
+        safe["supported_values"] = [
+            item for item in supported_values if isinstance(item, str)
+        ]
+    executor_name = diagnostics.get("executor_name")
+    if isinstance(executor_name, str):
+        safe["executor_name"] = executor_name
+    return safe
 
 
 def serialize_session_error(error_category: str | None) -> dict[str, Any]:
@@ -390,6 +423,32 @@ def _serialize_run_diagnostics(result: RunResult) -> dict[str, Any]:
         "executor_response_diagnostics": _serialize_executor_response_diagnostics(
             result
         ),
+        "filesystem_executor": _serialize_filesystem_result(result),
+    }
+
+
+def _serialize_filesystem_result(result: RunResult) -> dict[str, Any] | None:
+    filesystem_result = getattr(result, "filesystem_result", None)
+    if filesystem_result is None:
+        return None
+    diagnostics = filesystem_result.diagnostics
+    return {
+        "executor_name": filesystem_result.executor_name,
+        "status": filesystem_result.status,
+        "changed_paths": list(filesystem_result.changed_paths),
+        "error_category": filesystem_result.error_category,
+        "diagnostics": {
+            "executor_name": diagnostics.executor_name,
+            "cwd": diagnostics.cwd,
+            "command": list(diagnostics.command),
+            "return_code": diagnostics.return_code,
+            "stdout_length": diagnostics.stdout_length,
+            "stderr_length": diagnostics.stderr_length,
+            "stdout_preview": diagnostics.stdout_preview,
+            "stderr_preview": diagnostics.stderr_preview,
+            "elapsed_ms": diagnostics.elapsed_ms,
+            "metadata": dict(diagnostics.metadata),
+        },
     }
 
 

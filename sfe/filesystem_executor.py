@@ -27,6 +27,7 @@ class FilesystemExecutionDiagnostics:
     stdout_preview: str | None
     stderr_preview: str | None
     elapsed_ms: int
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class FilesystemExecutionResult:
     changed_paths: tuple[str, ...]
     diagnostics: FilesystemExecutionDiagnostics
     error_category: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 class FilesystemExecutor(Protocol):
