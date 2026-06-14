@@ -140,8 +140,10 @@ def _safe_workspace_write_executor_diagnostics(
             safe[key] = _safe_diagnostic_value(value)
     for key in (
         "expected_paths",
+        "expected_placeholder_paths",
         "actual_changed_paths",
         "precreated_expected_paths",
+        "untouched_placeholder_paths",
     ):
         value = diagnostics.get(key)
         if isinstance(value, tuple | list):
@@ -179,8 +181,10 @@ def _safe_filesystem_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
             if key
             in {
                 "expected_paths",
+                "expected_placeholder_paths",
                 "actual_changed_paths",
                 "precreated_expected_paths",
+                "untouched_placeholder_paths",
                 "no_changes_reason",
                 "context_paths",
             }

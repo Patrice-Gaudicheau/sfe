@@ -983,6 +983,11 @@ def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
         "README.md",
     )
     assert result.issue.diagnostics["actual_changed_paths"] == ()
+    assert result.issue.diagnostics["untouched_placeholder_paths"] == (
+        "index.html",
+        "styles.css",
+        "README.md",
+    )
     assert result.issue.diagnostics["no_changes_reason"] == (
         "expected_files_not_created_or_modified"
     )
@@ -999,6 +1004,13 @@ def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
     )
     assert result.filesystem_result is not None
     assert result.filesystem_result.diagnostics.metadata["actual_changed_paths"] == ()
+    assert result.filesystem_result.diagnostics.metadata[
+        "untouched_placeholder_paths"
+    ] == ("index.html", "styles.css", "README.md")
+    rendered = render_run_result(result)
+    assert "filesystem expected placeholder paths: index.html, styles.css, README.md" in rendered
+    assert "filesystem untouched placeholder paths: index.html, styles.css, README.md" in rendered
+    assert "filesystem actual changed paths: none" in rendered
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1031,9 +1043,92 @@ def test_run_pipeline_default_aider_precreates_expected_files_only_in_worktree(
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
     assert result.issue.reason == "no_changes"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["untouched_placeholder_paths"] == ("index.html",)
     assert not (repo / "index.html").exists()
     assert result.workspace_session is not None
     assert (result.active_workspace / "index.html").is_file()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_does_not_promote_committed_empty_placeholders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def commit_placeholders(workspace: Path) -> None:
+        _git(workspace, "add", "index.html", "styles.css", "README.md")
+        _git(workspace, "commit", "-m", "Commit untouched placeholders")
+
+    filesystem_executor = FakeFilesystemExecutor(commit_placeholders)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html, styles.css and README.md",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "no_changes"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["actual_changed_paths"] == ()
+    assert result.issue.diagnostics["untouched_placeholder_paths"] == (
+        "index.html",
+        "styles.css",
+        "README.md",
+    )
+    assert result.promoted_files == ()
+    assert not (repo / "index.html").exists()
+    assert not (repo / "styles.css").exists()
+    assert not (repo / "README.md").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_existing_empty_expected_files_are_not_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    for relative_path in ("index.html", "styles.css", "README.md"):
+        (repo / relative_path).write_text("", encoding="utf-8")
+    _git(repo, "add", "index.html", "styles.css", "README.md")
+    _git(repo, "commit", "-m", "Add empty generated files")
+    manager = _manager()
+    filesystem_executor = FakeFilesystemExecutor()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html, styles.css and README.md",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "no_changes"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["precreated_expected_paths"] == ()
+    assert result.issue.diagnostics["untouched_placeholder_paths"] == ()
+    assert result.issue.diagnostics["actual_changed_paths"] == ()
+    assert result.promoted_files == ()
+    for relative_path in ("index.html", "styles.css", "README.md"):
+        assert (repo / relative_path).read_text(encoding="utf-8") == ""
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

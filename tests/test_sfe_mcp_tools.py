@@ -680,8 +680,18 @@ def test_no_changes_workspace_write_diagnostics_are_serialized_safely() -> None:
             elapsed_ms=12,
             metadata={
                 "expected_paths": ("index.html", "styles.css", "README.md"),
+                "expected_placeholder_paths": (
+                    "index.html",
+                    "styles.css",
+                    "README.md",
+                ),
                 "actual_changed_paths": (),
                 "precreated_expected_paths": (
+                    "index.html",
+                    "styles.css",
+                    "README.md",
+                ),
+                "untouched_placeholder_paths": (
                     "index.html",
                     "styles.css",
                     "README.md",
@@ -696,8 +706,18 @@ def test_no_changes_workspace_write_diagnostics_are_serialized_safely() -> None:
         diagnostics={
             "executor_name": "aider",
             "expected_paths": ("index.html", "styles.css", "README.md"),
+            "expected_placeholder_paths": (
+                "index.html",
+                "styles.css",
+                "README.md",
+            ),
             "actual_changed_paths": (),
             "precreated_expected_paths": (
+                "index.html",
+                "styles.css",
+                "README.md",
+            ),
+            "untouched_placeholder_paths": (
                 "index.html",
                 "styles.css",
                 "README.md",
@@ -747,12 +767,20 @@ def test_no_changes_workspace_write_diagnostics_are_serialized_safely() -> None:
         "README.md",
     ]
     assert result["issue"]["diagnostics"]["actual_changed_paths"] == []
+    assert result["issue"]["diagnostics"]["untouched_placeholder_paths"] == [
+        "index.html",
+        "styles.css",
+        "README.md",
+    ]
     assert result["issue"]["diagnostics"]["no_changes_reason"] == (
         "expected_files_not_created_or_modified"
     )
     assert result["action_hint"] == "inspect_run_report_expected_and_actual_paths"
     assert result["diagnostics"]["filesystem_executor"]["diagnostics"]["metadata"][
         "expected_paths"
+    ] == ["index.html", "styles.css", "README.md"]
+    assert result["diagnostics"]["filesystem_executor"]["diagnostics"]["metadata"][
+        "untouched_placeholder_paths"
     ] == ["index.html", "styles.css", "README.md"]
     rendered = repr(result)
     assert "SECRET" not in rendered

@@ -796,6 +796,10 @@ def _render_filesystem_result(filesystem_result: object) -> list[str]:
         f"{_display_value(getattr(filesystem_result, 'status', None))}",
         "  filesystem expected files: "
         f"{_format_diagnostic_list(metadata.get('expected_paths'))}",
+        "  filesystem expected placeholder paths: "
+        f"{_format_diagnostic_list(metadata.get('expected_placeholder_paths'))}",
+        "  filesystem untouched placeholder paths: "
+        f"{_format_diagnostic_list(metadata.get('untouched_placeholder_paths'))}",
         "  filesystem actual changed paths: "
         f"{_format_diagnostic_list(metadata.get('actual_changed_paths'))}",
         "  filesystem no changes reason: "

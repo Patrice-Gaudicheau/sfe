@@ -233,6 +233,19 @@ class PromotionResult:
 
 
 @dataclass(frozen=True)
+class ExpectedPlaceholderSnapshot:
+    relative_path: str
+    before_bytes: bytes | None
+    precreated: bool = False
+
+
+@dataclass(frozen=True)
+class PlaceholderFilterResult:
+    baseline: PromotionBaseline
+    untouched_placeholder_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RunRequest:
     workspace_root: Path | None
     task: str
@@ -853,20 +866,20 @@ class RunPipeline:
                 git_preparation=git_preparation,
             )
         expected_paths = expected_paths_result
-        precreated_paths_result = _precreate_expected_workspace_write_files(
+        placeholder_snapshots_result = _prepare_expected_workspace_write_placeholders(
             active_workspace,
             expected_paths,
         )
-        if isinstance(precreated_paths_result, RunIssue):
+        if isinstance(placeholder_snapshots_result, RunIssue):
             fs_result = _filesystem_preflight_failed_result(
                 cwd=active_workspace,
                 executor_name=self.filesystem_executor.name,
-                error_category=precreated_paths_result.reason,
-                metadata=precreated_paths_result.diagnostics or {},
+                error_category=placeholder_snapshots_result.reason,
+                metadata=placeholder_snapshots_result.diagnostics or {},
             )
             return _filesystem_workspace_write_failed_result(
                 fs_result,
-                issue=precreated_paths_result,
+                issue=placeholder_snapshots_result,
                 execution_mode_decision=execution_mode_decision,
                 session=session,
                 active_workspace=active_workspace,
@@ -876,12 +889,15 @@ class RunPipeline:
                 selected_source_refs=selected_source_refs,
                 git_preparation=git_preparation,
             )
-        precreated_paths = precreated_paths_result
+        placeholder_snapshots = placeholder_snapshots_result
+        placeholder_paths = _placeholder_snapshot_paths(placeholder_snapshots)
+        precreated_paths = _precreated_placeholder_paths(placeholder_snapshots)
         self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
         self._emit_progress(
             "filesystem_worktree_execution_started",
             "SFE: Aider filesystem execution started",
             expected_paths=expected_paths,
+            expected_placeholder_paths=placeholder_paths,
             precreated_expected_paths=precreated_paths,
         )
         fs_result = self.filesystem_executor.execute(
@@ -895,6 +911,7 @@ class RunPipeline:
                     "source_path": str(session.source_path.resolve()),
                     "worktree_path": str(session.worktree_path.resolve()),
                     "expected_paths": expected_paths,
+                    "expected_placeholder_paths": placeholder_paths,
                     "precreated_expected_paths": precreated_paths,
                 },
             )
@@ -902,6 +919,7 @@ class RunPipeline:
         fs_result = _with_filesystem_diagnostics_metadata(
             fs_result,
             expected_paths=expected_paths,
+            expected_placeholder_paths=placeholder_paths,
             precreated_expected_paths=precreated_paths,
         )
         if fs_result.status != "completed":
@@ -917,15 +935,17 @@ class RunPipeline:
                 git_preparation=git_preparation,
             )
 
-        promotion_baseline = _filter_precreated_placeholder_changes(
+        filtered = _filter_unchanged_placeholder_changes(
             _capture_actual_workspace_changes(session, active_workspace),
-            precreated_paths,
+            placeholder_snapshots,
         )
+        promotion_baseline = filtered.baseline
         patch_summary = _summary_from_promotion_baseline(promotion_baseline)
         changed_files = _promotion_baseline_paths(promotion_baseline)
         fs_result = _with_filesystem_diagnostics_metadata(
             fs_result,
             actual_changed_paths=changed_files,
+            untouched_placeholder_paths=filtered.untouched_placeholder_paths,
         )
         self._emit_progress(
             "workspace_boundary_check_completed",
@@ -933,6 +953,7 @@ class RunPipeline:
             changed_file_count=len(changed_files),
             actual_changed_paths=changed_files,
             expected_paths=expected_paths,
+            untouched_placeholder_paths=filtered.untouched_placeholder_paths,
             destination_root=str(session.source_path.resolve()),
         )
         if promotion_baseline.issue is not None:
@@ -967,8 +988,10 @@ class RunPipeline:
                 diagnostics={
                     "executor_name": fs_result.executor_name,
                     "expected_paths": expected_paths,
+                    "expected_placeholder_paths": placeholder_paths,
                     "actual_changed_paths": changed_files,
                     "precreated_expected_paths": precreated_paths,
+                    "untouched_placeholder_paths": filtered.untouched_placeholder_paths,
                     "no_changes_reason": no_changes_reason,
                     "diagnostics": _filesystem_diagnostics_dict(
                         fs_result.diagnostics
@@ -980,6 +1003,7 @@ class RunPipeline:
                 "SFE: no workspace changes produced",
                 expected_paths=expected_paths,
                 actual_changed_paths=changed_files,
+                untouched_placeholder_paths=filtered.untouched_placeholder_paths,
                 no_changes_reason=no_changes_reason,
             )
             return _filesystem_workspace_write_failed_result(
@@ -1656,12 +1680,12 @@ class RunPipeline:
                 all_promoted_files=tuple(all_promoted_files),
                 allowed_files=batch.allowed_files,
             )
-            precreated_paths_result = _precreate_expected_workspace_write_files(
+            placeholder_snapshots_result = _prepare_expected_workspace_write_placeholders(
                 active_workspace,
                 batch.allowed_files,
             )
-            if isinstance(precreated_paths_result, RunIssue):
-                issue = precreated_paths_result
+            if isinstance(placeholder_snapshots_result, RunIssue):
+                issue = placeholder_snapshots_result
                 fs_result = _filesystem_preflight_failed_result(
                     cwd=active_workspace,
                     executor_name=self.filesystem_executor.name,
@@ -1708,7 +1732,9 @@ class RunPipeline:
                     promoted_files=tuple(all_promoted_files),
                     filesystem_result=latest_filesystem_result,
                 )
-            precreated_paths = precreated_paths_result
+            placeholder_snapshots = placeholder_snapshots_result
+            placeholder_paths = _placeholder_snapshot_paths(placeholder_snapshots)
+            precreated_paths = _precreated_placeholder_paths(placeholder_snapshots)
             fs_result = self.filesystem_executor.execute(
                 FilesystemExecutionRequest(
                     cwd=active_workspace,
@@ -1723,6 +1749,7 @@ class RunPipeline:
                         "multi_pass_index": index,
                         "multi_pass_total": len(parsed_plan.batches),
                         "expected_paths": batch.allowed_files,
+                        "expected_placeholder_paths": placeholder_paths,
                         "precreated_expected_paths": precreated_paths,
                     },
                 )
@@ -1730,6 +1757,7 @@ class RunPipeline:
             fs_result = _with_filesystem_diagnostics_metadata(
                 fs_result,
                 expected_paths=batch.allowed_files,
+                expected_placeholder_paths=placeholder_paths,
                 precreated_expected_paths=precreated_paths,
             )
             latest_filesystem_result = fs_result
@@ -1792,15 +1820,17 @@ class RunPipeline:
                 session,
                 active_workspace,
             )
-            promotion_baseline = _filter_precreated_placeholder_changes(
+            filtered = _filter_unchanged_placeholder_changes(
                 promotion_baseline,
-                precreated_paths,
+                placeholder_snapshots,
             )
+            promotion_baseline = filtered.baseline
             patch_summary = _summary_from_promotion_baseline(promotion_baseline)
             changed_files = _promotion_baseline_paths(promotion_baseline)
             fs_result = _with_filesystem_diagnostics_metadata(
                 fs_result,
                 actual_changed_paths=changed_files,
+                untouched_placeholder_paths=filtered.untouched_placeholder_paths,
             )
             latest_filesystem_result = fs_result
             provider_diagnostics = _filesystem_pass_provider_diagnostics(
@@ -1869,8 +1899,10 @@ class RunPipeline:
                     diagnostics={
                         "executor_name": fs_result.executor_name,
                         "expected_paths": batch.allowed_files,
+                        "expected_placeholder_paths": placeholder_paths,
                         "actual_changed_paths": changed_files,
                         "precreated_expected_paths": precreated_paths,
+                        "untouched_placeholder_paths": filtered.untouched_placeholder_paths,
                         "no_changes_reason": no_changes_reason,
                         "diagnostics": _filesystem_diagnostics_dict(
                             fs_result.diagnostics
@@ -1899,6 +1931,7 @@ class RunPipeline:
                     "SFE: no workspace changes produced",
                     expected_paths=batch.allowed_files,
                     actual_changed_paths=changed_files,
+                    untouched_placeholder_paths=filtered.untouched_placeholder_paths,
                     no_changes_reason=no_changes_reason,
                     multi_pass_id=batch.id,
                     multi_pass_index=index,
@@ -3431,11 +3464,11 @@ def _expected_workspace_write_path_rejection_reason(
     return None
 
 
-def _precreate_expected_workspace_write_files(
+def _prepare_expected_workspace_write_placeholders(
     active_workspace: Path,
     expected_paths: tuple[str, ...],
-) -> tuple[str, ...] | RunIssue:
-    precreated: list[str] = []
+) -> tuple[ExpectedPlaceholderSnapshot, ...] | RunIssue:
+    snapshots: list[ExpectedPlaceholderSnapshot] = []
     for relative_path in expected_paths:
         issue = _validate_expected_workspace_write_path(
             active_workspace,
@@ -3446,9 +3479,34 @@ def _precreate_expected_workspace_write_files(
         target = (active_workspace / relative_path).resolve()
         try:
             if target.exists() or target.is_symlink():
+                if not target.is_file():
+                    return RunIssue(
+                        "workspace_write_executor",
+                        "expected_file_placeholder_not_file",
+                        relative_path,
+                        diagnostics={
+                            "expected_path": relative_path,
+                            "expected_paths": expected_paths,
+                            "active_workspace": str(active_workspace.resolve()),
+                        },
+                    )
+                snapshots.append(
+                    ExpectedPlaceholderSnapshot(
+                        relative_path=relative_path,
+                        before_bytes=target.read_bytes(),
+                        precreated=False,
+                    )
+                )
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.touch(exist_ok=True)
+            snapshots.append(
+                ExpectedPlaceholderSnapshot(
+                    relative_path=relative_path,
+                    before_bytes=b"",
+                    precreated=True,
+                )
+            )
         except OSError:
             return RunIssue(
                 "workspace_write_executor",
@@ -3460,37 +3518,95 @@ def _precreate_expected_workspace_write_files(
                     "active_workspace": str(active_workspace.resolve()),
                 },
             )
-        precreated.append(relative_path)
-    return tuple(precreated)
+    return tuple(snapshots)
 
 
-def _filter_precreated_placeholder_changes(
+def _filter_unchanged_placeholder_changes(
     baseline: PromotionBaseline,
-    precreated_paths: tuple[str, ...],
-) -> PromotionBaseline:
-    if baseline.issue is not None or not precreated_paths:
-        return baseline
-    precreated = set(precreated_paths)
+    placeholder_snapshots: tuple[ExpectedPlaceholderSnapshot, ...],
+) -> PlaceholderFilterResult:
+    if baseline.issue is not None or not placeholder_snapshots:
+        return PlaceholderFilterResult(baseline)
+    placeholders = {
+        snapshot.relative_path: snapshot
+        for snapshot in placeholder_snapshots
+    }
     targets: list[PromotionTarget] = []
+    untouched: list[str] = []
     for target in baseline.targets:
-        if (
-            target.relative_path in precreated
-            and target.change_kind == "created"
-            and target.source_before is None
-        ):
+        placeholder = placeholders.get(target.relative_path)
+        if placeholder is not None:
             try:
-                if target.worktree_path.is_file() and target.worktree_path.read_bytes() == b"":
+                if (
+                    target.worktree_path.is_file()
+                    and target.worktree_path.read_bytes() == placeholder.before_bytes
+                ):
+                    untouched.append(target.relative_path)
                     continue
             except OSError:
-                return PromotionBaseline(
-                    issue=RunIssue(
-                        "workspace_status",
-                        "worktree_read_failed",
-                        target.relative_path,
+                return PlaceholderFilterResult(
+                    PromotionBaseline(
+                        issue=RunIssue(
+                            "workspace_status",
+                            "worktree_read_failed",
+                            target.relative_path,
+                        )
+                    )
+                )
+            if (
+                not target.worktree_path.exists()
+                and placeholder.before_bytes is None
+            ):
+                untouched.append(target.relative_path)
+                continue
+            if not target.worktree_path.exists():
+                return PlaceholderFilterResult(
+                    PromotionBaseline(
+                        issue=RunIssue(
+                            "workspace_status",
+                            "worktree_read_failed",
+                            target.relative_path,
+                        )
                     )
                 )
         targets.append(target)
-    return PromotionBaseline(targets=tuple(targets))
+    return PlaceholderFilterResult(
+        PromotionBaseline(targets=tuple(targets)),
+        untouched_placeholder_paths=_order_paths_like_placeholders(
+            tuple(untouched),
+            placeholder_snapshots,
+        ),
+    )
+
+
+def _placeholder_snapshot_paths(
+    snapshots: tuple[ExpectedPlaceholderSnapshot, ...],
+) -> tuple[str, ...]:
+    return tuple(snapshot.relative_path for snapshot in snapshots)
+
+
+def _precreated_placeholder_paths(
+    snapshots: tuple[ExpectedPlaceholderSnapshot, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        snapshot.relative_path
+        for snapshot in snapshots
+        if snapshot.precreated
+    )
+
+
+def _order_paths_like_placeholders(
+    paths: tuple[str, ...],
+    snapshots: tuple[ExpectedPlaceholderSnapshot, ...],
+) -> tuple[str, ...]:
+    remaining = set(paths)
+    ordered: list[str] = []
+    for snapshot in snapshots:
+        if snapshot.relative_path in remaining:
+            ordered.append(snapshot.relative_path)
+            remaining.remove(snapshot.relative_path)
+    ordered.extend(path for path in paths if path in remaining)
+    return tuple(ordered)
 
 
 def _with_filesystem_diagnostics_metadata(
