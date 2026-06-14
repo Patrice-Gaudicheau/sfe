@@ -27,11 +27,13 @@ def test_openai_maps_base_url_to_openai_api_base() -> None:
     assert result.aider_env == {
         "OPENAI_API_KEY": "fixture-openai-key",
         "OPENAI_API_BASE": "https://example.test/v1",
+        "OPENAI_BASE_URL": "https://example.test/v1",
     }
     assert result.selected_model == "gpt-fixture"
     assert result.diagnostics["aider_env_variable_names"] == (
         "OPENAI_API_BASE",
         "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
     )
 
 
@@ -219,8 +221,28 @@ def test_alibaba_maps_to_openai_compatible_when_model_is_explicit() -> None:
     assert result.aider_env == {
         "OPENAI_API_KEY": "fixture-alibaba-key",
         "OPENAI_API_BASE": "https://dashscope.example/v1",
+        "OPENAI_BASE_URL": "https://dashscope.example/v1",
     }
     assert result.selected_model == "openai/qwen-fixture"
+
+
+def test_lemonade_maps_base_url_to_both_openai_base_conventions() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER": "lemonade",
+            "SFE_LEMONADE_API_KEY": "fixture-lemonade-key",
+            "SFE_LEMONADE_BASE_URL": "http://127.0.0.1:13305",
+            "SFE_AIDER_MODEL": "openai/phi-fixture",
+        }
+    )
+
+    assert result.ok
+    assert result.aider_env == {
+        "OPENAI_API_KEY": "fixture-lemonade-key",
+        "OPENAI_API_BASE": "http://127.0.0.1:13305/v1",
+        "OPENAI_BASE_URL": "http://127.0.0.1:13305/v1",
+    }
+    assert result.selected_model == "openai/phi-fixture"
 
 
 def test_codexcli_is_unsupported_for_aider_bridge() -> None:
@@ -283,6 +305,7 @@ def test_diagnostics_do_not_contain_provider_values() -> None:
     assert "base-value-that-must-not-leak" not in diagnostics
     assert "OPENAI_API_KEY" in diagnostics
     assert "OPENAI_API_BASE" in diagnostics
+    assert "OPENAI_BASE_URL" in diagnostics
 
 
 def test_temporary_env_file_contains_only_expected_keys_and_is_deleted(
@@ -293,6 +316,7 @@ def test_temporary_env_file_contains_only_expected_keys_and_is_deleted(
         {
             "OPENAI_API_KEY": "fixture-openai-key",
             "OPENAI_API_BASE": "https://example.test/v1",
+            "OPENAI_BASE_URL": "https://example.test/v1",
         },
         forbidden_roots=(tmp_path,),
     ) as env_path:
@@ -302,6 +326,7 @@ def test_temporary_env_file_contains_only_expected_keys_and_is_deleted(
         text = env_path.read_text(encoding="utf-8")
         assert 'OPENAI_API_KEY="fixture-openai-key"' in text
         assert 'OPENAI_API_BASE="https://example.test/v1"' in text
+        assert 'OPENAI_BASE_URL="https://example.test/v1"' in text
         assert "SFE_PROVIDER" not in text
 
     assert not env_path_after_exit.exists()

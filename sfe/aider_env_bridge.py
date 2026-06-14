@@ -77,12 +77,25 @@ def resolve_aider_env_bridge(
 
     if provider_name == "openai":
         _require_env(env, "OPENAI_API_KEY", missing, aider_env, "OPENAI_API_KEY")
-        _optional_env(env, "OPENAI_BASE_URL", aider_env, "OPENAI_API_BASE")
+        _optional_env(
+            env,
+            "OPENAI_BASE_URL",
+            aider_env,
+            "OPENAI_API_BASE",
+            "OPENAI_BASE_URL",
+        )
         if selected_model is None:
             missing.extend((SFE_AIDER_MODEL_ENV, "SFE_OPENAI_EXECUTOR_MODEL"))
     elif provider_name == "openai-compatible":
         _require_env(env, "OPENAI_API_KEY", missing, aider_env, "OPENAI_API_KEY")
-        _require_env(env, "OPENAI_BASE_URL", missing, aider_env, "OPENAI_API_BASE")
+        _require_env(
+            env,
+            "OPENAI_BASE_URL",
+            missing,
+            aider_env,
+            "OPENAI_API_BASE",
+            "OPENAI_BASE_URL",
+        )
         if _env_value(env, SFE_AIDER_MODEL_ENV) is None:
             missing.append(SFE_AIDER_MODEL_ENV)
     elif provider_name == "anthropic":
@@ -95,17 +108,18 @@ def resolve_aider_env_bridge(
             missing.extend((SFE_AIDER_MODEL_ENV, "SFE_GOOGLE_MODEL"))
     elif provider_name == "alibaba":
         _require_env(env, "ALIBABA_API_KEY", missing, aider_env, "OPENAI_API_KEY")
-        _require_env(env, "ALIBABA_BASE_URL", missing, aider_env, "OPENAI_API_BASE")
-        if _env_value(env, SFE_AIDER_MODEL_ENV) is None:
-            missing.append(SFE_AIDER_MODEL_ENV)
-    elif provider_name == "lemonade":
         _require_env(
             env,
-            "SFE_LEMONADE_BASE_URL",
+            "ALIBABA_BASE_URL",
             missing,
             aider_env,
             "OPENAI_API_BASE",
+            "OPENAI_BASE_URL",
         )
+        if _env_value(env, SFE_AIDER_MODEL_ENV) is None:
+            missing.append(SFE_AIDER_MODEL_ENV)
+    elif provider_name == "lemonade":
+        _require_lemonade_base_url(env, missing, aider_env)
         _optional_env(env, "SFE_LEMONADE_API_KEY", aider_env, "OPENAI_API_KEY")
         if _env_value(env, SFE_AIDER_MODEL_ENV) is None:
             missing.append(SFE_AIDER_MODEL_ENV)
@@ -203,12 +217,15 @@ def _require_env(
     missing: list[str],
     aider_env: dict[str, str],
     target_name: str,
+    *additional_target_names: str,
 ) -> None:
     value = _env_value(env, source_name)
     if value is None:
         missing.append(source_name)
         return
     aider_env[target_name] = value
+    for additional_target_name in additional_target_names:
+        aider_env[additional_target_name] = value
 
 
 def _optional_env(
@@ -216,10 +233,32 @@ def _optional_env(
     source_name: str,
     aider_env: dict[str, str],
     target_name: str,
+    *additional_target_names: str,
 ) -> None:
     value = _env_value(env, source_name)
     if value is not None:
         aider_env[target_name] = value
+        for additional_target_name in additional_target_names:
+            aider_env[additional_target_name] = value
+
+
+def _require_lemonade_base_url(
+    env: Mapping[str, str],
+    missing: list[str],
+    aider_env: dict[str, str],
+) -> None:
+    value = _env_value(env, "SFE_LEMONADE_BASE_URL")
+    if value is None:
+        missing.append("SFE_LEMONADE_BASE_URL")
+        return
+    normalized = _ensure_openai_v1_base_url(value)
+    aider_env["OPENAI_API_BASE"] = normalized
+    aider_env["OPENAI_BASE_URL"] = normalized
+
+
+def _ensure_openai_v1_base_url(value: str) -> str:
+    stripped = value.rstrip("/")
+    return stripped if stripped.endswith("/v1") else f"{stripped}/v1"
 
 
 def _result(
