@@ -2,12 +2,13 @@
 
 This document describes the proposed bridge between SFE configuration and
 Aider's runtime environment. The bridge is implemented for single-pass Aider
-workspace writes on this branch. Multi-pass Aider execution and real
-model-backed smoke testing remain deferred.
+workspace writes on this branch, and is reused by the Aider-backed multi-pass
+workspace write path. Real model-backed multi-pass smoke testing should remain
+bounded and optional.
 
 ## Goals
 
-- Keep Aider as the default single-pass `workspace_write` executor.
+- Keep Aider as the default `workspace_write` executor.
 - Keep `SFE_WORKSPACE_WRITE_EXECUTOR=text` as the explicit legacy fallback.
 - Let Aider receive only the provider settings it needs.
 - Avoid passing the whole SFE `.env` to Aider.
@@ -63,9 +64,9 @@ and `.env.example` are sufficient to define the bridge.
 
 ## Proposed Bridge
 
-Add a small SFE-owned helper in a later implementation phase that builds an
-Aider execution environment from already-loaded SFE configuration. The helper
-should return structured data, not mutate process-global state directly.
+SFE owns a small helper that builds an Aider execution environment from
+already-loaded SFE configuration. The helper returns structured data and does
+not mutate process-global state directly.
 
 Recommended behavior:
 
@@ -101,11 +102,12 @@ to text transport.
 
 ## Model Mapping Policy
 
-Add these future SFE configuration variables:
+SFE supports these Aider-specific configuration variables:
 
 - `SFE_AIDER_MODEL`: explicit Aider main model override.
 - `SFE_AIDER_WEAK_MODEL`: optional Aider weak model override.
-- `SFE_AIDER_ENV_FILE`: optional explicit env file override for advanced users.
+- `SFE_AIDER_ENV_FILE`: reserved for a possible future explicit env file
+  override for advanced users.
 - `SFE_AIDER_TIMEOUT_SECONDS`: optional timeout passed to Aider.
 
 Avoid `SFE_AIDER_EXTRA_ARGS` for now. It is too easy to bypass SFE's safety
@@ -193,13 +195,13 @@ Diagnostics must not include:
 - Confirm promoted output appears only in the selected destination.
 - Do not print secrets.
 
-### Phase E: Multi-Pass Later
+### Phase E: Multi-Pass Aider Execution
 
-- Keep multi-pass text-backed until the bridge and single-pass behavior are
-  stable.
-- Reuse the same bridge for each later Aider pass.
-- Keep each later multi-pass Aider call small and batch-specific; SFE remains
-  the context router and planner.
+- Reuse the same bridge for each Aider pass.
+- Keep each multi-pass Aider call small and batch-specific; SFE remains the
+  context router and planner.
+- Preserve `SFE_WORKSPACE_WRITE_EXECUTOR=text` as the explicit legacy
+  multi-pass fallback.
 
 ## Open Questions
 

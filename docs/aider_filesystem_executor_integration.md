@@ -2,8 +2,9 @@
 
 This note describes the target architecture for making Aider the normal
 filesystem writer for SFE `workspace_write` execution. The current branch has
-the single-pass foundation implemented; multi-pass Aider execution remains
-deferred.
+the Aider-backed single-pass and multi-pass `workspace_write` paths
+implemented. The legacy text transport remains available only through the
+explicit `SFE_WORKSPACE_WRITE_EXECUTOR=text` fallback.
 
 ## Target Architecture
 
@@ -214,14 +215,14 @@ The effective policy is squash-at-promotion:
 
 ## TUI Impact
 
-The TUI default should eventually be:
+On this branch, the intended TUI default is:
 
 ```text
 /task <request>
 /run
 ```
 
-When the execution-mode router selects `workspace_write`, `/run` should use the
+When the execution-mode router selects `workspace_write`, `/run` uses the
 Aider-backed filesystem executor by default. The TUI should surface:
 
 - the same compact progress events already used by `RunPipeline`;
@@ -258,9 +259,9 @@ become legacy text transports. They remain useful for:
 - small controlled cases where direct filesystem execution is not desired.
 
 They should not remain the preferred path for large multi-file generation once
-the Aider executor is enabled by default. In the target state, missing Aider
-does not silently fall back for normal `workspace_write`; it fails closed with
-installation instructions.
+the Aider executor is enabled by default. Missing Aider does not silently fall
+back for normal `workspace_write`; it fails closed with installation
+instructions.
 
 ## Current Code Touchpoints
 
@@ -301,10 +302,10 @@ The relevant current implementation areas are:
   preserve commit metadata in diagnostics, squash at promotion time, or ignore
   commit boundaries and promote file state only.
 - Current multi-pass `allowed_files` are warnings rather than hard rejection
-  when extra in-destination files change. The Aider path needs an explicit
-  policy for whether expected files are guidance or strict scope.
+  when extra in-destination files change. The current Aider path preserves that
+  warning-oriented policy; a later hard-scope mode would need a separate design.
 - Long-running Aider calls need cancellation and richer progress behavior that
-  is acceptable for both TUI and MCP; the current single-pass path has
+  is acceptable for both TUI and MCP; the current Aider paths use
   non-interactive execution and configured timeout handling.
 - Secret handling needs care. SFE should not echo full prompts, file contents,
   environment variables, or Aider logs that may contain secrets in normal MCP
@@ -350,7 +351,7 @@ The relevant current implementation areas are:
 
 ### Phase 4: Single-Pass Aider Workspace Write
 
-- Add an opt-in Aider-backed `workspace_write` path for single-pass runs.
+- Add the default Aider-backed `workspace_write` path for single-pass runs.
 - Invoke Aider only inside the active SFE worktree.
 - Capture actual disk changes, validate boundaries, promote, and report.
 - Verify missing-Aider failure behavior in both TUI and MCP tests.
@@ -366,11 +367,11 @@ The relevant current implementation areas are:
 
 ### Phase 6: Make Aider The Default Filesystem Writer
 
-- Switch normal TUI `/run` and MCP `sfe_run` `workspace_write` execution to
-  the Aider-backed path.
-- Fail closed when Aider is missing.
-- Keep text transport behind an explicit legacy/fallback configuration.
-- Update user docs and `.env.example` to reflect the new default.
+- Normal TUI `/run` and MCP `sfe_run` `workspace_write` execution use the
+  Aider-backed path by default on this branch.
+- Missing Aider fails closed.
+- Text transport remains behind an explicit legacy/fallback configuration.
+- User docs and `.env.example` should continue to reflect the branch default.
 
 ### Phase 7: Legacy Cleanup
 

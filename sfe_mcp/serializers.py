@@ -468,6 +468,11 @@ def _serialize_executor_response_diagnostics_mapping(
     diagnostics: dict[str, Any],
 ) -> dict[str, Any]:
     serialized: dict[str, Any] = {}
+    filesystem_diagnostics = diagnostics.get("filesystem_executor")
+    if isinstance(filesystem_diagnostics, dict):
+        serialized["filesystem_executor"] = _safe_diagnostic_mapping(
+            filesystem_diagnostics
+        )
     for key in (
         "provider_name",
         "response_object_type",
