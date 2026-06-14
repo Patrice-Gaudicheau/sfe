@@ -1,5 +1,7 @@
 # Spatial Field Engine for Cognition
 
+[![Singularity: 95%+](https://img.shields.io/badge/Singularity-95%25%2B-111111?style=flat-square)](docs/singularity.md)
+
 **Context-routing and governance infrastructure for long-context LLM workflows.**
 
 Spatial Field Engine for Cognition (`SFE`) is open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
