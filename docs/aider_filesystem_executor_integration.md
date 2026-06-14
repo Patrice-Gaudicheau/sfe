@@ -152,6 +152,27 @@ The executor should:
 - fail with a structured timeout or execution error rather than blocking
   indefinitely.
 
+## Aider Model Selection Policy
+
+`SFE_AIDER_MODEL` is the highest-priority explicit override for Aider. When it
+is unset, SFE resolves the executor provider from `SFE_PROVIDER_EXECUTOR`, then
+`SFE_PROVIDER`, then the default `openai`, and only then selects the known-safe
+executor model for that provider.
+
+The Aider fallback model must come from executor settings, not router settings:
+
+- `openai` uses `SFE_OPENAI_EXECUTOR_MODEL`;
+- `anthropic` uses `SFE_ANTHROPIC_EXECUTOR_MODEL`;
+- `google` uses `SFE_GOOGLE_MODEL` in the current configuration model;
+- OpenAI-compatible or local providers such as Alibaba/Qwen, Lemonade, and
+  Ollama require `SFE_AIDER_MODEL` unless a tested Aider/LiteLLM-compatible
+  mapping exists.
+
+SFE must never fall back to `SFE_PROVIDER_ROUTER` or router model settings for
+Aider. Router models are chosen for planning and routing, may be more
+expensive, and are not the filesystem execution default. If no safe Aider model
+can be selected, the run fails closed with `missing_aider_model`.
+
 Before spawning Aider, SFE must assert:
 
 - the active workspace path is inside the SFE worktree;

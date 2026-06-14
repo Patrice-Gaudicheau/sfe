@@ -117,11 +117,19 @@ validated allow-list of specific settings.
 Default model selection:
 
 1. Use `SFE_AIDER_MODEL` when set.
-2. For OpenAI, Anthropic, and Gemini, consider the provider-specific SFE
-   executor model only if it is known to be valid for Aider/LiteLLM.
-3. For Alibaba/Qwen, Lemonade, Ollama, and other OpenAI-compatible endpoints,
+2. Resolve the executor provider from `SFE_PROVIDER_EXECUTOR`, then
+   `SFE_PROVIDER`, then the default `openai`.
+3. For OpenAI, Anthropic, and Gemini, use the provider-specific SFE executor
+   model only if it is known to be valid for Aider/LiteLLM:
+   `SFE_OPENAI_EXECUTOR_MODEL`, `SFE_ANTHROPIC_EXECUTOR_MODEL`, or
+   `SFE_GOOGLE_MODEL`.
+4. For Alibaba/Qwen, Lemonade, Ollama, and other OpenAI-compatible endpoints,
    require `SFE_AIDER_MODEL` until tested mappings exist.
-4. If no safe model can be selected, fail closed with a diagnostic such as
+5. Never use router model settings as an Aider fallback. Variables such as
+   `SFE_PROVIDER_ROUTER`, router-provider model names, or any future
+   router-only model configuration are for planning/routing and may be more
+   expensive than the filesystem executor model.
+6. If no safe model can be selected, fail closed with a diagnostic such as
    `missing_aider_model`.
 
 The bridge should pass the selected model with Aider's `--model` flag rather

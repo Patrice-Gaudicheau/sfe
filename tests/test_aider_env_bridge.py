@@ -53,13 +53,18 @@ def test_aider_model_overrides_provider_model() -> None:
     result = resolve_aider_env_bridge(
         {
             "SFE_PROVIDER": "openai",
+            "SFE_PROVIDER_EXECUTOR": "anthropic",
             "OPENAI_API_KEY": "fixture-openai-key",
+            "ANTHROPIC_API_KEY": "fixture-anthropic-key",
             "SFE_AIDER_MODEL": "aider/main-model",
             "SFE_OPENAI_EXECUTOR_MODEL": "provider-model",
+            "SFE_ANTHROPIC_EXECUTOR_MODEL": "anthropic-provider-model",
+            "SFE_OPENAI_ROUTER_MODEL": "expensive-router-model",
         }
     )
 
     assert result.ok
+    assert result.provider_name == "anthropic"
     assert result.selected_model == "aider/main-model"
 
 
@@ -89,6 +94,61 @@ def test_provider_specific_model_fallbacks() -> None:
     assert openai.selected_model == "openai-model"
     assert anthropic.selected_model == "claude-fixture"
     assert google.selected_model == "gemini-fixture"
+
+
+def test_openai_executor_provider_model_is_used_without_aider_override() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER": "anthropic",
+            "SFE_PROVIDER_EXECUTOR": "openai",
+            "OPENAI_API_KEY": "fixture-openai-key",
+            "ANTHROPIC_API_KEY": "fixture-anthropic-key",
+            "SFE_OPENAI_EXECUTOR_MODEL": "openai-executor-model",
+            "SFE_ANTHROPIC_EXECUTOR_MODEL": "anthropic-executor-model",
+            "SFE_OPENAI_ROUTER_MODEL": "openai-router-model",
+        }
+    )
+
+    assert result.ok
+    assert result.provider_name == "openai"
+    assert result.selected_model == "openai-executor-model"
+
+
+def test_router_model_is_never_used_as_aider_fallback() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER": "openai",
+            "OPENAI_API_KEY": "fixture-openai-key",
+            "SFE_OPENAI_ROUTER_MODEL": "expensive-router-model",
+            "SFE_ROUTER_MODEL": "another-router-model",
+        }
+    )
+
+    assert not result.ok
+    assert result.error_category == "missing_aider_model"
+    assert result.selected_model is None
+    assert result.missing_variables == (
+        "SFE_AIDER_MODEL",
+        "SFE_OPENAI_EXECUTOR_MODEL",
+    )
+    assert "expensive-router-model" not in repr(result.diagnostics)
+    assert "another-router-model" not in repr(result.diagnostics)
+
+
+def test_only_router_model_for_explicit_provider_fails_closed() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER_EXECUTOR": "google",
+            "GOOGLE_API_KEY": "fixture-google-key",
+            "SFE_GOOGLE_ROUTER_MODEL": "gemini-router-model",
+        }
+    )
+
+    assert not result.ok
+    assert result.provider_name == "google"
+    assert result.error_category == "missing_aider_model"
+    assert result.selected_model is None
+    assert result.missing_variables == ("SFE_AIDER_MODEL", "SFE_GOOGLE_MODEL")
 
 
 def test_google_maps_google_api_key_to_gemini_api_key() -> None:
