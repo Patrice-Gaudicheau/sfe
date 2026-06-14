@@ -1,6 +1,6 @@
 # Spatial Field Engine for Cognition
 
-[![Singularity: 95%+](https://img.shields.io/badge/Singularity-95%25%2B-111111?style=flat-square)](docs/singularity.md)
+[![AI-Coded: 95%+](https://img.shields.io/badge/AI--Coded-95%25%2B-111111?style=flat-square)](docs/ai-coded.md)
 
 **Context-routing and governance infrastructure for long-context LLM workflows.**
 
