@@ -34,29 +34,27 @@ The current primary TUI workflow is:
 ```
 
 `/run` is the current primary TUI action. It first asks the core
-execution-mode router
-whether the task should produce a console answer, write workspace files, or be
-treated as an outside-workspace action. `console_output` returns a
-natural-language answer with no worktree or patch. `workspace_write` discovers
-workspace context, builds the internal routing/preflight state needed for a
-reduced executor payload, and writes changes into an SFE-created Git worktree.
-Text-returning API providers, including OpenAI, Anthropic, Google, Alibaba,
-Lemonade, Ollama, and similar endpoints, transport those changes as
-deterministic full-file `SFE_FILE` blocks; strict Git diffs remain a
-compatibility path. This transport contract is defined in core SFE and shared by
-TUI, MCP, scripts, and direct `RunPipeline` usage. SFE then enforces one
-boundary: every created, modified, or deleted path must be inside the selected
-destination directory before promotion. It does not require human
-approval, diff inspection, router review, patch hunk/preimage validation, patch
-repair, syntax checks, tests, or lint before promotion. `external_action` is
-recognized but not implemented yet and fails cleanly before workspace work
-starts.
+execution-mode router whether the task should produce a console answer, write
+workspace files, or be treated as an outside-workspace action. `console_output`
+returns a natural-language answer with no worktree or patch.
+`workspace_write` discovers workspace context, builds the internal
+routing/preflight state needed for a reduced executor payload, creates or reuses
+an SFE-controlled Git worktree, and invokes the external Aider executable there
+as the default filesystem writer. Aider is required for normal workspace
+writes, is not vendored into SFE, and may create commits inside the worktree.
+SFE treats those commits as session history only: it captures the final
+worktree file state, validates changed paths against the selected destination
+boundary and internal path blocklist, and promotes only the accepted final file
+state. The user source history does not receive Aider micro-commits directly.
+It does not require human approval, diff inspection, router review, patch
+hunk/preimage validation, patch repair, syntax checks, tests, or lint before
+promotion. `external_action` is recognized but not implemented yet and fails
+cleanly before workspace work starts.
 
-`workspace_write` is the developer worktree execution mode. For text-only
-providers, model text is a file transport and audit artifact rather than a
-promotion contract: `SFE_FILE` blocks are written into the controlled worktree,
-then the resulting filesystem changes are checked against the
-destination-directory boundary.
+`workspace_write` is the developer worktree execution mode. The legacy
+`SFE_FILE`/strict-diff text transport remains available only when
+`SFE_WORKSPACE_WRITE_EXECUTOR=text` is set for rollback or debugging; it is not
+the preferred large multi-file generation path.
 
 Large `workspace_write` tasks may use multi-pass execution. In that path the
 Router designs and validates the strict JSON batch plan before execution
@@ -219,10 +217,18 @@ router effort, then the shared value. The benchmark-local `openai-codexcli`
 name is retained for benchmark history and internal dispatch compatibility. In
 DEV patch mode CodexCLI proposes text only; SFE still owns discovery path
 validation, text-to-file or diff parsing, worktree isolation, application, and
-rejection. Filesystem-capable executor paths can later use the real controlled
-worktree as the source of truth. Google discovery routing uses
-`SFE_GOOGLE_DISCOVERY_MODEL`, then
+rejection. Normal `workspace_write` uses Aider as the filesystem writer unless
+`SFE_WORKSPACE_WRITE_EXECUTOR=text` selects the legacy text path. Google
+discovery routing uses `SFE_GOOGLE_DISCOVERY_MODEL`, then
 `SFE_GOOGLE_MODEL`, then the Google provider default.
+
+For Aider-backed `workspace_write`, model selection is separate from router
+model selection. `SFE_AIDER_MODEL` is the explicit Aider override. When it is
+unset, SFE resolves the executor provider from `SFE_PROVIDER_EXECUTOR`, then
+`SFE_PROVIDER`, then the default `openai`, and uses the known-safe executor
+model for that provider. SFE never falls back to router model settings for
+Aider; if no safe Aider-compatible executor model can be selected, the run
+fails closed.
 
 The full CodexCLI `/run` role split is:
 

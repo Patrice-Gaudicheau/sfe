@@ -22,6 +22,8 @@ apply generated file changes inside an SFE-created worktree, depending on the
 core execution-mode router. The original workspace remains protected by
 Git/worktree isolation for workspace writes. Advanced primitives such as
 `/patch` and `/apply-patch` remain available for debug and compatibility.
+Normal workspace writes use the external Aider executable by default; Aider is
+required for that path and is not vendored into SFE.
 
 ## Launch
 
@@ -35,6 +37,21 @@ This loads local `.env` settings into the TUI subprocess if `.env` exists, then
 runs `python -m sfe_tui`. The `.env` file is local/private, ignored by git, and
 must not be committed. The TUI executor provider is selected with
 `SFE_PROVIDER`, for example `SFE_PROVIDER=lemonade` or `SFE_PROVIDER=ollama`.
+For normal `workspace_write`, install Aider externally and keep it on `PATH`.
+On Ubuntu, Debian, and WSL, the recommended path is:
+
+```bash
+sudo apt update
+sudo apt install pipx
+pipx ensurepath
+exec $SHELL -l
+pipx install aider-chat
+aider --version
+which aider
+```
+
+`which aider` may resolve to `~/.local/bin/aider`; that is valid if it is on
+`PATH`.
 
 You can also launch the module directly when the environment is already
 configured:
@@ -102,12 +119,12 @@ Lower-level diagnostics are available but are not the normal first path:
 - `/task <text>`: store the current task. Empty tasks are rejected.
 - `/run`: resolve the current task through the core execution-mode router. It
   may answer directly in the TUI console or create workspace file changes
-  through the isolated worktree pipeline. During execution, it prints compact
-  `SFE:` progress lines for routing/context observability. If a workspace write
-  is selected and the workspace is not yet a Git repository, `/run` can
-  initialize a local repository snapshot first; it does not create a remote,
-  push, run syntax checks, run tests or lint, require diff inspection, require
-  human approval, or require router review.
+  through the Aider-backed isolated worktree pipeline. During execution, it
+  prints compact `SFE:` progress lines for routing/context observability. If a
+  workspace write is selected and the workspace is not yet a Git repository,
+  `/run` can initialize a local repository snapshot first; it does not create a
+  remote, push, run syntax checks, run tests or lint, require diff inspection,
+  require human approval, or require router review.
 - `/reset`: clear task, context, latest routing/result, and skipped/rejected
   context and discovery state; preserve the selected workspace.
 - `/advanced`: show lower-level diagnostic commands.
@@ -324,7 +341,10 @@ not a formal security proof.
 For `workspace_write`, `/run` uses Git/worktree isolation as its main
 operational guard. It may initialize a local Git repository snapshot when the
 selected workspace is not already a repository, then create or reuse an
-SFE-owned worktree and apply there.
+SFE-owned worktree and run Aider there. Aider may create commits inside that
+worktree. SFE treats those commits as session history only and promotes the
+final validated file state back to the selected source destination; the source
+history does not receive Aider micro-commits directly.
 
 `/isolate` creates an isolated Git Worktree using core SFE workspace isolation
 support. The worktree is created outside the original workspace on a generated
@@ -402,13 +422,12 @@ The current TUI behavior intentionally keeps these boundaries:
 - diagnostics do not display raw file contents, request bodies, provider
   payloads, API keys, or authorization headers.
 
-## DEV Patch Provider Limits
+## Legacy Text Transport
 
-Empty-workspace file creation through the DEV `/run` workspace-write path uses a
-core text-to-file transport for API providers that cannot edit the filesystem
-directly. This includes OpenAI, Anthropic, Google, Alibaba, Lemonade, Ollama,
-and similar text-returning endpoints. The preferred response format is a
-deterministic full-file block:
+Normal `/run` workspace writes use the Aider-backed filesystem writer. The
+older core text-to-file transport remains available only when
+`SFE_WORKSPACE_WRITE_EXECUTOR=text` is set for legacy/debug rollback. In that
+mode, text-returning providers use deterministic full-file blocks:
 
 ```text
 <<<SFE_FILE path="app/index.html">
@@ -420,17 +439,15 @@ deterministic full-file block:
 SFE writes those blocks into the controlled worktree, captures the actual
 created, modified, and deleted files, and then enforces the destination-directory
 boundary before promotion. Strict Git-style unified diffs remain accepted as a
-compatibility path, but SFE does not rely on hunk/preimage validation, patch
-repair, or a second LLM repair pass as promotion gates.
+compatibility path in text mode, but text transport is no longer the preferred
+large multi-file generation path.
 
 If a text-returning executor returns prose such as "I created the files" without
 `SFE_FILE` blocks or a valid Git diff, `/run` fails explicitly with an
 `executor_produced_no_files`-style diagnostic. The model text is not treated as
-evidence that files were created. Filesystem-capable executors may later use the
-real controlled worktree as the source of truth, but text-returning API
-providers must transport file contents. Because the transport is implemented in
+evidence that files were created. Because the runtime path is implemented in
 core SFE, TUI, MCP, scripts, tests, and direct `RunPipeline` usage share the same
-behavior.
+workspace-write behavior.
 
 For local providers, prefer smaller and simpler workspace-write tasks, or use
 explicit batches for large scaffolds. The lightweight `SFE:` progress lines

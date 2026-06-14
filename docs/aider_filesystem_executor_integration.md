@@ -1,14 +1,14 @@
 # Aider Filesystem Executor Integration
 
-This note describes the target architecture for making Aider the normal
-filesystem writer for SFE `workspace_write` execution. The current branch has
-the Aider-backed single-pass and multi-pass `workspace_write` paths
-implemented. The legacy text transport remains available only through the
-explicit `SFE_WORKSPACE_WRITE_EXECUTOR=text` fallback.
+This note describes the current architecture for using Aider as the normal
+filesystem writer for SFE `workspace_write` execution. Aider-backed single-pass
+and multi-pass `workspace_write` are implemented on `main`. The legacy text
+transport remains available only through the explicit
+`SFE_WORKSPACE_WRITE_EXECUTOR=text` fallback.
 
-## Target Architecture
+## Current Architecture
 
-The target `workspace_write` flow is:
+The default `workspace_write` flow is:
 
 1. SFE routes the task through the existing execution-mode router.
 2. SFE prepares the selected workspace as a Git repository when needed.
@@ -95,10 +95,10 @@ should preserve those properties.
 
 ## Conceptual Aider Invocation
 
-The implementation should introduce a core-owned Aider filesystem executor
-rather than embedding Aider calls in the TUI or MCP layers.
+SFE uses a core-owned Aider filesystem executor rather than embedding Aider
+calls in the TUI or MCP layers.
 
-Conceptually, SFE should invoke Aider with:
+SFE invokes Aider with:
 
 - `cwd` set to the active SFE worktree or active destination path inside it;
 - a bounded task message generated from the SFE task, selected context summary,
@@ -110,24 +110,23 @@ Conceptually, SFE should invoke Aider with:
 - diagnostics capture for command, working directory, return code, stdout/stderr
   lengths, provider/model metadata when available, and elapsed time.
 
-The exact CLI flags should be verified during implementation against the
-installed Aider version. The architecture should not depend on undocumented
-flags if a stable alternative exists.
+The exact CLI flags are kept in the core executor and should be rechecked when
+upgrading Aider. The architecture should not depend on undocumented flags if a
+stable alternative exists.
 
 ## Context Control Policy
 
 SFE remains the context router. Aider must not receive the full repository or
-an oversized global context by default. For single-pass `workspace_write`, SFE
-should give Aider:
+an oversized global context by default. For `workspace_write`, SFE gives Aider:
 
 - a short scoped instruction;
 - explicit editable paths when SFE knows them;
 - explicit new file paths when SFE can infer them;
 - only selected supporting files via read-only context paths.
 
-Aider must not become a second global planner competing with SFE. For later
-multi-pass work, each Aider invocation should be batch-specific, small, and
-bounded by the Router-owned plan.
+Aider must not become a second global planner competing with SFE. For
+multi-pass work, each Aider invocation is batch-specific, small, and bounded by
+the Router-owned plan.
 
 ## Non-Interactive Invocation Policy
 
@@ -337,70 +336,20 @@ The relevant current implementation areas are:
 - Binary files, generated dependency directories, deletes, renames, and symlink
   behavior need explicit validation coverage.
 
-## Phased Implementation Plan
+## Implementation History
 
-### Phase 0: Documentation And Design Boundary
+The integration landed in controlled phases:
 
-- Add this design note.
-- Keep runtime behavior unchanged.
-- Confirm the current direct-mutation promotion tests and worktree behavior.
-
-### Phase 1: Aider Preflight And Diagnostics
-
-- Add a small core preflight helper that detects Aider.
-- Return a structured missing-Aider issue with the exact installation commands.
-- Add unit tests for missing executable diagnostics.
-- Do not route normal `/run` to Aider yet.
-
-### Phase 2: Filesystem Executor Interface
-
-- Introduce a core filesystem executor boundary separate from text response
+- Aider preflight and diagnostics were added.
+- A filesystem executor boundary was introduced separately from text response
   parsing.
-- Model the result as disk mutation plus bounded diagnostics, not as a patch
-  string.
-- Keep `ExecutionBackend.patch()` text behavior intact as the legacy path.
-- Add a fake filesystem executor for tests.
-
-### Phase 3: Promotion Capture For Committed Worktree Changes
-
-- Extend promotion baseline capture to detect changes relative to the SFE
-  session source head, including Aider-created commits.
-- Combine committed branch diffs with uncommitted worktree status.
-- Preserve existing destination-boundary checks before promotion.
-- Add tests where the executor commits inside the worktree and SFE still
-  promotes only valid destination paths.
-
-### Phase 4: Single-Pass Aider Workspace Write
-
-- Add the default Aider-backed `workspace_write` path for single-pass runs.
-- Invoke Aider only inside the active SFE worktree.
-- Capture actual disk changes, validate boundaries, promote, and report.
-- Verify missing-Aider failure behavior in both TUI and MCP tests.
-
-### Phase 5: Multi-Pass Aider Execution
-
-- Reuse the Router-owned multi-pass plan.
-- For each batch, call Aider with the batch goal, explicit expected files, and
-  minimal selected context.
-- Capture and promote each pass, then refresh context for later passes.
-- Report per-pass diagnostics and warnings consistently with current
-  `MultiPassRunSummary`.
-
-### Phase 6: Make Aider The Default Filesystem Writer
-
-- Normal TUI `/run` and MCP `sfe_run` `workspace_write` execution use the
-  Aider-backed path by default on this branch.
-- Missing Aider fails closed.
-- Text transport remains behind an explicit legacy/fallback configuration.
-- User docs and `.env.example` should continue to reflect the branch default.
-
-### Phase 7: Legacy Cleanup
-
-- Keep the old text parser path long enough for tests, compatibility, and
-  rollback.
-- Deprecate `SFE_FILE` as the preferred large generation path.
-- Remove or simplify repair-oriented code only after the Aider path has enough
-  live validation.
+- Promotion capture was extended to include both uncommitted worktree changes
+  and Aider-created commits relative to the session source head.
+- Single-pass and multi-pass Aider-backed `workspace_write` paths were wired
+  through the shared `RunPipeline`.
+- TUI and MCP now inherit the same default Aider-backed runtime behavior.
+- The old text parser path remains for tests, compatibility, and explicit
+  rollback via `SFE_WORKSPACE_WRITE_EXECUTOR=text`.
 
 ## Feasibility Assessment
 
@@ -409,8 +358,8 @@ outer shell: execution-mode routing, discovery, multi-pass planning, worktree
 creation, direct filesystem mutation capture, boundary validation, promotion,
 and shared TUI/MCP runtime plumbing.
 
-The main required runtime change is replacing text-response parsing as the
-normal writer with a filesystem executor that invokes Aider. The main safety
-change is expanding promotion capture from uncommitted worktree status to the
-full worktree branch delta so Aider-managed commits are visible to SFE before
+The main runtime change was replacing text-response parsing as the normal
+writer with a filesystem executor that invokes Aider. The main safety change
+was expanding promotion capture from uncommitted worktree status to the full
+worktree branch delta so Aider-managed commits are visible to SFE before
 promotion.

@@ -31,8 +31,7 @@ general model-safety guarantees.
 8. [workspace_write_multipass.md](workspace_write_multipass.md): current
    multi-pass behavior for large `workspace_write` scaffolds.
 9. [aider_filesystem_executor_integration.md](aider_filesystem_executor_integration.md):
-   exploration plan for making Aider the normal filesystem writer for
-   `workspace_write`.
+   current Aider-backed filesystem writer architecture for `workspace_write`.
 
 ## Current Architecture And Doctrine
 
@@ -46,8 +45,8 @@ general model-safety guarantees.
   multi-pass `workspace_write` planning, batch validation, promotion, and
   reports work.
 - [aider_filesystem_executor_integration.md](aider_filesystem_executor_integration.md):
-  target architecture and phased plan for an external Aider-backed filesystem
-  executor.
+  current architecture for the external Aider-backed filesystem executor,
+  worktree promotion, and legacy text fallback.
 - [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
   planned local MCP control surface and TUI/MCP ISO runtime requirement.
 - [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): current local STDIO MCP

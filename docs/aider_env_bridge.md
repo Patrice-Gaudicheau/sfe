@@ -1,10 +1,9 @@
 # SFE .env To Aider Environment Bridge
 
-This document describes the proposed bridge between SFE configuration and
-Aider's runtime environment. The bridge is implemented for single-pass Aider
-workspace writes on this branch, and is reused by the Aider-backed multi-pass
-workspace write path. Real model-backed multi-pass smoke testing should remain
-bounded and optional.
+This document describes the bridge between SFE configuration and Aider's
+runtime environment. The bridge is implemented for Aider-backed single-pass and
+multi-pass `workspace_write` execution on `main`. Real model-backed smoke tests
+should remain bounded and use disposable workspaces.
 
 ## Goals
 
@@ -15,9 +14,8 @@ bounded and optional.
 - Never copy `.env` into an SFE worktree.
 - Keep diagnostics bounded and secret-safe.
 
-SFE should resolve the executor provider with the existing provider config
-rules: `SFE_PROVIDER_EXECUTOR`, then `SFE_PROVIDER`, then the default
-`openai`.
+SFE resolves the executor provider with the existing provider config rules:
+`SFE_PROVIDER_EXECUTOR`, then `SFE_PROVIDER`, then the default `openai`.
 
 ## Aider Expected Variables
 
@@ -59,16 +57,16 @@ Relevant SFE configuration currently documented or used by provider code:
 | Ollama | `SFE_OLLAMA_BASE_URL`, `SFE_OLLAMA_MODEL`, `SFE_OLLAMA_EXECUTOR_MODEL`, `SFE_OLLAMA_TIMEOUT_SECONDS`, `SFE_OLLAMA_THINK` |
 | Codex CLI | `SFE_CODEXCLI_EXECUTOR_MODEL`, `SFE_CODEXCLI_EXECUTOR_EFFORT`, `SFE_CODEXCLI_REASONING_EFFORT` |
 
-The real `.env` should not be inspected for this design pass. Versioned source
-and `.env.example` are sufficient to define the bridge.
+The real `.env` should not be inspected when reviewing this behavior. Versioned
+source and `.env.example` are sufficient to understand the bridge.
 
-## Proposed Bridge
+## Runtime Bridge
 
 SFE owns a small helper that builds an Aider execution environment from
 already-loaded SFE configuration. The helper returns structured data and does
 not mutate process-global state directly.
 
-Recommended behavior:
+Current behavior:
 
 - Resolve the SFE executor provider using existing provider config helpers.
 - Build a minimal key/value mapping for Aider.
@@ -83,7 +81,7 @@ Recommended behavior:
 - Run Aider with a controlled subprocess environment rather than inheriting
   the whole SFE process environment.
 
-Initial mapping:
+Current mapping:
 
 | SFE executor provider | Required source values | Aider env output | Model policy |
 | --- | --- | --- | --- |
@@ -96,7 +94,7 @@ Initial mapping:
 | `ollama` | `SFE_OLLAMA_BASE_URL` | `OLLAMA_API_BASE` | Require `SFE_AIDER_MODEL`. |
 | `codexcli` | local Codex CLI auth | none | Not supported by Aider bridge; fail closed or require separate Aider provider config. |
 
-Missing required provider values should fail closed with a structured issue that
+Missing required provider values fail closed with a structured issue that
 lists only missing variable names. There must be no silent fallback from Aider
 to text transport.
 
@@ -164,52 +162,25 @@ Diagnostics must not include:
 - API keys or tokens;
 - unbounded Aider output.
 
-## Implementation Phases
+## Implementation Status
 
-### Phase A: Documentation
+The bridge is implemented in stages that are now present on `main`:
 
-- Add this design note.
-- Keep runtime behavior unchanged.
-- Do not inspect the real `.env`.
-- Do not run a real Aider/model smoke test.
-
-### Phase B: Pure Bridge Helper
-
-- Add a testable helper that accepts an environment mapping and returns an Aider
+- a testable helper accepts an environment mapping and returns an Aider
   env mapping plus CLI options such as `--model`, `--weak-model`, and
-  `--timeout`.
-- Unit test provider mappings, missing variables, model override precedence,
-  and redaction behavior.
-- Do not wire it into `AiderFilesystemExecutor` yet.
-
-### Phase C: Runtime Wiring
-
-- Wire the helper into `AiderFilesystemExecutor`.
-- Write the minimal temporary env file outside the worktree.
-- Pass `--env-file <tempfile>` to Aider.
-- Pass `--model`, optional `--weak-model`, and optional `--timeout`.
-- Close stdin and apply the configured timeout to the Aider subprocess.
-- Keep Aider input/chat history files outside the worktree and delete them with
+  `--timeout`;
+- provider mappings, missing variables, model override precedence, and
+  redaction behavior are unit-tested;
+- `AiderFilesystemExecutor` writes the minimal temporary env file outside the
+  worktree and passes it with `--env-file`;
+- Aider receives `--model`, optional `--weak-model`, and optional `--timeout`;
+- stdin is closed and the configured timeout is applied to the Aider
+  subprocess;
+- Aider input/chat history files are kept outside the worktree and deleted with
   the temporary execution files.
-- Redact env-file paths and values in diagnostics.
-- Preserve Aider as the default single-pass writer and text as explicit
-  fallback only.
-
-### Phase D: Bounded Real Smoke
-
-- Run a real single-pass smoke only when safe model credentials/configuration
-  are available.
-- Use a disposable source repo and an SFE-controlled worktree.
-- Confirm promoted output appears only in the selected destination.
-- Do not print secrets.
-
-### Phase E: Multi-Pass Aider Execution
-
-- Reuse the same bridge for each Aider pass.
-- Keep each multi-pass Aider call small and batch-specific; SFE remains the
-  context router and planner.
-- Preserve `SFE_WORKSPACE_WRITE_EXECUTOR=text` as the explicit legacy
-  multi-pass fallback.
+- env-file paths and values are redacted in diagnostics;
+- the same bridge is reused for each Aider-backed multi-pass batch;
+- `SFE_WORKSPACE_WRITE_EXECUTOR=text` remains the explicit legacy fallback.
 
 ## Open Questions
 

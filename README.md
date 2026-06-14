@@ -277,23 +277,21 @@ SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `/run` first asks the core execution-mode router how to resolve the task.
 `console_output` produces a natural-language answer in the TUI with no Git
 preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
-existing discovery, context-routing, executor, and isolated worktree pipeline
-for creating, modifying, or deleting workspace files. Text-returning API
-providers such as OpenAI, Anthropic, Google, Alibaba, Lemonade, Ollama, and
-similar endpoints return full-file `SFE_FILE` blocks, which core SFE writes into
-the controlled worktree; strict Git diffs remain accepted as a compatibility
-path. Filesystem-capable local or CLI executors are a separate path and may use
-real worktree filesystem changes when they actually run with `cwd` inside the
-controlled worktree. In all cases, SFE then enforces one safety boundary: every
-created, modified, or deleted path must be inside the selected destination
-directory before changes are promoted. This deliberately avoids fragile patch
-hunk/preimage validation and repair loops, trading fewer false failures for a
-filesystem-scope boundary check. If the selected workspace is not yet a Git
-repository, `workspace_write` can initialize a local snapshot first; it does not
-create a remote, push, run syntax checks, run tests or lint, require diff
-inspection, require human approval, or require router review. `external_action`
-is recognized as outside-workspace work, but is not implemented yet and fails
-cleanly. Historical and debug commands such as
+existing discovery, context-routing, Aider-backed filesystem executor, and
+isolated worktree pipeline for creating, modifying, or deleting workspace
+files. Aider is required for normal `workspace_write` execution and is not
+vendored into SFE; install it externally and keep it on `PATH`. In all cases,
+SFE enforces one safety boundary: every created, modified, or deleted path must
+be inside the selected destination directory before changes are promoted. Aider
+may create commits inside the SFE-controlled worktree, but SFE promotes only
+the final validated file state back to the selected source destination; the
+user source history does not receive Aider's micro-commits directly. If the
+selected workspace is not yet a Git repository, `workspace_write` can
+initialize a local snapshot first; it does not create a remote, push, run
+syntax checks, run tests or lint, require diff inspection, require human
+approval, or require router review. `external_action` is recognized as
+outside-workspace work, but is not implemented yet and fails cleanly.
+Historical and debug commands such as
 `/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
 `/review-worktree` remain available, but are hidden from the default help.
 
@@ -304,6 +302,39 @@ isolation when a workspace write is selected. It is not meant to make the model
 smarter, replace code review, control every executor response, or require
 mandatory diff inspection, human approval, syntax checks, tests, or lint before
 the worktree apply step.
+
+### Aider Workspace Writer
+
+Normal `workspace_write` execution uses Aider by default for both single-pass
+and multi-pass runs. `SFE_WORKSPACE_WRITE_EXECUTOR` does not need to be set for
+normal use. Set `SFE_WORKSPACE_WRITE_EXECUTOR=text` only for legacy/debug
+rollback to the older `SFE_FILE` or strict Git-diff text transport.
+
+Recommended Ubuntu, Debian, and WSL installation:
+
+```bash
+sudo apt update
+sudo apt install pipx
+pipx ensurepath
+exec $SHELL -l
+pipx install aider-chat
+aider --version
+which aider
+```
+
+An executable such as `~/.local/bin/aider` is valid as long as it is on `PATH`.
+The older `aider-install` bootstrap can still work as an alternative, but
+`pipx install aider-chat` avoids common externally-managed Python environment
+problems on Debian-family systems.
+
+`SFE_AIDER_MODEL` is the explicit model override for Aider. When it is unset,
+SFE resolves the executor provider from `SFE_PROVIDER_EXECUTOR`, then
+`SFE_PROVIDER`, then the default `openai`, and uses the known-safe executor
+model for that provider, such as `SFE_OPENAI_EXECUTOR_MODEL`,
+`SFE_ANTHROPIC_EXECUTOR_MODEL`, or the current Google `SFE_GOOGLE_MODEL`. SFE
+never falls back to router model settings for Aider; if no safe
+Aider-compatible executor model can be selected, `workspace_write` fails closed
+with a `missing_aider_model` diagnostic.
 
 The architecture boundary is:
 
@@ -485,17 +516,18 @@ SFE_CODEXCLI_EXECUTOR_IDLE_TIMEOUT_SECONDS=900
 
 This falls back to `SFE_PROVIDER_EXECUTOR_IDLE_TIMEOUT_SECONDS`, then
 `SFE_PROVIDER_IDLE_TIMEOUT_SECONDS`, then the built-in provider idle default.
-The setting only keeps a silent provider call alive longer. For text-only
-providers, prefer `SFE_FILE` full-file blocks or explicit batches when asking
-SFE to create many files at once.
+The setting only keeps a silent provider call alive longer. Normal
+`workspace_write` uses the Aider-backed filesystem writer; the legacy text
+transport is available only when `SFE_WORKSPACE_WRITE_EXECUTOR=text` is set for
+debugging or rollback.
 
-Large `workspace_write` scaffold tasks can also use core multi-pass execution.
+Large `workspace_write` scaffold tasks can use core multi-pass execution.
 `SFE_WORKSPACE_WRITE_MULTIPASS=auto` enables a cautious heuristic for large
 project/scaffold requests, `true` forces multi-pass for validation or testing,
 and `false` preserves single-pass behavior. Multi-pass asks the Router for a
 strict JSON batch plan, validates that plan before execution, then asks the
-Executor to make one batch of workspace changes with an explicit `allowed_files`
-list. The default guardrails reject invalid plans, batches that
+filesystem executor to make one batch of workspace changes with an explicit
+`allowed_files` list. The default guardrails reject invalid plans, batches that
 exceed a numeric `SFE_MULTIPASS_MAX_PASSES` cap when configured (`auto` by
 default) or
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` (default `10`). `allowed_files` is planning
@@ -748,6 +780,11 @@ model intelligence.
   local TUI surface, patch/worktree mode, and provider integration.
 - `docs/workspace_write_multipass.md`: multi-pass `workspace_write` mode for
   large scaffold generation, including configuration and report fields.
+- `docs/aider_filesystem_executor_integration.md`: current Aider-backed
+  `workspace_write` architecture, worktree promotion behavior, and legacy text
+  fallback.
+- `docs/aider_env_bridge.md`: secret-safe SFE-to-Aider environment bridge and
+  model selection policy.
 - `docs/provider_comparison_summary.md`: main cross-provider benchmark summary for protocol-aligned OpenAI and Anthropic campaigns.
 - `docs/openai_paced_equivalent_summary.md`: OpenAI paced-equivalent campaign summary.
 - `docs/anthropic_benchmark_paced_summary.md`: Anthropic paced campaign summary, including structural provider-call pacing.
