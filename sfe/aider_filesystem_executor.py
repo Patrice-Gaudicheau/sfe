@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import time
-import os
 from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 
@@ -126,8 +126,35 @@ class AiderFilesystemExecutor:
                             check=False,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL,
                             text=True,
+                            timeout=bridge.selected_timeout_seconds,
                             env=_aider_subprocess_environment(),
+                        )
+                    except subprocess.TimeoutExpired as exc:
+                        elapsed_ms = int((self.monotonic() - start) * 1000)
+                        return FilesystemExecutionResult(
+                            executor_name=self.name,
+                            status="failed",
+                            changed_paths=(),
+                            diagnostics=FilesystemExecutionDiagnostics(
+                                executor_name=self.name,
+                                cwd=str(request.cwd),
+                                command=_sanitize_command(command),
+                                return_code=None,
+                                stdout_length=_safe_len(exc.stdout),
+                                stderr_length=_safe_len(exc.stderr),
+                                stdout_preview=_bounded_preview(exc.stdout),
+                                stderr_preview=_bounded_preview(exc.stderr),
+                                elapsed_ms=elapsed_ms,
+                                metadata={
+                                    "aider_path": preflight.executable_path,
+                                    "error_type": type(exc).__name__,
+                                    "timeout_seconds": bridge.selected_timeout_seconds,
+                                    "bridge_diagnostics": bridge.diagnostics,
+                                },
+                            ),
+                            error_category="aider_timeout",
                         )
                     except OSError as exc:
                         elapsed_ms = int((self.monotonic() - start) * 1000)
@@ -348,12 +375,18 @@ def _failed_result(
 def _bounded_preview(value: object) -> str | None:
     if value is None:
         return None
-    text = str(value)
+    text = _string_from_output(value)
     return text if len(text) <= MAX_OUTPUT_PREVIEW_CHARS else text[:MAX_OUTPUT_PREVIEW_CHARS]
 
 
 def _safe_len(value: object) -> int:
-    return len(str(value)) if value is not None else 0
+    return len(_string_from_output(value)) if value is not None else 0
+
+
+def _string_from_output(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _format_timeout(value: float) -> str:

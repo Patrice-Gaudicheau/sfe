@@ -1,8 +1,9 @@
 # SFE .env To Aider Environment Bridge
 
 This document describes the proposed bridge between SFE configuration and
-Aider's runtime environment. It is a design note only: no runtime bridge,
-multi-pass Aider execution, or real model smoke test is implemented here.
+Aider's runtime environment. The bridge is implemented for single-pass Aider
+workspace writes on this branch. Multi-pass Aider execution and real
+model-backed smoke testing remain deferred.
 
 ## Goals
 
@@ -78,6 +79,8 @@ Recommended behavior:
 - Delete the temporary env file after Aider exits.
 - Redact the env-file path in diagnostics as `<aider-env-file>`.
 - Never serialize env values or env-file contents.
+- Run Aider with a controlled subprocess environment rather than inheriting
+  the whole SFE process environment.
 
 Initial mapping:
 
@@ -140,6 +143,7 @@ Diagnostics may include:
 - sanitized command with `--message-file <message-file>` and
   `--env-file <aider-env-file>`;
 - return code, elapsed time, stdout/stderr lengths, and short bounded previews.
+- timeout category and duration when configured.
 
 Diagnostics must not include:
 
@@ -173,6 +177,8 @@ Diagnostics must not include:
 - Wire the helper into `AiderFilesystemExecutor`.
 - Write the minimal temporary env file outside the worktree.
 - Pass `--env-file <tempfile>` to Aider.
+- Pass `--model`, optional `--weak-model`, and optional `--timeout`.
+- Close stdin and apply the configured timeout to the Aider subprocess.
 - Redact env-file paths and values in diagnostics.
 - Preserve Aider as the default single-pass writer and text as explicit
   fallback only.
@@ -190,6 +196,8 @@ Diagnostics must not include:
 - Keep multi-pass text-backed until the bridge and single-pass behavior are
   stable.
 - Reuse the same bridge for each later Aider pass.
+- Keep each later multi-pass Aider call small and batch-specific; SFE remains
+  the context router and planner.
 
 ## Open Questions
 

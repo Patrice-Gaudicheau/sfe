@@ -1,8 +1,9 @@
 # Aider Filesystem Executor Integration
 
 This note describes the target architecture for making Aider the normal
-filesystem writer for SFE `workspace_write` execution. It is an exploration
-plan only: no runtime integration is implemented by this document.
+filesystem writer for SFE `workspace_write` execution. The current branch has
+the single-pass foundation implemented; multi-pass Aider execution remains
+deferred.
 
 ## Target Architecture
 
@@ -112,6 +113,40 @@ The exact CLI flags should be verified during implementation against the
 installed Aider version. The architecture should not depend on undocumented
 flags if a stable alternative exists.
 
+## Context Control Policy
+
+SFE remains the context router. Aider must not receive the full repository or
+an oversized global context by default. For single-pass `workspace_write`, SFE
+should give Aider:
+
+- a short scoped instruction;
+- explicit editable paths when SFE knows them;
+- explicit new file paths when SFE can infer them;
+- only selected supporting files via read-only context paths.
+
+Aider must not become a second global planner competing with SFE. For later
+multi-pass work, each Aider invocation should be batch-specific, small, and
+bounded by the Router-owned plan.
+
+## Non-Interactive Invocation Policy
+
+Aider is invoked as a one-shot, non-interactive filesystem writer. Local Aider
+0.86.2 supports the required flags: `--message-file`, `--env-file`,
+`--yes-always`, `--no-pretty`, `--no-stream`, `--no-gui`, `--no-browser`,
+`--git`, `--auto-commits`, `--no-auto-lint`, `--no-auto-test`,
+`--subtree-only`, `--model`, `--weak-model`, and `--timeout`.
+
+The executor should:
+
+- send the task through a temporary message file rather than command-line text;
+- pass only a minimal temporary Aider env file;
+- close stdin so the process cannot wait for terminal input;
+- capture stdout and stderr with bounded diagnostics;
+- pass `--timeout` when `SFE_AIDER_TIMEOUT_SECONDS` is configured;
+- apply the same configured timeout to the spawned Aider process;
+- fail with a structured timeout or execution error rather than blocking
+  indefinitely.
+
 Before spawning Aider, SFE must assert:
 
 - the active workspace path is inside the SFE worktree;
@@ -156,6 +191,22 @@ Aider becomes responsible for:
 
 Aider must not be responsible for promotion into the user source directory, SFE
 session cleanup, target-boundary policy, or final SFE reporting.
+
+## Commit Promotion Policy
+
+Aider may create micro-commits inside the SFE-controlled worktree. Those commits
+are treated as session execution history only. SFE does not promote Aider
+commits directly into the user source checkout.
+
+The effective policy is squash-at-promotion:
+
+- SFE captures committed changes relative to the session source head and
+  uncommitted worktree changes;
+- SFE validates the final changed paths and file state against the selected
+  destination boundary and internal path blocklist;
+- SFE promotes only validated destination-bound file changes;
+- user-facing source history receives the final promoted state, not Aider's
+  internal micro-commit sequence.
 
 ## TUI Impact
 
@@ -234,12 +285,8 @@ The relevant current implementation areas are:
 
 ## Risks And Open Questions
 
-- Aider commits can hide changes from the current status-only promotion capture.
-  Today `_capture_actual_workspace_changes()` reads `git status` in the
-  worktree. If Aider commits successfully, the status may be clean while the
-  worktree branch differs from the source head. Before Aider commits are
-  allowed, SFE must capture both committed and uncommitted changes relative to
-  the session source head.
+- Aider context can grow too large if SFE passes broad context. SFE must keep
+  selected context small and prefer explicit edit/read paths.
 - Aider CLI flags and installation shape need implementation-time verification.
   The design should depend on stable commands and detect version/capability
   problems clearly.
@@ -252,8 +299,9 @@ The relevant current implementation areas are:
 - Current multi-pass `allowed_files` are warnings rather than hard rejection
   when extra in-destination files change. The Aider path needs an explicit
   policy for whether expected files are guidance or strict scope.
-- Long-running Aider calls need timeout, cancellation, and progress behavior
-  that is acceptable for both TUI and MCP.
+- Long-running Aider calls need cancellation and richer progress behavior that
+  is acceptable for both TUI and MCP; the current single-pass path has
+  non-interactive execution and configured timeout handling.
 - Secret handling needs care. SFE should not echo full prompts, file contents,
   environment variables, or Aider logs that may contain secrets in normal MCP
   or TUI output.

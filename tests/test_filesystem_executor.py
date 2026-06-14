@@ -90,6 +90,8 @@ def test_aider_filesystem_executor_uses_message_file_and_bounded_command(
         assert "Create docs" in message_path.read_text(encoding="utf-8")
         assert "OPENAI_API_KEY" in env_file_path.read_text(encoding="utf-8")
         assert "OPENAI_API_KEY" not in kwargs["env"]
+        assert kwargs["stdin"] is subprocess.DEVNULL
+        assert kwargs["timeout"] == 30.0
         calls.append({"command": command, "cwd": kwargs["cwd"]})
         return subprocess.CompletedProcess(command, 0, stdout="ok\n", stderr="")
 
@@ -234,6 +236,65 @@ def test_aider_filesystem_executor_bridge_failure_does_not_run_aider(
     assert result.error_category == "missing_aider_environment"
     assert result.metadata["missing_variables"] == ("OPENAI_API_KEY",)
     assert calls == []
+
+
+def test_aider_filesystem_executor_timeout_is_structured_and_bounded(
+    tmp_path: Path,
+) -> None:
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout=1.0,
+            output=b"partial stdout",
+            stderr=b"partial stderr",
+        )
+
+    executor = AiderFilesystemExecutor(
+        preflight=lambda: AiderPreflightResult(
+            available=True,
+            executable_path="/home/patrice/.local/bin/aider",
+            version_output="aider 0.86.2",
+            install_guidance=(),
+            diagnostics={},
+        ),
+        env_bridge=lambda: AiderEnvBridgeResult(
+            provider_name="openai",
+            aider_env={"OPENAI_API_KEY": "fixture-openai-key"},
+            selected_model="gpt-fixture",
+            selected_weak_model=None,
+            selected_timeout_seconds=1.0,
+            missing_variables=(),
+            error_category=None,
+            diagnostics={
+                "provider_name": "openai",
+                "aider_env_variable_names": ("OPENAI_API_KEY",),
+                "selected_model": "gpt-fixture",
+                "selected_weak_model": None,
+                "selected_timeout_seconds": 1.0,
+                "missing_variables": (),
+                "error_category": None,
+            },
+        ),
+        runner=runner,
+        monotonic=_monotonic_sequence(20.0, 21.5),
+    )
+
+    result = executor.execute(
+        FilesystemExecutionRequest(cwd=tmp_path, task="Create docs")
+    )
+
+    assert result.status == "failed"
+    assert result.error_category == "aider_timeout"
+    assert result.diagnostics.command[
+        result.diagnostics.command.index("--message-file") + 1
+    ] == "<message-file>"
+    assert result.diagnostics.command[
+        result.diagnostics.command.index("--env-file") + 1
+    ] == "<aider-env-file>"
+    assert result.diagnostics.stdout_preview == "partial stdout"
+    assert result.diagnostics.stderr_preview == "partial stderr"
+    assert result.diagnostics.elapsed_ms == 1500
+    assert result.diagnostics.metadata["timeout_seconds"] == 1.0
 
 
 def test_aider_filesystem_executor_rejects_windows_internal_paths(
