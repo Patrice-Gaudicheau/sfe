@@ -12,7 +12,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable
 
 from sfe.discovery import (
@@ -33,7 +33,11 @@ from sfe.execution_mode_router import (
     create_configured_execution_mode_router,
 )
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
-from sfe.filesystem_executor import FilesystemExecutor, FilesystemExecutionResult
+from sfe.filesystem_executor import (
+    FilesystemExecutionDiagnostics,
+    FilesystemExecutor,
+    FilesystemExecutionResult,
+)
 from sfe.aider_filesystem_executor import AIDER_EXECUTOR_NAME, AiderFilesystemExecutor
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.multipass import (
@@ -108,6 +112,74 @@ from sfe.workspace_write_executor import (
 
 RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED = "failed"
+EXPECTED_WORKSPACE_WRITE_FILE_EXTENSIONS = (
+    "c",
+    "cjs",
+    "cpp",
+    "cs",
+    "css",
+    "go",
+    "h",
+    "hpp",
+    "html",
+    "htm",
+    "ini",
+    "java",
+    "js",
+    "json",
+    "jsx",
+    "kt",
+    "md",
+    "mjs",
+    "php",
+    "py",
+    "rb",
+    "rs",
+    "sh",
+    "sql",
+    "svg",
+    "toml",
+    "ts",
+    "tsx",
+    "txt",
+    "yaml",
+    "yml",
+)
+EXPECTED_WORKSPACE_WRITE_FILE_RE = re.compile(
+    r"(?P<path>"
+    r"(?:[A-Za-z]:[\\/])?"
+    r"(?:[./\\~]*[A-Za-z0-9_.-]+[\\/])*"
+    r"[./\\~]*[A-Za-z0-9_.-]+"
+    r"\.(?:"
+    + "|".join(
+        re.escape(extension)
+        for extension in sorted(
+            EXPECTED_WORKSPACE_WRITE_FILE_EXTENSIONS,
+            key=len,
+            reverse=True,
+        )
+    )
+    + r"))",
+    re.IGNORECASE,
+)
+EXPECTED_WORKSPACE_WRITE_UNSAFE_FILE_RE = re.compile(
+    r"(?P<path>"
+    r"(?:\.\.[\\/]|[\\/]|~[\\/]|[A-Za-z]:[\\/]|"
+    r"(?:\.git|\.sfe|\.sfe-worktrees)[\\/])"
+    r"(?:[A-Za-z0-9_.-]+[\\/])*"
+    r"[A-Za-z0-9_.-]+\.(?:"
+    + "|".join(
+        re.escape(extension)
+        for extension in sorted(
+            EXPECTED_WORKSPACE_WRITE_FILE_EXTENSIONS,
+            key=len,
+            reverse=True,
+        )
+    )
+    + r"))",
+    re.IGNORECASE,
+)
+INTERNAL_WORKSPACE_WRITE_PATH_PARTS = frozenset({".git", ".sfe", ".sfe-worktrees"})
 
 
 @dataclass(frozen=True)
@@ -757,23 +829,80 @@ class RunPipeline:
     ) -> RunResult:
         from sfe.filesystem_executor import FilesystemExecutionRequest
 
+        expected_paths_result = _expected_workspace_write_paths_from_task(
+            request.task,
+            active_workspace,
+        )
+        if isinstance(expected_paths_result, RunIssue):
+            fs_result = _filesystem_preflight_failed_result(
+                cwd=active_workspace,
+                executor_name=self.filesystem_executor.name,
+                error_category=expected_paths_result.reason,
+                metadata=expected_paths_result.diagnostics or {},
+            )
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=expected_paths_result,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+            )
+        expected_paths = expected_paths_result
+        precreated_paths_result = _precreate_expected_workspace_write_files(
+            active_workspace,
+            expected_paths,
+        )
+        if isinstance(precreated_paths_result, RunIssue):
+            fs_result = _filesystem_preflight_failed_result(
+                cwd=active_workspace,
+                executor_name=self.filesystem_executor.name,
+                error_category=precreated_paths_result.reason,
+                metadata=precreated_paths_result.diagnostics or {},
+            )
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=precreated_paths_result,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+            )
+        precreated_paths = precreated_paths_result
         self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
         self._emit_progress(
             "filesystem_worktree_execution_started",
             "SFE: Aider filesystem execution started",
+            expected_paths=expected_paths,
+            precreated_expected_paths=precreated_paths,
         )
         fs_result = self.filesystem_executor.execute(
             FilesystemExecutionRequest(
                 cwd=active_workspace,
                 task=request.task,
-                expected_paths=(),
+                expected_paths=expected_paths,
                 context_paths=selected_source_refs,
                 metadata={
                     "workspace_session_id": session.session_id,
                     "source_path": str(session.source_path.resolve()),
                     "worktree_path": str(session.worktree_path.resolve()),
+                    "expected_paths": expected_paths,
+                    "precreated_expected_paths": precreated_paths,
                 },
             )
+        )
+        fs_result = _with_filesystem_diagnostics_metadata(
+            fs_result,
+            expected_paths=expected_paths,
+            precreated_expected_paths=precreated_paths,
         )
         if fs_result.status != "completed":
             return _filesystem_workspace_write_failed_result(
@@ -788,13 +917,22 @@ class RunPipeline:
                 git_preparation=git_preparation,
             )
 
-        promotion_baseline = _capture_actual_workspace_changes(session, active_workspace)
+        promotion_baseline = _filter_precreated_placeholder_changes(
+            _capture_actual_workspace_changes(session, active_workspace),
+            precreated_paths,
+        )
         patch_summary = _summary_from_promotion_baseline(promotion_baseline)
         changed_files = _promotion_baseline_paths(promotion_baseline)
+        fs_result = _with_filesystem_diagnostics_metadata(
+            fs_result,
+            actual_changed_paths=changed_files,
+        )
         self._emit_progress(
             "workspace_boundary_check_completed",
             "SFE: workspace boundary check completed",
             changed_file_count=len(changed_files),
+            actual_changed_paths=changed_files,
+            expected_paths=expected_paths,
             destination_root=str(session.source_path.resolve()),
         )
         if promotion_baseline.issue is not None:
@@ -811,6 +949,53 @@ class RunPipeline:
                 git_preparation=git_preparation,
                 patch_summary=patch_summary,
                 changed_files=changed_files,
+            )
+
+        if not changed_files:
+            no_changes_reason = (
+                "expected_files_not_created_or_modified"
+                if expected_paths
+                else "filesystem_executor_completed_without_worktree_changes"
+            )
+            fs_result = _with_filesystem_diagnostics_metadata(
+                fs_result,
+                no_changes_reason=no_changes_reason,
+            )
+            issue = RunIssue(
+                "workspace_write_executor",
+                "no_changes",
+                diagnostics={
+                    "executor_name": fs_result.executor_name,
+                    "expected_paths": expected_paths,
+                    "actual_changed_paths": changed_files,
+                    "precreated_expected_paths": precreated_paths,
+                    "no_changes_reason": no_changes_reason,
+                    "diagnostics": _filesystem_diagnostics_dict(
+                        fs_result.diagnostics
+                    ),
+                },
+            )
+            self._emit_progress(
+                "filesystem_no_changes",
+                "SFE: no workspace changes produced",
+                expected_paths=expected_paths,
+                actual_changed_paths=changed_files,
+                no_changes_reason=no_changes_reason,
+            )
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                promotion_result=PromotionResult("skipped"),
             )
 
         promotion_result = _promote_actual_workspace_changes(promotion_baseline)
@@ -1471,6 +1656,59 @@ class RunPipeline:
                 all_promoted_files=tuple(all_promoted_files),
                 allowed_files=batch.allowed_files,
             )
+            precreated_paths_result = _precreate_expected_workspace_write_files(
+                active_workspace,
+                batch.allowed_files,
+            )
+            if isinstance(precreated_paths_result, RunIssue):
+                issue = precreated_paths_result
+                fs_result = _filesystem_preflight_failed_result(
+                    cwd=active_workspace,
+                    executor_name=self.filesystem_executor.name,
+                    error_category=issue.reason,
+                    metadata=issue.diagnostics or {},
+                )
+                latest_filesystem_result = fs_result
+                provider_diagnostics = _filesystem_pass_provider_diagnostics(
+                    fs_result,
+                    pass_index=index,
+                    total_passes=len(parsed_plan.batches),
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=None,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                    filesystem_result=latest_filesystem_result,
+                )
+            precreated_paths = precreated_paths_result
             fs_result = self.filesystem_executor.execute(
                 FilesystemExecutionRequest(
                     cwd=active_workspace,
@@ -1484,8 +1722,15 @@ class RunPipeline:
                         "multi_pass_id": batch.id,
                         "multi_pass_index": index,
                         "multi_pass_total": len(parsed_plan.batches),
+                        "expected_paths": batch.allowed_files,
+                        "precreated_expected_paths": precreated_paths,
                     },
                 )
+            )
+            fs_result = _with_filesystem_diagnostics_metadata(
+                fs_result,
+                expected_paths=batch.allowed_files,
+                precreated_expected_paths=precreated_paths,
             )
             latest_filesystem_result = fs_result
             provider_diagnostics = _filesystem_pass_provider_diagnostics(
@@ -1547,8 +1792,22 @@ class RunPipeline:
                 session,
                 active_workspace,
             )
+            promotion_baseline = _filter_precreated_placeholder_changes(
+                promotion_baseline,
+                precreated_paths,
+            )
             patch_summary = _summary_from_promotion_baseline(promotion_baseline)
             changed_files = _promotion_baseline_paths(promotion_baseline)
+            fs_result = _with_filesystem_diagnostics_metadata(
+                fs_result,
+                actual_changed_paths=changed_files,
+            )
+            latest_filesystem_result = fs_result
+            provider_diagnostics = _filesystem_pass_provider_diagnostics(
+                fs_result,
+                pass_index=index,
+                total_passes=len(parsed_plan.batches),
+            )
             if promotion_baseline.issue is not None:
                 issue = promotion_baseline.issue
                 pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
@@ -1589,6 +1848,78 @@ class RunPipeline:
                         )
                     ),
                     promoted_files=tuple(all_promoted_files),
+                    filesystem_result=latest_filesystem_result,
+                )
+
+            if not changed_files:
+                no_changes_reason = "expected_files_not_created_or_modified"
+                fs_result = _with_filesystem_diagnostics_metadata(
+                    fs_result,
+                    no_changes_reason=no_changes_reason,
+                )
+                latest_filesystem_result = fs_result
+                provider_diagnostics = _filesystem_pass_provider_diagnostics(
+                    fs_result,
+                    pass_index=index,
+                    total_passes=len(parsed_plan.batches),
+                )
+                issue = RunIssue(
+                    "workspace_write_executor",
+                    "no_changes",
+                    diagnostics={
+                        "executor_name": fs_result.executor_name,
+                        "expected_paths": batch.allowed_files,
+                        "actual_changed_paths": changed_files,
+                        "precreated_expected_paths": precreated_paths,
+                        "no_changes_reason": no_changes_reason,
+                        "diagnostics": _filesystem_diagnostics_dict(
+                            fs_result.diagnostics
+                        ),
+                    },
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                self._emit_progress(
+                    "filesystem_no_changes",
+                    "SFE: no workspace changes produced",
+                    expected_paths=batch.allowed_files,
+                    actual_changed_paths=changed_files,
+                    no_changes_reason=no_changes_reason,
+                    multi_pass_id=batch.id,
+                    multi_pass_index=index,
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=None,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                    promotion_status="skipped",
+                    promotion_issue=issue,
                     filesystem_result=latest_filesystem_result,
                 )
 
@@ -2988,6 +3319,227 @@ def _executor_provider(result: ExecutionResult | None) -> str | None:
         return None
     provider = result.summary.get("executor_provider")
     return str(provider) if provider is not None else None
+
+
+def _expected_workspace_write_paths_from_task(
+    task: str,
+    active_workspace: Path,
+) -> tuple[str, ...] | RunIssue:
+    for match in EXPECTED_WORKSPACE_WRITE_UNSAFE_FILE_RE.finditer(task):
+        if _file_mention_is_inside_url(task, match.start()):
+            continue
+        candidate = _normalize_expected_workspace_write_path(match.group("path"))
+        issue = _validate_expected_workspace_write_path(
+            active_workspace,
+            candidate,
+        )
+        if issue is not None:
+            return issue
+    paths: list[str] = []
+    seen: set[str] = set()
+    for match in EXPECTED_WORKSPACE_WRITE_FILE_RE.finditer(task):
+        if _file_mention_is_inside_url(task, match.start()):
+            continue
+        candidate = _normalize_expected_workspace_write_path(match.group("path"))
+        if not candidate or candidate in seen:
+            continue
+        issue = _validate_expected_workspace_write_path(
+            active_workspace,
+            candidate,
+        )
+        if issue is not None:
+            return issue
+        seen.add(candidate)
+        paths.append(candidate)
+    return tuple(paths[:20])
+
+
+def _file_mention_is_inside_url(task: str, start: int) -> bool:
+    prefix = task[max(0, start - 80) : start].lower()
+    last_separator = max(
+        prefix.rfind(" "),
+        prefix.rfind("\n"),
+        prefix.rfind("\t"),
+    )
+    prefix = prefix[last_separator + 1 :]
+    return "://" in prefix
+
+
+def _normalize_expected_workspace_write_path(path: str) -> str:
+    normalized = path.replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _validate_expected_workspace_write_path(
+    active_workspace: Path,
+    relative_path: str,
+) -> RunIssue | None:
+    reason = _expected_workspace_write_path_rejection_reason(
+        active_workspace,
+        relative_path,
+    )
+    if reason is None:
+        return None
+    return RunIssue(
+        "workspace_write_executor",
+        "unsafe_expected_path",
+        relative_path or None,
+        diagnostics={
+            "expected_path": relative_path,
+            "validation_reason": reason,
+        },
+    )
+
+
+def _expected_workspace_write_path_rejection_reason(
+    active_workspace: Path,
+    relative_path: str,
+) -> str | None:
+    if not relative_path or relative_path.strip() != relative_path:
+        return "empty_or_ambiguous_path"
+    if "\t" in relative_path or "\r" in relative_path or "\0" in relative_path:
+        return "empty_or_ambiguous_path"
+    parsed = Path(relative_path)
+    windows = PureWindowsPath(relative_path)
+    if parsed.is_absolute() or windows.is_absolute() or windows.drive:
+        return "absolute_path"
+    parsed_parts = parsed.parts
+    windows_parts = windows.parts
+    if (
+        ".." in parsed_parts
+        or ".." in windows_parts
+        or "~" in parsed_parts
+        or "~" in windows_parts
+    ):
+        return "path_outside_workspace"
+    lowered_parts = {part.lower() for part in (*parsed_parts, *windows_parts)}
+    if lowered_parts & INTERNAL_WORKSPACE_WRITE_PATH_PARTS:
+        return "internal_workspace_path"
+    root = active_workspace.resolve()
+    target = root / relative_path
+    try:
+        target_parent = target.parent.resolve()
+        target_parent.relative_to(root)
+        if target.exists() or target.is_symlink():
+            target.resolve().relative_to(root)
+    except ValueError:
+        return "path_outside_workspace"
+    except OSError:
+        return "path_resolution_failed"
+    return None
+
+
+def _precreate_expected_workspace_write_files(
+    active_workspace: Path,
+    expected_paths: tuple[str, ...],
+) -> tuple[str, ...] | RunIssue:
+    precreated: list[str] = []
+    for relative_path in expected_paths:
+        issue = _validate_expected_workspace_write_path(
+            active_workspace,
+            relative_path,
+        )
+        if issue is not None:
+            return issue
+        target = (active_workspace / relative_path).resolve()
+        try:
+            if target.exists() or target.is_symlink():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch(exist_ok=True)
+        except OSError:
+            return RunIssue(
+                "workspace_write_executor",
+                "expected_file_precreate_failed",
+                relative_path,
+                diagnostics={
+                    "expected_path": relative_path,
+                    "expected_paths": expected_paths,
+                    "active_workspace": str(active_workspace.resolve()),
+                },
+            )
+        precreated.append(relative_path)
+    return tuple(precreated)
+
+
+def _filter_precreated_placeholder_changes(
+    baseline: PromotionBaseline,
+    precreated_paths: tuple[str, ...],
+) -> PromotionBaseline:
+    if baseline.issue is not None or not precreated_paths:
+        return baseline
+    precreated = set(precreated_paths)
+    targets: list[PromotionTarget] = []
+    for target in baseline.targets:
+        if (
+            target.relative_path in precreated
+            and target.change_kind == "created"
+            and target.source_before is None
+        ):
+            try:
+                if target.worktree_path.is_file() and target.worktree_path.read_bytes() == b"":
+                    continue
+            except OSError:
+                return PromotionBaseline(
+                    issue=RunIssue(
+                        "workspace_status",
+                        "worktree_read_failed",
+                        target.relative_path,
+                    )
+                )
+        targets.append(target)
+    return PromotionBaseline(targets=tuple(targets))
+
+
+def _with_filesystem_diagnostics_metadata(
+    result: FilesystemExecutionResult,
+    **metadata: object,
+) -> FilesystemExecutionResult:
+    clean_metadata = {
+        key: value
+        for key, value in metadata.items()
+        if value is not None
+    }
+    if not clean_metadata:
+        return result
+    diagnostics = replace(
+        result.diagnostics,
+        metadata={
+            **result.diagnostics.metadata,
+            **clean_metadata,
+        },
+    )
+    return replace(result, diagnostics=diagnostics)
+
+
+def _filesystem_preflight_failed_result(
+    *,
+    cwd: Path,
+    executor_name: str,
+    error_category: str,
+    metadata: dict[str, object],
+) -> FilesystemExecutionResult:
+    return FilesystemExecutionResult(
+        executor_name=executor_name,
+        status="failed",
+        changed_paths=(),
+        diagnostics=FilesystemExecutionDiagnostics(
+            executor_name=executor_name,
+            cwd=str(cwd),
+            command=(),
+            return_code=None,
+            stdout_length=0,
+            stderr_length=0,
+            stdout_preview=None,
+            stderr_preview=None,
+            elapsed_ms=0,
+            metadata=metadata,
+        ),
+        error_category=error_category,
+        metadata=metadata,
+    )
 
 
 def _filesystem_diagnostics_dict(

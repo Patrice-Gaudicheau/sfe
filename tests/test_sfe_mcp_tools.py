@@ -23,6 +23,10 @@ from sfe.execution_mode_router import (  # noqa: E402
     EXECUTION_MODE_WORKSPACE_WRITE,
     ExecutionModeDecision,
 )
+from sfe.filesystem_executor import (  # noqa: E402
+    FilesystemExecutionDiagnostics,
+    FilesystemExecutionResult,
+)
 from sfe.multipass import (  # noqa: E402
     MultiPassBatchResult,
     MultiPassIssue,
@@ -657,6 +661,103 @@ def test_failed_run_result_serializes_issue_category_and_reason() -> None:
         "path": None,
     }
     assert result["action_hint"] == "inspect_run_report_or_retry"
+
+
+def test_no_changes_workspace_write_diagnostics_are_serialized_safely() -> None:
+    filesystem_result = FilesystemExecutionResult(
+        executor_name="aider",
+        status="completed",
+        changed_paths=(),
+        diagnostics=FilesystemExecutionDiagnostics(
+            executor_name="aider",
+            cwd="/workspace/.sfe-worktrees/session",
+            command=("aider", "--message-file", "<message-file>"),
+            return_code=0,
+            stdout_length=34,
+            stderr_length=0,
+            stdout_preview="No files were edited.",
+            stderr_preview="",
+            elapsed_ms=12,
+            metadata={
+                "expected_paths": ("index.html", "styles.css", "README.md"),
+                "actual_changed_paths": (),
+                "precreated_expected_paths": (
+                    "index.html",
+                    "styles.css",
+                    "README.md",
+                ),
+                "no_changes_reason": "expected_files_not_created_or_modified",
+            },
+        ),
+    )
+    issue = RunIssue(
+        "workspace_write_executor",
+        "no_changes",
+        diagnostics={
+            "executor_name": "aider",
+            "expected_paths": ("index.html", "styles.css", "README.md"),
+            "actual_changed_paths": (),
+            "precreated_expected_paths": (
+                "index.html",
+                "styles.css",
+                "README.md",
+            ),
+            "no_changes_reason": "expected_files_not_created_or_modified",
+            "diagnostics": {
+                "executor_name": "aider",
+                "return_code": 0,
+                "stdout_length": 34,
+                "stderr_length": 0,
+                "stdout_preview": "No files were edited.",
+                "stderr_preview": "",
+                "elapsed_ms": 12,
+                "metadata": filesystem_result.diagnostics.metadata,
+            },
+        },
+    )
+    session = FakeRuntimeSession()
+    session.report_result = RunReportResult(
+        ok=True,
+        run_result=RunResult(
+            status=RUN_STATUS_FAILED,
+            issue=issue,
+            execution_mode_decision=ExecutionModeDecision(
+                execution_mode=EXECUTION_MODE_WORKSPACE_WRITE,
+                reason="The task edits workspace files.",
+                confidence=0.9,
+                provider_name="fake-router",
+                model="fake-model",
+                provider_calls_made=1,
+            ),
+            executor_provider="aider",
+            promotion_status="skipped",
+            promotion_applied=False,
+            filesystem_result=filesystem_result,
+        ),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run_report()
+
+    assert result["ok"] is False
+    assert result["issue"]["reason"] == "no_changes"
+    assert result["issue"]["diagnostics"]["expected_paths"] == [
+        "index.html",
+        "styles.css",
+        "README.md",
+    ]
+    assert result["issue"]["diagnostics"]["actual_changed_paths"] == []
+    assert result["issue"]["diagnostics"]["no_changes_reason"] == (
+        "expected_files_not_created_or_modified"
+    )
+    assert result["action_hint"] == "inspect_run_report_expected_and_actual_paths"
+    assert result["diagnostics"]["filesystem_executor"]["diagnostics"]["metadata"][
+        "expected_paths"
+    ] == ["index.html", "styles.css", "README.md"]
+    rendered = repr(result)
+    assert "SECRET" not in rendered
+    assert "api_key" not in rendered.lower()
+    assert "User task:" not in rendered
 
 
 def test_workspace_status_serializes_session_metadata_safely(tmp_path: Path) -> None:

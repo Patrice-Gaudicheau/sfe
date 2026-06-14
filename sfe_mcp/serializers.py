@@ -130,6 +130,61 @@ def _safe_workspace_write_executor_diagnostics(
     executor_name = diagnostics.get("executor_name")
     if isinstance(executor_name, str):
         safe["executor_name"] = executor_name
+    for key in (
+        "expected_path",
+        "validation_reason",
+        "no_changes_reason",
+    ):
+        value = diagnostics.get(key)
+        if isinstance(value, str):
+            safe[key] = _safe_diagnostic_value(value)
+    for key in (
+        "expected_paths",
+        "actual_changed_paths",
+        "precreated_expected_paths",
+    ):
+        value = diagnostics.get(key)
+        if isinstance(value, tuple | list):
+            safe[key] = [
+                _safe_diagnostic_value(item)
+                for item in value[:40]
+                if isinstance(item, str)
+            ]
+    filesystem_diagnostics = diagnostics.get("diagnostics")
+    if isinstance(filesystem_diagnostics, dict):
+        safe["filesystem_executor"] = _safe_filesystem_diagnostics(
+            filesystem_diagnostics
+        )
+    return safe
+
+
+def _safe_filesystem_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in (
+        "executor_name",
+        "return_code",
+        "stdout_length",
+        "stderr_length",
+        "stdout_preview",
+        "stderr_preview",
+        "elapsed_ms",
+    ):
+        if key in diagnostics:
+            safe[key] = _safe_diagnostic_value(diagnostics[key])
+    metadata = diagnostics.get("metadata")
+    if isinstance(metadata, dict):
+        safe["metadata"] = {
+            key: _safe_diagnostic_value(value)
+            for key, value in metadata.items()
+            if key
+            in {
+                "expected_paths",
+                "actual_changed_paths",
+                "precreated_expected_paths",
+                "no_changes_reason",
+                "context_paths",
+            }
+        }
     return safe
 
 
@@ -447,7 +502,7 @@ def _serialize_filesystem_result(result: RunResult) -> dict[str, Any] | None:
             "stdout_preview": diagnostics.stdout_preview,
             "stderr_preview": diagnostics.stderr_preview,
             "elapsed_ms": diagnostics.elapsed_ms,
-            "metadata": dict(diagnostics.metadata),
+            "metadata": _safe_diagnostic_mapping(dict(diagnostics.metadata)),
         },
     }
 
@@ -648,6 +703,8 @@ def _run_action_hint(result: RunResult) -> str | None:
         return None
     if issue.category == "patch_generation" and issue.reason == "invalid_response":
         return "inspect_run_report_or_retry"
+    if issue.category == "workspace_write_executor" and issue.reason == "no_changes":
+        return "inspect_run_report_expected_and_actual_paths"
     if issue.category == "context_discovery":
         return "inspect_discovery_configuration_or_retry"
     if issue.category == "routing":

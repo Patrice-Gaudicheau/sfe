@@ -66,6 +66,7 @@ class AiderFilesystemExecutor:
         self,
         request: FilesystemExecutionRequest,
     ) -> FilesystemExecutionResult:
+        path_metadata = _request_path_metadata(request)
         preflight = self.preflight()
         if not preflight.available or preflight.executable_path is None:
             return _failed_result(
@@ -74,6 +75,7 @@ class AiderFilesystemExecutor:
                 metadata={
                     "install_guidance": preflight.install_guidance,
                     "preflight_diagnostics": preflight.diagnostics,
+                    **path_metadata,
                 },
             )
 
@@ -84,7 +86,10 @@ class AiderFilesystemExecutor:
             return _failed_result(
                 cwd=request.cwd,
                 error_category=path_issue,
-                metadata={"aider_path": preflight.executable_path},
+                metadata={
+                    "aider_path": preflight.executable_path,
+                    **path_metadata,
+                },
             )
 
         bridge = self.env_bridge()
@@ -96,6 +101,7 @@ class AiderFilesystemExecutor:
                     "aider_path": preflight.executable_path,
                     "bridge_diagnostics": bridge.diagnostics,
                     "missing_variables": bridge.missing_variables,
+                    **path_metadata,
                 },
             )
 
@@ -156,6 +162,7 @@ class AiderFilesystemExecutor:
                                     "error_type": type(exc).__name__,
                                     "timeout_seconds": bridge.selected_timeout_seconds,
                                     "bridge_diagnostics": bridge.diagnostics,
+                                    **path_metadata,
                                 },
                             ),
                             error_category="aider_timeout",
@@ -180,6 +187,7 @@ class AiderFilesystemExecutor:
                                     "aider_path": preflight.executable_path,
                                     "error_type": type(exc).__name__,
                                     "bridge_diagnostics": bridge.diagnostics,
+                                    **path_metadata,
                                 },
                             ),
                             error_category="aider_execution_error",
@@ -192,6 +200,7 @@ class AiderFilesystemExecutor:
                 metadata={
                     "aider_path": preflight.executable_path,
                     "bridge_diagnostics": bridge.diagnostics,
+                    **path_metadata,
                 },
             )
         except OSError as exc:
@@ -213,6 +222,7 @@ class AiderFilesystemExecutor:
                         "aider_path": preflight.executable_path,
                         "error_type": type(exc).__name__,
                         "bridge_diagnostics": bridge.diagnostics,
+                        **path_metadata,
                     },
                 ),
                 error_category="aider_tempfile_error",
@@ -232,6 +242,7 @@ class AiderFilesystemExecutor:
                 "aider_path": preflight.executable_path,
                 "version_output": preflight.version_output,
                 "bridge_diagnostics": bridge.diagnostics,
+                **path_metadata,
             },
         )
         return FilesystemExecutionResult(
@@ -240,7 +251,10 @@ class AiderFilesystemExecutor:
             changed_paths=(),
             diagnostics=diagnostics,
             error_category=None if completed.returncode == 0 else "aider_failed",
-            metadata={"aider_path": preflight.executable_path},
+            metadata={
+                "aider_path": preflight.executable_path,
+                **path_metadata,
+            },
         )
 
 
@@ -265,6 +279,15 @@ def _build_aider_prompt(request: FilesystemExecutionRequest) -> str:
             "",
         ]
     )
+
+
+def _request_path_metadata(
+    request: FilesystemExecutionRequest,
+) -> dict[str, tuple[str, ...]]:
+    return {
+        "expected_paths": request.expected_paths,
+        "context_paths": request.context_paths,
+    }
 
 
 def _build_aider_command(

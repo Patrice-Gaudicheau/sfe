@@ -952,6 +952,130 @@ def test_run_pipeline_missing_aider_fails_closed_without_text_fallback(
     assert not (repo / "should-not-run.txt").exists()
 
 
+def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    filesystem_executor = FakeFilesystemExecutor()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html, styles.css and README.md",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "no_changes"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["expected_paths"] == (
+        "index.html",
+        "styles.css",
+        "README.md",
+    )
+    assert result.issue.diagnostics["actual_changed_paths"] == ()
+    assert result.issue.diagnostics["no_changes_reason"] == (
+        "expected_files_not_created_or_modified"
+    )
+    assert result.promotion_status == "skipped"
+    assert result.promoted_files == ()
+    assert result.changed_files == ()
+    assert not (repo / "index.html").exists()
+    assert not (repo / "styles.css").exists()
+    assert not (repo / "README.md").exists()
+    assert filesystem_executor.calls[0].expected_paths == (
+        "index.html",
+        "styles.css",
+        "README.md",
+    )
+    assert result.filesystem_result is not None
+    assert result.filesystem_result.diagnostics.metadata["actual_changed_paths"] == ()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_precreates_expected_files_only_in_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def inspect_precreated(workspace: Path) -> None:
+        assert (workspace / "index.html").is_file()
+        assert not (repo / "index.html").exists()
+
+    filesystem_executor = FakeFilesystemExecutor(inspect_precreated)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index.html",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "no_changes"
+    assert not (repo / "index.html").exists()
+    assert result.workspace_session is not None
+    assert (result.active_workspace / "index.html").is_file()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+@pytest.mark.parametrize(
+    "task,validation_reason",
+    [
+        ("Create ../index.html", "path_outside_workspace"),
+        ("Create /tmp/index.html", "absolute_path"),
+        ("Create C:\\tmp\\index.html", "absolute_path"),
+        ("Create .git/index.html", "internal_workspace_path"),
+        ("Create .sfe-worktrees/index.html", "internal_workspace_path"),
+    ],
+)
+def test_run_pipeline_default_aider_rejects_unsafe_expected_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    task: str,
+    validation_reason: str,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    filesystem_executor = FakeFilesystemExecutor()
+
+    result = _pipeline(filesystem_executor=filesystem_executor).run(
+        RunRequest(
+            workspace_root=repo,
+            task=task,
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "unsafe_expected_path"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["validation_reason"] == validation_reason
+    assert filesystem_executor.calls == []
+    assert result.workspace_session is not None
+    assert _manager().cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_default_aider_invokes_filesystem_executor_inside_worktree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -988,6 +1112,86 @@ def test_run_pipeline_default_aider_invokes_filesystem_executor_inside_worktree(
     assert filesystem_executor.calls[0].cwd.is_relative_to(
         result.workspace_session.worktree_path
     )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_passes_expected_files_and_promotes_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        assert (workspace / "index.html").is_file()
+        assert (workspace / "styles.css").is_file()
+        assert (workspace / "README.md").is_file()
+        (workspace / "index.html").write_text("<h1>SFE</h1>\n", encoding="utf-8")
+        (workspace / "styles.css").write_text("body { margin: 0; }\n", encoding="utf-8")
+        (workspace / "README.md").write_text("# SFE\n", encoding="utf-8")
+
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html, styles.css and README.md",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert filesystem_executor.calls[0].expected_paths == (
+        "index.html",
+        "styles.css",
+        "README.md",
+    )
+    assert set(result.promoted_files) == {"index.html", "styles.css", "README.md"}
+    assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>SFE</h1>\n"
+    assert (repo / "styles.css").read_text(encoding="utf-8") == "body { margin: 0; }\n"
+    assert (repo / "README.md").read_text(encoding="utf-8") == "# SFE\n"
+    assert result.filesystem_result is not None
+    assert set(result.filesystem_result.diagnostics.metadata["actual_changed_paths"]) == {
+        "index.html",
+        "styles.css",
+        "README.md",
+    }
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_legacy_text_fallback_remains_unaffected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    text_executor = FakeExecutor(_create_file_proposal("index.html"))
+    filesystem_executor = FakeFilesystemExecutor()
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=text_executor,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create index.html",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "escaped\n"
+    assert filesystem_executor.calls == []
+    assert text_executor.patch_calls
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -3375,9 +3579,11 @@ def test_run_pipeline_forced_multipass_aider_rejects_internal_paths(
         target.parent.mkdir()
         target.write_text("internal\n", encoding="utf-8")
 
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+
     result = _pipeline(
         workspace_manager=manager,
-        filesystem_executor=FakeFilesystemExecutor(mutate),
+        filesystem_executor=filesystem_executor,
         multipass_planner=planner,
     ).run(
         RunRequest(
@@ -3389,9 +3595,10 @@ def test_run_pipeline_forced_multipass_aider_rejects_internal_paths(
 
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
-    assert result.issue.category == "promotion"
-    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "unsafe_expected_path"
     assert result.issue.path == ".sfe/leak.txt"
+    assert filesystem_executor.calls == []
     assert not (repo / ".sfe" / "leak.txt").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True

@@ -354,6 +354,11 @@ def _run_issue_hint(result: RunResult) -> str | None:
             "executor returned an invalid or empty response; use /run-report "
             "for diagnostics or retry /run"
         )
+    if issue.category == "workspace_write_executor" and issue.reason == "no_changes":
+        return (
+            "filesystem executor completed without creating or modifying files; "
+            "use /run-report for expected and actual path diagnostics"
+        )
     if (
         issue.category == "context_discovery"
         and issue.reason == "discovery_router_provider_not_supported"
@@ -529,6 +534,9 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
     response_diagnostics = _executor_response_diagnostics(result)
     if response_diagnostics is not None:
         lines.extend(_render_executor_response_diagnostics(response_diagnostics))
+    filesystem_result = result.filesystem_result
+    if filesystem_result is not None:
+        lines.extend(_render_filesystem_result(filesystem_result))
     if result.console_output:
         lines.extend(["SFE console output", result.console_output])
     lines.extend(
@@ -773,6 +781,30 @@ def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | Non
         return None
     diagnostics = patch_result.summary.get("executor_response_diagnostics")
     return diagnostics if isinstance(diagnostics, dict) else None
+
+
+def _render_filesystem_result(filesystem_result: object) -> list[str]:
+    diagnostics = getattr(filesystem_result, "diagnostics", None)
+    metadata = getattr(diagnostics, "metadata", {}) if diagnostics is not None else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return [
+        "SFE filesystem executor",
+        "  filesystem executor: "
+        f"{_display_value(getattr(filesystem_result, 'executor_name', None))}",
+        "  filesystem status: "
+        f"{_display_value(getattr(filesystem_result, 'status', None))}",
+        "  filesystem expected files: "
+        f"{_format_diagnostic_list(metadata.get('expected_paths'))}",
+        "  filesystem actual changed paths: "
+        f"{_format_diagnostic_list(metadata.get('actual_changed_paths'))}",
+        "  filesystem no changes reason: "
+        f"{_display_value(metadata.get('no_changes_reason'))}",
+        "  filesystem stdout length: "
+        f"{_display_value(getattr(diagnostics, 'stdout_length', None))}",
+        "  filesystem stderr length: "
+        f"{_display_value(getattr(diagnostics, 'stderr_length', None))}",
+    ]
 
 
 def _render_executor_response_diagnostics(

@@ -185,6 +185,8 @@ def test_aider_filesystem_executor_uses_message_file_and_bounded_command(
     assert result.diagnostics.return_code == 0
     assert result.diagnostics.elapsed_ms == 250
     assert result.diagnostics.metadata["aider_path"] == "/home/patrice/.local/bin/aider"
+    assert result.diagnostics.metadata["expected_paths"] == ("docs/README.md",)
+    assert result.diagnostics.metadata["context_paths"] == ("context.txt",)
     assert env_file_path is not None
     assert not env_file_path.exists()
 
