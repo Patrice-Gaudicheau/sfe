@@ -33,6 +33,8 @@ from sfe.execution_mode_router import (
     create_configured_execution_mode_router,
 )
 from sfe.execution_backend import ExecutionBackend, ExecutionResult
+from sfe.filesystem_executor import FilesystemExecutor, FilesystemExecutionResult
+from sfe.aider_filesystem_executor import AIDER_EXECUTOR_NAME, AiderFilesystemExecutor
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.multipass import (
     MultiPassBatch,
@@ -95,6 +97,12 @@ from sfe.workspace_write_transport import (
     SFE_FILE_START_RE,
     is_invalid_sfe_file_path,
     sfe_file_closing_marker_kind,
+)
+from sfe.workspace_write_executor import (
+    WORKSPACE_WRITE_EXECUTOR_AIDER,
+    WORKSPACE_WRITE_EXECUTOR_TEXT,
+    WorkspaceWriteExecutorConfigError,
+    resolve_workspace_write_executor,
 )
 
 
@@ -213,6 +221,7 @@ class RunResult:
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
     patch_hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
     multi_pass_summary: MultiPassRunSummary | None = None
+    filesystem_result: FilesystemExecutionResult | None = None
 
 
 class GitWorkspacePreparer:
@@ -292,6 +301,7 @@ class RunPipeline:
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
         multipass_planner: MultiPassPlanner | None = None,
+        filesystem_executor: FilesystemExecutor | None = None,
         full_file_replacement_reviewer: object | None = None,
         git_preparer: GitWorkspacePreparer | None = None,
         progress_callback: RunProgressCallback | None = None,
@@ -306,6 +316,7 @@ class RunPipeline:
             execution_mode_router or create_configured_execution_mode_router()
         )
         self.multipass_planner = multipass_planner or create_configured_multipass_planner()
+        self.filesystem_executor = filesystem_executor or AiderFilesystemExecutor()
         self.git_preparer = git_preparer or GitWorkspacePreparer()
         self.progress_callback = progress_callback
 
@@ -464,10 +475,39 @@ class RunPipeline:
         )
         multipass_config = resolve_multipass_config()
         multipass_requested = should_use_multipass(request.task, multipass_config)
+        try:
+            workspace_write_executor = resolve_workspace_write_executor()
+        except WorkspaceWriteExecutorConfigError as exc:
+            return RunResult(
+                status=RUN_STATUS_FAILED,
+                issue=RunIssue(
+                    "workspace_write_executor",
+                    "unsupported_workspace_write_executor",
+                    diagnostics={
+                        "configured_value": exc.value,
+                        "supported_values": (
+                            WORKSPACE_WRITE_EXECUTOR_AIDER,
+                            WORKSPACE_WRITE_EXECUTOR_TEXT,
+                        ),
+                    },
+                ),
+                execution_mode_decision=execution_mode_decision,
+                workspace_session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                warnings=_base_warnings(),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+            )
         if (
             dry_run_result.contract.context_segments
             and not selected_ids
             and not multipass_requested
+            and workspace_write_executor == WORKSPACE_WRITE_EXECUTOR_TEXT
         ):
             return RunResult(
                 status=RUN_STATUS_FAILED,
@@ -486,6 +526,20 @@ class RunPipeline:
             )
 
         if multipass_requested:
+            if workspace_write_executor == WORKSPACE_WRITE_EXECUTOR_AIDER:
+                return self._run_workspace_write_multipass_filesystem(
+                    request=request,
+                    execution_mode_decision=execution_mode_decision,
+                    git_preparation=git_preparation,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    selected_source_refs=selected_source_refs,
+                    contract=contract,
+                    config=multipass_config,
+                )
             return self._run_workspace_write_multipass(
                 request=request,
                 execution_mode_decision=execution_mode_decision,
@@ -498,6 +552,19 @@ class RunPipeline:
                 selected_source_refs=selected_source_refs,
                 contract=contract,
                 config=multipass_config,
+            )
+
+        if workspace_write_executor == WORKSPACE_WRITE_EXECUTOR_AIDER:
+            return self._run_workspace_write_filesystem(
+                request=request,
+                execution_mode_decision=execution_mode_decision,
+                git_preparation=git_preparation,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
             )
 
         self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
@@ -673,6 +740,126 @@ class RunPipeline:
             patch_hunk_count_normalization=(
                 proposal.hunk_count_normalization if proposal is not None else None
             ),
+        )
+
+    def _run_workspace_write_filesystem(
+        self,
+        *,
+        request: RunRequest,
+        execution_mode_decision: ExecutionModeDecision,
+        git_preparation: GitPreparationResult,
+        session: WorkspaceSession,
+        active_workspace: Path,
+        worktree_created: bool,
+        discovery_result: DiscoveryResult,
+        dry_run_result: ExecutionResult,
+        selected_source_refs: tuple[str, ...],
+    ) -> RunResult:
+        from sfe.filesystem_executor import FilesystemExecutionRequest
+
+        self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
+        self._emit_progress(
+            "filesystem_worktree_execution_started",
+            "SFE: Aider filesystem execution started",
+        )
+        fs_result = self.filesystem_executor.execute(
+            FilesystemExecutionRequest(
+                cwd=active_workspace,
+                task=request.task,
+                expected_paths=(),
+                context_paths=selected_source_refs,
+                metadata={
+                    "workspace_session_id": session.session_id,
+                    "source_path": str(session.source_path.resolve()),
+                    "worktree_path": str(session.worktree_path.resolve()),
+                },
+            )
+        )
+        if fs_result.status != "completed":
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+            )
+
+        promotion_baseline = _capture_actual_workspace_changes(session, active_workspace)
+        patch_summary = _summary_from_promotion_baseline(promotion_baseline)
+        changed_files = _promotion_baseline_paths(promotion_baseline)
+        self._emit_progress(
+            "workspace_boundary_check_completed",
+            "SFE: workspace boundary check completed",
+            changed_file_count=len(changed_files),
+            destination_root=str(session.source_path.resolve()),
+        )
+        if promotion_baseline.issue is not None:
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=promotion_baseline.issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+            )
+
+        promotion_result = _promote_actual_workspace_changes(promotion_baseline)
+        if promotion_result.status not in {"applied", "skipped"}:
+            issue = promotion_result.issue or RunIssue("promotion", "promotion_not_applied")
+            return _filesystem_workspace_write_failed_result(
+                fs_result,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                promotion_result=promotion_result,
+            )
+
+        self._emit_progress(
+            "promotion_completed",
+            "SFE: promotion completed",
+            promoted_file_count=len(promotion_result.promoted_files),
+        )
+        return RunResult(
+            status=RUN_STATUS_COMPLETED,
+            execution_mode_decision=execution_mode_decision,
+            workspace_session=session,
+            active_workspace=active_workspace,
+            worktree_created=worktree_created,
+            discovery_result=discovery_result,
+            dry_run_result=dry_run_result,
+            patch_result=None,
+            patch_generated=False,
+            patch_applied=False,
+            patch_summary=patch_summary,
+            changed_files=changed_files,
+            selected_source_refs=selected_source_refs,
+            executor_provider=fs_result.executor_name,
+            warnings=_warnings_for_summary(patch_summary),
+            git_auto_init=git_preparation.auto_initialized,
+            git_initial_commit_hash=git_preparation.initial_commit_hash,
+            git_init_warning=git_preparation.warning,
+            promotion_status=promotion_result.status,
+            promotion_applied=promotion_result.status == "applied",
+            promoted_files=promotion_result.promoted_files,
+            filesystem_result=fs_result,
         )
 
     def _run_workspace_write_multipass(
@@ -984,7 +1171,10 @@ class RunPipeline:
                     git_preparation=git_preparation,
                     multi_pass_summary=summary,
                     patch_summary=_combine_patch_summaries(
-                        (*completed_summaries, patch_summary)
+                        (
+                            *completed_summaries,
+                            *((patch_summary,) if patch_summary is not None else ()),
+                        )
                     ),
                     promoted_files=tuple(all_promoted_files),
                     patch_proposal_diagnostics=patch_proposal_diagnostics,
@@ -1067,7 +1257,10 @@ class RunPipeline:
                     git_preparation=git_preparation,
                     multi_pass_summary=summary,
                     patch_summary=_combine_patch_summaries(
-                        (*completed_summaries, patch_summary)
+                        (
+                            *completed_summaries,
+                            *((patch_summary,) if patch_summary is not None else ()),
+                        )
                     ),
                     promoted_files=tuple(all_promoted_files),
                     promotion_status=promotion_result.status,
@@ -1183,6 +1376,366 @@ class RunPipeline:
             promoted_files=tuple(all_promoted_files),
             patch_hunk_count_normalization=latest_hunk_normalization,
             multi_pass_summary=multi_pass_summary,
+        )
+
+    def _run_workspace_write_multipass_filesystem(
+        self,
+        *,
+        request: RunRequest,
+        execution_mode_decision: ExecutionModeDecision,
+        git_preparation: GitPreparationResult,
+        session: WorkspaceSession,
+        active_workspace: Path,
+        worktree_created: bool,
+        discovery_result: DiscoveryResult,
+        dry_run_result: ExecutionResult,
+        selected_source_refs: tuple[str, ...],
+        contract: SFEContract,
+        config: MultiPassConfig,
+    ) -> RunResult:
+        from sfe.filesystem_executor import FilesystemExecutionRequest
+
+        self._emit_progress(
+            "multi_pass_planning_started",
+            "SFE: multi-pass planning started",
+        )
+        planner_response = self.multipass_planner.plan(
+            contract,
+            config=config,
+        )
+        if planner_response.issue is not None or planner_response.plan is None:
+            planning_issue = planner_response.issue or MultiPassIssue(
+                "multi_pass_planning",
+                "invalid_response",
+            )
+            issue = _run_issue_from_multipass(planning_issue)
+            summary = _build_multi_pass_summary(
+                status="failed",
+                failed_issue=planning_issue,
+            )
+            return _multipass_run_result(
+                status=RUN_STATUS_FAILED,
+                issue=issue,
+                execution_mode_decision=execution_mode_decision,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=None,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                multi_pass_summary=summary,
+            )
+
+        parsed_plan = planner_response.plan
+        self._emit_progress(
+            "multi_pass_plan_completed",
+            f"SFE: multi-pass plan completed: {len(parsed_plan.batches)} passes",
+            multi_pass_total=len(parsed_plan.batches),
+            provider_name=planner_response.provider_name,
+            model=planner_response.model,
+        )
+
+        pass_results: list[MultiPassBatchResult] = []
+        completed_summaries: list[PatchSummary] = []
+        all_promoted_files: list[str] = []
+        completed_files: list[str] = []
+        multi_pass_warnings: list[str] = []
+        latest_filesystem_result: FilesystemExecutionResult | None = None
+        refresh_base_refs = tuple(segment.source_ref for segment in contract.context_segments)
+
+        for index, batch in enumerate(parsed_plan.batches, start=1):
+            self._emit_progress(
+                "multi_pass_pass_started",
+                f"SFE: multi-pass pass {index}/{len(parsed_plan.batches)} started",
+                multi_pass_index=index,
+                multi_pass_total=len(parsed_plan.batches),
+                multi_pass_id=batch.id,
+            )
+            changed_files_before_pass = set(
+                _promotion_baseline_paths(
+                    _capture_actual_workspace_changes(session, active_workspace)
+                )
+            )
+            pass_task = _build_multipass_filesystem_task(
+                user_task=request.task,
+                plan=parsed_plan,
+                batch=batch,
+                pass_index=index,
+                total_passes=len(parsed_plan.batches),
+                completed_files=tuple(completed_files),
+            )
+            context_paths = _multipass_filesystem_context_paths(
+                selected_source_refs=selected_source_refs,
+                all_promoted_files=tuple(all_promoted_files),
+                allowed_files=batch.allowed_files,
+            )
+            fs_result = self.filesystem_executor.execute(
+                FilesystemExecutionRequest(
+                    cwd=active_workspace,
+                    task=pass_task,
+                    expected_paths=batch.allowed_files,
+                    context_paths=context_paths,
+                    metadata={
+                        "workspace_session_id": session.session_id,
+                        "source_path": str(session.source_path.resolve()),
+                        "worktree_path": str(session.worktree_path.resolve()),
+                        "multi_pass_id": batch.id,
+                        "multi_pass_index": index,
+                        "multi_pass_total": len(parsed_plan.batches),
+                    },
+                )
+            )
+            latest_filesystem_result = fs_result
+            provider_diagnostics = _filesystem_pass_provider_diagnostics(
+                fs_result,
+                pass_index=index,
+                total_passes=len(parsed_plan.batches),
+            )
+            if fs_result.status != "completed":
+                issue = RunIssue(
+                    "workspace_write_executor",
+                    fs_result.error_category or "filesystem_execution_failed",
+                    diagnostics={
+                        "executor_name": fs_result.executor_name,
+                        "install_guidance": fs_result.metadata.get("install_guidance"),
+                        "missing_variables": fs_result.metadata.get("missing_variables"),
+                        "diagnostics": _filesystem_diagnostics_dict(
+                            fs_result.diagnostics
+                        ),
+                    },
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(
+                    issue,
+                    pass_id=batch.id,
+                )
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=None,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(tuple(completed_summaries)),
+                    promoted_files=tuple(all_promoted_files),
+                )
+
+            promotion_baseline = _capture_actual_workspace_changes(
+                session,
+                active_workspace,
+            )
+            patch_summary = _summary_from_promotion_baseline(promotion_baseline)
+            changed_files = _promotion_baseline_paths(promotion_baseline)
+            if promotion_baseline.issue is not None:
+                issue = promotion_baseline.issue
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=None,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(
+                        tuple(
+                            summary
+                            for summary in (*completed_summaries, patch_summary)
+                            if summary is not None
+                        )
+                    ),
+                    promoted_files=tuple(all_promoted_files),
+                    filesystem_result=latest_filesystem_result,
+                )
+
+            promotion_result = _promote_actual_workspace_changes(promotion_baseline)
+            if promotion_result.status not in {"applied", "skipped"}:
+                issue = promotion_result.issue or RunIssue(
+                    "promotion",
+                    "promotion_not_applied",
+                )
+                pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
+                pass_results.append(
+                    _failed_batch_result(
+                        batch,
+                        issue=pass_issue,
+                        provider_diagnostics=provider_diagnostics,
+                    )
+                )
+                summary = _build_multi_pass_summary(
+                    status="failed",
+                    project_summary=parsed_plan.project_summary,
+                    passes_total=len(parsed_plan.batches),
+                    pass_results=tuple(pass_results),
+                    failed_issue=pass_issue,
+                    all_promoted_files=tuple(all_promoted_files),
+                    safe_resume_possible=bool(all_promoted_files),
+                )
+                return _multipass_run_result(
+                    status=RUN_STATUS_FAILED,
+                    issue=issue,
+                    execution_mode_decision=execution_mode_decision,
+                    session=session,
+                    active_workspace=active_workspace,
+                    worktree_created=worktree_created,
+                    discovery_result=discovery_result,
+                    dry_run_result=dry_run_result,
+                    patch_result=None,
+                    selected_source_refs=selected_source_refs,
+                    git_preparation=git_preparation,
+                    multi_pass_summary=summary,
+                    patch_summary=_combine_patch_summaries(
+                        tuple(
+                            summary
+                            for summary in (*completed_summaries, patch_summary)
+                            if summary is not None
+                        )
+                    ),
+                    promoted_files=tuple(all_promoted_files),
+                    promotion_status=promotion_result.status,
+                    promotion_issue=promotion_result.issue,
+                    filesystem_result=latest_filesystem_result,
+                )
+
+            pass_promoted_files = tuple(
+                path
+                for path in promotion_result.promoted_files
+                if path not in changed_files_before_pass
+            )
+            batch_warnings: list[str] = []
+            for path in pass_promoted_files:
+                if batch.allowed_files and path not in set(batch.allowed_files):
+                    warning = f"multi_pass_path_outside_allowed_files:{path}"
+                    batch_warnings.append(warning)
+                    multi_pass_warnings.append(warning)
+            if patch_summary is not None:
+                completed_summaries.append(patch_summary)
+            completed_files.extend(pass_promoted_files)
+            for promoted_file in promotion_result.promoted_files:
+                if promoted_file not in all_promoted_files:
+                    all_promoted_files.append(promoted_file)
+            self._emit_progress(
+                "multi_pass_workspace_state_refreshed",
+                "SFE: multi-pass workspace state refreshed",
+                refreshed_file_count=len(all_promoted_files),
+            )
+            pass_results.append(
+                MultiPassBatchResult(
+                    pass_id=batch.id,
+                    title=batch.title,
+                    status="completed",
+                    allowed_files=batch.allowed_files,
+                    created_files=patch_summary.created_paths if patch_summary else (),
+                    promoted_files=pass_promoted_files,
+                    patch_paths=changed_files,
+                    provider_diagnostics=provider_diagnostics,
+                    warnings=tuple(dict.fromkeys(batch_warnings)),
+                )
+            )
+            self._emit_progress(
+                "multi_pass_pass_completed",
+                f"SFE: multi-pass pass {index}/{len(parsed_plan.batches)} completed",
+                multi_pass_index=index,
+                multi_pass_total=len(parsed_plan.batches),
+                multi_pass_id=batch.id,
+                promoted_file_count=len(pass_promoted_files),
+            )
+            _refresh_multipass_contract(
+                workspace_root=active_workspace,
+                task=request.task,
+                base_source_refs=refresh_base_refs,
+                refreshed_paths=tuple(all_promoted_files),
+            )
+
+        aggregate_summary = _combine_patch_summaries(tuple(completed_summaries))
+        multi_pass_summary = _build_multi_pass_summary(
+            status="completed",
+            project_summary=parsed_plan.project_summary,
+            passes_total=len(parsed_plan.batches),
+            pass_results=tuple(pass_results),
+            all_promoted_files=tuple(all_promoted_files),
+        )
+        self._emit_progress(
+            "promotion_completed",
+            "SFE: promotion completed",
+            promoted_file_count=len(all_promoted_files),
+        )
+        return RunResult(
+            status=RUN_STATUS_COMPLETED,
+            execution_mode_decision=execution_mode_decision,
+            workspace_session=session,
+            active_workspace=active_workspace,
+            worktree_created=worktree_created,
+            discovery_result=discovery_result,
+            dry_run_result=dry_run_result,
+            patch_result=None,
+            patch_generated=False,
+            patch_applied=False,
+            patch_summary=aggregate_summary,
+            changed_files=aggregate_summary.paths if aggregate_summary else (),
+            selected_source_refs=selected_source_refs,
+            executor_provider=(
+                latest_filesystem_result.executor_name
+                if latest_filesystem_result is not None
+                else AIDER_EXECUTOR_NAME
+            ),
+            warnings=tuple(
+                dict.fromkeys(
+                    (*_warnings_for_summary(aggregate_summary), *multi_pass_warnings)
+                )
+            ),
+            git_auto_init=git_preparation.auto_initialized,
+            git_initial_commit_hash=git_preparation.initial_commit_hash,
+            git_init_warning=git_preparation.warning,
+            promotion_status="applied" if all_promoted_files else "skipped",
+            promotion_applied=bool(all_promoted_files),
+            promoted_files=tuple(all_promoted_files),
+            multi_pass_summary=multi_pass_summary,
+            filesystem_result=latest_filesystem_result,
         )
 
     def _emit_progress(
@@ -1892,6 +2445,61 @@ def _workspace_write_failed_result(
     )
 
 
+def _filesystem_workspace_write_failed_result(
+    filesystem_result: FilesystemExecutionResult,
+    *,
+    execution_mode_decision: ExecutionModeDecision,
+    session: WorkspaceSession,
+    active_workspace: Path,
+    worktree_created: bool,
+    discovery_result: DiscoveryResult,
+    dry_run_result: ExecutionResult,
+    selected_source_refs: tuple[str, ...],
+    git_preparation: GitPreparationResult,
+    issue: RunIssue | None = None,
+    patch_summary: PatchSummary | None = None,
+    changed_files: tuple[str, ...] = (),
+    promotion_result: PromotionResult | None = None,
+) -> RunResult:
+    effective_issue = issue or RunIssue(
+        "workspace_write_executor",
+        filesystem_result.error_category or "filesystem_execution_failed",
+        diagnostics={
+            "executor_name": filesystem_result.executor_name,
+            "install_guidance": filesystem_result.metadata.get("install_guidance"),
+            "diagnostics": _filesystem_diagnostics_dict(
+                filesystem_result.diagnostics
+            ),
+        },
+    )
+    return RunResult(
+        status=RUN_STATUS_FAILED,
+        issue=effective_issue,
+        execution_mode_decision=execution_mode_decision,
+        workspace_session=session,
+        active_workspace=active_workspace,
+        worktree_created=worktree_created,
+        discovery_result=discovery_result,
+        dry_run_result=dry_run_result,
+        patch_result=None,
+        patch_generated=False,
+        patch_applied=False,
+        patch_summary=patch_summary,
+        changed_files=changed_files,
+        selected_source_refs=selected_source_refs,
+        executor_provider=filesystem_result.executor_name,
+        warnings=_warnings_for_summary(patch_summary),
+        git_auto_init=git_preparation.auto_initialized,
+        git_initial_commit_hash=git_preparation.initial_commit_hash,
+        git_init_warning=git_preparation.warning,
+        promotion_status=promotion_result.status if promotion_result else "skipped",
+        promotion_applied=False,
+        promoted_files=promotion_result.promoted_files if promotion_result else (),
+        promotion_issue=effective_issue if issue is not None else None,
+        filesystem_result=filesystem_result,
+    )
+
+
 def _multipass_run_result(
     *,
     status: str,
@@ -1911,6 +2519,7 @@ def _multipass_run_result(
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
     promotion_status: str = "skipped",
     promotion_issue: RunIssue | None = None,
+    filesystem_result: FilesystemExecutionResult | None = None,
 ) -> RunResult:
     return RunResult(
         status=status,
@@ -1938,6 +2547,7 @@ def _multipass_run_result(
         promotion_issue=promotion_issue,
         patch_proposal_diagnostics=patch_proposal_diagnostics,
         multi_pass_summary=multi_pass_summary,
+        filesystem_result=filesystem_result,
     )
 
 
@@ -2380,6 +2990,113 @@ def _executor_provider(result: ExecutionResult | None) -> str | None:
     return str(provider) if provider is not None else None
 
 
+def _filesystem_diagnostics_dict(
+    diagnostics: object,
+) -> dict[str, object]:
+    if not hasattr(diagnostics, "executor_name"):
+        return {}
+    return {
+        "executor_name": getattr(diagnostics, "executor_name", None),
+        "cwd": getattr(diagnostics, "cwd", None),
+        "command": list(getattr(diagnostics, "command", ()) or ()),
+        "return_code": getattr(diagnostics, "return_code", None),
+        "stdout_length": getattr(diagnostics, "stdout_length", 0),
+        "stderr_length": getattr(diagnostics, "stderr_length", 0),
+        "stdout_preview": getattr(diagnostics, "stdout_preview", None),
+        "stderr_preview": getattr(diagnostics, "stderr_preview", None),
+        "elapsed_ms": getattr(diagnostics, "elapsed_ms", 0),
+        "metadata": dict(getattr(diagnostics, "metadata", {}) or {}),
+    }
+
+
+def _filesystem_pass_provider_diagnostics(
+    result: FilesystemExecutionResult,
+    *,
+    pass_index: int,
+    total_passes: int,
+) -> dict[str, object]:
+    return {
+        "provider_name": result.executor_name,
+        "filesystem_executor": {
+            "executor_name": result.executor_name,
+            "status": result.status,
+            "error_category": result.error_category,
+            "changed_paths": tuple(result.changed_paths),
+            "pass_index": pass_index,
+            "passes_total": total_passes,
+            "diagnostics": _filesystem_diagnostics_dict(result.diagnostics),
+        },
+    }
+
+
+def _build_multipass_filesystem_task(
+    *,
+    user_task: str,
+    plan: MultiPassPlan,
+    batch: MultiPassBatch,
+    pass_index: int,
+    total_passes: int,
+    completed_files: tuple[str, ...],
+) -> str:
+    allowed_files = "\n".join(f"- {path}" for path in batch.allowed_files) or "- none"
+    dependencies = "\n".join(f"- {item}" for item in batch.depends_on) or "- none"
+    validation_notes = (
+        "\n".join(f"- {item}" for item in batch.validation_notes) or "- none"
+    )
+    completed = "\n".join(f"- {path}" for path in completed_files) or "- none"
+    return "\n".join(
+        [
+            "Execute one SFE multi-pass workspace_write batch.",
+            "Keep this pass small and scoped. Do not plan or implement other passes.",
+            "Modify only files needed for this batch, preferably the allowed files.",
+            "",
+            f"Pass: {pass_index}/{total_passes}",
+            f"Batch id: {batch.id}",
+            f"Batch title: {batch.title}",
+            "",
+            "Global user task summary:",
+            user_task,
+            "",
+            "Project plan summary:",
+            plan.project_summary,
+            "",
+            "Batch goal:",
+            batch.goal,
+            "",
+            "Allowed or expected editable files:",
+            allowed_files,
+            "",
+            "Dependencies:",
+            dependencies,
+            "",
+            "Previously promoted files:",
+            completed,
+            "",
+            "Validation notes:",
+            validation_notes,
+            "",
+        ]
+    )
+
+
+def _multipass_filesystem_context_paths(
+    *,
+    selected_source_refs: tuple[str, ...],
+    all_promoted_files: tuple[str, ...],
+    allowed_files: tuple[str, ...],
+) -> tuple[str, ...]:
+    candidates = (*selected_source_refs, *all_promoted_files)
+    allowed = set(allowed_files)
+    selected: list[str] = []
+    seen: set[str] = set()
+    for path in candidates:
+        if not path or path in seen or path in allowed:
+            continue
+        seen.add(path)
+        selected.append(path)
+    return tuple(selected[:10])
+
+
 def _is_hunk_accounting_issue(issue: PatchIssue | None) -> bool:
     return (
         issue is not None
@@ -2458,6 +3175,15 @@ def _capture_actual_workspace_changes(
         return PromotionBaseline(
             issue=RunIssue("workspace_status", "worktree_status_failed")
         )
+    committed_entries = _capture_committed_worktree_change_entries(session)
+    if isinstance(committed_entries, RunIssue):
+        return PromotionBaseline(issue=committed_entries)
+    change_entries = _dedupe_change_entries(
+        (
+            *committed_entries,
+            *_parse_git_status_z(status_result.stdout),
+        )
+    )
     active_root = active_workspace.resolve()
     source_root = session.source_path.resolve()
     try:
@@ -2469,7 +3195,7 @@ def _capture_actual_workspace_changes(
     active_prefix_parts = active_prefix.parts
     targets: list[PromotionTarget] = []
     offending_paths: list[str] = []
-    for status_code, worktree_relative_path in _parse_git_status_z(status_result.stdout):
+    for status_code, worktree_relative_path in change_entries:
         worktree_relative = Path(worktree_relative_path)
         if worktree_relative.is_absolute() or ".." in worktree_relative.parts:
             offending_paths.append(worktree_relative_path)
@@ -2485,6 +3211,10 @@ def _capture_actual_workspace_changes(
             offending_paths.append(worktree_relative_path)
             continue
         relative_path = destination_relative.as_posix()
+        if _is_internal_promotion_path(relative_path):
+            return PromotionBaseline(
+                issue=RunIssue("promotion", "internal_path_not_promoted", relative_path)
+            )
         worktree_target = active_root / destination_relative
         source_target = source_root / destination_relative
         deleted = "D" in status_code and not worktree_target.exists()
@@ -2526,6 +3256,60 @@ def _capture_actual_workspace_changes(
             )
         )
     return PromotionBaseline(targets=tuple(targets))
+
+
+def _capture_committed_worktree_change_entries(
+    session: WorkspaceSession,
+) -> tuple[tuple[str, str], ...] | RunIssue:
+    source_head = _source_head_for_session(session)
+    if source_head is None:
+        return RunIssue("workspace_status", "source_head_unavailable")
+    diff_result = _git(
+        session.worktree_path,
+        "diff",
+        "--name-status",
+        "-z",
+        "--no-renames",
+        source_head,
+        "HEAD",
+    )
+    if diff_result.returncode != 0:
+        return RunIssue("workspace_status", "committed_worktree_diff_failed")
+    return _parse_git_name_status_z(diff_result.stdout)
+
+
+def _source_head_for_session(session: WorkspaceSession) -> str | None:
+    source_head = session.metadata.get("source_head")
+    if isinstance(source_head, str) and source_head.strip():
+        return source_head.strip()
+    result = _git(session.source_git_root, "rev-parse", "--verify", "HEAD")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _parse_git_name_status_z(status_text: str) -> tuple[tuple[str, str], ...]:
+    tokens = [token for token in status_text.split("\0") if token]
+    entries: list[tuple[str, str]] = []
+    index = 0
+    while index + 1 < len(tokens):
+        status_code = tokens[index]
+        path = tokens[index + 1]
+        entries.append((status_code, path))
+        index += 2
+    return tuple(entries)
+
+
+def _dedupe_change_entries(
+    entries: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    order: list[str] = []
+    by_path: dict[str, str] = {}
+    for status_code, path in entries:
+        if path not in by_path:
+            order.append(path)
+        by_path[path] = status_code
+    return tuple((by_path[path], path) for path in order)
 
 
 def _parse_git_status_z(status_text: str) -> tuple[tuple[str, str], ...]:

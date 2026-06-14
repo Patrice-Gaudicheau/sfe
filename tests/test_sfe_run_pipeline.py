@@ -31,6 +31,11 @@ from sfe.execution_mode_router import (
     create_configured_execution_mode_router,
 )
 from sfe.execution_backend import ExecutionResult
+from sfe.filesystem_executor import (
+    FilesystemExecutionDiagnostics,
+    FilesystemExecutionRequest,
+    FilesystemExecutionResult,
+)
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.full_file_replacement_review import (
     FullFileReplacementReviewDecision,
@@ -56,6 +61,7 @@ from sfe.run_pipeline import (
     RunProgressEvent,
     RunRequest,
 )
+from sfe.workspace_write_executor import resolve_workspace_write_executor
 from sfe.workspace_isolation import WorkspaceIsolationPolicy, WorkspaceManager
 from sfe_tui.app import SfeTuiApp
 from sfe_tui.backends import DirectBackend
@@ -66,6 +72,11 @@ from sfe_tui.executors import (
     create_tui_executor,
 )
 from sfe_tui.renderer import render_help, render_run_result, render_run_result_normal
+
+
+@pytest.fixture(autouse=True)
+def _default_legacy_text_workspace_write_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
 
 
 class FakeExecutor:
@@ -166,6 +177,50 @@ class DirectMutationExecutor(FakeExecutor):
         )
 
 
+class FakeFilesystemExecutor:
+    name = "fake-aider"
+
+    def __init__(
+        self,
+        mutation: object | None = None,
+        *,
+        status: str = "completed",
+        error_category: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        self.mutation = mutation
+        self.status = status
+        self.error_category = error_category
+        self.metadata = metadata or {}
+        self.calls: list[FilesystemExecutionRequest] = []
+
+    def execute(
+        self,
+        request: FilesystemExecutionRequest,
+    ) -> FilesystemExecutionResult:
+        self.calls.append(request)
+        if self.mutation is not None:
+            self.mutation(request.cwd)
+        return FilesystemExecutionResult(
+            executor_name=self.name,
+            status=self.status,
+            changed_paths=(),
+            diagnostics=FilesystemExecutionDiagnostics(
+                executor_name=self.name,
+                cwd=str(request.cwd),
+                command=("fake-aider", "--message-file", "<message-file>"),
+                return_code=0 if self.status == "completed" else 1,
+                stdout_length=0,
+                stderr_length=0,
+                stdout_preview="",
+                stderr_preview="",
+                elapsed_ms=1,
+            ),
+            error_category=self.error_category,
+            metadata=self.metadata,
+        )
+
+
 class FakeMultiPassPlanner:
     provider_name = "fake-router-planner"
     model = "fake-router-planner-model"
@@ -251,6 +306,30 @@ class FakeFullFileReplacementReviewer:
         if self.error is not None:
             raise self.error
         return self.decision
+
+
+def test_workspace_write_executor_defaults_to_aider_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+
+    assert resolve_workspace_write_executor() == "aider"
+
+
+def test_workspace_write_executor_blank_defaults_to_aider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "  ")
+
+    assert resolve_workspace_write_executor() == "aider"
+
+
+def test_workspace_write_executor_explicit_text_keeps_legacy_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
+
+    assert resolve_workspace_write_executor() == "text"
 
 
 class FakeChatProvider:
@@ -803,6 +882,194 @@ def test_run_pipeline_accepts_direct_created_modified_and_deleted_files_inside_d
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_unknown_workspace_write_executor_fails_clearly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "bogus")
+    repo = _init_repo(tmp_path / "repo")
+    executor = FakeExecutor()
+
+    result = _pipeline(executor=executor).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "unsupported_workspace_write_executor"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["configured_value"] == "bogus"
+    assert executor.patch_calls == []
+
+
+def test_run_pipeline_missing_aider_fails_closed_without_text_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    text_executor = FakeExecutor(_create_file_proposal("should-not-run.txt"))
+    filesystem_executor = FakeFilesystemExecutor(
+        status="failed",
+        error_category="aider_missing",
+        metadata={
+            "install_guidance": (
+                "sudo apt update",
+                "sudo apt install pipx",
+                "pipx install aider-chat",
+            )
+        },
+    )
+
+    result = _pipeline(
+        executor=text_executor,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "aider_missing"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["install_guidance"] == (
+        "sudo apt update",
+        "sudo apt install pipx",
+        "pipx install aider-chat",
+    )
+    assert text_executor.patch_calls == []
+    assert filesystem_executor.calls
+    assert not (repo / "should-not-run.txt").exists()
+
+
+def test_run_pipeline_default_aider_invokes_filesystem_executor_inside_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "created.txt").write_text("from fake aider\n", encoding="utf-8")
+
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create a file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.executor_provider == "fake-aider"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert result.promoted_files == ("created.txt",)
+    assert (repo / "created.txt").read_text(encoding="utf-8") == "from fake aider\n"
+    assert result.workspace_session is not None
+    assert result.active_workspace is not None
+    assert filesystem_executor.calls[0].cwd == result.active_workspace
+    assert filesystem_executor.calls[0].cwd != repo
+    assert filesystem_executor.calls[0].cwd.is_relative_to(
+        result.workspace_session.worktree_path
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_promotes_committed_worktree_changes_relative_to_source_head(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "obsolete.txt").write_text("remove me\n", encoding="utf-8")
+    _git(repo, "add", "obsolete.txt")
+    _git(repo, "commit", "-m", "Add obsolete file")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "context.txt").write_text("committed modified\n", encoding="utf-8")
+        (workspace / "created.txt").write_text("committed created\n", encoding="utf-8")
+        (workspace / "obsolete.txt").unlink()
+        _git(workspace, "add", "-A")
+        _git(workspace, "commit", "-m", "Aider-style committed changes")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=DirectMutationExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and commit files inside the worktree",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert set(result.changed_files) == {"context.txt", "created.txt", "obsolete.txt"}
+    assert set(result.promoted_files) == {"context.txt", "created.txt", "obsolete.txt"}
+    assert result.promotion_status == "applied"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "committed modified\n"
+    assert (repo / "created.txt").read_text(encoding="utf-8") == "committed created\n"
+    assert not (repo / "obsolete.txt").exists()
+
+    assert result.workspace_session is not None
+    assert (
+        _git(result.workspace_session.worktree_path, "status", "--porcelain")
+        .stdout.strip()
+        == ""
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_promotes_committed_worktree_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "context.txt").write_text("committed by fake aider\n", encoding="utf-8")
+        (workspace / "aider-created.txt").write_text("created\n", encoding="utf-8")
+        _git(workspace, "add", "-A")
+        _git(workspace, "commit", "-m", "Fake Aider commit")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create a committed file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert set(result.promoted_files) == {"context.txt", "aider-created.txt"}
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "committed by fake aider\n"
+    assert (repo / "aider-created.txt").read_text(encoding="utf-8") == "created\n"
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_rejects_direct_change_outside_destination_directory(
     tmp_path: Path,
 ) -> None:
@@ -836,6 +1103,91 @@ def test_run_pipeline_rejects_direct_change_outside_destination_directory(
     assert result.issue.reason == "changed_path_outside_destination"
     assert result.issue.diagnostics is not None
     assert result.issue.diagnostics["authorized_output_root"] == str(app_dir.resolve())
+    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert not (repo / "outside-app.txt").exists()
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_rejects_out_of_destination_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    app_dir = repo / "app"
+    app_dir.mkdir()
+    (app_dir / "context.txt").write_text("app context\n", encoding="utf-8")
+    _git(repo, "add", "app/context.txt")
+    _git(repo, "commit", "-m", "Add app context")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "context.txt").write_text("inside app\n", encoding="utf-8")
+        (workspace.parent / "outside-app.txt").write_text("outside app\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+        discovery_router=FakeDiscoveryRouter(("context.txt",)),
+    ).run(
+        RunRequest(
+            workspace_root=app_dir,
+            task="Patch context inside and outside app",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_boundary"
+    assert result.issue.reason == "changed_path_outside_destination"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert not (repo / "outside-app.txt").exists()
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_committed_change_outside_destination_directory(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    app_dir = repo / "app"
+    app_dir.mkdir()
+    (app_dir / "context.txt").write_text("app context\n", encoding="utf-8")
+    _git(repo, "add", "app/context.txt")
+    _git(repo, "commit", "-m", "Add app context")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        git_root = workspace.parent
+        (workspace / "context.txt").write_text("inside app\n", encoding="utf-8")
+        (git_root / "outside-app.txt").write_text("outside app\n", encoding="utf-8")
+        _git(git_root, "add", "-A")
+        _git(git_root, "commit", "-m", "Committed outside selected destination")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=DirectMutationExecutor(mutate),
+        discovery_router=FakeDiscoveryRouter(("context.txt",)),
+    ).run(
+        RunRequest(
+            workspace_root=app_dir,
+            task="Commit inside app and outside app",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_boundary"
+    assert result.issue.reason == "changed_path_outside_destination"
+    assert result.issue.diagnostics is not None
     assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
     assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
     assert not (repo / "outside-app.txt").exists()
@@ -1052,18 +1404,91 @@ def test_run_pipeline_rejects_internal_promotion_paths(tmp_path: Path) -> None:
         )
     )
 
-    assert result.status == RUN_STATUS_COMPLETED
+    assert result.status == RUN_STATUS_FAILED
     assert result.patch_generated is True
     assert result.patch_applied is True
-    assert result.promotion_status == "applied"
-    assert result.promotion_applied is True
-    assert result.issue is None
-    assert (repo / ".sfe-worktrees" / "leak.txt").read_text(encoding="utf-8") == "escaped\n"
+    assert result.promotion_status == "rejected"
+    assert result.promotion_applied is False
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe-worktrees/leak.txt"
+    assert not (repo / ".sfe-worktrees" / "leak.txt").exists()
 
     assert result.workspace_session is not None
     assert (
         result.workspace_session.worktree_path / ".sfe-worktrees" / "leak.txt"
     ).exists()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_committed_internal_promotion_paths(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        target = workspace / ".sfe-worktrees" / "leak.txt"
+        target.parent.mkdir()
+        target.write_text("committed internal\n", encoding="utf-8")
+        _git(workspace, "add", "-A")
+        _git(workspace, "commit", "-m", "Commit internal path")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=DirectMutationExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and commit an internal file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe-worktrees/leak.txt"
+    assert not (repo / ".sfe-worktrees" / "leak.txt").exists()
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_rejects_internal_promotion_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        target = workspace / ".sfe" / "leak.txt"
+        target.parent.mkdir()
+        target.write_text("internal\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and create an internal file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe/leak.txt"
+    assert not (repo / ".sfe" / "leak.txt").exists()
+
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -2701,6 +3126,274 @@ def test_run_pipeline_forced_multipass_promotes_each_batch(
         Path(str(call["executor_working_directory"])) != repo
         for call in executor.patch_calls
     )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_forced_multipass_defaults_to_aider_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "foundation": ["index.html"],
+                "docs": ["README.md"],
+            }
+        )
+    )
+    text_executor = FakeExecutor(
+        multipass_patch_answers=[
+            _valid_new_file_diff("should-not-run.txt"),
+            _valid_new_file_diff("also-should-not-run.txt"),
+        ],
+    )
+    pass_index = 0
+
+    def mutate(workspace: Path) -> None:
+        nonlocal pass_index
+        pass_index += 1
+        if pass_index == 1:
+            (workspace / "index.html").write_text("<h1>Hello</h1>\n", encoding="utf-8")
+        else:
+            (workspace / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=text_executor,
+        filesystem_executor=filesystem_executor,
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create a two file scaffold",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.executor_provider == "fake-aider"
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert result.patch_result is None
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.passes_total == 2
+    assert result.multi_pass_summary.passes_completed == 2
+    assert result.multi_pass_summary.promoted_files_by_pass == {
+        "foundation": ("index.html",),
+        "docs": ("README.md",),
+    }
+    assert result.promoted_files == ("index.html", "README.md")
+    assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>Hello</h1>\n"
+    assert (repo / "README.md").read_text(encoding="utf-8") == "# Demo\n"
+    assert text_executor.patch_calls == []
+    assert len(filesystem_executor.calls) == 2
+    assert filesystem_executor.calls[0].expected_paths == ("index.html",)
+    assert filesystem_executor.calls[1].expected_paths == ("README.md",)
+    assert result.active_workspace is not None
+    assert all(call.cwd == result.active_workspace for call in filesystem_executor.calls)
+    assert result.workspace_session is not None
+    assert filesystem_executor.calls[0].cwd.is_relative_to(
+        result.workspace_session.worktree_path
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_forced_multipass_missing_aider_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"foundation": ["index.html"]}))
+    text_executor = FakeExecutor(
+        multipass_patch_answers=[_valid_new_file_diff("should-not-run.txt")]
+    )
+    filesystem_executor = FakeFilesystemExecutor(
+        status="failed",
+        error_category="aider_missing",
+        metadata={
+            "install_guidance": (
+                "python -m pip install aider-install",
+                "aider-install",
+            )
+        },
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=text_executor,
+        filesystem_executor=filesystem_executor,
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create one file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "aider_missing"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["install_guidance"] == (
+        "python -m pip install aider-install",
+        "aider-install",
+    )
+    assert text_executor.patch_calls == []
+    assert len(filesystem_executor.calls) == 1
+    assert not (repo / "should-not-run.txt").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_forced_multipass_aider_captures_committed_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "foundation": ["index.html"],
+                "docs": ["README.md"],
+            }
+        )
+    )
+    pass_index = 0
+
+    def mutate(workspace: Path) -> None:
+        nonlocal pass_index
+        pass_index += 1
+        if pass_index == 1:
+            (workspace / "index.html").write_text("committed html\n", encoding="utf-8")
+            commit_message = "Fake Aider pass 1"
+        else:
+            (workspace / "README.md").write_text("committed docs\n", encoding="utf-8")
+            commit_message = "Fake Aider pass 2"
+        _git(workspace, "add", "-A")
+        _git(workspace, "commit", "-m", commit_message)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create committed multipass files",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.promoted_files_by_pass == {
+        "foundation": ("index.html",),
+        "docs": ("README.md",),
+    }
+    assert set(result.promoted_files) == {"index.html", "README.md"}
+    assert (repo / "index.html").read_text(encoding="utf-8") == "committed html\n"
+    assert (repo / "README.md").read_text(encoding="utf-8") == "committed docs\n"
+    assert result.workspace_session is not None
+    assert (
+        _git(result.workspace_session.worktree_path, "status", "--porcelain")
+        .stdout.strip()
+        == ""
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_forced_multipass_aider_rejects_out_of_destination_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    app_dir = repo / "app"
+    app_dir.mkdir()
+    (app_dir / "context.txt").write_text("app context\n", encoding="utf-8")
+    _git(repo, "add", "app/context.txt")
+    _git(repo, "commit", "-m", "Add app context")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"foundation": ["context.txt"]}))
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "context.txt").write_text("inside app\n", encoding="utf-8")
+        (workspace.parent / "outside-app.txt").write_text("outside app\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+        discovery_router=FakeDiscoveryRouter(("context.txt",)),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=app_dir,
+            task="Patch inside app only",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_boundary"
+    assert result.issue.reason == "changed_path_outside_destination"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert not (repo / "outside-app.txt").exists()
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_forced_multipass_aider_rejects_internal_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(_multipass_plan_json({"foundation": [".sfe/leak.txt"]}))
+
+    def mutate(workspace: Path) -> None:
+        target = workspace / ".sfe" / "leak.txt"
+        target.parent.mkdir()
+        target.write_text("internal\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create an internal file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe/leak.txt"
+    assert not (repo / ".sfe" / "leak.txt").exists()
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -4486,8 +5179,10 @@ def _pipeline(
     *,
     workspace_manager: WorkspaceManager | None = None,
     executor: FakeExecutor | None = None,
+    filesystem_executor: FakeFilesystemExecutor | None = None,
     discovery_router: FakeDiscoveryRouter | None = None,
     execution_mode_router: object | None = None,
+    multipass_planner: FakeMultiPassPlanner | None = None,
     git_preparer: object | None = None,
     progress_callback: object | None = None,
 ) -> RunPipeline:
@@ -4496,6 +5191,8 @@ def _pipeline(
         workspace_manager=workspace_manager or _manager(),
         discovery_router=discovery_router or FakeDiscoveryRouter(),
         execution_mode_router=execution_mode_router or FakeExecutionModeRouter(),
+        multipass_planner=multipass_planner,
+        filesystem_executor=filesystem_executor,
         git_preparer=git_preparer,
         progress_callback=progress_callback,
     )
