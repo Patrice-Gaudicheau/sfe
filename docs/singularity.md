@@ -10,4 +10,4 @@ The implementation work has been produced overwhelmingly through AI coding workf
 
 This is not presented as a philosophical claim. This is not presented as marketing fiction. This is simply the current state of how the project has been built.
 
-Readers may interpret the badge as they wish, but the statement is meant as a transparent description of the production model behind SFE.
+The badge is intended as a transparent description of the production model behind SFE.
