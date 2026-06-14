@@ -133,13 +133,17 @@ bounded by the Router-owned plan.
 Aider is invoked as a one-shot, non-interactive filesystem writer. Local Aider
 0.86.2 supports the required flags: `--message-file`, `--env-file`,
 `--yes-always`, `--no-pretty`, `--no-stream`, `--no-gui`, `--no-browser`,
-`--git`, `--auto-commits`, `--no-auto-lint`, `--no-auto-test`,
-`--subtree-only`, `--model`, `--weak-model`, and `--timeout`.
+`--git`, `--no-gitignore`, `--no-add-gitignore-files`, `--auto-commits`,
+`--no-auto-lint`, `--no-auto-test`, `--subtree-only`, `--map-tokens`,
+`--model`, `--weak-model`, and `--timeout`.
 
 The executor should:
 
 - send the task through a temporary message file rather than command-line text;
 - pass only a minimal temporary Aider env file;
+- place Aider input/chat history files outside the worktree and delete them
+  after execution;
+- avoid Aider-created `.gitignore` and repo-map cache churn in the worktree;
 - close stdin so the process cannot wait for terminal input;
 - capture stdout and stderr with bounded diagnostics;
 - pass `--timeout` when `SFE_AIDER_TIMEOUT_SECONDS` is configured;

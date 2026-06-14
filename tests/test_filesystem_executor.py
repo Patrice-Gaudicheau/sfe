@@ -81,11 +81,15 @@ def test_aider_filesystem_executor_uses_message_file_and_bounded_command(
         nonlocal env_file_path
         message_index = command.index("--message-file") + 1
         message_path = Path(command[message_index])
+        input_history_path = Path(command[command.index("--input-history-file") + 1])
+        chat_history_path = Path(command[command.index("--chat-history-file") + 1])
         env_index = command.index("--env-file") + 1
         env_file_path = Path(command[env_index])
         assert message_path.exists()
         assert env_file_path.exists()
         assert not message_path.is_relative_to(tmp_path)
+        assert not input_history_path.is_relative_to(tmp_path)
+        assert not chat_history_path.is_relative_to(tmp_path)
         assert not env_file_path.is_relative_to(tmp_path)
         assert "Create docs" in message_path.read_text(encoding="utf-8")
         assert "OPENAI_API_KEY" in env_file_path.read_text(encoding="utf-8")
@@ -141,6 +145,11 @@ def test_aider_filesystem_executor_uses_message_file_and_bounded_command(
     assert isinstance(command, list)
     assert "--message-file" in command
     assert "--env-file" in command
+    assert "--input-history-file" in command
+    assert "--chat-history-file" in command
+    assert "--no-gitignore" in command
+    assert "--no-add-gitignore-files" in command
+    assert command[command.index("--map-tokens") + 1] == "0"
     assert "--model" in command
     assert "gpt-fixture" in command
     assert "--weak-model" in command
@@ -160,6 +169,18 @@ def test_aider_filesystem_executor_uses_message_file_and_bounded_command(
     assert (
         result.diagnostics.command[result.diagnostics.command.index("--env-file") + 1]
         == "<aider-env-file>"
+    )
+    assert (
+        result.diagnostics.command[
+            result.diagnostics.command.index("--input-history-file") + 1
+        ]
+        == "<aider-input-history-file>"
+    )
+    assert (
+        result.diagnostics.command[
+            result.diagnostics.command.index("--chat-history-file") + 1
+        ]
+        == "<aider-chat-history-file>"
     )
     assert result.diagnostics.return_code == 0
     assert result.diagnostics.elapsed_ms == 250

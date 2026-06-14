@@ -103,6 +103,8 @@ class AiderFilesystemExecutor:
         try:
             with tempfile.TemporaryDirectory(prefix="sfe-aider-") as temp_dir:
                 message_path = Path(temp_dir) / "message.txt"
+                input_history_path = Path(temp_dir) / "input.history"
+                chat_history_path = Path(temp_dir) / "chat.history.md"
                 message_path.write_text(prompt, encoding="utf-8")
                 with write_temporary_aider_env_file(
                     bridge.aider_env,
@@ -111,6 +113,8 @@ class AiderFilesystemExecutor:
                     command = _build_aider_command(
                         aider_path=preflight.executable_path,
                         message_path=message_path,
+                        input_history_path=input_history_path,
+                        chat_history_path=chat_history_path,
                         env_file_path=env_file_path,
                         selected_model=bridge.selected_model,
                         selected_weak_model=bridge.selected_weak_model,
@@ -267,6 +271,8 @@ def _build_aider_command(
     *,
     aider_path: str,
     message_path: Path,
+    input_history_path: Path,
+    chat_history_path: Path,
     env_file_path: Path,
     selected_model: str | None,
     selected_weak_model: str | None,
@@ -278,6 +284,10 @@ def _build_aider_command(
         aider_path,
         "--message-file",
         str(message_path),
+        "--input-history-file",
+        str(input_history_path),
+        "--chat-history-file",
+        str(chat_history_path),
         "--env-file",
         str(env_file_path),
         "--yes-always",
@@ -286,10 +296,14 @@ def _build_aider_command(
         "--no-gui",
         "--no-browser",
         "--git",
+        "--no-gitignore",
+        "--no-add-gitignore-files",
         "--auto-commits",
         "--no-auto-lint",
         "--no-auto-test",
         "--subtree-only",
+        "--map-tokens",
+        "0",
     ]
     if selected_model is not None:
         command.extend(("--model", selected_model))
@@ -320,6 +334,12 @@ def _sanitize_command(command: list[str]) -> tuple[str, ...]:
         if item == "--message-file":
             skip_next = True
             redacted_next = "<message-file>"
+        elif item == "--input-history-file":
+            skip_next = True
+            redacted_next = "<aider-input-history-file>"
+        elif item == "--chat-history-file":
+            skip_next = True
+            redacted_next = "<aider-chat-history-file>"
         elif item == "--env-file":
             skip_next = True
             redacted_next = "<aider-env-file>"

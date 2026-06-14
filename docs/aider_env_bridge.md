@@ -179,6 +179,8 @@ Diagnostics must not include:
 - Pass `--env-file <tempfile>` to Aider.
 - Pass `--model`, optional `--weak-model`, and optional `--timeout`.
 - Close stdin and apply the configured timeout to the Aider subprocess.
+- Keep Aider input/chat history files outside the worktree and delete them with
+  the temporary execution files.
 - Redact env-file paths and values in diagnostics.
 - Preserve Aider as the default single-pass writer and text as explicit
   fallback only.
