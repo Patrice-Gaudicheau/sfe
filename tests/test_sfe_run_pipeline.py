@@ -803,6 +803,52 @@ def test_run_pipeline_accepts_direct_created_modified_and_deleted_files_inside_d
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_promotes_committed_worktree_changes_relative_to_source_head(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "obsolete.txt").write_text("remove me\n", encoding="utf-8")
+    _git(repo, "add", "obsolete.txt")
+    _git(repo, "commit", "-m", "Add obsolete file")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "context.txt").write_text("committed modified\n", encoding="utf-8")
+        (workspace / "created.txt").write_text("committed created\n", encoding="utf-8")
+        (workspace / "obsolete.txt").unlink()
+        _git(workspace, "add", "-A")
+        _git(workspace, "commit", "-m", "Aider-style committed changes")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=DirectMutationExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and commit files inside the worktree",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.patch_generated is False
+    assert result.patch_applied is False
+    assert set(result.changed_files) == {"context.txt", "created.txt", "obsolete.txt"}
+    assert set(result.promoted_files) == {"context.txt", "created.txt", "obsolete.txt"}
+    assert result.promotion_status == "applied"
+    assert (repo / "context.txt").read_text(encoding="utf-8") == "committed modified\n"
+    assert (repo / "created.txt").read_text(encoding="utf-8") == "committed created\n"
+    assert not (repo / "obsolete.txt").exists()
+
+    assert result.workspace_session is not None
+    assert (
+        _git(result.workspace_session.worktree_path, "status", "--porcelain")
+        .stdout.strip()
+        == ""
+    )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_rejects_direct_change_outside_destination_directory(
     tmp_path: Path,
 ) -> None:
@@ -836,6 +882,49 @@ def test_run_pipeline_rejects_direct_change_outside_destination_directory(
     assert result.issue.reason == "changed_path_outside_destination"
     assert result.issue.diagnostics is not None
     assert result.issue.diagnostics["authorized_output_root"] == str(app_dir.resolve())
+    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert not (repo / "outside-app.txt").exists()
+
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_committed_change_outside_destination_directory(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    app_dir = repo / "app"
+    app_dir.mkdir()
+    (app_dir / "context.txt").write_text("app context\n", encoding="utf-8")
+    _git(repo, "add", "app/context.txt")
+    _git(repo, "commit", "-m", "Add app context")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        git_root = workspace.parent
+        (workspace / "context.txt").write_text("inside app\n", encoding="utf-8")
+        (git_root / "outside-app.txt").write_text("outside app\n", encoding="utf-8")
+        _git(git_root, "add", "-A")
+        _git(git_root, "commit", "-m", "Committed outside selected destination")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=DirectMutationExecutor(mutate),
+        discovery_router=FakeDiscoveryRouter(("context.txt",)),
+    ).run(
+        RunRequest(
+            workspace_root=app_dir,
+            task="Commit inside app and outside app",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "workspace_boundary"
+    assert result.issue.reason == "changed_path_outside_destination"
+    assert result.issue.diagnostics is not None
     assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
     assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
     assert not (repo / "outside-app.txt").exists()
@@ -1052,18 +1141,56 @@ def test_run_pipeline_rejects_internal_promotion_paths(tmp_path: Path) -> None:
         )
     )
 
-    assert result.status == RUN_STATUS_COMPLETED
+    assert result.status == RUN_STATUS_FAILED
     assert result.patch_generated is True
     assert result.patch_applied is True
-    assert result.promotion_status == "applied"
-    assert result.promotion_applied is True
-    assert result.issue is None
-    assert (repo / ".sfe-worktrees" / "leak.txt").read_text(encoding="utf-8") == "escaped\n"
+    assert result.promotion_status == "rejected"
+    assert result.promotion_applied is False
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe-worktrees/leak.txt"
+    assert not (repo / ".sfe-worktrees" / "leak.txt").exists()
 
     assert result.workspace_session is not None
     assert (
         result.workspace_session.worktree_path / ".sfe-worktrees" / "leak.txt"
     ).exists()
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_rejects_committed_internal_promotion_paths(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        target = workspace / ".sfe-worktrees" / "leak.txt"
+        target.parent.mkdir()
+        target.write_text("committed internal\n", encoding="utf-8")
+        _git(workspace, "add", "-A")
+        _git(workspace, "commit", "-m", "Commit internal path")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        executor=DirectMutationExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context and commit an internal file",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "internal_path_not_promoted"
+    assert result.issue.path == ".sfe-worktrees/leak.txt"
+    assert not (repo / ".sfe-worktrees" / "leak.txt").exists()
+
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

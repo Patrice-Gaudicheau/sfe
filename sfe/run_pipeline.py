@@ -2458,6 +2458,15 @@ def _capture_actual_workspace_changes(
         return PromotionBaseline(
             issue=RunIssue("workspace_status", "worktree_status_failed")
         )
+    committed_entries = _capture_committed_worktree_change_entries(session)
+    if isinstance(committed_entries, RunIssue):
+        return PromotionBaseline(issue=committed_entries)
+    change_entries = _dedupe_change_entries(
+        (
+            *committed_entries,
+            *_parse_git_status_z(status_result.stdout),
+        )
+    )
     active_root = active_workspace.resolve()
     source_root = session.source_path.resolve()
     try:
@@ -2469,7 +2478,7 @@ def _capture_actual_workspace_changes(
     active_prefix_parts = active_prefix.parts
     targets: list[PromotionTarget] = []
     offending_paths: list[str] = []
-    for status_code, worktree_relative_path in _parse_git_status_z(status_result.stdout):
+    for status_code, worktree_relative_path in change_entries:
         worktree_relative = Path(worktree_relative_path)
         if worktree_relative.is_absolute() or ".." in worktree_relative.parts:
             offending_paths.append(worktree_relative_path)
@@ -2485,6 +2494,10 @@ def _capture_actual_workspace_changes(
             offending_paths.append(worktree_relative_path)
             continue
         relative_path = destination_relative.as_posix()
+        if _is_internal_promotion_path(relative_path):
+            return PromotionBaseline(
+                issue=RunIssue("promotion", "internal_path_not_promoted", relative_path)
+            )
         worktree_target = active_root / destination_relative
         source_target = source_root / destination_relative
         deleted = "D" in status_code and not worktree_target.exists()
@@ -2526,6 +2539,60 @@ def _capture_actual_workspace_changes(
             )
         )
     return PromotionBaseline(targets=tuple(targets))
+
+
+def _capture_committed_worktree_change_entries(
+    session: WorkspaceSession,
+) -> tuple[tuple[str, str], ...] | RunIssue:
+    source_head = _source_head_for_session(session)
+    if source_head is None:
+        return RunIssue("workspace_status", "source_head_unavailable")
+    diff_result = _git(
+        session.worktree_path,
+        "diff",
+        "--name-status",
+        "-z",
+        "--no-renames",
+        source_head,
+        "HEAD",
+    )
+    if diff_result.returncode != 0:
+        return RunIssue("workspace_status", "committed_worktree_diff_failed")
+    return _parse_git_name_status_z(diff_result.stdout)
+
+
+def _source_head_for_session(session: WorkspaceSession) -> str | None:
+    source_head = session.metadata.get("source_head")
+    if isinstance(source_head, str) and source_head.strip():
+        return source_head.strip()
+    result = _git(session.source_git_root, "rev-parse", "--verify", "HEAD")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _parse_git_name_status_z(status_text: str) -> tuple[tuple[str, str], ...]:
+    tokens = [token for token in status_text.split("\0") if token]
+    entries: list[tuple[str, str]] = []
+    index = 0
+    while index + 1 < len(tokens):
+        status_code = tokens[index]
+        path = tokens[index + 1]
+        entries.append((status_code, path))
+        index += 2
+    return tuple(entries)
+
+
+def _dedupe_change_entries(
+    entries: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    order: list[str] = []
+    by_path: dict[str, str] = {}
+    for status_code, path in entries:
+        if path not in by_path:
+            order.append(path)
+        by_path[path] = status_code
+    return tuple((by_path[path], path) for path in order)
 
 
 def _parse_git_status_z(status_text: str) -> tuple[tuple[str, str], ...]:
