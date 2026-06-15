@@ -7,12 +7,17 @@ PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 cd "$PROJECT_ROOT"
 
 ASSUME_YES=${SFE_INSTALL_ASSUME_YES:-0}
+ALLOW_UPDATES=${SFE_INSTALL_ALLOW_UPDATES:-0}
 DRY_RUN=${SFE_INSTALL_DRY_RUN:-0}
 SKIP_AIDER=${SFE_INSTALL_SKIP_AIDER:-0}
 VENV_DIR=${SFE_INSTALL_VENV_DIR:-.venv}
 PYTHON_BIN_OVERRIDE=${SFE_INSTALL_PYTHON_BIN:-}
 AIDER_BIN=${SFE_INSTALL_AIDER_BIN:-aider}
 PIPX_BIN=${SFE_INSTALL_PIPX_BIN:-pipx}
+AIDER_LATEST_VERSION_OVERRIDE=${SFE_INSTALL_AIDER_LATEST_VERSION:-}
+OS_ID_OVERRIDE=${SFE_INSTALL_OS_ID:-}
+OS_LIKE_OVERRIDE=${SFE_INSTALL_OS_LIKE:-}
+PROC_VERSION_OVERRIDE=${SFE_INSTALL_PROC_VERSION:-}
 PYTHON_BIN_RESOLVED=
 
 log() {
@@ -46,6 +51,10 @@ can_prompt() {
     [ -t 0 ] && [ -t 1 ]
 }
 
+can_interactively_prompt() {
+    [ -t 0 ] && [ -t 1 ]
+}
+
 confirm() {
     prompt=$1
     if is_enabled "$ASSUME_YES"; then
@@ -53,6 +62,27 @@ confirm() {
         return 0
     fi
     if ! can_prompt; then
+        return 1
+    fi
+    printf "%s [y/N] " "$prompt"
+    read -r answer || return 1
+    case "$answer" in
+        y|Y|yes|YES)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+confirm_update() {
+    prompt=$1
+    if is_enabled "$ALLOW_UPDATES"; then
+        log "$prompt [auto-yes via SFE_INSTALL_ALLOW_UPDATES=1]"
+        return 0
+    fi
+    if ! can_interactively_prompt; then
         return 1
     fi
     printf "%s [y/N] " "$prompt"
@@ -77,6 +107,14 @@ run_cmd() {
 
 read_os_release_value() {
     key=$1
+    if [ "$key" = "ID" ] && [ -n "$OS_ID_OVERRIDE" ]; then
+        printf "%s\n" "$OS_ID_OVERRIDE"
+        return 0
+    fi
+    if [ "$key" = "ID_LIKE" ] && [ -n "$OS_LIKE_OVERRIDE" ]; then
+        printf "%s\n" "$OS_LIKE_OVERRIDE"
+        return 0
+    fi
     if [ ! -r /etc/os-release ]; then
         return 0
     fi
@@ -97,10 +135,14 @@ is_debian_like() {
 }
 
 is_wsl() {
-    if [ ! -r /proc/version ]; then
-        return 1
+    if [ -n "$PROC_VERSION_OVERRIDE" ]; then
+        version_text=$PROC_VERSION_OVERRIDE
+    else
+        if [ ! -r /proc/version ]; then
+            return 1
+        fi
+        version_text=$(cat /proc/version 2>/dev/null || true)
     fi
-    version_text=$(cat /proc/version 2>/dev/null || true)
     case "$version_text" in
         *icrosoft*|*Microsoft*|*WSL*)
             return 0
@@ -250,13 +292,51 @@ ensure_venv() {
     fi
 
     log "Creating a local virtual environment at $VENV_DIR."
-    run_cmd "$python_bin" -m venv "$VENV_DIR"
+    if create_venv "$python_bin"; then
+        return 0
+    fi
+
+    if ! is_debian_like && ! is_wsl; then
+        die "Virtual environment creation failed. Install the Python venv module for $python_bin and rerun make install."
+    fi
+
+    warn "Python is available, but \`$python_bin -m venv $VENV_DIR\` failed."
+    log "On Debian, Ubuntu, and WSL this usually means \`python3-venv\` is missing."
+    log "Suggested command:"
+    log "  sudo apt install python3-venv python3-pip"
+
+    if ! can_prompt; then
+        die "This session is non-interactive, so no system install command was run. Install python3-venv and python3-pip manually, then rerun make install."
+    fi
+
+    if ! confirm "Run \`sudo apt install python3-venv python3-pip\` now and retry virtual environment creation?"; then
+        die "Virtual environment creation was left incomplete. Install python3-venv and python3-pip manually, then rerun make install."
+    fi
+
+    if ! install_apt_packages python3-venv python3-pip; then
+        die "Virtual environment creation could not continue because python3-venv/python3-pip were not installed."
+    fi
+
+    if create_venv "$python_bin"; then
+        return 0
+    fi
+
+    die "Virtual environment creation still failed after installing python3-venv/python3-pip. Review the error above and rerun make install."
 }
 
 install_project_dependencies() {
     venv_python=$1
     log "Installing SFE into $VENV_DIR with the repository's editable package configuration."
     run_cmd "$venv_python" -m pip install --disable-pip-version-check -e .
+}
+
+create_venv() {
+    python_bin=$1
+    log "+ $python_bin -m venv $VENV_DIR"
+    if is_enabled "$DRY_RUN"; then
+        return 0
+    fi
+    "$python_bin" -m venv "$VENV_DIR"
 }
 
 extract_numeric_version() {
@@ -293,7 +373,10 @@ check_aider_upgrade() {
         return 0
     fi
 
-    latest_version=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || true
+    if [ -n "$AIDER_LATEST_VERSION_OVERRIDE" ]; then
+        latest_version=$AIDER_LATEST_VERSION_OVERRIDE
+    else
+        latest_version=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || true
 import json
 import urllib.request
 
@@ -302,6 +385,7 @@ with urllib.request.urlopen("https://pypi.org/pypi/aider-chat/json", timeout=5) 
 print(payload["info"]["version"])
 PY
 )
+    fi
     if [ -z "$latest_version" ]; then
         return 0
     fi
@@ -310,10 +394,10 @@ PY
         warn "Aider $current_version is installed at $aider_path, but PyPI currently reports $latest_version."
         pipx_path=$(find_command "$PIPX_BIN")
         if [ -n "$pipx_path" ] && "$pipx_path" list 2>/dev/null | grep -Fq "package aider-chat"; then
-            if confirm "Run \`$PIPX_BIN upgrade aider-chat\` now?"; then
+            if confirm_update "Run \`$PIPX_BIN upgrade aider-chat\` now?"; then
                 run_cmd "$pipx_path" upgrade aider-chat
             else
-                log "Leaving the existing Aider installation unchanged."
+                log "Leaving the existing Aider installation unchanged. Updates require an interactive confirmation or SFE_INSTALL_ALLOW_UPDATES=1."
             fi
         else
             log "Leaving the existing Aider installation unchanged. Update it manually if you want the newer release."

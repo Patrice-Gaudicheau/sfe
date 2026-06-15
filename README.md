@@ -426,6 +426,8 @@ flows. It does not run `apt upgrade`, `brew upgrade`, or other global upgrade
 commands. On Debian, Ubuntu, and WSL it can offer, after explicit confirmation,
 to install missing packages such as `python3-venv` or `pipx`. For automation,
 you can opt in to auto-confirmation with `SFE_INSTALL_ASSUME_YES=1 make install`.
+Existing Aider installs stay conservative: upgrades still require an
+interactive confirmation or `SFE_INSTALL_ALLOW_UPDATES=1`.
 
 If you prefer to do the Python setup manually, the equivalent core steps are:
 
