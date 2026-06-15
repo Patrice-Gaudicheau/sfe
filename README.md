@@ -2,12 +2,7 @@
 
 # Spatial Field Engine for Cognition
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue)
-![Status](https://img.shields.io/badge/status-experimental%20research-orange)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Interface](https://img.shields.io/badge/interface-TUI%20%2B%20MCP-6f42c1)
-![Providers](https://img.shields.io/badge/providers-multi--provider-0f766e)
-![Execution](https://img.shields.io/badge/execution-workspace--write-334155)
+[![AI-Coded: 95%+](https://img.shields.io/badge/AI--Coded-95%25%2B-111111?style=flat-square)](docs/ai-coded.md)
 
 **Context-routing and governance infrastructure for long-context LLM workflows.**
 
