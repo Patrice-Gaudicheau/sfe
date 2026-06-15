@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/badge/OpenAI--compatible-0F766E?style=flat-square" alt="OpenAI-compatible">
 </p>
 
-**SFE** (Spatial Field Engine for Cognition) is open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
+**SFE** (Spatial Field Engine for Cognition) is an open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
 
 For technical founders, AI infrastructure teams, and research engineers running repeated API-heavy workflows, SFE provides:
 
