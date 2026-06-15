@@ -10,9 +10,6 @@
   <img src="https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg" alt="Interface: TUI + MCP">
   <img src="https://img.shields.io/badge/Providers-multi--provider-0f766e.svg" alt="Providers: multi-provider">
 </p>
-<p align="center">
-  <img src="assets/sfe_provider_badges.svg" alt="Supported providers: OpenAI, Anthropic, Google, Alibaba, Ollama, Lemonade, CodexCLI, OpenAI-compatible">
-</p>
 
 **Context-routing and governance infrastructure for long-context LLM workflows.**
 
