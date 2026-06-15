@@ -232,6 +232,12 @@ class FakeExecutor:
         return self.patch_response
 
 
+def _use_legacy_text_workspace_write_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
+
+
 class FakeMultiPassPlanner:
     provider_name = "fake-router-planner"
     model = "fake-router-planner-model"
@@ -4546,7 +4552,11 @@ def test_tui_run_report_after_run_debug_reports_debug_run_result(tmp_path) -> No
     assert report_output == debug_output
 
 
-def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
+def test_tui_run_workspace_write_renders_compact_summary(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor()
     output: list[str] = []
@@ -4601,7 +4611,11 @@ def test_tui_run_workspace_write_renders_compact_summary(tmp_path) -> None:
     assert cleanup.cleaned is True
 
 
-def test_tui_run_progress_lines_omit_sensitive_material(tmp_path) -> None:
+def test_tui_run_progress_lines_omit_sensitive_material(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     (repo / "context.txt").write_text(
         "old context SECRET_FILE_CONTENT\n",
@@ -4645,7 +4659,11 @@ def test_tui_run_progress_lines_omit_sensitive_material(tmp_path) -> None:
     assert cleanup.cleaned is True
 
 
-def test_tui_run_report_after_workspace_write_run_does_not_execute_again(tmp_path) -> None:
+def test_tui_run_report_after_workspace_write_run_does_not_execute_again(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor()
     router = FakeExecutionModeRouter()
@@ -4679,6 +4697,7 @@ def test_tui_run_report_after_workspace_write_run_does_not_execute_again(tmp_pat
 
 
 def test_tui_run_report_displays_multipass_summary(tmp_path, monkeypatch) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
     repo = init_git_repo(tmp_path / "repo")
     planner = FakeMultiPassPlanner(
@@ -4753,7 +4772,11 @@ def test_tui_run_report_displays_multipass_summary(tmp_path, monkeypatch) -> Non
     assert cleanup.cleaned is True
 
 
-def test_tui_run_debug_workspace_write_renders_full_report(tmp_path) -> None:
+def test_tui_run_debug_workspace_write_renders_full_report(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor()
     output: list[str] = []
@@ -4808,7 +4831,11 @@ def test_tui_run_external_action_renders_compact_message(tmp_path) -> None:
     assert "worktree path:" not in run_output
 
 
-def test_tui_run_invalid_response_failure_stores_last_result_and_hints(tmp_path) -> None:
+def test_tui_run_invalid_response_failure_stores_last_result_and_hints(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
@@ -4849,7 +4876,11 @@ def test_tui_run_invalid_response_failure_stores_last_result_and_hints(tmp_path)
     assert cleanup.cleaned is True
 
 
-def test_tui_run_report_after_failed_run_does_not_execute_again(tmp_path) -> None:
+def test_tui_run_report_after_failed_run_does_not_execute_again(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
@@ -4890,7 +4921,9 @@ def test_tui_run_report_after_failed_run_does_not_execute_again(tmp_path) -> Non
 
 def test_tui_run_report_displays_safe_invalid_response_shape_diagnostics(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     provider = FakeProvider(
         response={
@@ -4960,7 +4993,11 @@ def test_tui_run_report_displays_safe_invalid_response_shape_diagnostics(
     assert cleanup.cleaned is True
 
 
-def test_tui_run_report_displays_provider_timeout_diagnostics(tmp_path) -> None:
+def test_tui_run_report_displays_provider_timeout_diagnostics(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     executor = FakeExecutor(
         patch_response=ExecutorResponse(
@@ -5018,7 +5055,11 @@ def test_tui_run_report_displays_provider_timeout_diagnostics(tmp_path) -> None:
     assert cleanup.cleaned is True
 
 
-def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> None:
+def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
     run_git(repo, "add", "README.md")
@@ -5067,7 +5108,9 @@ def test_tui_run_invalid_patch_proposal_omits_debug_diagnostics(tmp_path) -> Non
 
 def test_tui_run_json_patch_proposal_reports_no_files(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     raw_output = (
         '{"edits":[{"path":"index.html","action":"create_file",'
@@ -5109,6 +5152,7 @@ def test_tui_run_json_patch_proposal_reports_no_files(
 
 
 def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path, monkeypatch) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     monkeypatch.delenv("SFE_PATCH_NORMALIZE_HUNK_COUNTS", raising=False)
     repo = init_git_repo(tmp_path / "repo")
     raw_output = invalid_new_file_hunk_count_diff()
@@ -5147,7 +5191,11 @@ def test_tui_run_report_renders_hunk_accounting_diagnostics(tmp_path, monkeypatc
     assert cleanup.cleaned is True
 
 
-def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(tmp_path) -> None:
+def test_tui_run_debug_renders_invalid_patch_proposal_diagnostics(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_legacy_text_workspace_write_executor(monkeypatch)
     repo = init_git_repo(tmp_path / "repo")
     (repo / "README.md").write_text("old readme\n", encoding="utf-8")
     run_git(repo, "add", "README.md")
