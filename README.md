@@ -1,3 +1,5 @@
+![SFE - Spatial Field Engine for Cognition](assets/202606152310_github.jpg)
+
 # Spatial Field Engine for Cognition
 
 [![AI-Coded: 95%+](https://img.shields.io/badge/AI--Coded-95%25%2B-111111?style=flat-square)](docs/ai-coded.md)

@@ -33,3 +33,7 @@ Thumbs.db
 
 # Local CLI artifacts
 .antigravitycli/
+
+# Photoshop source files
+*.psd
+*.psb
