@@ -5,9 +5,9 @@
 [![AI-Coded: 95%+](https://img.shields.io/badge/AI--Coded-95%25%2B-111111?style=flat-square)](docs/ai-coded.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
-[![Status: experimental research](https://img.shields.io/badge/Status-experimental%20research-orange.svg)](#project-status)
-[![Interface: TUI + MCP](https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg)](#quick-start-tui-or-mcp)
-[![Providers: multi--provider](https://img.shields.io/badge/Providers-multi--provider-0f766e.svg)](#provider-support)
+![Status: experimental research](https://img.shields.io/badge/Status-experimental%20research-orange.svg)
+![Interface: TUI + MCP](https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg)
+![Providers: multi--provider](https://img.shields.io/badge/Providers-multi--provider-0f766e.svg)
 
 **Context-routing and governance infrastructure for long-context LLM workflows.**
 
