@@ -415,6 +415,21 @@ The benchmark execution pattern remains:
 This project is dependency-light and targets Python 3.10+.
 
 ```bash
+make install
+source .venv/bin/activate
+```
+
+`make install` is conservative by design: it checks for `python3` first and
+falls back to `python`, reuses an existing `.venv`, installs SFE in editable
+mode, and checks for the external Aider CLI used by normal `workspace_write`
+flows. It does not run `apt upgrade`, `brew upgrade`, or other global upgrade
+commands. On Debian, Ubuntu, and WSL it can offer, after explicit confirmation,
+to install missing packages such as `python3-venv` or `pipx`. For automation,
+you can opt in to auto-confirmation with `SFE_INSTALL_ASSUME_YES=1 make install`.
+
+If you prefer to do the Python setup manually, the equivalent core steps are:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
@@ -440,6 +455,10 @@ This role-level provider configuration is what enables Router/Executor model
 separation: a strong router can be paired with a cheaper or more specialized
 executor when the selected context is narrow enough and the configured provider
 supports the required task.
+
+If Aider is missing, `make install` follows the documented Ubuntu/Debian/WSL
+`pipx install aider-chat` path when it can prompt, and otherwise fails safely
+with the same commands so the next step is explicit.
 
 ## Minimal Verification
 
