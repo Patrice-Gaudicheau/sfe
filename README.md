@@ -3,12 +3,12 @@
 # Spatial Field Engine for Cognition
 
 <p align="center">
-  [![AI-Coded: 95%+](https://img.shields.io/badge/AI--Coded-95%25%2B-111111?style=flat-square)](docs/ai-coded.md)
-  [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-  [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
-  ![Status: experimental research](https://img.shields.io/badge/Status-experimental%20research-orange.svg)
-  ![Interface: TUI + MCP](https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg)
-  ![Providers: multi--provider](https://img.shields.io/badge/Providers-multi--provider-0f766e.svg)
+  <a href="docs/ai-coded.md"><img src="https://img.shields.io/badge/AI--Coded-95%25%2B-111111?style=flat-square" alt="AI-Coded: 95%+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <img src="https://img.shields.io/badge/Status-experimental%20research-orange.svg" alt="Status: experimental research">
+  <img src="https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg" alt="Interface: TUI + MCP">
+  <img src="https://img.shields.io/badge/Providers-multi--provider-0f766e.svg" alt="Providers: multi-provider">
 </p>
 
 **Context-routing and governance infrastructure for long-context LLM workflows.**
