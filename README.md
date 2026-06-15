@@ -11,14 +11,14 @@
   <img src="https://img.shields.io/badge/Providers-multi--provider-0f766e.svg" alt="Providers: multi-provider">
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square" alt="OpenAI">
-  <img src="https://img.shields.io/badge/Anthropic-D97757?style=flat-square" alt="Anthropic">
-  <img src="https://img.shields.io/badge/Google-4285F4?style=flat-square" alt="Google">
-  <img src="https://img.shields.io/badge/Alibaba-FF6A00?style=flat-square" alt="Alibaba">
-  <img src="https://img.shields.io/badge/Ollama-111111?style=flat-square" alt="Ollama">
-  <img src="https://img.shields.io/badge/Lemonade-F59E0B?style=flat-square" alt="Lemonade">
-  <img src="https://img.shields.io/badge/CodexCLI-334155?style=flat-square" alt="CodexCLI">
-  <img src="https://img.shields.io/badge/OpenAI--compatible-0F766E?style=flat-square" alt="OpenAI-compatible">
+  <img src="https://img.shields.io/badge/Provider-OpenAI-412991?style=flat-square" alt="Provider: OpenAI">
+  <img src="https://img.shields.io/badge/Provider-Anthropic-D97757?style=flat-square" alt="Provider: Anthropic">
+  <img src="https://img.shields.io/badge/Provider-Google-4285F4?style=flat-square" alt="Provider: Google">
+  <img src="https://img.shields.io/badge/Provider-Alibaba-FF6A00?style=flat-square" alt="Provider: Alibaba">
+  <img src="https://img.shields.io/badge/Provider-Ollama-111111?style=flat-square" alt="Provider: Ollama">
+  <img src="https://img.shields.io/badge/Provider-Lemonade-F59E0B?style=flat-square" alt="Provider: Lemonade">
+  <img src="https://img.shields.io/badge/Provider-CodexCLI-334155?style=flat-square" alt="Provider: CodexCLI">
+  <img src="https://img.shields.io/badge/Provider-OpenAI--compatible-0F766E?style=flat-square" alt="Provider: OpenAI-compatible">
 </p>
 
 **SFE** (Spatial Field Engine for Cognition) is an open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
