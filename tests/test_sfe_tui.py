@@ -53,6 +53,7 @@ from sfe.runtime_session import (
     TargetDirectoryResult,
     TaskSetResult,
 )
+from sfe.workspace_write_executor import resolve_workspace_write_executor
 from sfe.workspace_isolation import WorkspaceSession
 from sfe.patch_json_repair import (
     PATCH_JSON_REPAIR_MAX_INPUT_CHARS,
@@ -236,6 +237,29 @@ def _use_legacy_text_workspace_write_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
+
+
+@pytest.mark.parametrize("configured_value", (None, "  "))
+def test_tui_workspace_write_executor_contract_defaults_to_aider(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_value: str | None,
+) -> None:
+    if configured_value is None:
+        monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    else:
+        monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", configured_value)
+
+    assert resolve_workspace_write_executor() == "aider"
+
+
+def test_tui_workspace_write_executor_contract_legacy_text_requires_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+
+    _use_legacy_text_workspace_write_executor(monkeypatch)
+
+    assert resolve_workspace_write_executor() == "text"
 
 
 class FakeMultiPassPlanner:
