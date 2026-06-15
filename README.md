@@ -32,6 +32,23 @@ For technical founders, AI infrastructure teams, and research engineers running 
 
 *Note: SFE is an experimental research prototype. It does not claim to make models more intelligent, nor does it guarantee universal token savings. The evidence here is early, mostly synthetic, and benchmark-specific. Treat results as a technical prototype signal, not production readiness. See [Limitations](#limitations) for details.*
 
+## Install
+
+From a terminal, clone SFE into your home directory and run the conservative installer:
+
+```bash
+cd ~
+git clone https://github.com/Patrice-Gaudicheau/SpatialFieldEngineForCognition.git
+cd SpatialFieldEngineForCognition
+make install
+source .venv/bin/activate
+```
+
+`make install` creates or reuses `.venv`, installs SFE locally in editable mode,
+and checks the external Aider CLI used by normal `workspace_write` runs. It
+does not run aggressive system upgrades. Once the environment is active,
+continue with the Quick Start below.
+
 ## Quick Start: TUI or MCP
 
 Configure at least one provider before using the TUI or MCP server:
