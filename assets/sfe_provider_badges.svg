@@ -1,0 +1,63 @@
+<svg width="1112" height="44" viewBox="0 0 1112 44" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">SFE supported providers</title>
+  <desc id="desc">A horizontal strip of supported provider badges: OpenAI, Anthropic, Google, Alibaba, Ollama, Lemonade, CodexCLI, and OpenAI-compatible.</desc>
+  <defs>
+    <linearGradient id="badgeFill" x1="0" y1="0" x2="0" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#262626"/>
+      <stop offset="1" stop-color="#171717"/>
+    </linearGradient>
+    <linearGradient id="badgeSheen" x1="0" y1="0" x2="1112" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F0D7A1" stop-opacity="0.14"/>
+      <stop offset="0.5" stop-color="#94A3B8" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#F0D7A1" stop-opacity="0.14"/>
+    </linearGradient>
+    <style>
+      .label {
+        fill: #F7F1E4;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+      }
+      .badge {
+        fill: url(#badgeFill);
+        stroke: #8F8165;
+        stroke-opacity: 0.72;
+      }
+    </style>
+  </defs>
+
+  <g>
+    <rect class="badge" x="1" y="1" width="100" height="42" rx="12"/>
+    <rect x="1" y="1" width="100" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="51" y="27" text-anchor="middle">OpenAI</text>
+
+    <rect class="badge" x="111" y="1" width="117" height="42" rx="12"/>
+    <rect x="111" y="1" width="117" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="169.5" y="27" text-anchor="middle">Anthropic</text>
+
+    <rect class="badge" x="238" y="1" width="98" height="42" rx="12"/>
+    <rect x="238" y="1" width="98" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="287" y="27" text-anchor="middle">Google</text>
+
+    <rect class="badge" x="346" y="1" width="104" height="42" rx="12"/>
+    <rect x="346" y="1" width="104" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="398" y="27" text-anchor="middle">Alibaba</text>
+
+    <rect class="badge" x="460" y="1" width="97" height="42" rx="12"/>
+    <rect x="460" y="1" width="97" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="508.5" y="27" text-anchor="middle">Ollama</text>
+
+    <rect class="badge" x="567" y="1" width="116" height="42" rx="12"/>
+    <rect x="567" y="1" width="116" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="625" y="27" text-anchor="middle">Lemonade</text>
+
+    <rect class="badge" x="693" y="1" width="108" height="42" rx="12"/>
+    <rect x="693" y="1" width="108" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="747" y="27" text-anchor="middle">CodexCLI</text>
+
+    <rect class="badge" x="811" y="1" width="300" height="42" rx="12"/>
+    <rect x="811" y="1" width="300" height="42" rx="12" fill="url(#badgeSheen)"/>
+    <text class="label" x="961" y="27" text-anchor="middle">OpenAI-compatible</text>
+  </g>
+</svg>

@@ -11,14 +11,7 @@
   <img src="https://img.shields.io/badge/Providers-multi--provider-0f766e.svg" alt="Providers: multi-provider">
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square" alt="OpenAI">
-  <img src="https://img.shields.io/badge/Anthropic-D97757?style=flat-square" alt="Anthropic">
-  <img src="https://img.shields.io/badge/Google-4285F4?style=flat-square" alt="Google">
-  <img src="https://img.shields.io/badge/Alibaba-FF6A00?style=flat-square" alt="Alibaba">
-  <img src="https://img.shields.io/badge/Ollama-111111?style=flat-square" alt="Ollama">
-  <img src="https://img.shields.io/badge/Lemonade-F59E0B?style=flat-square" alt="Lemonade">
-  <img src="https://img.shields.io/badge/CodexCLI-334155?style=flat-square" alt="CodexCLI">
-  <img src="https://img.shields.io/badge/OpenAI--compatible-0F766E?style=flat-square" alt="OpenAI-compatible">
+  <img src="assets/sfe_provider_badges.svg" alt="Supported providers: OpenAI, Anthropic, Google, Alibaba, Ollama, Lemonade, CodexCLI, OpenAI-compatible">
 </p>
 
 **Context-routing and governance infrastructure for long-context LLM workflows.**
