@@ -22,6 +22,8 @@
 
 **SFE** (Spatial Field Engine for Cognition) is an open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
 
+This separation enables a simple model-allocation pattern: a stronger model can think, route, and select context, while a cheaper or specialized model executes against that reduced context. SFE can also loop: it can keep working on the original task, check the result, and retry instead of stopping at the first answer.
+
 For technical founders, AI infrastructure teams, and research engineers running repeated API-heavy workflows, SFE provides:
 
 - **Bounded Context Exposure:** Reduces repeated input-token exposure by selecting smaller, authoritative executor contexts.
