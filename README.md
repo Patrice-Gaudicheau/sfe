@@ -9,7 +9,6 @@
   <img src="https://img.shields.io/badge/Status-experimental%20research-orange.svg" alt="Status: experimental research">
   <img src="https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg" alt="Interface: TUI + MCP">
   <img src="https://img.shields.io/badge/Loop-enabled-22c55e.svg" alt="Loop: enabled">
-  <img src="https://img.shields.io/badge/Providers-multi--provider-0f766e.svg" alt="Providers: multi-provider">
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/Provider-OpenAI-412991?style=flat-square" alt="Provider: OpenAI">
