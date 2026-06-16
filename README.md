@@ -86,6 +86,13 @@ mode. For write tasks, SFE uses its workspace-write path and mechanical
 boundaries. For read-only or answer tasks, SFE can answer without mutating the
 workspace.
 
+For supported local `workspace_write` runs, SFE can run a bounded **Real Loop**:
+after a completed write attempt, a configured verifier/governor model compares
+the final workspace state with the original task. It can mark the task as
+passed, blocked, aborted, or worth one targeted retry. Retries use a supervisor
+generated correction task focused only on missing or failed requirements. This
+is LLM-based verification, not a deterministic correctness guarantee.
+
 For MCP clients, use the local SFE MCP server instead of the TUI. The current
 client setup notes cover both
 [Antigravity](docs/sfe_mcp_client_setup.md#antigravity-setup) and

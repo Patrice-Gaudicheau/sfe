@@ -19,6 +19,13 @@ from sfe.execution_backend import ExecutionBackend, ExecutionResult
 from sfe.execution_mode_router import ExecutionModeRouter
 from sfe.git_worktree_backend import GitWorktreeBackend
 from sfe.multipass_planner import MultiPassPlanner
+from sfe.real_loop import (
+    RealLoopConfig,
+    RealLoopController,
+    RealLoopVerifier,
+    resolve_real_loop_config,
+    route_real_loop_correction_task,
+)
 from sfe.run_pipeline import (
     RunPipeline,
     RunProgressCallback,
@@ -83,6 +90,8 @@ class RuntimeSession:
         discovery_router: DiscoveryRouter | None = None,
         execution_mode_router: ExecutionModeRouter | None = None,
         multipass_planner: MultiPassPlanner | None = None,
+        real_loop_config: RealLoopConfig | None = None,
+        real_loop_verifier: RealLoopVerifier | None = None,
     ) -> None:
         self.cwd = (cwd or Path.cwd()).resolve()
         self.backend = backend
@@ -92,6 +101,8 @@ class RuntimeSession:
         self.discovery_router = discovery_router
         self.execution_mode_router = execution_mode_router
         self.multipass_planner = multipass_planner
+        self.real_loop_config = real_loop_config
+        self.real_loop_verifier = real_loop_verifier
         self.workspace_root: Path | None = None
         self.workspace_session: WorkspaceSession | None = None
         self.discovery_result: DiscoveryResult | None = None
@@ -168,6 +179,35 @@ class RuntimeSession:
                     workspace_session=self.workspace_session,
                 )
             )
+            real_loop_config = self.real_loop_config or resolve_real_loop_config()
+            if not real_loop_config.disabled:
+                controller = RealLoopController(
+                    config=real_loop_config,
+                    verifier=self.real_loop_verifier,
+                    progress_callback=capture_progress,
+                )
+
+                def run_attempt(
+                    task: str,
+                    workspace_session: WorkspaceSession | None,
+                ) -> RunResult:
+                    return pipeline.run(
+                        RunRequest(
+                            workspace_root=self.workspace_root,
+                            task=task,
+                            workspace_session=workspace_session,
+                        )
+                    )
+
+                result = controller.run(
+                    initial_result=result,
+                    original_task=self.task,
+                    run_attempt=run_attempt,
+                    route_correction_task=lambda task: route_real_loop_correction_task(
+                        pipeline.execution_mode_router,
+                        task,
+                    ),
+                )
         finally:
             if after_execute is not None:
                 after_execute()

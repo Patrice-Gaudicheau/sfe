@@ -237,6 +237,7 @@ def _use_legacy_text_workspace_write_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SFE_WORKSPACE_WRITE_EXECUTOR", "text")
+    monkeypatch.setenv("SFE_REAL_LOOP", "false")
 
 
 @pytest.mark.parametrize("configured_value", (None, "  "))

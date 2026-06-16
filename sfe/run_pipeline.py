@@ -307,6 +307,7 @@ class RunResult:
     patch_hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
     multi_pass_summary: MultiPassRunSummary | None = None
     filesystem_result: FilesystemExecutionResult | None = None
+    real_loop_summary: object | None = None
 
 
 class GitWorkspacePreparer:

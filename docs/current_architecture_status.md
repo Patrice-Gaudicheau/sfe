@@ -13,6 +13,9 @@ For the planned local MCP control surface and the TUI/MCP ISO runtime
 requirement, see
 [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md).
 
+For the bounded verifier/governor retry layer on supported workspace writes,
+see [real_loop.md](real_loop.md).
+
 ## Current Local User Path
 
 SFE core is the routing/context engine: routing, context selection, bounded
@@ -62,6 +65,13 @@ proceeds. The Executor does not design the global plan; it only makes the
 changes for each already-validated batch. Batch outputs use the same worktree
 isolation, actual-change capture, destination-boundary check, and promotion
 machinery as normal workspace writes.
+
+Completed `workspace_write` attempts may also use Real Loop when enabled and a
+verifier provider is available. Real Loop asks an LLM verifier/governor to judge
+the final workspace state against the original task. The governor can stop with
+pass, blocked, or abort, or produce a targeted correction task for one bounded
+retry attempt. This is an auditable LLM judgment, not deterministic proof of
+task correctness.
 
 The worktree is the main operational guard for `workspace_write`. If the
 selected workspace is already inside a Git repository, `/run` uses that

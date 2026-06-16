@@ -332,6 +332,7 @@ def render_run_result_normal(result: RunResult) -> str:
         "SFE run",
         f"  status: {result.status}",
         f"  execution mode: {_display_value(execution_mode)}",
+        *_render_real_loop_normal_lines(result),
         f"  multi-pass: {_yes_no(result.multi_pass_summary is not None and result.multi_pass_summary.enabled)}",
         f"  promoted files: {_format_string_list(list(result.promoted_files))}",
         f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
@@ -423,6 +424,7 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         f"  selected context tokens: {_display_value(_run_selected_tokens(dry_run))}",
         f"  estimated reduction pct: {_display_value(_run_reduction_pct(dry_run))}",
         f"  executor provider: {_display_value(result.executor_provider)}",
+        *_render_real_loop_debug_lines(result),
         f"  patch generated: {_yes_no(result.patch_generated)}",
         f"  patch applied: {_yes_no(result.patch_applied)}",
         f"  multi-pass: {_yes_no(result.multi_pass_summary is not None and result.multi_pass_summary.enabled)}",
@@ -549,6 +551,73 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         ]
     )
     return "\n".join(lines)
+
+
+def _render_real_loop_normal_lines(result: RunResult) -> list[str]:
+    summary = getattr(result, "real_loop_summary", None)
+    if summary is None:
+        return []
+    lines = [
+        "  real loop: "
+        f"{_display_value(getattr(summary, 'real_loop_status', None))}",
+        "  LLM verifier verdict: "
+        f"{_display_value(getattr(summary, 'llm_verifier_verdict', None))}",
+        "  retry worthwhile: "
+        f"{_display_bool(getattr(summary, 'retry_worthwhile', None))}",
+        "  stop reason: "
+        f"{_display_value(getattr(summary, 'stop_reason', None))}",
+    ]
+    reason = getattr(summary, "reason", None)
+    if reason:
+        lines.append(f"  reason: {_display_value(reason)}")
+    if getattr(summary, "real_loop_status", None) == "aborted" and not reason:
+        lines.append(
+            "  note: Real Loop stopped incomplete because further retries were "
+            "not expected to improve the result."
+        )
+    return lines
+
+
+def _render_real_loop_debug_lines(result: RunResult) -> list[str]:
+    summary = getattr(result, "real_loop_summary", None)
+    if summary is None:
+        return []
+    lines = [
+        "SFE Real Loop",
+        "  real loop status: "
+        f"{_display_value(getattr(summary, 'real_loop_status', None))}",
+        f"  attempts: {getattr(summary, 'attempts_total', 0)}/{getattr(summary, 'max_iterations', 0)}",
+        "  LLM verifier verdict: "
+        f"{_display_value(getattr(summary, 'llm_verifier_verdict', None))}",
+        "  retry worthwhile: "
+        f"{_display_bool(getattr(summary, 'retry_worthwhile', None))}",
+        "  progress since previous iteration: "
+        f"{_display_value(getattr(summary, 'progress_since_previous_iteration', None))}",
+        "  stop reason: "
+        f"{_display_value(getattr(summary, 'stop_reason', None))}",
+        "  reason: "
+        f"{_display_value(getattr(summary, 'reason', None))}",
+        "  detected issues: "
+        f"{_format_string_list(list(getattr(summary, 'detected_issues', ()) or ())) }",
+        "  executor retry task: "
+        f"{_display_value(getattr(summary, 'executor_retry_task', None))}",
+        "  verifier provider: "
+        f"{_display_value(getattr(summary, 'verifier_provider', None))}",
+        "  verifier model: "
+        f"{_display_value(getattr(summary, 'verifier_model', None))}",
+    ]
+    for iteration in tuple(getattr(summary, "iterations", ()) or ()):
+        index = getattr(iteration, "iteration_index", 0)
+        lines.extend(
+            [
+                f"  iteration {index} run status: {_display_value(getattr(iteration, 'run_status', None))}",
+                f"  iteration {index} verifier verdict: {_display_value(getattr(iteration, 'llm_verifier_verdict', None))}",
+                f"  iteration {index} progress: {_display_value(getattr(iteration, 'progress_since_previous_iteration', None))}",
+                f"  iteration {index} retry worthwhile: {_display_bool(getattr(iteration, 'retry_worthwhile', None))}",
+                f"  iteration {index} stop reason: {_display_value(getattr(iteration, 'stop_reason', None))}",
+            ]
+        )
+    return lines
 
 
 def _render_multi_pass_summary(summary: object) -> list[str]:

@@ -19,6 +19,11 @@ Large monolithic file-generation responses are brittle:
 Multi-pass reduces that risk by asking the Router to split the work into
 bounded batches, then validating and promoting each batch independently.
 
+Multi-pass is not Real Loop. Multi-pass divides one `workspace_write` attempt
+into planned batches. Real Loop verifies the final state after a completed
+attempt and may launch a new targeted correction attempt when its
+verifier/governor says the retry is worthwhile.
+
 ## How It Works
 
 The core flow is:

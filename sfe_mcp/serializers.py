@@ -87,6 +87,7 @@ def serialize_run_result(
             "init_warning": result.git_init_warning,
         },
         "executor_provider": result.executor_provider,
+        "real_loop": _serialize_real_loop_summary(result),
         "warnings": list(result.warnings),
         "action_hint": _run_action_hint(result),
         "progress": [serialize_progress_event(event) for event in progress_events],
@@ -239,6 +240,7 @@ def serialize_session_error(error_category: str | None) -> dict[str, Any]:
             "initial_commit_hash": None,
             "init_warning": None,
         },
+        "real_loop": None,
         "warnings": [],
         "action_hint": _session_error_action_hint(reason),
         "progress": [],
@@ -403,6 +405,78 @@ def _serialize_multi_pass_top_level(result: RunResult) -> dict[str, Any]:
             }
             for result in summary.pass_results
         ],
+    }
+
+
+def _serialize_real_loop_summary(result: RunResult) -> dict[str, Any] | None:
+    summary = getattr(result, "real_loop_summary", None)
+    if summary is None:
+        return None
+    return {
+        "enabled": bool(getattr(summary, "enabled", False)),
+        "real_loop_status": getattr(summary, "real_loop_status", None),
+        "attempts_total": getattr(summary, "attempts_total", 0),
+        "max_iterations": getattr(summary, "max_iterations", 0),
+        "llm_verifier_verdict": getattr(summary, "llm_verifier_verdict", None),
+        "retry_worthwhile": getattr(summary, "retry_worthwhile", None),
+        "stop_reason": getattr(summary, "stop_reason", None),
+        "progress_since_previous_iteration": getattr(
+            summary,
+            "progress_since_previous_iteration",
+            None,
+        ),
+        "detected_issues": [
+            _safe_diagnostic_value(item)
+            for item in tuple(getattr(summary, "detected_issues", ()) or ())
+            if isinstance(item, str)
+        ],
+        "executor_retry_task": _safe_diagnostic_value(
+            getattr(summary, "executor_retry_task", None)
+        ),
+        "verifier_provider": getattr(summary, "verifier_provider", None),
+        "verifier_model": getattr(summary, "verifier_model", None),
+        "reason": _safe_diagnostic_value(getattr(summary, "reason", None)),
+        "iterations": [
+            _serialize_real_loop_iteration(iteration)
+            for iteration in tuple(getattr(summary, "iterations", ()) or ())
+        ],
+    }
+
+
+def _serialize_real_loop_iteration(iteration: object) -> dict[str, Any]:
+    return {
+        "iteration_index": getattr(iteration, "iteration_index", 0),
+        "run_status": getattr(iteration, "run_status", None),
+        "execution_mode": getattr(iteration, "execution_mode", None),
+        "changed_files": list(getattr(iteration, "changed_files", ()) or ()),
+        "promoted_files": list(getattr(iteration, "promoted_files", ()) or ()),
+        "llm_verifier_verdict": getattr(iteration, "llm_verifier_verdict", None),
+        "retry_worthwhile": getattr(iteration, "retry_worthwhile", None),
+        "progress_since_previous_iteration": getattr(
+            iteration,
+            "progress_since_previous_iteration",
+            None,
+        ),
+        "repeated_failure": getattr(iteration, "repeated_failure", None),
+        "failure_category": getattr(iteration, "failure_category", None),
+        "detected_issues": [
+            _safe_diagnostic_value(item)
+            for item in tuple(getattr(iteration, "detected_issues", ()) or ())
+            if isinstance(item, str)
+        ],
+        "correction_objective": _safe_diagnostic_value(
+            getattr(iteration, "correction_objective", None)
+        ),
+        "executor_retry_task": _safe_diagnostic_value(
+            getattr(iteration, "executor_retry_task", None)
+        ),
+        "files_or_areas_to_focus": [
+            _safe_diagnostic_value(item)
+            for item in tuple(getattr(iteration, "files_or_areas_to_focus", ()) or ())
+            if isinstance(item, str)
+        ],
+        "reason": _safe_diagnostic_value(getattr(iteration, "reason", None)),
+        "stop_reason": getattr(iteration, "stop_reason", None),
     }
 
 

@@ -124,7 +124,10 @@ Lower-level diagnostics are available but are not the normal first path:
   workspace write is selected and the workspace is not yet a Git repository,
   `/run` can initialize a local repository snapshot first; it does not create a
   remote, push, run syntax checks, run tests or lint, require diff inspection,
-  require human approval, or require router review.
+  require human approval, or require router review. When Real Loop is enabled
+  and a verifier provider is available, completed workspace writes receive a
+  bounded LLM verifier/governor check that may stop or issue a targeted
+  correction task for one bounded retry.
 - `/reset`: clear task, context, latest routing/result, and skipped/rejected
   context and discovery state; preserve the selected workspace.
 - `/advanced`: show lower-level diagnostic commands.
@@ -203,6 +206,8 @@ SFE: executor prompt prepared
 SFE: patch/worktree execution started
 SFE: workspace boundary check completed
 SFE: promotion completed
+SFE: Real Loop verification started: attempt 1
+SFE: Real Loop verifier verdict: pass
 ```
 
 For `console_output`, `/run` shows the routing and prompt-preparation steps,

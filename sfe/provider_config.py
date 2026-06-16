@@ -14,6 +14,7 @@ SFE_PROVIDER_ENV = "SFE_PROVIDER"
 SFE_PROVIDER_ROUTER_ENV = "SFE_PROVIDER_ROUTER"
 SFE_PROVIDER_DISCOVERY_ENV = "SFE_PROVIDER_DISCOVERY"
 SFE_PROVIDER_EXECUTOR_ENV = "SFE_PROVIDER_EXECUTOR"
+SFE_PROVIDER_VERIFIER_ENV = "SFE_PROVIDER_VERIFIER"
 DEFAULT_SFE_PROVIDER = "openai"
 CODEXCLI_SFE_PROVIDER = "codexcli"
 OLLAMA_SFE_PROVIDER = "ollama"
@@ -95,6 +96,18 @@ def resolve_sfe_executor_provider(
         role_env_var=SFE_PROVIDER_EXECUTOR_ENV,
         default=default,
     )
+
+
+def resolve_sfe_verifier_provider(
+    environ: Mapping[str, str] | None = None,
+    default: str = DEFAULT_SFE_PROVIDER,
+) -> str:
+    """Resolve the Real Loop verifier provider from verifier, router, or shared config."""
+    env = os.environ if environ is None else environ
+    provider = _env_value(env, SFE_PROVIDER_VERIFIER_ENV)
+    if provider is not None:
+        return normalize_provider_name(provider)
+    return resolve_sfe_router_provider(env, default=default)
 
 
 def _resolve_sfe_role_provider(

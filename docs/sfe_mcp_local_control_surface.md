@@ -147,6 +147,8 @@ Expected behavior:
 - return concise structured status, execution mode, issue category and reason
   when failed, selected context metadata, changed files, promotion status, and
   safe progress metadata;
+- include Real Loop summary fields when the shared runtime verifier/governor
+  runs for an eligible `workspace_write` task;
 - not expose raw provider payloads, secrets, absolute internal paths, full file
   contents, or full prompts.
 
@@ -231,6 +233,12 @@ transport for `workspace_write`. MCP does not implement its own parser or prompt
 contract; it reaches the same `RuntimeSession` and `RunPipeline` path as the TUI.
 Filesystem-capable local or CLI executors are a separate path when they actually
 write files inside the controlled worktree.
+
+Real Loop follows the same rule: MCP does not own verifier prompts, retry-task
+generation, or loop stop logic. When enabled, those behaviors live in the shared
+runtime layer and are reported through `sfe_run` / `sfe_run_report` as safe
+structured metadata such as `real_loop_status`, `llm_verifier_verdict`,
+`retry_worthwhile`, `stop_reason`, and `executor_retry_task`.
 
 ## Git Worktree And Promotion Expectations
 
