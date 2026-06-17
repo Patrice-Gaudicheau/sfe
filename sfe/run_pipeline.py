@@ -3360,12 +3360,15 @@ def _expected_workspace_write_paths_from_task(
     active_workspace: Path,
 ) -> tuple[str, ...] | RunIssue:
     for match in EXPECTED_WORKSPACE_WRITE_UNSAFE_FILE_RE.finditer(task):
+        if not _unsafe_file_mention_has_path_boundary(task, match.start()):
+            continue
         if _file_mention_is_inside_url(task, match.start()):
             continue
         candidate = _normalize_expected_workspace_write_path(match.group("path"))
         issue = _validate_expected_workspace_write_path(
             active_workspace,
             candidate,
+            expected_paths=(candidate,),
         )
         if issue is not None:
             return issue
@@ -3377,15 +3380,48 @@ def _expected_workspace_write_paths_from_task(
         candidate = _normalize_expected_workspace_write_path(match.group("path"))
         if not candidate or candidate in seen:
             continue
+        if _file_mention_is_prose_constraint(task, match.end(), candidate):
+            continue
         issue = _validate_expected_workspace_write_path(
             active_workspace,
             candidate,
+            expected_paths=(*paths, candidate),
         )
         if issue is not None:
             return issue
         seen.add(candidate)
         paths.append(candidate)
     return tuple(paths[:20])
+
+
+def _unsafe_file_mention_has_path_boundary(task: str, start: int) -> bool:
+    if start <= 0:
+        return True
+    previous = task[start - 1]
+    return not (previous.isalnum() or previous in {"_", ".", "-"})
+
+
+def _file_mention_is_prose_constraint(
+    task: str,
+    end: int,
+    candidate: str,
+) -> bool:
+    normalized = candidate.replace("\\", "/")
+    if "/" in normalized or normalized.startswith((".", "~")):
+        return False
+    suffix = task[end:]
+    stripped_suffix = suffix.lstrip(" \t")
+    return stripped_suffix.lower().startswith(
+        (
+            "must ",
+            "must not ",
+            "should ",
+            "should not ",
+            "shall ",
+            "shall not ",
+            "only ",
+        )
+    )
 
 
 def _file_mention_is_inside_url(task: str, start: int) -> bool:
@@ -3409,6 +3445,8 @@ def _normalize_expected_workspace_write_path(path: str) -> str:
 def _validate_expected_workspace_write_path(
     active_workspace: Path,
     relative_path: str,
+    *,
+    expected_paths: tuple[str, ...] | None = None,
 ) -> RunIssue | None:
     reason = _expected_workspace_write_path_rejection_reason(
         active_workspace,
@@ -3422,6 +3460,7 @@ def _validate_expected_workspace_write_path(
         relative_path or None,
         diagnostics={
             "expected_path": relative_path,
+            "expected_paths": expected_paths or (relative_path,),
             "validation_reason": reason,
         },
     )
@@ -3474,6 +3513,7 @@ def _prepare_expected_workspace_write_placeholders(
         issue = _validate_expected_workspace_write_path(
             active_workspace,
             relative_path,
+            expected_paths=expected_paths,
         )
         if issue is not None:
             return issue

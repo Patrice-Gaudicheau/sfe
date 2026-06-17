@@ -1015,6 +1015,149 @@ def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_expected_workspace_write_paths_ignore_bare_prose_filename(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "main.js must only bootstrap the application.",
+        tmp_path,
+    )
+
+    assert result == ()
+
+
+def test_expected_workspace_write_paths_keep_explicit_relative_structure(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "\n".join(
+            [
+                "Create this structure:",
+                "src/main.js",
+                "src/core/App.js",
+                "main.js must only bootstrap the application.",
+            ]
+        ),
+        tmp_path,
+    )
+
+    assert result == ("src/main.js", "src/core/App.js")
+
+
+def test_expected_workspace_write_paths_reject_explicit_absolute_path(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "Create /main.js",
+        tmp_path,
+    )
+
+    assert isinstance(result, RunIssue)
+    assert result.reason == "unsafe_expected_path"
+    assert result.path == "/main.js"
+    assert result.diagnostics is not None
+    assert result.diagnostics["validation_reason"] == "absolute_path"
+    assert result.diagnostics["expected_paths"] == ("/main.js",)
+
+
+def test_run_pipeline_default_aider_invokes_executor_for_nested_main_js_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    task = "\n".join(
+        [
+            "Build a Vite project with this explicit structure:",
+            "src/main.js",
+            "src/core/App.js",
+            "src/core/createRenderer.js",
+            "main.js must only bootstrap the application.",
+            "Do not create a monolithic JavaScript file.",
+        ]
+    )
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "src").mkdir(parents=True, exist_ok=True)
+        (workspace / "src/main.js").write_text(
+            "import './core/App.js';\n",
+            encoding="utf-8",
+        )
+        (workspace / "src/core").mkdir(parents=True, exist_ok=True)
+        (workspace / "src/core/App.js").write_text(
+            "export class App {}\n",
+            encoding="utf-8",
+        )
+        (workspace / "src/core/createRenderer.js").write_text(
+            "export function createRenderer() {}\n",
+            encoding="utf-8",
+        )
+
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task=task,
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert filesystem_executor.calls
+    assert filesystem_executor.calls[0].expected_paths == (
+        "src/main.js",
+        "src/core/App.js",
+        "src/core/createRenderer.js",
+    )
+    assert "/main.js" not in filesystem_executor.calls[0].expected_paths
+    assert set(result.promoted_files) == {
+        "src/main.js",
+        "src/core/App.js",
+        "src/core/createRenderer.js",
+    }
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_unsafe_expected_path_report_is_consistent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    filesystem_executor = FakeFilesystemExecutor()
+
+    result = _pipeline(filesystem_executor=filesystem_executor).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create /main.js",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "unsafe_expected_path"
+    assert result.issue.path == "/main.js"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["expected_paths"] == ("/main.js",)
+    assert result.filesystem_result is not None
+    assert result.filesystem_result.diagnostics.metadata["expected_paths"] == (
+        "/main.js",
+    )
+    rendered = render_run_result(result)
+    assert "issue path: /main.js" in rendered
+    assert "filesystem expected files: /main.js" in rendered
+    assert filesystem_executor.calls == []
+    assert result.workspace_session is not None
+    assert _manager().cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_default_aider_precreates_expected_files_only_in_worktree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
