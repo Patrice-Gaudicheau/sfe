@@ -18,18 +18,13 @@ Use these documents for the current benchmark picture:
 
 ## Historical Progression
 
-The Large Real-World notes record an earlier benchmark progression over
-controlled, project-like multi-zone fixtures:
+The Large Real-World notes recorded an earlier benchmark progression over
+controlled, project-like multi-zone fixtures, from deterministic validation
+through OpenAI selector-only, selector plus deterministic executor, and selector
+plus OpenAI executor smoke observations.
 
-- [large_real_world_benchmark_progression_summary.md](history/large_real_world/large_real_world_benchmark_progression_summary.md):
-  synthesis of the progression from deterministic validation through live
-  OpenAI selector and executor smoke tests.
-- [openai_selector_executor_runs_may_2026.md](history/large_real_world/openai_selector_executor_runs_may_2026.md):
-  consolidated OpenAI selector-only, selector plus deterministic executor, and
-  selector plus OpenAI executor smoke observations.
-
-These notes are useful for audit continuity, but they are not the current
-headline benchmark documentation.
+Those records are local-only developer material. They are useful for audit
+continuity, but they are not the current headline benchmark documentation.
 
 ## Caveats
 

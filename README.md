@@ -780,9 +780,8 @@ calls:
 python runtime/run_codexcli_output_token_benchmark.py --dry-run --max-tasks 1
 ```
 
-For the protocol, fixture reset command, safe one-task live commands, and
-Campaign A/B model setup, see
-`docs/history/providers/codexcli/codexcli_output_token_dev_patch_benchmark_protocol.md`.
+Use the dry-run path for local protocol inspection before any live CodexCLI
+benchmark call.
 
 Run one tiny Alibaba/Qwen smoke test when local credentials are configured:
 
@@ -847,9 +846,6 @@ model intelligence.
 - `docs/INDEX.md`: recommended starting point and documentation map for technical reviewers.
 - `docs/sfe_product_doctrine.md`: current product doctrine and terminology.
 - `docs/tui_v0_1_user_guide.md`: current local SFE-aware TUI workflow.
-- `docs/history/tui/tui_apply_patch_legacy_design.md`: legacy `/patch` ->
-  `/apply-patch` write boundary, retained for historical context rather than
-  the primary `/run` workflow.
 - `docs/current_architecture_status.md`: current boundary between the SFE core,
   local TUI surface, filesystem/worktree mode, and provider integration.
 - `docs/workspace_write_multipass.md`: multi-pass `workspace_write` mode for

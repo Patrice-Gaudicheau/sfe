@@ -1,4 +1,0 @@
-app/app.js
-app/index.html
-app/README.md
-app/styles.css

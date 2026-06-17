@@ -61,12 +61,6 @@ general model-safety guarantees.
 
 - [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current local user-facing
   TUI guide. `/run` is the current primary action.
-- [history/tui/tui_apply_patch_legacy_design.md](history/tui/tui_apply_patch_legacy_design.md):
-  legacy `/patch` -> `/apply-patch` write-boundary design from before the
-  current `/run`-first and Aider-backed workspace-writer flow.
-
-Historical TUI milestone and backend-strategy notes are under
-[`history/tui/`](history/tui/).
 
 ## Benchmark Evidence
 
@@ -147,32 +141,12 @@ include `openai` even though they call OpenAI when `OPENAI_API_KEY` is present.
 Generated local reports should stay outside tracked files, preferably under
 `/tmp`, unless a summarized documentation note is intentionally added.
 
-## History
+## Local Historical Notes
 
-Historical notes preserve experiments, smoke tests, milestones, and superseded
-roadmaps. They are useful for audit trail and context, but they should not be
-read as current top-level project status.
-
-- [history/router/router_contract_legacy.md](history/router/router_contract_legacy.md):
-  older broad router contract with task type, role, memory zones, and
-  older direct/tool-assisted/multi-step execution patterns.
-- [history/tui/tui_readonly_ask_milestone.md](history/tui/tui_readonly_ask_milestone.md)
-- [history/tui/tui_direct_backend_strategy.md](history/tui/tui_direct_backend_strategy.md)
-- [history/tui/tui_apply_patch_legacy_design.md](history/tui/tui_apply_patch_legacy_design.md)
-- [history/mcp/mcp_antigravity_dogfooding_001.md](history/mcp/mcp_antigravity_dogfooding_001.md)
-- [history/sfe_continuity_orientation_glossary.md](history/sfe_continuity_orientation_glossary.md)
-- [history/high_overlap/high_overlap_fixture_expansion_phase_close.md](history/high_overlap/high_overlap_fixture_expansion_phase_close.md)
-- [history/roadmaps/roadmap_after_structural_50k.md](history/roadmaps/roadmap_after_structural_50k.md)
-- [high_overlap_history.md](high_overlap_history.md): rollup for historical
-  high-overlap experiment notes.
-- [large_real_world_history.md](large_real_world_history.md): rollup for
-  historical large real-world-style benchmark notes.
-- [history/openai_smoke_reports/](history/openai_smoke_reports/README.md):
-  historical generated Markdown report snapshots moved out of tracked `logs/`.
-- [alibaba_provider_history.md](alibaba_provider_history.md): rollup for
-  Alibaba/Qwen historical integration notes.
-- [history/providers/codexcli/](history/providers/codexcli/README.md):
-  rollup for CodexCLI provider history and retained benchmark notes.
+Bulky historical notes and demo artifacts are local-only developer material and
+are not part of the tracked GitHub documentation. Current tracked docs should
+be used for public architecture, setup, TUI/MCP, provider, and benchmark
+interpretation.
 
 ## Terms And Caveats
 

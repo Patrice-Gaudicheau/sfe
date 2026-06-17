@@ -26,14 +26,11 @@ document says otherwise. It should not be read as a repeat campaign.
 ## Historical Integration Notes
 
 Earlier Alibaba/Qwen work advanced through small provider checks before the
-current large/contextual summaries existed:
+current large/contextual summaries existed. The local-only historical notes
+cover early Qwen router checks, progressive benchmark stages, Qwen structural
+spatial-only smoke, and Alibaba-hosted DeepSeek exploration.
 
-- [history/providers/alibaba/](history/providers/alibaba/README.md):
-  consolidated historical smoke rollup covering early Qwen router checks,
-  progressive benchmark stages, Qwen structural spatial-only smoke, and
-  Alibaba-hosted DeepSeek exploration.
-
-These notes are useful for audit continuity, but the current Alibaba/Qwen
+Those notes are useful for audit continuity, but the current Alibaba/Qwen
 benchmark status should be taken from the supporting docs above and from
 `README.md`.
 

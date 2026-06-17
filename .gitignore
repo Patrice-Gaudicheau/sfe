@@ -34,6 +34,11 @@ Thumbs.db
 # Local CLI artifacts
 .antigravitycli/
 
+# Local-only historical/demo material
+docs/history/
+examples/NoteKeeper/
+examples/SolarSystem3D/
+
 # Photoshop source files
 *.psd
 *.psb

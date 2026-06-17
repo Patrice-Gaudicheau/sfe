@@ -2,9 +2,8 @@
 
 This is the current routing contract used by the `/run` pipeline. Historical
 router concepts such as task type, role, memory zones, and older
-direct/tool-assisted/multi-step execution patterns are preserved in
-`docs/history/router/router_contract_legacy.md`, but they are not the current
-TUI `/run` execution-mode contract.
+direct/tool-assisted/multi-step execution patterns are not the current TUI
+`/run` execution-mode contract.
 
 ## Responsibility
 

@@ -15,24 +15,16 @@ describe methodology, fixture design, or phase-level interpretation:
   diagnostic failure buckets and strict validation interpretation.
 - [high_overlap_authority_gap_fixture_expansion_design.md](high_overlap_authority_gap_fixture_expansion_design.md):
   fixture expansion design for authority-gap scenarios.
-- [high_overlap_fixture_expansion_phase_close.md](history/high_overlap/high_overlap_fixture_expansion_phase_close.md):
-  phase closeout for newer authority-gap fixtures, with a current status note.
 
 ## Historical Progression
 
-The historical High-Overlap notes record controlled experiments and phase
-progression:
+The historical High-Overlap notes recorded controlled progression through
+poison-pill, hostile distractor, subtle authority-conflict, and newer
+authority-gap fixture checks. The newer fixture observations included selector,
+selected-context executor, repeat-3, and selected-vs-full smoke runs.
 
-- [high_overlap_poison_pill_progression_summary.md](history/high_overlap/high_overlap_poison_pill_progression_summary.md):
-  progression through poison-pill and hostile distractor checks.
-- [high_overlap_subtle_poison_progression_summary.md](history/high_overlap/high_overlap_subtle_poison_progression_summary.md):
-  progression through subtler poison and authority-conflict checks.
-- [new_fixtures_smoke_runs_may_2026.md](history/high_overlap/new_fixtures_smoke_runs_may_2026.md):
-  consolidated selector, selected-context executor, repeat-3, and
-  selected-vs-full observations for newer authority-gap fixtures.
-
-These records are useful for audit continuity, but current readers should use
-the visible methodology docs above and the current project overview before
+Those records are local-only developer material. Current readers should use the
+visible methodology docs above and the current project overview before
 interpreting historical run notes.
 
 ## Caveats

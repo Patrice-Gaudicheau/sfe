@@ -1,3 +1,0 @@
-app/app.js
-app/README.md
-app/index.html
