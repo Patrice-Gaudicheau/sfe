@@ -102,6 +102,25 @@ def _safe_resolve_provider(resolver: Callable[[], str]) -> str:
         return "invalid"
 
 
+def _normalize_task_text(raw_text: str) -> str:
+    task = raw_text.strip()
+    if (
+        len(task) >= 2
+        and task[0] == task[-1]
+        and task[0] in {'"', "'"}
+    ):
+        return task[1:-1].strip()
+    return task
+
+
+def _split_command(command: str) -> tuple[str, str]:
+    if command == "/task":
+        return "/task", ""
+    if command.startswith("/task") and command[len("/task")].isspace():
+        return "/task", _normalize_task_text(command[len("/task") :])
+    return command.partition(" ")[::2]
+
+
 @dataclass(frozen=True)
 class PendingPatchProposal:
     text: str
@@ -260,7 +279,7 @@ class SfeTuiApp:
         self._plain_output(renderer.color_sfe_output(text, enabled=self.color_enabled))
 
     def _handle_command(self, command: str) -> bool:
-        name, _, rest = command.partition(" ")
+        name, rest = _split_command(command)
         if name in {"/help", "/?"}:
             if rest.strip() == "advanced":
                 self.output(renderer.render_advanced_help())

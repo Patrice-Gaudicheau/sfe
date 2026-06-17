@@ -86,7 +86,7 @@ workspace paths using safe relative labels where possible.
 The normal first path is short:
 
 ```text
-/task <question>
+/task Build a small app
 /run
 ```
 
@@ -116,7 +116,8 @@ Lower-level diagnostics are available but are not the normal first path:
 - `/help` and `/?`: show concise command help.
 - `/status`: show current TUI state, latest result metadata, and write/shell
   boundaries.
-- `/task <text>`: store the current task. Empty tasks are rejected.
+- `/task <text>`: store the current task. Quotes around task text are optional,
+  not required. Empty tasks are rejected.
 - `/run`: resolve the current task through the core execution-mode router. It
   may answer directly in the TUI console or create workspace file changes
   through the Aider-backed isolated worktree pipeline. During execution, it

@@ -76,15 +76,15 @@ Use this minimal workflow:
 
 ```text
 Workspace: <enter the target workspace directory>
-/task <describe what SFE should do>
+/task Build a small app
 /run
 ```
 
-`Workspace` selects the target directory. `/task` defines the current task.
-`/run` lets SFE route the task, select context, and execute the appropriate
-mode. For write tasks, SFE uses its workspace-write path and mechanical
-boundaries. For read-only or answer tasks, SFE can answer without mutating the
-workspace.
+`Workspace` selects the target directory. `/task` defines the current task;
+quotes around the task text are optional, not required. `/run` lets SFE route
+the task, select context, and execute the appropriate mode. For write tasks,
+SFE uses its workspace-write path and mechanical boundaries. For read-only or
+answer tasks, SFE can answer without mutating the workspace.
 
 For supported local `workspace_write` runs, SFE can run a bounded **Real Loop**:
 after a completed write attempt, a configured verifier/governor model compares
@@ -315,11 +315,12 @@ SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `DirectBackend` and follows:
 
 ```text
-/task <question>
+/task Build a small app
 /run
 ```
 
-`/run` first asks the core execution-mode router how to resolve the task.
+Quotes around `/task` text are optional. `/run` first asks the core
+execution-mode router how to resolve the task.
 `console_output` produces a natural-language answer in the TUI with no Git
 preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
 existing discovery, context-routing, Aider-backed filesystem executor, and

@@ -1868,6 +1868,74 @@ def test_task_without_text_is_actionable_error_and_preserves_existing_task(
     assert "task present: True" in rendered
 
 
+def test_task_command_accepts_unquoted_raw_text(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime_session = RecordingRuntimeSession(workspace)
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=lambda text: None,
+        cwd=workspace,
+        runtime_session=runtime_session,  # type: ignore[arg-type]
+    )
+
+    app._handle_command("/task Build a small app")
+    app._handle_command("/task    Keep   internal   spacing")
+    app._handle_command("/task\tTabbed task text")
+
+    assert runtime_session.set_task_calls == [
+        "Build a small app",
+        "Keep   internal   spacing",
+        "Tabbed task text",
+    ]
+
+
+def test_task_command_accepts_quoted_text(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime_session = RecordingRuntimeSession(workspace)
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=lambda text: None,
+        cwd=workspace,
+        runtime_session=runtime_session,  # type: ignore[arg-type]
+    )
+
+    app._handle_command('/task "Build a small app"')
+    app._handle_command("/task 'Build a small app'")
+
+    assert runtime_session.set_task_calls == [
+        "Build a small app",
+        "Build a small app",
+    ]
+
+
+def test_normal_commands_keep_existing_dispatch_behavior(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime_session = RecordingRuntimeSession(workspace)
+    output: list[str] = []
+    app = SfeTuiApp(
+        input_provider=FakeInput([""]),
+        output=output.append,
+        cwd=workspace,
+        runtime_session=runtime_session,  # type: ignore[arg-type]
+    )
+
+    assert app._handle_command("/help") is False
+    assert app._handle_command("/status") is False
+    assert app._handle_command("/reset") is False
+    assert app._handle_command("/run") is False
+    assert app._handle_command("/quit") is True
+
+    rendered = "\n".join(output)
+    assert "SFE TUI commands:" in rendered
+    assert "SFE TUI status" in rendered
+    assert "Session reset. Workspace is preserved." in rendered
+    assert runtime_session.reset_calls == 1
+    assert runtime_session.run_calls == 1
+
+
 def test_unknown_command_suggests_help(tmp_path) -> None:
     output: list[str] = []
     app = SfeTuiApp(
