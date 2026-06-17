@@ -857,7 +857,7 @@ def _render_filesystem_result(filesystem_result: object) -> list[str]:
     metadata = getattr(diagnostics, "metadata", {}) if diagnostics is not None else {}
     if not isinstance(metadata, dict):
         metadata = {}
-    return [
+    lines = [
         "SFE filesystem executor",
         "  filesystem executor: "
         f"{_display_value(getattr(filesystem_result, 'executor_name', None))}",
@@ -878,6 +878,28 @@ def _render_filesystem_result(filesystem_result: object) -> list[str]:
         "  filesystem stderr length: "
         f"{_display_value(getattr(diagnostics, 'stderr_length', None))}",
     ]
+    bridge_diagnostics = metadata.get("bridge_diagnostics")
+    if isinstance(bridge_diagnostics, dict):
+        lines.extend(_render_aider_bridge_diagnostics(bridge_diagnostics))
+    return lines
+
+
+def _render_aider_bridge_diagnostics(diagnostics: dict[str, object]) -> list[str]:
+    lines = [
+        "  filesystem bridge provider: "
+        f"{_display_value(diagnostics.get('provider_name'))}",
+        "  filesystem bridge provider source: "
+        f"{_display_value(diagnostics.get('provider_source_env_var'))}="
+        f"{_display_value(diagnostics.get('provider_source_value'))}",
+    ]
+    ignored_env_var = diagnostics.get("ignored_provider_env_var")
+    if ignored_env_var is not None:
+        lines.append(
+            "  filesystem bridge ignored provider source: "
+            f"{_display_value(ignored_env_var)}="
+            f"{_display_value(diagnostics.get('ignored_provider_value'))}"
+        )
+    return lines
 
 
 def _render_executor_response_diagnostics(

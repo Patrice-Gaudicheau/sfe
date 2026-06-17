@@ -9,9 +9,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from sfe.provider_config import resolve_sfe_executor_provider
+from sfe.provider_config import (
+    CODEXCLI_SFE_PROVIDER,
+    SFE_PROVIDER_ENV,
+    SFE_PROVIDER_EXECUTOR_ENV,
+    normalize_provider_name,
+)
 
 
+SFE_AIDER_PROVIDER_ENV = "SFE_AIDER_PROVIDER"
 SFE_AIDER_MODEL_ENV = "SFE_AIDER_MODEL"
 SFE_AIDER_WEAK_MODEL_ENV = "SFE_AIDER_WEAK_MODEL"
 SFE_AIDER_TIMEOUT_SECONDS_ENV = "SFE_AIDER_TIMEOUT_SECONDS"
@@ -45,9 +51,8 @@ def resolve_aider_env_bridge(
     """Resolve a minimal Aider environment without mutating process globals."""
 
     env = os.environ if environ is None else environ
-    try:
-        provider_name = resolve_sfe_executor_provider(env, default="openai")
-    except ValueError:
+    provider_result = _resolve_aider_provider(env)
+    if isinstance(provider_result, str):
         return _result(
             provider_name="invalid",
             aider_env={},
@@ -56,7 +61,12 @@ def resolve_aider_env_bridge(
             selected_timeout_seconds=None,
             missing_variables=(),
             error_category="unsupported_sfe_provider",
+            diagnostics_extra={
+                "provider_source_env_var": provider_result,
+                "provider_source_value": _env_value(env, provider_result),
+            },
         )
+    provider_name, provider_diagnostics = provider_result
 
     timeout_result = _resolve_timeout(env)
     if isinstance(timeout_result, str):
@@ -68,6 +78,7 @@ def resolve_aider_env_bridge(
             selected_timeout_seconds=None,
             missing_variables=(),
             error_category=timeout_result,
+            diagnostics_extra=provider_diagnostics,
         )
 
     selected_model = _resolve_model(provider_name, env)
@@ -136,6 +147,7 @@ def resolve_aider_env_bridge(
             selected_timeout_seconds=timeout_result,
             missing_variables=(),
             error_category="unsupported_aider_provider",
+            diagnostics_extra=provider_diagnostics,
         )
     else:
         return _result(
@@ -146,6 +158,7 @@ def resolve_aider_env_bridge(
             selected_timeout_seconds=timeout_result,
             missing_variables=(),
             error_category="unsupported_aider_provider",
+            diagnostics_extra=provider_diagnostics,
         )
 
     missing_variables = _dedupe(missing)
@@ -158,6 +171,7 @@ def resolve_aider_env_bridge(
         selected_timeout_seconds=timeout_result,
         missing_variables=missing_variables,
         error_category=error_category,
+        diagnostics_extra=provider_diagnostics,
     )
 
 
@@ -196,6 +210,72 @@ def _resolve_model(provider_name: str, env: Mapping[str, str]) -> str | None:
     if provider_name == "google":
         return _env_value(env, "SFE_GOOGLE_MODEL")
     return None
+
+
+def _resolve_aider_provider(
+    env: Mapping[str, str],
+) -> tuple[str, dict[str, object]] | str:
+    explicit_aider_provider = _env_value(env, SFE_AIDER_PROVIDER_ENV)
+    if explicit_aider_provider is not None:
+        try:
+            provider = normalize_provider_name(explicit_aider_provider)
+        except ValueError:
+            return SFE_AIDER_PROVIDER_ENV
+        return provider, {
+            "provider_source_env_var": SFE_AIDER_PROVIDER_ENV,
+            "provider_source_value": explicit_aider_provider,
+        }
+
+    executor_provider = _env_value(env, SFE_PROVIDER_EXECUTOR_ENV)
+    if executor_provider is not None:
+        try:
+            provider = normalize_provider_name(executor_provider)
+        except ValueError:
+            return SFE_PROVIDER_EXECUTOR_ENV
+        if provider != CODEXCLI_SFE_PROVIDER:
+            return provider, {
+                "provider_source_env_var": SFE_PROVIDER_EXECUTOR_ENV,
+                "provider_source_value": executor_provider,
+            }
+        fallback_result = _resolve_non_codexcli_aider_fallback(env)
+        if isinstance(fallback_result, str):
+            return fallback_result
+        provider, diagnostics = fallback_result
+        diagnostics.update(
+            {
+                "ignored_provider_env_var": SFE_PROVIDER_EXECUTOR_ENV,
+                "ignored_provider_value": executor_provider,
+            }
+        )
+        return provider, diagnostics
+
+    return _resolve_non_codexcli_aider_fallback(env)
+
+
+def _resolve_non_codexcli_aider_fallback(
+    env: Mapping[str, str],
+) -> tuple[str, dict[str, object]] | str:
+    shared_provider = _env_value(env, SFE_PROVIDER_ENV)
+    if shared_provider is not None:
+        try:
+            provider = normalize_provider_name(shared_provider)
+        except ValueError:
+            return SFE_PROVIDER_ENV
+        if provider != CODEXCLI_SFE_PROVIDER:
+            return provider, {
+                "provider_source_env_var": SFE_PROVIDER_ENV,
+                "provider_source_value": shared_provider,
+            }
+        return "openai", {
+            "provider_source_env_var": "default",
+            "provider_source_value": "openai",
+            "ignored_provider_env_var": SFE_PROVIDER_ENV,
+            "ignored_provider_value": shared_provider,
+        }
+    return "openai", {
+        "provider_source_env_var": "default",
+        "provider_source_value": "openai",
+    }
 
 
 def _resolve_timeout(env: Mapping[str, str]) -> float | None | str:
@@ -270,6 +350,7 @@ def _result(
     selected_timeout_seconds: float | None,
     missing_variables: tuple[str, ...],
     error_category: str | None,
+    diagnostics_extra: Mapping[str, object] | None = None,
 ) -> AiderEnvBridgeResult:
     diagnostics = {
         "provider_name": provider_name,
@@ -280,6 +361,8 @@ def _result(
         "missing_variables": missing_variables,
         "error_category": error_category,
     }
+    if diagnostics_extra is not None:
+        diagnostics.update(dict(diagnostics_extra))
     return AiderEnvBridgeResult(
         provider_name=provider_name,
         aider_env=dict(aider_env),

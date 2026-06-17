@@ -215,6 +215,7 @@ class FakeFilesystemExecutor:
                 stdout_preview="",
                 stderr_preview="",
                 elapsed_ms=1,
+                metadata=self.metadata,
             ),
             error_category=self.error_category,
             metadata=self.metadata,
@@ -952,6 +953,43 @@ def test_run_pipeline_missing_aider_fails_closed_without_text_fallback(
     assert not (repo / "should-not-run.txt").exists()
 
 
+def test_run_pipeline_aider_bridge_failure_report_shows_provider_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    filesystem_executor = FakeFilesystemExecutor(
+        status="failed",
+        error_category="unsupported_aider_provider",
+        metadata={
+            "bridge_diagnostics": {
+                "provider_name": "codexcli",
+                "provider_source_env_var": "SFE_AIDER_PROVIDER",
+                "provider_source_value": "codexcli",
+                "error_category": "unsupported_aider_provider",
+            },
+        },
+    )
+
+    result = _pipeline(filesystem_executor=filesystem_executor).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    rendered = render_run_result(result)
+    assert "issue reason: unsupported_aider_provider" in rendered
+    assert "filesystem bridge provider: codexcli" in rendered
+    assert (
+        "filesystem bridge provider source: SFE_AIDER_PROVIDER=codexcli"
+        in rendered
+    )
+
+
 def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1044,6 +1082,24 @@ def test_expected_workspace_write_paths_keep_explicit_relative_structure(
     assert result == ("src/main.js", "src/core/App.js")
 
 
+def test_expected_workspace_write_paths_ignore_dependency_names(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "\n".join(
+            [
+                "Build a Vite app with Three.js, Rapier, npm,",
+                "@dimforge/rapier3d, and OrbitControls.",
+                "src/main.js",
+                "src/core/App.js",
+            ]
+        ),
+        tmp_path,
+    )
+
+    assert result == ("src/main.js", "src/core/App.js")
+
+
 def test_expected_workspace_write_paths_reject_explicit_absolute_path(
     tmp_path: Path,
 ) -> None:
@@ -1073,6 +1129,7 @@ def test_run_pipeline_default_aider_invokes_executor_for_nested_main_js_task(
             "src/main.js",
             "src/core/App.js",
             "src/core/createRenderer.js",
+            "Use Three.js, Rapier, npm, @dimforge/rapier3d, and OrbitControls.",
             "main.js must only bootstrap the application.",
             "Do not create a monolithic JavaScript file.",
         ]

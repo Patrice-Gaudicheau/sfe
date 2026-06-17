@@ -180,6 +180,16 @@ EXPECTED_WORKSPACE_WRITE_UNSAFE_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 INTERNAL_WORKSPACE_WRITE_PATH_PARTS = frozenset({".git", ".sfe", ".sfe-worktrees"})
+EXPECTED_WORKSPACE_WRITE_NON_PATH_NAMES = frozenset(
+    {
+        "@dimforge/rapier3d",
+        "npm",
+        "orbitcontrols",
+        "rapier",
+        "three.js",
+        "vite",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -3380,6 +3390,8 @@ def _expected_workspace_write_paths_from_task(
         candidate = _normalize_expected_workspace_write_path(match.group("path"))
         if not candidate or candidate in seen:
             continue
+        if _file_mention_is_known_non_path_name(candidate):
+            continue
         if _file_mention_is_prose_constraint(task, match.end(), candidate):
             continue
         issue = _validate_expected_workspace_write_path(
@@ -3422,6 +3434,13 @@ def _file_mention_is_prose_constraint(
             "only ",
         )
     )
+
+
+def _file_mention_is_known_non_path_name(candidate: str) -> bool:
+    normalized = candidate.replace("\\", "/").strip().lower()
+    if "/" in normalized:
+        return False
+    return normalized in EXPECTED_WORKSPACE_WRITE_NON_PATH_NAMES
 
 
 def _file_mention_is_inside_url(task: str, start: int) -> bool:

@@ -70,6 +70,44 @@ def test_aider_model_overrides_provider_model() -> None:
     assert result.selected_model == "aider/main-model"
 
 
+def test_codexcli_executor_provider_does_not_select_aider_provider() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_AIDER_MODEL": "gpt-5.4-mini",
+            "SFE_OPENAI_EXECUTOR_MODEL": "gpt-5.4-mini",
+            "SFE_CODEXCLI_EXECUTOR_MODEL": "gpt-5.4",
+            "OPENAI_API_KEY": "fixture-openai-key",
+        }
+    )
+
+    assert result.ok
+    assert result.provider_name == "openai"
+    assert result.selected_model == "gpt-5.4-mini"
+    assert result.aider_env == {"OPENAI_API_KEY": "fixture-openai-key"}
+    assert result.diagnostics["provider_source_env_var"] == "default"
+    assert result.diagnostics["provider_source_value"] == "openai"
+    assert result.diagnostics["ignored_provider_env_var"] == "SFE_PROVIDER_EXECUTOR"
+    assert result.diagnostics["ignored_provider_value"] == "codexcli"
+
+
+def test_codexcli_shared_provider_does_not_select_aider_provider() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER": "codexcli",
+            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_AIDER_MODEL": "gpt-5.4-mini",
+            "OPENAI_API_KEY": "fixture-openai-key",
+        }
+    )
+
+    assert result.ok
+    assert result.provider_name == "openai"
+    assert result.selected_model == "gpt-5.4-mini"
+    assert result.diagnostics["ignored_provider_env_var"] == "SFE_PROVIDER_EXECUTOR"
+    assert result.diagnostics["ignored_provider_value"] == "codexcli"
+
+
 def test_provider_specific_model_fallbacks() -> None:
     openai = resolve_aider_env_bridge(
         {
@@ -245,12 +283,14 @@ def test_lemonade_maps_base_url_to_both_openai_base_conventions() -> None:
     assert result.selected_model == "openai/phi-fixture"
 
 
-def test_codexcli_is_unsupported_for_aider_bridge() -> None:
-    result = resolve_aider_env_bridge({"SFE_PROVIDER": "codexcli"})
+def test_explicit_codexcli_aider_provider_is_unsupported_with_source() -> None:
+    result = resolve_aider_env_bridge({"SFE_AIDER_PROVIDER": "codexcli"})
 
     assert not result.ok
     assert result.error_category == "unsupported_aider_provider"
     assert result.aider_env == {}
+    assert result.diagnostics["provider_source_env_var"] == "SFE_AIDER_PROVIDER"
+    assert result.diagnostics["provider_source_value"] == "codexcli"
 
 
 def test_timeout_parsing_accepts_positive_and_rejects_invalid() -> None:
