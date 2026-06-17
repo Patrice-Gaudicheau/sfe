@@ -187,8 +187,86 @@ def test_aider_filesystem_executor_uses_message_file_and_bounded_command(
     assert result.diagnostics.metadata["aider_path"] == "/home/patrice/.local/bin/aider"
     assert result.diagnostics.metadata["expected_paths"] == ("docs/README.md",)
     assert result.diagnostics.metadata["context_paths"] == ("context.txt",)
+    assert result.diagnostics.metadata["editable_file_count"] == 1
+    assert result.diagnostics.metadata["aider_command_count"] == 1
+    assert result.diagnostics.metadata["editable_files_per_command"] == (1,)
     assert env_file_path is not None
     assert not env_file_path.exists()
+
+
+def test_aider_filesystem_executor_splits_large_expected_file_lists(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        message_path = Path(command[command.index("--message-file") + 1])
+        message_text = message_path.read_text(encoding="utf-8")
+        editable_files = [
+            command[index + 1]
+            for index, value in enumerate(command)
+            if value == "--file"
+        ]
+        calls.append(
+            {
+                "command": command,
+                "cwd": kwargs["cwd"],
+                "editable_files": tuple(editable_files),
+                "message": message_text,
+            }
+        )
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=f"pass {len(calls)} ok\n",
+            stderr="",
+        )
+
+    executor = AiderFilesystemExecutor(
+        preflight=lambda: AiderPreflightResult(
+            available=True,
+            executable_path="/home/patrice/.local/bin/aider",
+            version_output="aider 0.86.2",
+            install_guidance=(),
+            diagnostics={},
+        ),
+        env_bridge=lambda: AiderEnvBridgeResult(
+            provider_name="openai",
+            aider_env={"OPENAI_API_KEY": "fixture-openai-key"},
+            selected_model="gpt-fixture",
+            selected_weak_model=None,
+            selected_timeout_seconds=None,
+            missing_variables=(),
+            error_category=None,
+            diagnostics={"provider_name": "openai"},
+        ),
+        runner=runner,
+        monotonic=_monotonic_sequence(10.0, 10.5),
+    )
+    expected_paths = tuple(f"src/file_{index}.js" for index in range(20))
+
+    result = executor.execute(
+        FilesystemExecutionRequest(
+            cwd=tmp_path,
+            task="Create a project",
+            expected_paths=expected_paths,
+        )
+    )
+
+    assert result.status == "completed"
+    assert len(calls) == 3
+    assert all(call["cwd"] == tmp_path for call in calls)
+    assert calls[0]["editable_files"] == expected_paths[:8]
+    assert calls[1]["editable_files"] == expected_paths[8:16]
+    assert calls[2]["editable_files"] == expected_paths[16:]
+    assert "Apply the change by editing files now" in str(calls[0]["message"])
+    assert "Aider pass: 1 of 3." in str(calls[0]["message"])
+    assert result.diagnostics.command == ("<multiple-aider-commands>",)
+    assert result.diagnostics.stdout_preview == "pass 1 ok\n\npass 2 ok\n\npass 3 ok\n"
+    assert result.diagnostics.metadata["aider_command_count"] == 3
+    assert result.diagnostics.metadata["editable_file_count"] == 20
+    assert result.diagnostics.metadata["editable_files_per_command"] == (8, 8, 4)
+    assert result.diagnostics.metadata["large_expected_file_list"] is True
 
 
 def test_aider_filesystem_executor_missing_aider_returns_install_guidance(

@@ -25,6 +25,7 @@ from sfe.filesystem_executor import (
 
 AIDER_EXECUTOR_NAME = "aider"
 MAX_OUTPUT_PREVIEW_CHARS = 500
+MAX_EDITABLE_FILES_PER_AIDER_PASS = 8
 SUBPROCESS_ENV_ALLOWLIST = (
     "HOME",
     "PATH",
@@ -105,42 +106,55 @@ class AiderFilesystemExecutor:
                 },
             )
 
-        prompt = _build_aider_prompt(request)
         try:
             with tempfile.TemporaryDirectory(prefix="sfe-aider-") as temp_dir:
-                message_path = Path(temp_dir) / "message.txt"
                 input_history_path = Path(temp_dir) / "input.history"
                 chat_history_path = Path(temp_dir) / "chat.history.md"
-                message_path.write_text(prompt, encoding="utf-8")
                 with write_temporary_aider_env_file(
                     bridge.aider_env,
                     forbidden_roots=_forbidden_env_file_roots(request),
                 ) as env_file_path:
-                    command = _build_aider_command(
-                        aider_path=preflight.executable_path,
-                        message_path=message_path,
-                        input_history_path=input_history_path,
-                        chat_history_path=chat_history_path,
-                        env_file_path=env_file_path,
-                        selected_model=bridge.selected_model,
-                        selected_weak_model=bridge.selected_weak_model,
-                        selected_timeout_seconds=bridge.selected_timeout_seconds,
-                        expected_paths=request.expected_paths,
-                        context_paths=request.context_paths,
-                    )
+                    batches = _editable_path_batches(request.expected_paths)
                     start = self.monotonic()
+                    completed_runs: list[subprocess.CompletedProcess[str]] = []
+                    sanitized_commands: list[tuple[str, ...]] = []
                     try:
-                        completed = self.runner(
-                            command,
-                            cwd=request.cwd,
-                            check=False,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            stdin=subprocess.DEVNULL,
-                            text=True,
-                            timeout=bridge.selected_timeout_seconds,
-                            env=_aider_subprocess_environment(),
-                        )
+                        for index, editable_paths in enumerate(batches, start=1):
+                            prompt = _build_aider_prompt(
+                                request,
+                                editable_paths=editable_paths,
+                                pass_index=index,
+                                pass_count=len(batches),
+                            )
+                            message_path = Path(temp_dir) / f"message-{index}.txt"
+                            message_path.write_text(prompt, encoding="utf-8")
+                            command = _build_aider_command(
+                                aider_path=preflight.executable_path,
+                                message_path=message_path,
+                                input_history_path=input_history_path,
+                                chat_history_path=chat_history_path,
+                                env_file_path=env_file_path,
+                                selected_model=bridge.selected_model,
+                                selected_weak_model=bridge.selected_weak_model,
+                                selected_timeout_seconds=bridge.selected_timeout_seconds,
+                                expected_paths=editable_paths,
+                                context_paths=request.context_paths,
+                            )
+                            sanitized_commands.append(_sanitize_command(command))
+                            completed = self.runner(
+                                command,
+                                cwd=request.cwd,
+                                check=False,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL,
+                                text=True,
+                                timeout=bridge.selected_timeout_seconds,
+                                env=_aider_subprocess_environment(),
+                            )
+                            completed_runs.append(completed)
+                            if completed.returncode != 0:
+                                break
                     except subprocess.TimeoutExpired as exc:
                         elapsed_ms = int((self.monotonic() - start) * 1000)
                         return FilesystemExecutionResult(
@@ -150,7 +164,11 @@ class AiderFilesystemExecutor:
                             diagnostics=FilesystemExecutionDiagnostics(
                                 executor_name=self.name,
                                 cwd=str(request.cwd),
-                                command=_sanitize_command(command),
+                                command=(
+                                    sanitized_commands[-1]
+                                    if sanitized_commands
+                                    else ()
+                                ),
                                 return_code=None,
                                 stdout_length=_safe_len(exc.stdout),
                                 stderr_length=_safe_len(exc.stderr),
@@ -162,6 +180,11 @@ class AiderFilesystemExecutor:
                                     "error_type": type(exc).__name__,
                                     "timeout_seconds": bridge.selected_timeout_seconds,
                                     "bridge_diagnostics": bridge.diagnostics,
+                                    **_aider_command_metadata(
+                                        request,
+                                        batches,
+                                        sanitized_commands,
+                                    ),
                                     **path_metadata,
                                 },
                             ),
@@ -176,7 +199,11 @@ class AiderFilesystemExecutor:
                             diagnostics=FilesystemExecutionDiagnostics(
                                 executor_name=self.name,
                                 cwd=str(request.cwd),
-                                command=_sanitize_command(command),
+                                command=(
+                                    sanitized_commands[-1]
+                                    if sanitized_commands
+                                    else ()
+                                ),
                                 return_code=None,
                                 stdout_length=0,
                                 stderr_length=0,
@@ -187,6 +214,11 @@ class AiderFilesystemExecutor:
                                     "aider_path": preflight.executable_path,
                                     "error_type": type(exc).__name__,
                                     "bridge_diagnostics": bridge.diagnostics,
+                                    **_aider_command_metadata(
+                                        request,
+                                        batches,
+                                        sanitized_commands,
+                                    ),
                                     **path_metadata,
                                 },
                             ),
@@ -228,29 +260,35 @@ class AiderFilesystemExecutor:
                 error_category="aider_tempfile_error",
             )
 
+        return_code = _aggregate_return_code(completed_runs)
         diagnostics = FilesystemExecutionDiagnostics(
             executor_name=self.name,
             cwd=str(request.cwd),
-            command=_sanitize_command(command),
-            return_code=completed.returncode,
-            stdout_length=_safe_len(completed.stdout),
-            stderr_length=_safe_len(completed.stderr),
-            stdout_preview=_bounded_preview(completed.stdout),
-            stderr_preview=_bounded_preview(completed.stderr),
+            command=_diagnostic_command(sanitized_commands),
+            return_code=return_code,
+            stdout_length=sum(_safe_len(run.stdout) for run in completed_runs),
+            stderr_length=sum(_safe_len(run.stderr) for run in completed_runs),
+            stdout_preview=_combined_preview(run.stdout for run in completed_runs),
+            stderr_preview=_combined_preview(run.stderr for run in completed_runs),
             elapsed_ms=elapsed_ms,
             metadata={
                 "aider_path": preflight.executable_path,
                 "version_output": preflight.version_output,
                 "bridge_diagnostics": bridge.diagnostics,
+                **_aider_command_metadata(
+                    request,
+                    batches,
+                    sanitized_commands,
+                ),
                 **path_metadata,
             },
         )
         return FilesystemExecutionResult(
             executor_name=self.name,
-            status="completed" if completed.returncode == 0 else "failed",
+            status="completed" if return_code == 0 else "failed",
             changed_paths=(),
             diagnostics=diagnostics,
-            error_category=None if completed.returncode == 0 else "aider_failed",
+            error_category=None if return_code == 0 else "aider_failed",
             metadata={
                 "aider_path": preflight.executable_path,
                 **path_metadata,
@@ -258,21 +296,35 @@ class AiderFilesystemExecutor:
         )
 
 
-def _build_aider_prompt(request: FilesystemExecutionRequest) -> str:
+def _build_aider_prompt(
+    request: FilesystemExecutionRequest,
+    *,
+    editable_paths: tuple[str, ...] | None = None,
+    pass_index: int = 1,
+    pass_count: int = 1,
+) -> str:
     context_lines = "\n".join(f"- {path}" for path in request.context_paths) or "- none"
     expected_lines = "\n".join(f"- {path}" for path in request.expected_paths) or "- none"
+    editable = request.expected_paths if editable_paths is None else editable_paths
+    editable_lines = "\n".join(f"- {path}" for path in editable) or "- none"
     return "\n".join(
         [
             "You are executing an SFE workspace_write task inside an SFE-controlled Git worktree.",
             "Modify files on disk only inside the current working directory subtree.",
             "Do not write outside the selected destination. Do not edit .git, .sfe, or .sfe-worktrees.",
             "Keep the change focused on the user task.",
+            "Apply the change by editing files now. Do not answer only in prose.",
+            "If editable files are listed below, write meaningful project contents to those files.",
+            f"Aider pass: {pass_index} of {pass_count}.",
             "",
             "User task:",
             request.task,
             "",
             "Expected edit paths:",
             expected_lines,
+            "",
+            "Editable paths for this Aider pass:",
+            editable_lines,
             "",
             "Selected read-only context paths:",
             context_lines,
@@ -283,10 +335,34 @@ def _build_aider_prompt(request: FilesystemExecutionRequest) -> str:
 
 def _request_path_metadata(
     request: FilesystemExecutionRequest,
-) -> dict[str, tuple[str, ...]]:
+) -> dict[str, object]:
     return {
         "expected_paths": request.expected_paths,
         "context_paths": request.context_paths,
+        "editable_file_count": len(request.expected_paths),
+    }
+
+
+def _editable_path_batches(expected_paths: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    if not expected_paths:
+        return ((),)
+    return tuple(
+        expected_paths[index : index + MAX_EDITABLE_FILES_PER_AIDER_PASS]
+        for index in range(0, len(expected_paths), MAX_EDITABLE_FILES_PER_AIDER_PASS)
+    )
+
+
+def _aider_command_metadata(
+    request: FilesystemExecutionRequest,
+    batches: tuple[tuple[str, ...], ...],
+    sanitized_commands: list[tuple[str, ...]],
+) -> dict[str, object]:
+    return {
+        "aider_command_count": len(sanitized_commands),
+        "aider_commands": tuple(sanitized_commands),
+        "editable_file_count": len(request.expected_paths),
+        "editable_files_per_command": tuple(len(batch) for batch in batches),
+        "large_expected_file_list": len(batches) > 1,
     }
 
 
@@ -369,6 +445,25 @@ def _sanitize_command(command: list[str]) -> tuple[str, ...]:
     return tuple(sanitized)
 
 
+def _diagnostic_command(commands: list[tuple[str, ...]]) -> tuple[str, ...]:
+    if not commands:
+        return ()
+    if len(commands) == 1:
+        return commands[0]
+    return ("<multiple-aider-commands>",)
+
+
+def _aggregate_return_code(
+    completed_runs: list[subprocess.CompletedProcess[str]],
+) -> int | None:
+    if not completed_runs:
+        return None
+    for run in completed_runs:
+        if run.returncode != 0:
+            return run.returncode
+    return 0
+
+
 def _validate_relative_paths(paths: tuple[str, ...]) -> str | None:
     for path in paths:
         if not path or path.strip() != path:
@@ -420,6 +515,15 @@ def _bounded_preview(value: object) -> str | None:
         return None
     text = _string_from_output(value)
     return text if len(text) <= MAX_OUTPUT_PREVIEW_CHARS else text[:MAX_OUTPUT_PREVIEW_CHARS]
+
+
+def _combined_preview(values: object) -> str | None:
+    text = "\n".join(
+        _string_from_output(value)
+        for value in values
+        if value is not None and _string_from_output(value)
+    )
+    return _bounded_preview(text)
 
 
 def _safe_len(value: object) -> int:

@@ -873,10 +873,24 @@ def _render_filesystem_result(filesystem_result: object) -> list[str]:
         f"{_format_diagnostic_list(metadata.get('actual_changed_paths'))}",
         "  filesystem no changes reason: "
         f"{_display_value(metadata.get('no_changes_reason'))}",
+        "  filesystem cwd: "
+        f"{_display_value(getattr(diagnostics, 'cwd', None))}",
+        "  filesystem command: "
+        f"{_format_diagnostic_list(getattr(diagnostics, 'command', ()))}",
+        "  filesystem editable file count: "
+        f"{_display_value(metadata.get('editable_file_count'))}",
+        "  filesystem aider command count: "
+        f"{_display_value(metadata.get('aider_command_count'))}",
+        "  filesystem editable files per command: "
+        f"{_format_diagnostic_list(metadata.get('editable_files_per_command'))}",
         "  filesystem stdout length: "
         f"{_display_value(getattr(diagnostics, 'stdout_length', None))}",
+        "  filesystem stdout preview: "
+        f"{_display_value(getattr(diagnostics, 'stdout_preview', None))}",
         "  filesystem stderr length: "
         f"{_display_value(getattr(diagnostics, 'stderr_length', None))}",
+        "  filesystem stderr preview: "
+        f"{_display_value(getattr(diagnostics, 'stderr_preview', None))}",
     ]
     bridge_diagnostics = metadata.get("bridge_diagnostics")
     if isinstance(bridge_diagnostics, dict):

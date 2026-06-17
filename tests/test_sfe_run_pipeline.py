@@ -187,11 +187,15 @@ class FakeFilesystemExecutor:
         status: str = "completed",
         error_category: str | None = None,
         metadata: dict[str, object] | None = None,
+        stdout: str = "",
+        stderr: str = "",
     ) -> None:
         self.mutation = mutation
         self.status = status
         self.error_category = error_category
         self.metadata = metadata or {}
+        self.stdout = stdout
+        self.stderr = stderr
         self.calls: list[FilesystemExecutionRequest] = []
 
     def execute(
@@ -210,10 +214,10 @@ class FakeFilesystemExecutor:
                 cwd=str(request.cwd),
                 command=("fake-aider", "--message-file", "<message-file>"),
                 return_code=0 if self.status == "completed" else 1,
-                stdout_length=0,
-                stderr_length=0,
-                stdout_preview="",
-                stderr_preview="",
+                stdout_length=len(self.stdout),
+                stderr_length=len(self.stderr),
+                stdout_preview=self.stdout[:500],
+                stderr_preview=self.stderr[:500],
                 elapsed_ms=1,
                 metadata=self.metadata,
             ),
@@ -997,7 +1001,15 @@ def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
     monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
-    filesystem_executor = FakeFilesystemExecutor()
+    filesystem_executor = FakeFilesystemExecutor(
+        metadata={
+            "editable_file_count": 3,
+            "aider_command_count": 1,
+            "editable_files_per_command": (3,),
+        },
+        stdout="Aider completed but did not edit files.\n",
+        stderr="warning: no edits made\n",
+    )
 
     result = _pipeline(
         workspace_manager=manager,
@@ -1049,6 +1061,12 @@ def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
     assert "filesystem expected placeholder paths: index.html, styles.css, README.md" in rendered
     assert "filesystem untouched placeholder paths: index.html, styles.css, README.md" in rendered
     assert "filesystem actual changed paths: none" in rendered
+    assert "filesystem stdout preview: Aider completed but did not edit files." in rendered
+    assert "filesystem stderr preview: warning: no edits made" in rendered
+    assert "filesystem command: fake-aider, --message-file, <message-file>" in rendered
+    assert "filesystem editable file count: 3" in rendered
+    assert "filesystem aider command count: 1" in rendered
+    assert "filesystem editable files per command: 3" in rendered
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1213,6 +1231,50 @@ def test_run_pipeline_default_aider_unsafe_expected_path_report_is_consistent(
     assert filesystem_executor.calls == []
     assert result.workspace_session is not None
     assert _manager().cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_large_no_changes_has_actionable_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    expected_paths = tuple(f"src/module_{index}.js" for index in range(20))
+    filesystem_executor = FakeFilesystemExecutor(
+        metadata={
+            "editable_file_count": 20,
+            "aider_command_count": 3,
+            "editable_files_per_command": (8, 8, 4),
+            "large_expected_file_list": True,
+        },
+        stdout="I can help create these files, but no edits were applied.\n",
+        stderr="aider warning\n",
+    )
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create " + ", ".join(expected_paths),
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.reason == "no_changes"
+    assert filesystem_executor.calls[0].expected_paths == expected_paths
+    rendered = render_run_result(result)
+    assert "filesystem no changes reason: expected_files_not_created_or_modified" in rendered
+    assert "filesystem editable file count: 20" in rendered
+    assert "filesystem aider command count: 3" in rendered
+    assert "filesystem editable files per command: 8, 8, 4" in rendered
+    assert "filesystem stdout preview: I can help create these files" in rendered
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
 
 
 def test_run_pipeline_default_aider_precreates_expected_files_only_in_worktree(
