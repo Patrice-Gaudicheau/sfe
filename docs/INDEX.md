@@ -14,29 +14,31 @@ general model-safety guarantees.
 
 1. [sfe_product_doctrine.md](sfe_product_doctrine.md): current doctrine and
    terminology. Read this first when interpreting the TUI, benchmarks,
-   or patch/worktree mode.
+   or filesystem/worktree mode.
 2. [README.md](../README.md): project purpose, benchmark snapshot, setup,
    provider support, and limitations.
 3. [current_architecture_status.md](current_architecture_status.md): current
    architecture status for the SFE core, TUI, `/run`, and `workspace_write`.
-4. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): local TUI workflow and
+4. [real_loop.md](real_loop.md): bounded verifier/governor retry behavior for
+   supported local `workspace_write` runs.
+5. [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): local TUI workflow and
    command reference.
-5. [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
-   design boundary for the planned local MCP control surface over the same
+6. [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
+   design boundary for the current local STDIO MCP control surface over the same
    runtime path as the TUI.
-6. [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): local MCP client setup
+7. [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): local MCP client setup
    for Antigravity and Codex App.
-7. [execution_mode_router_contract.md](execution_mode_router_contract.md):
+8. [execution_mode_router_contract.md](execution_mode_router_contract.md):
    current `/run` execution-mode router contract.
-8. [workspace_write_multipass.md](workspace_write_multipass.md): current
+9. [workspace_write_multipass.md](workspace_write_multipass.md): current
    multi-pass behavior for large `workspace_write` scaffolds.
-9. [aider_filesystem_executor_integration.md](aider_filesystem_executor_integration.md):
+10. [aider_filesystem_executor_integration.md](aider_filesystem_executor_integration.md):
    current Aider-backed filesystem writer architecture for `workspace_write`.
 
 ## Current Architecture And Doctrine
 
 - [sfe_product_doctrine.md](sfe_product_doctrine.md): SFE core, TUI,
-  patch/worktree, benchmarks, and future API boundaries.
+  filesystem/worktree mode, benchmarks, and future API boundaries.
 - [current_architecture_status.md](current_architecture_status.md): current
   architecture boundary and what remains unproven.
 - [execution_mode_router_contract.md](execution_mode_router_contract.md):
@@ -44,11 +46,13 @@ general model-safety guarantees.
 - [workspace_write_multipass.md](workspace_write_multipass.md): how
   multi-pass `workspace_write` planning, batch validation, promotion, and
   reports work.
+- [real_loop.md](real_loop.md): bounded verifier/governor retry behavior for
+  supported local `workspace_write` runs.
 - [aider_filesystem_executor_integration.md](aider_filesystem_executor_integration.md):
   current architecture for the external Aider-backed filesystem executor,
   worktree promotion, and legacy text fallback.
 - [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md):
-  planned local MCP control surface and TUI/MCP ISO runtime requirement.
+  current local STDIO MCP control surface and TUI/MCP ISO runtime requirement.
 - [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): current local STDIO MCP
   setup for Antigravity and Codex App.
 - [sfe_continuity_orientation_layer.md](sfe_continuity_orientation_layer.md):

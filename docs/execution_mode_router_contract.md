@@ -17,7 +17,7 @@ It returns one of three modes:
 - `console_output`: answer in the TUI console; no Git preparation, worktree,
   patch generation, or workspace mutation.
 - `workspace_write`: create, modify, or delete workspace files through the
-  developer patch/worktree execution mode.
+  developer filesystem/worktree execution mode.
 - `external_action`: the task requires action outside the workspace, such as
   sending mail, publishing, opening a PR, or calling external services. This is
   recognized but not implemented in the current `/run` path.
@@ -44,8 +44,8 @@ After mode selection, the `/run` pipeline branches:
 
 - `console_output` prepares an executor prompt and displays the answer.
 - `workspace_write` prepares the workspace, discovers context, selects relevant
-  context, prepares the executor prompt, runs the patch/worktree flow, validates
-  the patch, and promotes only when promotion actually succeeds.
+  context, prepares the executor prompt, runs the configured workspace writer,
+  validates changed paths, and promotes only when promotion actually succeeds.
 - `external_action` fails closed before workspace work starts.
 
 The TUI renders compact `SFE:` progress lines for these boundaries. Those lines

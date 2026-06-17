@@ -256,12 +256,12 @@ they should not be presented as the preferred large multi-file path.
 
 ## MCP Impact
 
-MCP should inherit the same behavior through `RuntimeSession.run()` and
-`RunPipeline`; it should not gain an MCP-specific Aider implementation.
+MCP inherits the same behavior through `RuntimeSession.run()` and `RunPipeline`;
+it does not have an MCP-specific Aider implementation.
 
-`sfe_run` should use the Aider-backed filesystem executor whenever the shared
-runtime would do so for TUI `/run`. `sfe_run_report` should expose safe
-structured diagnostics for the Aider execution. Missing Aider should return a
+`sfe_run` uses the Aider-backed filesystem executor whenever the shared runtime
+would do so for TUI `/run`. `sfe_run_report` exposes safe structured diagnostics
+for the Aider execution. Missing Aider returns a
 structured failed run with the same installation guidance rather than silently
 falling back to text transport.
 
@@ -270,18 +270,17 @@ different renderers.
 
 ## Legacy And Fallback Behavior
 
-`SFE_FILE` blocks, structured replacement JSON, and strict Git diffs should
-become legacy text transports. They remain useful for:
+`SFE_FILE` blocks, structured replacement JSON, and strict Git diffs are legacy
+text transports. They remain useful for:
 
 - deterministic tests;
 - providers or environments that explicitly opt into text-only compatibility;
 - debugging the old parser path;
 - small controlled cases where direct filesystem execution is not desired.
 
-They should not remain the preferred path for large multi-file generation once
-the Aider executor is enabled by default. Missing Aider does not silently fall
-back for normal `workspace_write`; it fails closed with installation
-instructions.
+They are not the preferred path for large multi-file generation now that the
+Aider executor is enabled by default. Missing Aider does not silently fall back
+for normal `workspace_write`; it fails closed with installation instructions.
 
 ## Current Code Touchpoints
 
@@ -305,8 +304,8 @@ The relevant current implementation areas are:
   structured result output.
 - `tests/test_sfe_run_pipeline.py`: existing evidence that direct worktree
   mutations can be promoted when they remain inside the destination boundary.
-- `tests/test_sfe_mcp_tools.py`: MCP uses the shared runtime and current
-  `SFE_FILE` transport.
+- `tests/test_sfe_mcp_tools.py`: MCP uses the shared runtime and safely
+  serializes Aider diagnostics and legacy text-transport results.
 
 ## Risks And Open Questions
 

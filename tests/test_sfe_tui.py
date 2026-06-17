@@ -4679,7 +4679,7 @@ def test_tui_run_workspace_write_renders_compact_summary(
         for line in progress_lines
     )
     assert "SFE: executor prompt prepared" in progress_lines
-    assert "SFE: patch/worktree execution started" in progress_lines
+    assert "SFE: workspace writer execution started" in progress_lines
     assert "SFE: workspace boundary check completed" in progress_lines
     assert progress_lines[-1] == "SFE: promotion completed"
     assert output.index(progress_lines[0]) < output.index(run_output)

@@ -60,7 +60,7 @@
     "name": "executor_prompt_prepared"
   },
   {
-    "message": "SFE: patch/worktree execution started",
+    "message": "SFE: workspace writer execution started",
     "metadata": {},
     "name": "patch_worktree_execution_started"
   },

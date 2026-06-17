@@ -12,7 +12,7 @@ model is:
 ```text
 SFE core = routing + context selection + bounded execution + validation + observability
 TUI = local user-facing control surface
-patch/worktree = developer execution mode
+filesystem/worktree = developer execution mode
 benchmarks = evidence and architectural feedback loop
 ```
 
@@ -81,17 +81,17 @@ future API surface.
 execution mode. It may produce `console_output`, enter `workspace_write`, or
 reject an unsupported `external_action`.
 
-`workspace_write` is the developer-oriented patch/worktree mode. Once SFE routes
-into `workspace_write`, the workflow intentionally becomes practical software
-development infrastructure: Git preparation, worktree isolation, patch
-generation, validation, and promotion. That is not conceptual drift. It is the
-first serious developer application of the SFE engine.
+`workspace_write` is the developer-oriented filesystem/worktree mode. Once SFE
+routes into `workspace_write`, the workflow intentionally becomes practical
+software development infrastructure: Git preparation, worktree isolation,
+filesystem writing, validation, and promotion. That is not conceptual drift. It
+is the first serious developer application of the SFE engine.
 
 For large `workspace_write` tasks, multi-pass coordination is a Router
 responsibility. The Router designs and validates the global batch plan because
 that is coherence and execution-mode coordination. The Executor remains the
-patching role: it generates each operational batch patch one batch at a time and
-does not design the global multi-pass plan.
+workspace-writing role: it makes the file changes for each operational batch one
+batch at a time and does not design the global multi-pass plan.
 
 The future API should be treated as another access surface for the same SFE
 core, not as a replacement doctrine.
@@ -101,7 +101,7 @@ core, not as a replacement doctrine.
 The TUI should make the routing/context layer visible without becoming heavy.
 The `SFE:` progress lines during `/run` are lightweight observability of
 pipeline boundaries such as execution-mode routing, context discovery, selected
-context, prompt preparation, patch validation, promotion, and console answer
+context, prompt preparation, workspace validation, promotion, and console answer
 generation.
 
 Those lines are not benchmark output. They do not perform a live

@@ -705,7 +705,7 @@ class RunPipeline:
         self._emit_progress("executor_prompt_prepared", "SFE: executor prompt prepared")
         self._emit_progress(
             "patch_worktree_execution_started",
-            "SFE: patch/worktree execution started",
+            "SFE: workspace writer execution started",
         )
         patch_result = self.backend.patch(contract)
         if not patch_result.answer:

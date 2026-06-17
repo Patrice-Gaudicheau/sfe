@@ -128,7 +128,8 @@ Lower-level diagnostics are available but are not the normal first path:
   require human approval, or require router review. When Real Loop is enabled
   and a verifier provider is available, completed workspace writes receive a
   bounded LLM verifier/governor check that may stop or issue a targeted
-  correction task for one bounded retry.
+  correction task within the configured attempt cap. The default cap is 3 total
+  attempts, including the original write.
 - `/reset`: clear task, context, latest routing/result, and skipped/rejected
   context and discovery state; preserve the selected workspace.
 - `/advanced`: show lower-level diagnostic commands.
@@ -204,7 +205,7 @@ SFE: context candidates inspected: 12
 SFE: relevant context selected: 3 files
 SFE: estimated token reduction: 71.4%
 SFE: executor prompt prepared
-SFE: patch/worktree execution started
+SFE: workspace writer execution started
 SFE: workspace boundary check completed
 SFE: promotion completed
 SFE: Real Loop verification started: attempt 1
@@ -471,8 +472,8 @@ heartbeat logic.
 - Advanced `/patch` does not apply patches; advanced `/apply-patch` is required
   only for that legacy/debug proposal flow.
 - `external_action` is recognized but not implemented.
-- The canonical `/run` pipeline is available through the TUI; there is no
-  separate stable CLI/API integration for it yet.
+- The canonical `/run` pipeline is available through the TUI and current local
+  STDIO MCP server; there is no stable remote API or HTTP integration for it yet.
 - There is no automatic merge, push, PR creation, arbitrary shell execution, or
   test/lint runner.
 - The current test suite validates expected behavior and safety boundaries, but

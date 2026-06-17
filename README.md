@@ -89,9 +89,11 @@ answer tasks, SFE can answer without mutating the workspace.
 For supported local `workspace_write` runs, SFE can run a bounded **Real Loop**:
 after a completed write attempt, a configured verifier/governor model compares
 the final workspace state with the original task. It can mark the task as
-passed, blocked, aborted, or worth one targeted retry. Retries use a supervisor
-generated correction task focused only on missing or failed requirements. This
-is LLM-based verification, not a deterministic correctness guarantee.
+passed, blocked, aborted, or worth a targeted retry within the configured
+attempt cap. The default cap is 3 total attempts, including the original write.
+Retries use a supervisor-generated correction task focused only on missing or
+failed requirements. This is LLM-based verification, not a deterministic
+correctness guarantee.
 
 For MCP clients, use the local SFE MCP server instead of the TUI. The current
 client setup notes cover both
@@ -99,7 +101,7 @@ client setup notes cover both
 [Codex App](docs/sfe_mcp_client_setup.md#codex-app-setup-with-the-form);
 they also show the expected MCP tool flow and local STDIO process shape.
 
-For the current product doctrine, start with `docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context engine; the TUI is the current local user-facing control surface; patch/worktree is the developer execution mode inside `workspace_write`; benchmarks are the experimental evidence and architectural feedback loop.
+For the current product doctrine, start with `docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context engine; the TUI is the current local user-facing control surface; filesystem/worktree execution is the developer mode inside `workspace_write`; benchmarks are the experimental evidence and architectural feedback loop.
 
 ## Core Engineering Signal
 
@@ -849,7 +851,7 @@ model intelligence.
   write boundary and router-reviewed full-file replacement design, retained for
   compatibility rather than the primary `/run` workflow.
 - `docs/current_architecture_status.md`: current boundary between the SFE core,
-  local TUI surface, patch/worktree mode, and provider integration.
+  local TUI surface, filesystem/worktree mode, and provider integration.
 - `docs/workspace_write_multipass.md`: multi-pass `workspace_write` mode for
   large scaffold generation, including configuration and report fields.
 - `docs/aider_filesystem_executor_integration.md`: current Aider-backed

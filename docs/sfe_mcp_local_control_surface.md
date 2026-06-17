@@ -11,9 +11,9 @@ status, see
 
 ## Purpose
 
-The MCP integration should expose SFE to local MCP clients as a small control
-surface over the same runtime path that the first-party TUI already uses.
-The v1 local stdio entry point is:
+The MCP integration exposes SFE to local MCP clients as a small control surface
+over the same runtime path that the first-party TUI uses. The v1 local stdio
+entry point is:
 
 ```bash
 sfe-mcp
@@ -40,7 +40,7 @@ MCP must not reimplement SFE task routing, context discovery, executor calling,
 patch parsing, validation, Git worktree handling, promotion, or run reporting.
 Those behaviors belong in the shared SFE runtime path.
 
-The MCP server should only own:
+The MCP server owns only:
 
 - MCP protocol setup and tool registration;
 - per-session state for the selected target directory, current task, latest
@@ -50,7 +50,7 @@ The MCP server should only own:
   output.
 
 If a behavior is already exercised by `/run`, `/run-report`, or
-`/workspace-status`, the MCP version should call the same internal layer rather
+`/workspace-status`, the MCP version calls the same internal layer rather
 than duplicating command-specific logic.
 
 Shared session logic lives in `sfe.runtime_session.RuntimeSession`. The MCP
@@ -69,11 +69,14 @@ effective behavior for:
   behavior;
 - discovery and context loading;
 - executor prompt preparation;
-- core `SFE_FILE` text transport and compatible Git diff parsing;
+- configured `workspace_write` execution, including the Aider-backed default and
+  the explicit legacy text fallback;
+- actual workspace-change capture;
 - mechanical path validation;
 - Git repository preparation;
 - Git worktree creation and reuse;
-- patch application inside the active SFE worktree;
+- file application inside the active SFE worktree when the runtime uses the
+  legacy text fallback;
 - promotion from the worktree back to the target directory when the current
   runtime path promotes changes;
 - latest run-report data;
@@ -85,7 +88,7 @@ state transitions and file effects must match the TUI runtime.
 
 ## Minimal V1 Tools
 
-The v1 MCP surface should expose only the canonical TUI-equivalent flow.
+The v1 MCP surface exposes only the canonical TUI-equivalent flow.
 
 ### `sfe_set_target_directory`
 
@@ -223,16 +226,15 @@ boundaries:
   mutation outside the current SFE runtime behavior;
 - no attempt to clean or remove non-SFE worktrees.
 
-Before enabling workspace writes through MCP, implementation tests must show
-that `sfe_run` uses the same validation and patch/worktree machinery as TUI
-`/run`.
+Implementation tests must keep showing that `sfe_run` uses the same validation
+and workspace-write machinery as TUI `/run`.
 
-Text-returning API providers, including OpenAI, Anthropic, Google, Alibaba,
-Lemonade, Ollama, and similar endpoints, use the core `SFE_FILE` full-file block
-transport for `workspace_write`. MCP does not implement its own parser or prompt
+Normal `workspace_write` uses the shared Aider-backed filesystem writer. The
+legacy text executor remains available only when
+`SFE_WORKSPACE_WRITE_EXECUTOR=text` is explicitly configured; in that mode,
+text-returning API providers use the core `SFE_FILE` full-file block transport or
+compatible strict Git diffs. MCP does not implement its own parser or prompt
 contract; it reaches the same `RuntimeSession` and `RunPipeline` path as the TUI.
-Filesystem-capable local or CLI executors are a separate path when they actually
-write files inside the controlled worktree.
 
 Real Loop follows the same rule: MCP does not own verifier prompts, retry-task
 generation, or loop stop logic. When enabled, those behaviors live in the shared
@@ -249,8 +251,8 @@ promotion behavior from the shared SFE runtime:
   repository for isolated worktree creation;
 - if the selected workspace is not a Git repository and the runtime currently
   auto-initializes a local repository snapshot, MCP does the same;
-- generated file changes are applied in an SFE-owned isolated worktree through
-  the existing patch pipeline;
+- generated file changes are made in an SFE-owned isolated worktree through the
+  configured workspace writer, defaulting to Aider;
 - promotion behavior must match the current runtime exactly, including which
   files are copied back to the target directory and which failures block
   promotion;

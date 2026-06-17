@@ -9,7 +9,7 @@ For the current user-facing TUI workflow and command reference, see
 For the current product doctrine, see
 [sfe_product_doctrine.md](sfe_product_doctrine.md).
 
-For the planned local MCP control surface and the TUI/MCP ISO runtime
+For the current local STDIO MCP control surface and the TUI/MCP ISO runtime
 requirement, see
 [sfe_mcp_local_control_surface.md](sfe_mcp_local_control_surface.md).
 
@@ -69,8 +69,9 @@ machinery as normal workspace writes.
 Completed `workspace_write` attempts may also use Real Loop when enabled and a
 verifier provider is available. Real Loop asks an LLM verifier/governor to judge
 the final workspace state against the original task. The governor can stop with
-pass, blocked, or abort, or produce a targeted correction task for one bounded
-retry attempt. This is an auditable LLM judgment, not deterministic proof of
+pass, blocked, or abort, or produce a targeted correction task within the
+configured bounded attempt cap. The default cap is 3 total attempts including the
+original write. This is an auditable LLM judgment, not deterministic proof of
 task correctness.
 
 The worktree is the main operational guard for `workspace_write`. If the
