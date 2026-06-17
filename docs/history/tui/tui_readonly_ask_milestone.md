@@ -46,11 +46,10 @@ Historical note: `/patch` is the next proposal-only phase and later became a
 core-validated patch flow for structured full-file replacements and safe
 new-file unified diffs, with `/apply-patch` as the explicit router-reviewed
 write boundary. See `../../tui_v0_1_user_guide.md` and
-`../../tui_apply_patch_design.md`
-for current behavior. The TUI renders this as "Patch proposal only, not
-applied". At the time of this milestone, the important boundary was that
-`/patch` does not write files, apply patches, execute shell commands, switch
-backends, or run an agent loop.
+`tui_apply_patch_legacy_design.md` for the historical legacy design. The TUI
+renders this as "Patch proposal only, not applied". At the time of this
+milestone, the important boundary was that `/patch` does not write files, apply
+patches, execute shell commands, switch backends, or run an agent loop.
 
 `/reset` exists as a session comfort command. It clears the current task, loaded
 and skipped context file records, warning records tied to those files, and the

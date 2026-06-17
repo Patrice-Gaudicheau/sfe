@@ -847,9 +847,9 @@ model intelligence.
 - `docs/INDEX.md`: recommended starting point and documentation map for technical reviewers.
 - `docs/sfe_product_doctrine.md`: current product doctrine and terminology.
 - `docs/tui_v0_1_user_guide.md`: current local SFE-aware TUI workflow.
-- `docs/tui_apply_patch_design.md`: advanced/debug `/patch` -> `/apply-patch`
-  write boundary and router-reviewed full-file replacement design, retained for
-  compatibility rather than the primary `/run` workflow.
+- `docs/history/tui/tui_apply_patch_legacy_design.md`: legacy `/patch` ->
+  `/apply-patch` write boundary, retained for historical context rather than
+  the primary `/run` workflow.
 - `docs/current_architecture_status.md`: current boundary between the SFE core,
   local TUI surface, filesystem/worktree mode, and provider integration.
 - `docs/workspace_write_multipass.md`: multi-pass `workspace_write` mode for

@@ -28,16 +28,9 @@ removed.
   role-split effort benchmark observations.
 - [codexcli_full_role_discovery_run_benchmark_note.md](codexcli_full_role_discovery_run_benchmark_note.md):
   full-role discovery `/run` benchmark sample and failure modes.
-- [codexcli_openai_discovery_tui_run_note.md](codexcli_openai_discovery_tui_run_note.md):
-  one manual TUI `/run` observation using CodexCLI with OpenAI discovery.
-- [codexcli_large_contextual_practical_fixture_note.md](codexcli_large_contextual_practical_fixture_note.md):
-  first benchmark-local CodexCLI executor validation on the practical fixture tier.
-- [codexcli_large_contextual_router_inclusive_note.md](codexcli_large_contextual_router_inclusive_note.md):
-  router-inclusive CodexCLI large/contextual observations.
-- [codexcli_openai_api_practical_repeat3_comparison.md](codexcli_openai_api_practical_repeat3_comparison.md):
-  directional comparison between CodexCLI and OpenAI API practical repeat-3 evidence.
-- [codexcli_raw_envelope_smoke_note.md](codexcli_raw_envelope_smoke_note.md):
-  raw CodexCLI token-envelope diagnostics.
+- [codexcli_historical_benchmark_runs.md](codexcli_historical_benchmark_runs.md):
+  consolidated manual TUI, large/contextual executor, router-inclusive,
+  OpenAI API comparison, and raw envelope observations.
 
 ## Caveats
 

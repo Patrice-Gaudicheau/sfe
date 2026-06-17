@@ -27,14 +27,9 @@ progression:
   progression through poison-pill and hostile distractor checks.
 - [high_overlap_subtle_poison_progression_summary.md](history/high_overlap/high_overlap_subtle_poison_progression_summary.md):
   progression through subtler poison and authority-conflict checks.
-- [high_overlap_new_fixtures_selector_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_smoke_notes.md):
-  selector smoke observations for newer authority-gap fixtures.
-- [high_overlap_new_fixtures_selector_repeat3_notes.md](history/high_overlap/high_overlap_new_fixtures_selector_repeat3_notes.md):
-  repeat-3 selector observations for newer authority-gap fixtures.
-- [high_overlap_new_fixtures_openai_smoke_notes.md](history/high_overlap/high_overlap_new_fixtures_openai_smoke_notes.md):
-  OpenAI selected-context executor smoke observations for newer fixtures.
-- [high_overlap_new_fixtures_comparison_notes.md](history/high_overlap/high_overlap_new_fixtures_comparison_notes.md):
-  selected-context vs full-context comparison observations for newer fixtures.
+- [new_fixtures_smoke_runs_may_2026.md](history/high_overlap/new_fixtures_smoke_runs_may_2026.md):
+  consolidated selector, selected-context executor, repeat-3, and
+  selected-vs-full observations for newer authority-gap fixtures.
 
 These records are useful for audit continuity, but current readers should use
 the visible methodology docs above and the current project overview before

@@ -24,12 +24,9 @@ controlled, project-like multi-zone fixtures:
 - [large_real_world_benchmark_progression_summary.md](history/large_real_world/large_real_world_benchmark_progression_summary.md):
   synthesis of the progression from deterministic validation through live
   OpenAI selector and executor smoke tests.
-- [large_real_world_openai_selector_smoke.md](history/large_real_world/large_real_world_openai_selector_smoke.md):
-  OpenAI selector-only smoke observations.
-- [large_real_world_openai_selector_deterministic_executor.md](history/large_real_world/large_real_world_openai_selector_deterministic_executor.md):
-  OpenAI selector plus deterministic executor observations.
-- [large_real_world_openai_selector_executor_smoke.md](history/large_real_world/large_real_world_openai_selector_executor_smoke.md):
-  OpenAI selector plus OpenAI executor smoke observations.
+- [openai_selector_executor_runs_may_2026.md](history/large_real_world/openai_selector_executor_runs_may_2026.md):
+  consolidated OpenAI selector-only, selector plus deterministic executor, and
+  selector plus OpenAI executor smoke observations.
 
 These notes are useful for audit continuity, but they are not the current
 headline benchmark documentation.

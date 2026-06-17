@@ -55,18 +55,15 @@ general model-safety guarantees.
   current local STDIO MCP control surface and TUI/MCP ISO runtime requirement.
 - [sfe_mcp_client_setup.md](sfe_mcp_client_setup.md): current local STDIO MCP
   setup for Antigravity and Codex App.
-- [sfe_continuity_orientation_layer.md](sfe_continuity_orientation_layer.md):
-  orientation vocabulary for tasks, workspaces, evidence, and continuity. It is
-  not current user guidance.
 - [decisions.md](decisions.md): project decision notes and historical context.
 
 ## TUI Usage
 
 - [tui_v0_1_user_guide.md](tui_v0_1_user_guide.md): current local user-facing
   TUI guide. `/run` is the current primary action.
-- [tui_apply_patch_design.md](tui_apply_patch_design.md): advanced/debug
-  `/patch` -> `/apply-patch` write boundary. The primary write path is
-  `/run` when the execution-mode router selects `workspace_write`.
+- [history/tui/tui_apply_patch_legacy_design.md](history/tui/tui_apply_patch_legacy_design.md):
+  legacy `/patch` -> `/apply-patch` write-boundary design from before the
+  current `/run`-first and Aider-backed workspace-writer flow.
 
 Historical TUI milestone and backend-strategy notes are under
 [`history/tui/`](history/tui/).
@@ -161,7 +158,9 @@ read as current top-level project status.
   older direct/tool-assisted/multi-step execution patterns.
 - [history/tui/tui_readonly_ask_milestone.md](history/tui/tui_readonly_ask_milestone.md)
 - [history/tui/tui_direct_backend_strategy.md](history/tui/tui_direct_backend_strategy.md)
+- [history/tui/tui_apply_patch_legacy_design.md](history/tui/tui_apply_patch_legacy_design.md)
 - [history/mcp/mcp_antigravity_dogfooding_001.md](history/mcp/mcp_antigravity_dogfooding_001.md)
+- [history/sfe_continuity_orientation_glossary.md](history/sfe_continuity_orientation_glossary.md)
 - [history/high_overlap/high_overlap_fixture_expansion_phase_close.md](history/high_overlap/high_overlap_fixture_expansion_phase_close.md)
 - [history/roadmaps/roadmap_after_structural_50k.md](history/roadmaps/roadmap_after_structural_50k.md)
 - [high_overlap_history.md](high_overlap_history.md): rollup for historical

@@ -28,14 +28,10 @@ document says otherwise. It should not be read as a repeat campaign.
 Earlier Alibaba/Qwen work advanced through small provider checks before the
 current large/contextual summaries existed:
 
-- [alibaba_router_smoke_note.md](history/providers/alibaba/alibaba_router_smoke_note.md): early router
-  smoke checks for Alibaba/Qwen provider wiring.
-- [alibaba_progressive_benchmark_note.md](history/providers/alibaba/alibaba_progressive_benchmark_note.md):
-  progressive setup across effectiveness, high-overlap selector,
-  multi-zone, limited large/contextual, and structural dry-run stages.
-- [alibaba_structural_50k_spatial_smoke_note.md](history/providers/alibaba/alibaba_structural_50k_spatial_smoke_note.md):
-  earlier structural spatial-only smoke that preceded the current
-  baseline-vs-spatial structural comparison.
+- [history/providers/alibaba/](history/providers/alibaba/README.md):
+  consolidated historical smoke rollup covering early Qwen router checks,
+  progressive benchmark stages, Qwen structural spatial-only smoke, and
+  Alibaba-hosted DeepSeek exploration.
 
 These notes are useful for audit continuity, but the current Alibaba/Qwen
 benchmark status should be taken from the supporting docs above and from
@@ -43,16 +39,9 @@ benchmark status should be taken from the supporting docs above and from
 
 ## Alibaba-Hosted DeepSeek Exploration
 
-The DeepSeek-related notes are Alibaba-hosted provider exploration records.
-They should not be confused with the current Alibaba/Qwen benchmark headline:
-
-- [alibaba_deepseek_smoke_note.md](history/providers/alibaba/alibaba_deepseek_smoke_note.md): DeepSeek
-  connectivity and limited benchmark smoke observations through Alibaba-hosted
-  paths.
-- [alibaba_deepseek_structural_spatial_smoke_note.md](history/providers/alibaba/alibaba_deepseek_structural_spatial_smoke_note.md):
-  DeepSeek structural spatial-only smoke.
-- [alibaba_deepseek_structural_50k_comparison_note.md](history/providers/alibaba/alibaba_deepseek_structural_50k_comparison_note.md):
-  DeepSeek structural 50k baseline-vs-spatial comparison note.
+The DeepSeek-related observations are included in the consolidated Alibaba
+history rollup. They should not be confused with the current Alibaba/Qwen
+benchmark headline.
 
 These are model/provider exploration records, not current Qwen summary rows and
 not broad provider rankings.
