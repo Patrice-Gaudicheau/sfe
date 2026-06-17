@@ -460,6 +460,9 @@ def build_real_loop_verifier_prompt(request: RealLoopVerifierRequest) -> str:
             "Use needs_retry only when retry is worthwhile and executor_retry_task is materially useful.",
             "executor_retry_task must target only missing or failed requirements.",
             "Use abort when progress has stalled or retry would waste tokens.",
+            "workspace_snapshot.inspected_root is the exact root inspected for this verdict.",
+            "workspace_snapshot.workspace_files is a bounded recursive file listing; do not report files as missing when they appear there.",
+            "For modular JavaScript projects, accept recursive src/**/*.js files unless the task explicitly requires files directly under src/.",
         ],
     }
     return (

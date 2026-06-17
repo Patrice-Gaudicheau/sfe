@@ -1139,6 +1139,26 @@ def test_expected_workspace_write_paths_ignore_shell_commands(
     assert result == ("src/main.js",)
 
 
+def test_expected_workspace_write_paths_do_not_include_tree_output_prefixes(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "\n".join(
+            [
+                "Expected tree:",
+                "├── README.md",
+                "└── styles.css",
+                "src/main.js",
+            ]
+        ),
+        tmp_path,
+    )
+
+    assert result == ("README.md", "styles.css", "src/main.js")
+    assert "├── README.md" not in result
+    assert "└── styles.css" not in result
+
+
 def test_expected_workspace_write_paths_reject_explicit_absolute_path(
     tmp_path: Path,
 ) -> None:
@@ -1254,12 +1274,98 @@ def test_run_pipeline_default_aider_rejects_command_like_created_path_but_promot
     assert result.rejected_artifacts
     assert result.rejected_artifacts[0].path == "npm run dev"
     assert result.rejected_artifacts[0].reason == "command_like_path"
-    assert result.rejected_artifacts[0].action == "ignored"
+    assert result.rejected_artifacts[0].action == "removed"
     assert "promotion_rejected_artifacts" in result.warnings
     rendered = render_run_result(result)
-    assert "rejected artifacts: npm run dev (command_like_path, action=ignored)" in rendered
+    assert "rejected artifacts: npm run dev (command_like_path, action=removed)" in rendered
     assert "filesystem rejected artifacts:" in rendered
     assert "command_like_path" in rendered
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+@pytest.mark.parametrize("tree_path", ("└── README.md", "├── styles.css"))
+def test_run_pipeline_default_aider_rejects_tree_output_artifacts_but_promotes_valid_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tree_path: str,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "index.html").write_text("<h1>App</h1>\n", encoding="utf-8")
+        (workspace / tree_path).write_text("tree artifact\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html from a tree listing.",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promoted_files == ("index.html",)
+    assert result.changed_files == ("index.html",)
+    assert result.patch_summary is not None
+    assert result.patch_summary.created_paths == ("index.html",)
+    assert result.patch_summary.modified_paths == ()
+    assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>App</h1>\n"
+    assert not (repo / tree_path).exists()
+    assert result.workspace_session is not None
+    assert not (result.workspace_session.worktree_path / tree_path).exists()
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == tree_path
+    assert result.rejected_artifacts[0].reason == "terminal_tree_artifact"
+    assert result.rejected_artifacts[0].action == "removed"
+    rendered = render_run_result(result)
+    assert f"{tree_path} (terminal_tree_artifact, action=removed)" in rendered
+    assert tree_path not in result.promoted_files
+    assert tree_path not in result.changed_files
+    assert tree_path not in result.patch_summary.created_paths
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_removes_existing_tree_output_artifact_from_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    artifact_path = "└── styles.css"
+    (repo / artifact_path).write_text("old artifact\n", encoding="utf-8")
+    _git(repo, "add", artifact_path)
+    _git(repo, "commit", "-m", "Add malformed artifact")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "index.html").write_text("<h1>App</h1>\n", encoding="utf-8")
+        (workspace / artifact_path).write_text("new artifact\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html and ignore tree listing artifacts.",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.promoted_files == ("index.html",)
+    assert not (repo / artifact_path).exists()
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == artifact_path
+    assert result.rejected_artifacts[0].reason == "terminal_tree_artifact"
+    assert result.rejected_artifacts[0].action == "removed"
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1297,7 +1403,7 @@ def test_run_pipeline_default_aider_only_rejected_artifacts_fails_as_no_useful_c
     assert not (repo / "npm run dev").exists()
     rendered = render_run_result(result)
     assert "filesystem no changes reason: only_rejected_artifacts" in rendered
-    assert "rejected artifacts: npm run dev (command_like_path, action=ignored)" in rendered
+    assert "rejected artifacts: npm run dev (command_like_path, action=removed)" in rendered
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 

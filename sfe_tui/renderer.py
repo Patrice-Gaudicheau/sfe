@@ -620,6 +620,10 @@ def _render_real_loop_debug_lines(result: RunResult) -> list[str]:
                 f"  iteration {index} verifier issue: {_display_value(getattr(iteration, 'verifier_issue_reason', None))}",
                 f"  iteration {index} verifier schema reason: {_display_value(getattr(iteration, 'verifier_schema_validation_reason', None))}",
                 f"  iteration {index} verifier raw preview: {_display_value(getattr(iteration, 'verifier_raw_answer_preview', None))}",
+                f"  iteration {index} verifier inspected root: {_display_value(getattr(iteration, 'verifier_inspected_root', None))}",
+                f"  iteration {index} verifier source root: {_display_value(getattr(iteration, 'verifier_source_root', None))}",
+                f"  iteration {index} verifier worktree root: {_display_value(getattr(iteration, 'verifier_worktree_root', None))}",
+                f"  iteration {index} verifier workspace files: {_format_string_list(list(getattr(iteration, 'verifier_workspace_files', ()) or ())) }",
             ]
         )
     return lines

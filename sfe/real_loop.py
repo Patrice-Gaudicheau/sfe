@@ -105,6 +105,10 @@ class RealLoopIterationSummary:
     verifier_issue_reason: str | None = None
     verifier_schema_validation_reason: str | None = None
     verifier_raw_answer_preview: str | None = None
+    verifier_inspected_root: str | None = None
+    verifier_source_root: str | None = None
+    verifier_worktree_root: str | None = None
+    verifier_workspace_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -207,6 +211,10 @@ class RealLoopController:
                 f"SFE: Real Loop verification started: attempt {attempt_index}",
                 real_loop_attempt=attempt_index,
             )
+            workspace_snapshot = build_real_loop_workspace_snapshot(
+                current_result,
+                self.config,
+            )
             verifier_response = self.verifier.verify(
                 RealLoopVerifierRequest(
                     original_task=original_task,
@@ -216,10 +224,7 @@ class RealLoopController:
                     previous_retry_tasks=tuple(previous_retry_tasks),
                     previous_failure_categories=tuple(previous_failure_categories),
                     run_result=_run_result_payload(current_result),
-                    workspace_snapshot=build_real_loop_workspace_snapshot(
-                        current_result,
-                        self.config,
-                    ),
+                    workspace_snapshot=workspace_snapshot,
                 )
             )
             if verifier_response.issue is not None or verifier_response.decision is None:
@@ -232,6 +237,7 @@ class RealLoopController:
                         stop_reason=issue.reason if issue is not None else "verifier_failed",
                         verifier_issue=issue,
                         verifier_raw_answer=verifier_response.raw_answer,
+                        workspace_snapshot=workspace_snapshot,
                     )
                 )
                 return _with_real_loop_summary(
@@ -252,6 +258,7 @@ class RealLoopController:
                     iteration_index=attempt_index,
                     task=current_task,
                     decision=decision,
+                    workspace_snapshot=workspace_snapshot,
                 )
             )
             self._emit_progress(
@@ -567,6 +574,18 @@ def build_real_loop_workspace_snapshot(
     config: RealLoopConfig,
 ) -> dict[str, object]:
     root = result.active_workspace
+    inspected_root = str(root.resolve()) if root is not None else None
+    source_root = (
+        str(result.workspace_session.source_path.resolve())
+        if result.workspace_session is not None
+        else None
+    )
+    worktree_root = (
+        str(result.workspace_session.worktree_path.resolve())
+        if result.workspace_session is not None
+        else None
+    )
+    workspace_files = _workspace_file_inventory(root)
     paths = tuple(dict.fromkeys((*result.promoted_files, *result.changed_files)))
     previews: list[dict[str, object]] = []
     total_chars = 0
@@ -586,6 +605,11 @@ def build_real_loop_workspace_snapshot(
                 total_chars += len(str(preview.get("text", "")))
                 previews.append(preview)
     return {
+        "inspected_root": inspected_root,
+        "source_root": source_root,
+        "worktree_root": worktree_root,
+        "workspace_files": list(workspace_files),
+        "workspace_file_count": len(workspace_files),
         "changed_files": list(result.changed_files),
         "promoted_files": list(result.promoted_files),
         "modified_files": list(result.patch_summary.modified_paths)
@@ -599,6 +623,39 @@ def build_real_loop_workspace_snapshot(
         and result.multi_pass_summary.enabled,
         "file_previews": previews,
     }
+
+
+def _workspace_file_inventory(
+    root: Path | None,
+    *,
+    limit: int = 240,
+) -> tuple[str, ...]:
+    if root is None:
+        return ()
+    root_path = root.resolve()
+    if not root_path.exists():
+        return ()
+    files: list[str] = []
+    try:
+        for path in sorted(root_path.rglob("*")):
+            try:
+                relative = path.relative_to(root_path)
+            except ValueError:
+                continue
+            if _is_real_loop_ignored_path(relative):
+                continue
+            if path.is_file():
+                files.append(relative.as_posix())
+                if len(files) >= limit:
+                    break
+    except OSError:
+        return tuple(files)
+    return tuple(files)
+
+
+def _is_real_loop_ignored_path(relative_path: Path) -> bool:
+    ignored_parts = {".git", ".sfe", ".sfe-worktrees", "node_modules"}
+    return any(part in ignored_parts for part in relative_path.parts)
 
 
 def _route_decision_from_execution_mode_decision(
@@ -632,6 +689,7 @@ def _iteration_from_result(
     stop_reason: str | None = None,
     verifier_issue: object | None = None,
     verifier_raw_answer: str | None = None,
+    workspace_snapshot: dict[str, object] | None = None,
 ) -> RealLoopIterationSummary:
     execution_mode = (
         result.execution_mode_decision.execution_mode
@@ -683,7 +741,33 @@ def _iteration_from_result(
             verifier_issue,
             verifier_raw_answer,
         ),
+        verifier_inspected_root=_snapshot_string(workspace_snapshot, "inspected_root"),
+        verifier_source_root=_snapshot_string(workspace_snapshot, "source_root"),
+        verifier_worktree_root=_snapshot_string(workspace_snapshot, "worktree_root"),
+        verifier_workspace_files=_snapshot_string_tuple(
+            workspace_snapshot,
+            "workspace_files",
+        ),
     )
+
+
+def _snapshot_string(snapshot: dict[str, object] | None, key: str) -> str | None:
+    if snapshot is None:
+        return None
+    value = snapshot.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _snapshot_string_tuple(
+    snapshot: dict[str, object] | None,
+    key: str,
+) -> tuple[str, ...]:
+    if snapshot is None:
+        return ()
+    value = snapshot.get(key)
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
 
 
 def _verifier_schema_validation_reason(verifier_issue: object | None) -> str | None:

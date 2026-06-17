@@ -32,6 +32,7 @@ from sfe.real_loop import (  # noqa: E402
 )
 from sfe.real_loop_verifier import (  # noqa: E402
     REAL_LOOP_VERIFIER_SCHEMA_VERSION,
+    build_real_loop_verifier_prompt,
     RealLoopVerifierDecision,
     RealLoopVerifierResponse,
     create_configured_real_loop_verifier,
@@ -160,6 +161,49 @@ def test_workspace_snapshot_preserves_relative_preview_paths(tmp_path: Path) -> 
     assert snapshot["file_previews"][0]["path"] == "src/index.html"
 
 
+def test_workspace_snapshot_includes_inspected_root_and_recursive_project_files(
+    tmp_path: Path,
+) -> None:
+    result = _run_result(tmp_path, "package.json")
+    (tmp_path / "index.html").write_text("<div id=\"app\"></div>\n", encoding="utf-8")
+    app = tmp_path / "src" / "core" / "App.js"
+    app.parent.mkdir(parents=True)
+    app.write_text("export class App {}\n", encoding="utf-8")
+
+    snapshot = build_real_loop_workspace_snapshot(result, RealLoopConfig(mode="true"))
+
+    assert snapshot["inspected_root"] == str(tmp_path.resolve())
+    assert snapshot["source_root"] == str(tmp_path.resolve())
+    assert snapshot["worktree_root"] == str(tmp_path.resolve())
+    assert "package.json" in snapshot["workspace_files"]
+    assert "index.html" in snapshot["workspace_files"]
+    assert "src/core/App.js" in snapshot["workspace_files"]
+
+
+def test_verifier_prompt_explains_recursive_workspace_files_are_authoritative(
+    tmp_path: Path,
+) -> None:
+    result = _run_result(tmp_path, "package.json")
+    (tmp_path / "index.html").write_text("<div id=\"app\"></div>\n", encoding="utf-8")
+    app = tmp_path / "src" / "core" / "App.js"
+    app.parent.mkdir(parents=True)
+    app.write_text("export class App {}\n", encoding="utf-8")
+    request = _verifier_request(
+        workspace_snapshot=build_real_loop_workspace_snapshot(
+            result,
+            RealLoopConfig(mode="true"),
+        )
+    )
+
+    prompt = build_real_loop_verifier_prompt(request)
+
+    assert '"inspected_root":' in prompt
+    assert '"workspace_files":' in prompt
+    assert "src/core/App.js" in prompt
+    assert "do not report files as missing when they appear there" in prompt
+    assert "accept recursive src/**/*.js files" in prompt
+
+
 def test_verifier_provider_prefers_explicit_verifier_provider_and_model() -> None:
     provider = FakeProvider()
     verifier = create_configured_real_loop_verifier(
@@ -267,6 +311,44 @@ def test_real_loop_passes_first_attempt(tmp_path: Path) -> None:
 
     assert final.real_loop_summary.real_loop_status == REAL_LOOP_STATUS_VERIFIED_PASS
     assert final.real_loop_summary.llm_verifier_verdict == "pass"
+
+
+def test_real_loop_verifier_request_uses_active_workspace_root_and_reports_it(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "generated-app"
+    workspace.mkdir()
+    result = _run_result(workspace, "package.json")
+    (workspace / "index.html").write_text("<div id=\"app\"></div>\n", encoding="utf-8")
+    app = workspace / "src" / "core" / "App.js"
+    app.parent.mkdir(parents=True)
+    app.write_text("export class App {}\n", encoding="utf-8")
+    verifier = FakeVerifier([_decision("pass")])
+    controller = RealLoopController(
+        config=RealLoopConfig(mode="true"),
+        verifier=verifier,
+    )
+
+    final = controller.run(
+        initial_result=result,
+        original_task="Create modular Vite app",
+        run_attempt=lambda task, session: pytest.fail("retry should not run"),
+        route_correction_task=lambda task: pytest.fail("route should not run"),
+    )
+    request = verifier.requests[0]
+    snapshot = request.workspace_snapshot
+    rendered = render_run_result(final)
+
+    assert snapshot["inspected_root"] == str(workspace.resolve())
+    assert snapshot["worktree_root"] == str(workspace.resolve())
+    assert "package.json" in snapshot["workspace_files"]
+    assert "index.html" in snapshot["workspace_files"]
+    assert "src/core/App.js" in snapshot["workspace_files"]
+    assert final.real_loop_summary is not None
+    iteration = final.real_loop_summary.iterations[0]
+    assert iteration.verifier_inspected_root == str(workspace.resolve())
+    assert "src/core/App.js" in iteration.verifier_workspace_files
+    assert f"iteration 1 verifier inspected root: {workspace.resolve()}" in rendered
 
 
 def test_real_loop_retries_with_targeted_task_then_passes(tmp_path: Path) -> None:
@@ -634,7 +716,11 @@ def _decision(
     return parse_real_loop_verifier_json(json.dumps(payload))
 
 
-def _verifier_request():
+def _verifier_request(
+    *,
+    run_result: dict[str, object] | None = None,
+    workspace_snapshot: dict[str, object] | None = None,
+):
     from sfe.real_loop_verifier import RealLoopVerifierRequest
 
     return RealLoopVerifierRequest(
@@ -644,8 +730,8 @@ def _verifier_request():
         max_iterations=3,
         previous_retry_tasks=(),
         previous_failure_categories=(),
-        run_result={},
-        workspace_snapshot={},
+        run_result=run_result or {},
+        workspace_snapshot=workspace_snapshot or {},
     )
 
 

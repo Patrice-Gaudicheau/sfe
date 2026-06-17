@@ -528,6 +528,20 @@ def _serialize_real_loop_iteration(iteration: object) -> dict[str, Any]:
         "verifier_raw_answer_preview": _safe_diagnostic_value(
             getattr(iteration, "verifier_raw_answer_preview", None)
         ),
+        "verifier_inspected_root": _safe_diagnostic_value(
+            getattr(iteration, "verifier_inspected_root", None)
+        ),
+        "verifier_source_root": _safe_diagnostic_value(
+            getattr(iteration, "verifier_source_root", None)
+        ),
+        "verifier_worktree_root": _safe_diagnostic_value(
+            getattr(iteration, "verifier_worktree_root", None)
+        ),
+        "verifier_workspace_files": [
+            _safe_diagnostic_value(item)
+            for item in tuple(getattr(iteration, "verifier_workspace_files", ()) or ())
+            if isinstance(item, str)
+        ],
     }
 
 

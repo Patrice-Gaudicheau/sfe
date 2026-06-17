@@ -762,7 +762,11 @@ class RunPipeline:
             else _summary_from_promotion_baseline(promotion_baseline)
         )
         changed_files = _promotion_baseline_paths(promotion_baseline)
-        rejected_artifacts = promotion_baseline.rejected_artifacts
+        rejected_artifacts = _cleanup_rejected_promotion_artifacts(
+            session,
+            active_workspace,
+            promotion_baseline.rejected_artifacts,
+        )
         self._emit_progress(
             "workspace_boundary_check_completed",
             "SFE: workspace boundary check completed",
@@ -1016,7 +1020,11 @@ class RunPipeline:
         promotion_baseline = filtered.baseline
         patch_summary = _summary_from_promotion_baseline(promotion_baseline)
         changed_files = _promotion_baseline_paths(promotion_baseline)
-        rejected_artifacts = promotion_baseline.rejected_artifacts
+        rejected_artifacts = _cleanup_rejected_promotion_artifacts(
+            session,
+            active_workspace,
+            promotion_baseline.rejected_artifacts,
+        )
         fs_result = _with_filesystem_diagnostics_metadata(
             fs_result,
             actual_changed_paths=changed_files,
@@ -1921,7 +1929,11 @@ class RunPipeline:
             promotion_baseline = filtered.baseline
             patch_summary = _summary_from_promotion_baseline(promotion_baseline)
             changed_files = _promotion_baseline_paths(promotion_baseline)
-            rejected_artifacts = promotion_baseline.rejected_artifacts
+            rejected_artifacts = _cleanup_rejected_promotion_artifacts(
+                session,
+                active_workspace,
+                promotion_baseline.rejected_artifacts,
+            )
             all_rejected_artifacts.extend(rejected_artifacts)
             fs_result = _with_filesystem_diagnostics_metadata(
                 fs_result,
@@ -4054,6 +4066,66 @@ def _promotion_rejected_artifact(
     return RejectedPromotionArtifact(path=path, reason=reason, action=action)
 
 
+def _cleanup_rejected_promotion_artifacts(
+    session: WorkspaceSession,
+    active_workspace: Path,
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...],
+) -> tuple[RejectedPromotionArtifact, ...]:
+    if not rejected_artifacts:
+        return ()
+    source_root = session.source_path.resolve()
+    active_root = active_workspace.resolve()
+    cleaned: list[RejectedPromotionArtifact] = []
+    for artifact in rejected_artifacts:
+        action = artifact.action
+        if _rejected_artifact_safe_to_remove(artifact):
+            removed = _remove_rejected_artifact_if_safe(
+                artifact.path,
+                root=active_root,
+            )
+            removed = (
+                _remove_rejected_artifact_if_safe(
+                    artifact.path,
+                    root=source_root,
+                )
+                or removed
+            )
+            if removed:
+                action = "removed"
+        cleaned.append(
+            RejectedPromotionArtifact(
+                path=artifact.path,
+                reason=artifact.reason,
+                action=action,
+            )
+        )
+    return tuple(cleaned)
+
+
+def _rejected_artifact_safe_to_remove(artifact: RejectedPromotionArtifact) -> bool:
+    return artifact.reason in {"terminal_tree_artifact", "command_like_path"}
+
+
+def _remove_rejected_artifact_if_safe(path: str, *, root: Path) -> bool:
+    relative = Path(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        return False
+    if _is_internal_promotion_path(relative.as_posix()):
+        return False
+    target = (root / relative).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return False
+    try:
+        if target.is_file() or target.is_symlink():
+            target.unlink()
+            return True
+    except OSError:
+        return False
+    return False
+
+
 def _summary_from_promotion_baseline(baseline: PromotionBaseline) -> PatchSummary | None:
     if baseline.issue is not None or not baseline.targets:
         return None
@@ -4164,6 +4236,15 @@ def _capture_actual_workspace_changes(
                 _promotion_rejected_artifact(
                     relative_path,
                     reason="command_like_path",
+                )
+            )
+            continue
+        tree_artifact_reason = _terminal_tree_artifact_path_reason(relative_path)
+        if tree_artifact_reason is not None:
+            rejected_artifacts.append(
+                _promotion_rejected_artifact(
+                    relative_path,
+                    reason="terminal_tree_artifact",
                 )
             )
             continue
@@ -4329,6 +4410,20 @@ def _command_like_promotion_path_reason(relative_path: str) -> str | None:
         return "pytest_command"
     if first == "python" and "-m" in tokens and "pytest" in tokens:
         return "python_pytest_command"
+    return None
+
+
+def _terminal_tree_artifact_path_reason(relative_path: str) -> str | None:
+    for part in Path(relative_path).parts:
+        normalized = part.strip()
+        if not normalized:
+            continue
+        if normalized.startswith(("├──", "└──", "│", "├─", "└─")):
+            return "unicode_tree_prefix"
+        if normalized.startswith(("|--", "`--", "+--")):
+            return "ascii_tree_prefix"
+        if normalized[0] in {"├", "└", "│"}:
+            return "unicode_tree_glyph"
     return None
 
 
