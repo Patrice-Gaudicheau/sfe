@@ -430,6 +430,8 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         f"  multi-pass: {_yes_no(result.multi_pass_summary is not None and result.multi_pass_summary.enabled)}",
         f"  promotion: {result.promotion_status}",
         f"  promoted files: {_format_string_list(list(result.promoted_files))}",
+        "  rejected artifacts: "
+        f"{_format_rejected_artifacts(getattr(result, 'rejected_artifacts', ()))}",
         f"  changed files: {_format_string_list(list(result.changed_files))}",
         f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
         f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
@@ -855,6 +857,22 @@ def _executor_response_diagnostics(result: RunResult) -> dict[str, object] | Non
     return diagnostics if isinstance(diagnostics, dict) else None
 
 
+def _format_rejected_artifacts(rejected_artifacts: object) -> str:
+    if not rejected_artifacts:
+        return "none"
+    formatted: list[str] = []
+    for artifact in rejected_artifacts:
+        path = getattr(artifact, "path", None)
+        reason = getattr(artifact, "reason", None)
+        action = getattr(artifact, "action", None)
+        if path is None:
+            continue
+        formatted.append(
+            f"{path} ({_display_value(reason)}, action={_display_value(action)})"
+        )
+    return _format_string_list(formatted)
+
+
 def _render_filesystem_result(filesystem_result: object) -> list[str]:
     diagnostics = getattr(filesystem_result, "diagnostics", None)
     metadata = getattr(diagnostics, "metadata", {}) if diagnostics is not None else {}
@@ -874,6 +892,8 @@ def _render_filesystem_result(filesystem_result: object) -> list[str]:
         f"{_format_diagnostic_list(metadata.get('untouched_placeholder_paths'))}",
         "  filesystem actual changed paths: "
         f"{_format_diagnostic_list(metadata.get('actual_changed_paths'))}",
+        "  filesystem rejected artifacts: "
+        f"{_format_diagnostic_list(metadata.get('rejected_artifacts'))}",
         "  filesystem no changes reason: "
         f"{_display_value(metadata.get('no_changes_reason'))}",
         "  filesystem cwd: "

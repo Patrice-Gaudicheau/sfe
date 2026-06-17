@@ -37,6 +37,7 @@ from sfe.patch_proposal_diagnostics import PatchProposalDiagnostics  # noqa: E40
 from sfe.run_pipeline import (  # noqa: E402
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
+    RejectedPromotionArtifact,
     RunIssue,
     RunProgressEvent,
     RunResult,
@@ -204,6 +205,7 @@ def make_run_result(
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
     patch_result: ExecutionResult | None = None,
     multi_pass_summary: MultiPassRunSummary | None = None,
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = (),
 ) -> RunResult:
     return RunResult(
         status=status,
@@ -236,6 +238,7 @@ def make_run_result(
         patch_proposal_diagnostics=patch_proposal_diagnostics,
         patch_result=patch_result,
         multi_pass_summary=multi_pass_summary,
+        rejected_artifacts=rejected_artifacts,
     )
 
 
@@ -359,9 +362,38 @@ def test_run_without_target_or_task_failure_is_surfaced() -> None:
     assert result["execution_mode"] is None
     assert result["selected_source_refs"] == []
     assert result["changed_files"] == []
+    assert result["rejected_artifacts"] == []
     assert result["promotion"]["status"] == "skipped"
     assert result["progress"] == []
     assert session.calls == [("run", None)]
+
+
+def test_run_output_includes_rejected_promotion_artifacts() -> None:
+    session = FakeRuntimeSession()
+    session.run_result = SessionRunResult(
+        ok=True,
+        run_result=make_run_result(
+            rejected_artifacts=(
+                RejectedPromotionArtifact(
+                    path="npm run dev",
+                    reason="command_like_path",
+                    action="ignored",
+                ),
+            )
+        ),
+        progress_events=(),
+    )
+    handlers = SfeMcpToolHandlers(session)  # type: ignore[arg-type]
+
+    result = handlers.sfe_run()
+
+    assert result["rejected_artifacts"] == [
+        {
+            "path": "npm run dev",
+            "reason": "command_like_path",
+            "action": "ignored",
+        }
+    ]
 
 
 def test_run_without_task_failure_is_surfaced_actionably() -> None:

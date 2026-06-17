@@ -56,6 +56,7 @@ def serialize_run_result(
         "modified_files": list(summary.modified_paths) if summary else [],
         "created_files": list(summary.created_paths) if summary else [],
         "promoted_files": list(result.promoted_files),
+        "rejected_artifacts": _serialize_rejected_artifacts(result),
         "patch_generated": result.patch_generated,
         "patch_applied": result.patch_applied,
         "promotion": {
@@ -153,6 +154,13 @@ def _safe_workspace_write_executor_diagnostics(
                 for item in value[:40]
                 if isinstance(item, str)
             ]
+    rejected_artifacts = diagnostics.get("rejected_artifacts")
+    if isinstance(rejected_artifacts, tuple | list):
+        safe["rejected_artifacts"] = [
+            _safe_rejected_artifact(item)
+            for item in rejected_artifacts[:40]
+            if _safe_rejected_artifact(item) is not None
+        ]
     filesystem_diagnostics = diagnostics.get("diagnostics")
     if isinstance(filesystem_diagnostics, dict):
         safe["filesystem_executor"] = _safe_filesystem_diagnostics(
@@ -186,11 +194,45 @@ def _safe_filesystem_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
                 "actual_changed_paths",
                 "precreated_expected_paths",
                 "untouched_placeholder_paths",
+                "rejected_artifacts",
                 "no_changes_reason",
                 "context_paths",
             }
         }
+        rejected_artifacts = metadata.get("rejected_artifacts")
+        if isinstance(rejected_artifacts, tuple | list):
+            safe["metadata"]["rejected_artifacts"] = [
+                safe_artifact
+                for item in rejected_artifacts[:40]
+                if (safe_artifact := _safe_rejected_artifact(item)) is not None
+            ]
     return safe
+
+
+def _serialize_rejected_artifacts(result: RunResult) -> list[dict[str, str]]:
+    return [
+        {
+            "path": artifact.path,
+            "reason": artifact.reason,
+            "action": artifact.action,
+        }
+        for artifact in getattr(result, "rejected_artifacts", ()) or ()
+    ]
+
+
+def _safe_rejected_artifact(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    reason = value.get("reason")
+    action = value.get("action")
+    if not isinstance(path, str):
+        return None
+    return {
+        "path": _redact_diagnostic_string(path),
+        "reason": reason if isinstance(reason, str) else "unknown",
+        "action": action if isinstance(action, str) else "unknown",
+    }
 
 
 def serialize_session_error(error_category: str | None) -> dict[str, Any]:
@@ -210,6 +252,7 @@ def serialize_session_error(error_category: str | None) -> dict[str, Any]:
         "modified_files": [],
         "created_files": [],
         "promoted_files": [],
+        "rejected_artifacts": [],
         "promotion": {
             "status": "skipped",
             "applied": False,

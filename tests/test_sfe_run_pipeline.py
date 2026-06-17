@@ -1220,7 +1220,7 @@ def test_run_pipeline_default_aider_invokes_executor_for_nested_main_js_task(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_default_aider_rejects_command_like_created_path(
+def test_run_pipeline_default_aider_rejects_command_like_created_path_but_promotes_valid_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1245,16 +1245,107 @@ def test_run_pipeline_default_aider_rejects_command_like_created_path(
         )
     )
 
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promotion_status == "applied"
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>App</h1>\n"
+    assert not (repo / "npm run dev").exists()
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "npm run dev"
+    assert result.rejected_artifacts[0].reason == "command_like_path"
+    assert result.rejected_artifacts[0].action == "ignored"
+    assert "promotion_rejected_artifacts" in result.warnings
+    rendered = render_run_result(result)
+    assert "rejected artifacts: npm run dev (command_like_path, action=ignored)" in rendered
+    assert "filesystem rejected artifacts:" in rendered
+    assert "command_like_path" in rendered
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_default_aider_only_rejected_artifacts_fails_as_no_useful_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "npm run dev").write_text("wrong artifact\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="The project must run with npm run dev.",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
-    assert result.issue.category == "promotion"
-    assert result.issue.reason == "command_like_path_not_promoted"
-    assert result.issue.path == "npm run dev"
-    assert not (repo / "index.html").exists()
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "no_changes"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["no_changes_reason"] == "only_rejected_artifacts"
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "npm run dev"
     assert not (repo / "npm run dev").exists()
     rendered = render_run_result(result)
-    assert "promotion issue reason: command_like_path_not_promoted" in rendered
-    assert "promotion issue path: npm run dev" in rendered
+    assert "filesystem no changes reason: only_rejected_artifacts" in rendered
+    assert "rejected artifacts: npm run dev (command_like_path, action=ignored)" in rendered
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+@pytest.mark.parametrize(
+    ("unsafe_path", "reason"),
+    (
+        ("/tmp/sfe-artifact.txt", "absolute_path"),
+        ("../secret.txt", "parent_traversal"),
+    ),
+)
+def test_run_pipeline_default_aider_rejects_unsafe_artifact_paths_but_promotes_valid_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_path: str,
+    reason: str,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    original_parse = run_pipeline_module._parse_git_status_z
+
+    def parse_with_unsafe_path(status_text: str) -> tuple[tuple[str, str], ...]:
+        return (*original_parse(status_text), ("??", unsafe_path))
+
+    monkeypatch.setattr(run_pipeline_module, "_parse_git_status_z", parse_with_unsafe_path)
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "index.html").write_text("<h1>App</h1>\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html.",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>App</h1>\n"
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == unsafe_path
+    assert result.rejected_artifacts[0].reason == reason
+    assert "promotion_rejected_artifacts" in result.warnings
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1719,14 +1810,13 @@ def test_run_pipeline_rejects_direct_change_outside_destination_directory(
         )
     )
 
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "workspace_boundary"
-    assert result.issue.reason == "changed_path_outside_destination"
-    assert result.issue.diagnostics is not None
-    assert result.issue.diagnostics["authorized_output_root"] == str(app_dir.resolve())
-    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
-    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promoted_files == ("context.txt",)
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "outside-app.txt"
+    assert result.rejected_artifacts[0].reason == "outside_workspace"
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "inside app\n"
     assert not (repo / "outside-app.txt").exists()
 
     assert result.workspace_session is not None
@@ -1762,13 +1852,13 @@ def test_run_pipeline_default_aider_rejects_out_of_destination_changes(
         )
     )
 
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "workspace_boundary"
-    assert result.issue.reason == "changed_path_outside_destination"
-    assert result.issue.diagnostics is not None
-    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
-    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promoted_files == ("context.txt",)
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "outside-app.txt"
+    assert result.rejected_artifacts[0].reason == "outside_workspace"
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "inside app\n"
     assert not (repo / "outside-app.txt").exists()
 
     assert result.workspace_session is not None
@@ -1805,13 +1895,13 @@ def test_run_pipeline_rejects_committed_change_outside_destination_directory(
         )
     )
 
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "workspace_boundary"
-    assert result.issue.reason == "changed_path_outside_destination"
-    assert result.issue.diagnostics is not None
-    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
-    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promoted_files == ("context.txt",)
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "outside-app.txt"
+    assert result.rejected_artifacts[0].reason == "outside_workspace"
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "inside app\n"
     assert not (repo / "outside-app.txt").exists()
 
     assert result.workspace_session is not None
@@ -2953,7 +3043,7 @@ def test_run_pipeline_recovers_new_files_from_malformed_preamble_diff(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_recovered_new_file_outside_destination_fails_boundary(
+def test_run_pipeline_recovered_new_file_outside_destination_fails_as_only_rejected_artifact(
     tmp_path: Path,
 ) -> None:
     repo = _init_repo(tmp_path / "repo")
@@ -2982,11 +3072,13 @@ def test_run_pipeline_recovered_new_file_outside_destination_fails_boundary(
 
     assert result.status == RUN_STATUS_FAILED
     assert result.issue is not None
-    assert result.issue.category == "workspace_boundary"
-    assert result.issue.reason == "changed_path_outside_destination"
+    assert result.issue.category == "workspace_write_executor"
+    assert result.issue.reason == "no_changes"
     assert result.issue.diagnostics is not None
-    assert result.issue.diagnostics["authorized_output_root"] == str(app_dir.resolve())
-    assert result.issue.diagnostics["offending_paths"] == ("outside.txt",)
+    assert result.issue.diagnostics["no_changes_reason"] == "only_rejected_artifacts"
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "outside.txt"
+    assert result.rejected_artifacts[0].reason == "outside_workspace"
     assert not (repo / "outside.txt").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
@@ -3817,12 +3909,71 @@ def test_run_pipeline_forced_multipass_defaults_to_aider_filesystem(
     assert len(filesystem_executor.calls) == 2
     assert filesystem_executor.calls[0].expected_paths == ("index.html",)
     assert filesystem_executor.calls[1].expected_paths == ("README.md",)
+    assert "Edit only the allowed files for this pass." in filesystem_executor.calls[0].task
+    assert "Do not create files named after shell commands" in filesystem_executor.calls[0].task
+    assert "Place commands such as npm install and npm run dev only inside README.md" in (
+        filesystem_executor.calls[0].task
+    )
     assert result.active_workspace is not None
     assert all(call.cwd == result.active_workspace for call in filesystem_executor.calls)
     assert result.workspace_session is not None
     assert filesystem_executor.calls[0].cwd.is_relative_to(
         result.workspace_session.worktree_path
     )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_forced_multipass_continues_when_later_pass_only_rejects_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "true")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "foundation": ["index.html"],
+                "docs": ["README.md"],
+            }
+        )
+    )
+    pass_index = 0
+
+    def mutate(workspace: Path) -> None:
+        nonlocal pass_index
+        pass_index += 1
+        if pass_index == 1:
+            (workspace / "index.html").write_text("<h1>Hello</h1>\n", encoding="utf-8")
+        else:
+            (workspace / "npm run dev").write_text("wrong artifact\n", encoding="utf-8")
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=FakeFilesystemExecutor(mutate),
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create a scaffold that runs with npm run dev",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promoted_files == ("index.html",)
+    assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>Hello</h1>\n"
+    assert not (repo / "npm run dev").exists()
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "npm run dev"
+    assert result.rejected_artifacts[0].reason == "command_like_path"
+    assert "promotion_rejected_artifacts" in result.warnings
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.status == "completed"
+    assert result.multi_pass_summary.passes_completed == 2
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
@@ -3991,7 +4142,7 @@ def test_run_pipeline_forced_multipass_aider_captures_committed_changes(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
-def test_run_pipeline_forced_multipass_aider_rejects_out_of_destination_change(
+def test_run_pipeline_forced_multipass_aider_rejects_out_of_destination_artifact_but_promotes_valid_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4023,13 +4174,14 @@ def test_run_pipeline_forced_multipass_aider_rejects_out_of_destination_change(
         )
     )
 
-    assert result.status == RUN_STATUS_FAILED
-    assert result.issue is not None
-    assert result.issue.category == "workspace_boundary"
-    assert result.issue.reason == "changed_path_outside_destination"
-    assert result.issue.diagnostics is not None
-    assert result.issue.diagnostics["offending_paths"] == ("outside-app.txt",)
-    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "app context\n"
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.issue is None
+    assert result.promoted_files == ("context.txt",)
+    assert result.rejected_artifacts
+    assert result.rejected_artifacts[0].path == "outside-app.txt"
+    assert result.rejected_artifacts[0].reason == "outside_workspace"
+    assert "promotion_rejected_artifacts" in result.warnings
+    assert (app_dir / "context.txt").read_text(encoding="utf-8") == "inside app\n"
     assert not (repo / "outside-app.txt").exists()
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True

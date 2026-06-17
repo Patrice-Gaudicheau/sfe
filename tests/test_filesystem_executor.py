@@ -261,6 +261,9 @@ def test_aider_filesystem_executor_splits_large_expected_file_lists(
     assert calls[2]["editable_files"] == expected_paths[16:]
     assert "Apply the change by editing files now" in str(calls[0]["message"])
     assert "Aider pass: 1 of 3." in str(calls[0]["message"])
+    assert "Edit only the files listed for this Aider pass" in str(calls[0]["message"])
+    assert "Never create files named after shell commands" in str(calls[0]["message"])
+    assert "Put shell commands only in documentation" in str(calls[0]["message"])
     assert result.diagnostics.command == ("<multiple-aider-commands>",)
     assert result.diagnostics.stdout_preview == "pass 1 ok\n\npass 2 ok\n\npass 3 ok\n"
     assert result.diagnostics.metadata["aider_command_count"] == 3

@@ -242,9 +242,17 @@ class PromotionTarget:
 
 
 @dataclass(frozen=True)
+class RejectedPromotionArtifact:
+    path: str
+    reason: str
+    action: str
+
+
+@dataclass(frozen=True)
 class PromotionBaseline:
     targets: tuple[PromotionTarget, ...] = ()
     issue: RunIssue | None = None
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -325,6 +333,7 @@ class RunResult:
     promotion_applied: bool = False
     promoted_files: tuple[str, ...] = ()
     promotion_issue: RunIssue | None = None
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = ()
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None
     patch_hunk_count_normalization: HunkCountNormalizationDiagnostics | None = None
     multi_pass_summary: MultiPassRunSummary | None = None
@@ -753,6 +762,7 @@ class RunPipeline:
             else _summary_from_promotion_baseline(promotion_baseline)
         )
         changed_files = _promotion_baseline_paths(promotion_baseline)
+        rejected_artifacts = promotion_baseline.rejected_artifacts
         self._emit_progress(
             "workspace_boundary_check_completed",
             "SFE: workspace boundary check completed",
@@ -776,6 +786,7 @@ class RunPipeline:
                 patch_summary=patch_summary,
                 changed_files=changed_files,
                 patch_proposal_diagnostics=patch_proposal_diagnostics,
+                rejected_artifacts=rejected_artifacts,
             )
         if parse_issue is not None and not changed_files:
             return _workspace_write_failed_result(
@@ -794,6 +805,37 @@ class RunPipeline:
                 patch_summary=patch_summary,
                 changed_files=changed_files,
                 patch_proposal_diagnostics=patch_proposal_diagnostics,
+                rejected_artifacts=rejected_artifacts,
+            )
+        if not changed_files and rejected_artifacts:
+            issue = RunIssue(
+                "workspace_write_executor",
+                "no_changes",
+                diagnostics={
+                    "actual_changed_paths": changed_files,
+                    "rejected_artifacts": _rejected_artifacts_for_diagnostics(
+                        rejected_artifacts
+                    ),
+                    "no_changes_reason": "only_rejected_artifacts",
+                },
+            )
+            return _workspace_write_failed_result(
+                issue,
+                session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=patch_result,
+                proposal=proposal,
+                selected_source_refs=selected_source_refs,
+                git_preparation=git_preparation,
+                execution_mode_decision=execution_mode_decision,
+                patch_applied=bool(apply_result and apply_result.applied),
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                patch_proposal_diagnostics=patch_proposal_diagnostics,
+                rejected_artifacts=rejected_artifacts,
             )
 
         promotion_result = _promote_actual_workspace_changes(promotion_baseline)
@@ -816,6 +858,7 @@ class RunPipeline:
                 changed_files=changed_files,
                 promotion_result=promotion_result,
                 patch_proposal_diagnostics=patch_proposal_diagnostics,
+                rejected_artifacts=rejected_artifacts,
             )
         self._emit_progress(
             "promotion_completed",
@@ -837,13 +880,21 @@ class RunPipeline:
             changed_files=changed_files,
             selected_source_refs=selected_source_refs,
             executor_provider=_executor_provider(patch_result),
-            warnings=_warnings_for_summary_and_proposal(patch_summary, proposal),
+            warnings=tuple(
+                dict.fromkeys(
+                    (
+                        *_warnings_for_summary_and_proposal(patch_summary, proposal),
+                        *_warnings_for_rejected_artifacts(rejected_artifacts),
+                    )
+                )
+            ),
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
             promotion_status=promotion_result.status,
             promotion_applied=promotion_result.status == "applied",
             promoted_files=promotion_result.promoted_files,
+            rejected_artifacts=rejected_artifacts,
             patch_proposal_diagnostics=patch_proposal_diagnostics,
             patch_hunk_count_normalization=(
                 proposal.hunk_count_normalization if proposal is not None else None
@@ -965,10 +1016,14 @@ class RunPipeline:
         promotion_baseline = filtered.baseline
         patch_summary = _summary_from_promotion_baseline(promotion_baseline)
         changed_files = _promotion_baseline_paths(promotion_baseline)
+        rejected_artifacts = promotion_baseline.rejected_artifacts
         fs_result = _with_filesystem_diagnostics_metadata(
             fs_result,
             actual_changed_paths=changed_files,
             untouched_placeholder_paths=filtered.untouched_placeholder_paths,
+            rejected_artifacts=_rejected_artifacts_for_diagnostics(
+                rejected_artifacts
+            ),
         )
         self._emit_progress(
             "workspace_boundary_check_completed",
@@ -997,7 +1052,9 @@ class RunPipeline:
 
         if not changed_files:
             no_changes_reason = (
-                "expected_files_not_created_or_modified"
+                "only_rejected_artifacts"
+                if rejected_artifacts
+                else "expected_files_not_created_or_modified"
                 if expected_paths
                 else "filesystem_executor_completed_without_worktree_changes"
             )
@@ -1013,6 +1070,9 @@ class RunPipeline:
                     "expected_paths": expected_paths,
                     "expected_placeholder_paths": placeholder_paths,
                     "actual_changed_paths": changed_files,
+                    "rejected_artifacts": _rejected_artifacts_for_diagnostics(
+                        rejected_artifacts
+                    ),
                     "precreated_expected_paths": precreated_paths,
                     "untouched_placeholder_paths": filtered.untouched_placeholder_paths,
                     "no_changes_reason": no_changes_reason,
@@ -1043,6 +1103,7 @@ class RunPipeline:
                 patch_summary=patch_summary,
                 changed_files=changed_files,
                 promotion_result=PromotionResult("skipped"),
+                rejected_artifacts=rejected_artifacts,
             )
 
         promotion_result = _promote_actual_workspace_changes(promotion_baseline)
@@ -1062,6 +1123,7 @@ class RunPipeline:
                 patch_summary=patch_summary,
                 changed_files=changed_files,
                 promotion_result=promotion_result,
+                rejected_artifacts=rejected_artifacts,
             )
 
         self._emit_progress(
@@ -1084,7 +1146,6 @@ class RunPipeline:
             changed_files=changed_files,
             selected_source_refs=selected_source_refs,
             executor_provider=fs_result.executor_name,
-            warnings=_warnings_for_summary(patch_summary),
             git_auto_init=git_preparation.auto_initialized,
             git_initial_commit_hash=git_preparation.initial_commit_hash,
             git_init_warning=git_preparation.warning,
@@ -1092,6 +1153,15 @@ class RunPipeline:
             promotion_applied=promotion_result.status == "applied",
             promoted_files=promotion_result.promoted_files,
             filesystem_result=fs_result,
+            rejected_artifacts=rejected_artifacts,
+            warnings=tuple(
+                dict.fromkeys(
+                    (
+                        *_warnings_for_summary(patch_summary),
+                        *_warnings_for_rejected_artifacts(rejected_artifacts),
+                    )
+                )
+            ),
         )
 
     def _run_workspace_write_multipass(
@@ -1674,6 +1744,7 @@ class RunPipeline:
         all_promoted_files: list[str] = []
         completed_files: list[str] = []
         multi_pass_warnings: list[str] = []
+        all_rejected_artifacts: list[RejectedPromotionArtifact] = []
         latest_filesystem_result: FilesystemExecutionResult | None = None
         refresh_base_refs = tuple(segment.source_ref for segment in contract.context_segments)
 
@@ -1850,10 +1921,15 @@ class RunPipeline:
             promotion_baseline = filtered.baseline
             patch_summary = _summary_from_promotion_baseline(promotion_baseline)
             changed_files = _promotion_baseline_paths(promotion_baseline)
+            rejected_artifacts = promotion_baseline.rejected_artifacts
+            all_rejected_artifacts.extend(rejected_artifacts)
             fs_result = _with_filesystem_diagnostics_metadata(
                 fs_result,
                 actual_changed_paths=changed_files,
                 untouched_placeholder_paths=filtered.untouched_placeholder_paths,
+                rejected_artifacts=_rejected_artifacts_for_diagnostics(
+                    rejected_artifacts
+                ),
             )
             latest_filesystem_result = fs_result
             provider_diagnostics = _filesystem_pass_provider_diagnostics(
@@ -1902,10 +1978,15 @@ class RunPipeline:
                     ),
                     promoted_files=tuple(all_promoted_files),
                     filesystem_result=latest_filesystem_result,
+                    rejected_artifacts=tuple(all_rejected_artifacts),
                 )
 
             if not changed_files:
-                no_changes_reason = "expected_files_not_created_or_modified"
+                no_changes_reason = (
+                    "only_rejected_artifacts"
+                    if rejected_artifacts
+                    else "expected_files_not_created_or_modified"
+                )
                 fs_result = _with_filesystem_diagnostics_metadata(
                     fs_result,
                     no_changes_reason=no_changes_reason,
@@ -1924,6 +2005,9 @@ class RunPipeline:
                         "expected_paths": batch.allowed_files,
                         "expected_placeholder_paths": placeholder_paths,
                         "actual_changed_paths": changed_files,
+                        "rejected_artifacts": _rejected_artifacts_for_diagnostics(
+                            rejected_artifacts
+                        ),
                         "precreated_expected_paths": precreated_paths,
                         "untouched_placeholder_paths": filtered.untouched_placeholder_paths,
                         "no_changes_reason": no_changes_reason,
@@ -1932,6 +2016,34 @@ class RunPipeline:
                         ),
                     },
                 )
+                if rejected_artifacts and all_promoted_files:
+                    batch_warnings = list(
+                        _warnings_for_rejected_artifacts(rejected_artifacts)
+                    )
+                    multi_pass_warnings.extend(batch_warnings)
+                    pass_results.append(
+                        MultiPassBatchResult(
+                            pass_id=batch.id,
+                            title=batch.title,
+                            status="completed",
+                            allowed_files=batch.allowed_files,
+                            patch_paths=(),
+                            provider_diagnostics=provider_diagnostics,
+                            warnings=tuple(dict.fromkeys(batch_warnings)),
+                        )
+                    )
+                    self._emit_progress(
+                        "multi_pass_pass_completed",
+                        (
+                            "SFE: multi-pass pass "
+                            f"{index}/{len(parsed_plan.batches)} completed with warnings"
+                        ),
+                        multi_pass_index=index,
+                        multi_pass_total=len(parsed_plan.batches),
+                        multi_pass_id=batch.id,
+                        promoted_file_count=0,
+                    )
+                    continue
                 pass_issue = _multi_pass_issue_from_run_issue(issue, pass_id=batch.id)
                 pass_results.append(
                     _failed_batch_result(
@@ -1977,6 +2089,7 @@ class RunPipeline:
                     promotion_status="skipped",
                     promotion_issue=issue,
                     filesystem_result=latest_filesystem_result,
+                    rejected_artifacts=tuple(all_rejected_artifacts),
                 )
 
             promotion_result = _promote_actual_workspace_changes(promotion_baseline)
@@ -2026,6 +2139,7 @@ class RunPipeline:
                     promotion_status=promotion_result.status,
                     promotion_issue=promotion_result.issue,
                     filesystem_result=latest_filesystem_result,
+                    rejected_artifacts=tuple(all_rejected_artifacts),
                 )
 
             pass_promoted_files = tuple(
@@ -2034,6 +2148,9 @@ class RunPipeline:
                 if path not in changed_files_before_pass
             )
             batch_warnings: list[str] = []
+            rejected_warnings = _warnings_for_rejected_artifacts(rejected_artifacts)
+            batch_warnings.extend(rejected_warnings)
+            multi_pass_warnings.extend(rejected_warnings)
             for path in pass_promoted_files:
                 if batch.allowed_files and path not in set(batch.allowed_files):
                     warning = f"multi_pass_path_outside_allowed_files:{path}"
@@ -2123,6 +2240,7 @@ class RunPipeline:
             promoted_files=tuple(all_promoted_files),
             multi_pass_summary=multi_pass_summary,
             filesystem_result=latest_filesystem_result,
+            rejected_artifacts=tuple(all_rejected_artifacts),
         )
 
     def _emit_progress(
@@ -2800,6 +2918,7 @@ def _workspace_write_failed_result(
     changed_files: tuple[str, ...],
     promotion_result: PromotionResult | None = None,
     patch_proposal_diagnostics: PatchProposalDiagnostics | None = None,
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = (),
 ) -> RunResult:
     return RunResult(
         status=RUN_STATUS_FAILED,
@@ -2817,7 +2936,14 @@ def _workspace_write_failed_result(
         changed_files=changed_files,
         selected_source_refs=selected_source_refs,
         executor_provider=_executor_provider(patch_result),
-        warnings=_warnings_for_summary_and_proposal(patch_summary, proposal),
+        warnings=tuple(
+            dict.fromkeys(
+                (
+                    *_warnings_for_summary_and_proposal(patch_summary, proposal),
+                    *_warnings_for_rejected_artifacts(rejected_artifacts),
+                )
+            )
+        ),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
@@ -2825,6 +2951,7 @@ def _workspace_write_failed_result(
         promotion_applied=False,
         promoted_files=promotion_result.promoted_files if promotion_result else (),
         promotion_issue=issue,
+        rejected_artifacts=rejected_artifacts,
         patch_proposal_diagnostics=patch_proposal_diagnostics,
         patch_hunk_count_normalization=(
             proposal.hunk_count_normalization if proposal is not None else None
@@ -2847,6 +2974,7 @@ def _filesystem_workspace_write_failed_result(
     patch_summary: PatchSummary | None = None,
     changed_files: tuple[str, ...] = (),
     promotion_result: PromotionResult | None = None,
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = (),
 ) -> RunResult:
     effective_issue = issue or RunIssue(
         "workspace_write_executor",
@@ -2875,7 +3003,14 @@ def _filesystem_workspace_write_failed_result(
         changed_files=changed_files,
         selected_source_refs=selected_source_refs,
         executor_provider=filesystem_result.executor_name,
-        warnings=_warnings_for_summary(patch_summary),
+        warnings=tuple(
+            dict.fromkeys(
+                (
+                    *_warnings_for_summary(patch_summary),
+                    *_warnings_for_rejected_artifacts(rejected_artifacts),
+                )
+            )
+        ),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
@@ -2883,6 +3018,7 @@ def _filesystem_workspace_write_failed_result(
         promotion_applied=False,
         promoted_files=promotion_result.promoted_files if promotion_result else (),
         promotion_issue=effective_issue if issue is not None else None,
+        rejected_artifacts=rejected_artifacts,
         filesystem_result=filesystem_result,
     )
 
@@ -2907,6 +3043,7 @@ def _multipass_run_result(
     promotion_status: str = "skipped",
     promotion_issue: RunIssue | None = None,
     filesystem_result: FilesystemExecutionResult | None = None,
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = (),
 ) -> RunResult:
     return RunResult(
         status=status,
@@ -2924,7 +3061,14 @@ def _multipass_run_result(
         changed_files=patch_summary.paths if patch_summary is not None else (),
         selected_source_refs=selected_source_refs,
         executor_provider=_executor_provider(patch_result),
-        warnings=_warnings_for_summary(patch_summary),
+        warnings=tuple(
+            dict.fromkeys(
+                (
+                    *_warnings_for_summary(patch_summary),
+                    *_warnings_for_rejected_artifacts(rejected_artifacts),
+                )
+            )
+        ),
         git_auto_init=git_preparation.auto_initialized,
         git_initial_commit_hash=git_preparation.initial_commit_hash,
         git_init_warning=git_preparation.warning,
@@ -2932,6 +3076,7 @@ def _multipass_run_result(
         promotion_applied=False,
         promoted_files=promoted_files,
         promotion_issue=promotion_issue,
+        rejected_artifacts=rejected_artifacts,
         patch_proposal_diagnostics=patch_proposal_diagnostics,
         multi_pass_summary=multi_pass_summary,
         filesystem_result=filesystem_result,
@@ -3643,7 +3788,10 @@ def _filter_unchanged_placeholder_changes(
                 )
         targets.append(target)
     return PlaceholderFilterResult(
-        PromotionBaseline(targets=tuple(targets)),
+        PromotionBaseline(
+            targets=tuple(targets),
+            rejected_artifacts=baseline.rejected_artifacts,
+        ),
         untouched_placeholder_paths=_order_paths_like_placeholders(
             tuple(untouched),
             placeholder_snapshots,
@@ -3788,7 +3936,9 @@ def _build_multipass_filesystem_task(
         [
             "Execute one SFE multi-pass workspace_write batch.",
             "Keep this pass small and scoped. Do not plan or implement other passes.",
-            "Modify only files needed for this batch, preferably the allowed files.",
+            "Edit only the allowed files for this pass.",
+            "Do not create files named after shell commands such as npm install, npm run dev, pytest -q, python -m pytest, or make install.",
+            "Place commands such as npm install and npm run dev only inside README.md or package.json scripts.",
             "",
             f"Pass: {pass_index}/{total_passes}",
             f"Batch id: {batch.id}",
@@ -3874,6 +4024,36 @@ def _promotion_baseline_paths(baseline: PromotionBaseline) -> tuple[str, ...]:
     return tuple(target.relative_path for target in baseline.targets)
 
 
+def _rejected_artifacts_for_diagnostics(
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...],
+) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            "path": artifact.path,
+            "reason": artifact.reason,
+            "action": artifact.action,
+        }
+        for artifact in rejected_artifacts
+    )
+
+
+def _warnings_for_rejected_artifacts(
+    rejected_artifacts: tuple[RejectedPromotionArtifact, ...],
+) -> tuple[str, ...]:
+    if not rejected_artifacts:
+        return ()
+    return ("promotion_rejected_artifacts",)
+
+
+def _promotion_rejected_artifact(
+    path: str,
+    *,
+    reason: str,
+    action: str = "ignored",
+) -> RejectedPromotionArtifact:
+    return RejectedPromotionArtifact(path=path, reason=reason, action=action)
+
+
 def _summary_from_promotion_baseline(baseline: PromotionBaseline) -> PatchSummary | None:
     if baseline.issue is not None or not baseline.targets:
         return None
@@ -3934,21 +4114,44 @@ def _capture_actual_workspace_changes(
         )
     active_prefix_parts = active_prefix.parts
     targets: list[PromotionTarget] = []
-    offending_paths: list[str] = []
+    rejected_artifacts: list[RejectedPromotionArtifact] = []
     for status_code, worktree_relative_path in change_entries:
         worktree_relative = Path(worktree_relative_path)
-        if worktree_relative.is_absolute() or ".." in worktree_relative.parts:
-            offending_paths.append(worktree_relative_path)
+        if worktree_relative.is_absolute():
+            rejected_artifacts.append(
+                _promotion_rejected_artifact(
+                    worktree_relative_path,
+                    reason="absolute_path",
+                )
+            )
+            continue
+        if ".." in worktree_relative.parts:
+            rejected_artifacts.append(
+                _promotion_rejected_artifact(
+                    worktree_relative_path,
+                    reason="parent_traversal",
+                )
+            )
             continue
         if active_prefix_parts:
             if worktree_relative.parts[: len(active_prefix_parts)] != active_prefix_parts:
-                offending_paths.append(worktree_relative_path)
+                rejected_artifacts.append(
+                    _promotion_rejected_artifact(
+                        worktree_relative_path,
+                        reason="outside_workspace",
+                    )
+                )
                 continue
             destination_relative = Path(*worktree_relative.parts[len(active_prefix_parts) :])
         else:
             destination_relative = worktree_relative
         if not destination_relative.parts:
-            offending_paths.append(worktree_relative_path)
+            rejected_artifacts.append(
+                _promotion_rejected_artifact(
+                    worktree_relative_path,
+                    reason="invalid_path",
+                )
+            )
             continue
         relative_path = destination_relative.as_posix()
         if _is_internal_promotion_path(relative_path):
@@ -3957,17 +4160,13 @@ def _capture_actual_workspace_changes(
             )
         command_like_reason = _command_like_promotion_path_reason(relative_path)
         if command_like_reason is not None:
-            return PromotionBaseline(
-                issue=RunIssue(
-                    "promotion",
-                    "command_like_path_not_promoted",
+            rejected_artifacts.append(
+                _promotion_rejected_artifact(
                     relative_path,
-                    diagnostics={
-                        "rejection_reason": command_like_reason,
-                        "changed_path": relative_path,
-                    },
+                    reason="command_like_path",
                 )
             )
+            continue
         worktree_target = active_root / destination_relative
         source_target = source_root / destination_relative
         deleted = "D" in status_code and not worktree_target.exists()
@@ -4000,15 +4199,10 @@ def _capture_actual_workspace_changes(
                 change_kind=change_kind,
             )
         )
-    if offending_paths:
-        return PromotionBaseline(
-            issue=_workspace_boundary_issue(
-                offending_paths=tuple(offending_paths),
-                source_root=source_root,
-                active_root=active_root,
-            )
-        )
-    return PromotionBaseline(targets=tuple(targets))
+    return PromotionBaseline(
+        targets=tuple(targets),
+        rejected_artifacts=tuple(rejected_artifacts),
+    )
 
 
 def _capture_committed_worktree_change_entries(
