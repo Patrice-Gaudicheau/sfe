@@ -8499,35 +8499,20 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
 
 
 def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
-    note = (
-        PROJECT_ROOT / "docs" / "history" / "tui" / "tui_direct_backend_strategy.md"
-    ).read_text(encoding="utf-8")
-    normalized_note = " ".join(note.split())
     index = (PROJECT_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
-
-    assert "DirectBackend is the default and only exposed backend" in note
-    assert "No `/backend` command" in note
-    assert "Router integration comes before executor integration" in note
-    assert "`local_lexical_preview`" in note
-    assert "`/ask` is the first read-only executor phase" in note
-    assert "write files, execute shell commands" in normalized_note
-    assert "dry-run" in normalized_note
-    assert "tui_direct_backend_strategy.md" in index
-    milestone = (
-        PROJECT_ROOT / "docs" / "history" / "tui" / "tui_readonly_ask_milestone.md"
+    architecture = (
+        PROJECT_ROOT / "docs" / "current_architecture_status.md"
     ).read_text(encoding="utf-8")
-    normalized_milestone = " ".join(milestone.split())
-    assert "selected 3 of 7 context segments" in milestone
-    assert "38.92%" in milestone
-    assert "36.58%" in milestone
-    assert "40.83%" in milestone
-    assert "raised from 800 to 1500 tokens" in milestone
-    assert "source/path-aware lexical ranking" in milestone
-    assert "`/patch` is the next proposal-only phase" in milestone
-    assert "Patch proposal only, not applied" in normalized_milestone
-    assert "does not write files, apply patches, execute shell commands" in normalized_milestone
-    assert "larger local output budget than" in normalized_milestone
-    assert "`/reset` exists as a session comfort command" in milestone
-    assert "preserves the selected workspace" in milestone
-    assert "not a benchmark" in milestone
-    assert "tui_readonly_ask_milestone.md" in index
+    guide = (PROJECT_ROOT / "docs" / "tui_v0_1_user_guide.md").read_text(
+        encoding="utf-8"
+    )
+    combined_public_docs = "\n".join((index, architecture, guide))
+
+    assert "current local user-facing" in combined_public_docs
+    assert "DirectBackend" in combined_public_docs
+    assert "`local_lexical_preview`" in combined_public_docs
+    assert "`/ask` uses `DirectBackend`" in architecture
+    assert "`/dry-run` makes no executor/provider call" in guide
+    assert "tui_direct_backend_strategy.md" not in index
+    assert "tui_readonly_ask_milestone.md" not in index
+    assert "history/tui/" not in index
