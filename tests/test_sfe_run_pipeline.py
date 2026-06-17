@@ -1118,6 +1118,27 @@ def test_expected_workspace_write_paths_ignore_dependency_names(
     assert result == ("src/main.js", "src/core/App.js")
 
 
+def test_expected_workspace_write_paths_ignore_shell_commands(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "\n".join(
+            [
+                "The project must run with:",
+                "npm install",
+                "npm run dev",
+                "pytest -q",
+                "python -m pytest",
+                "make install",
+                "src/main.js",
+            ]
+        ),
+        tmp_path,
+    )
+
+    assert result == ("src/main.js",)
+
+
 def test_expected_workspace_write_paths_reject_explicit_absolute_path(
     tmp_path: Path,
 ) -> None:
@@ -1199,6 +1220,45 @@ def test_run_pipeline_default_aider_invokes_executor_for_nested_main_js_task(
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_default_aider_rejects_command_like_created_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+
+    def mutate(workspace: Path) -> None:
+        (workspace / "index.html").write_text("<h1>App</h1>\n", encoding="utf-8")
+        (workspace / "npm run dev").write_text("wrong artifact\n", encoding="utf-8")
+
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create index.html. The project must run with npm run dev.",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "promotion"
+    assert result.issue.reason == "command_like_path_not_promoted"
+    assert result.issue.path == "npm run dev"
+    assert not (repo / "index.html").exists()
+    assert not (repo / "npm run dev").exists()
+    rendered = render_run_result(result)
+    assert "promotion issue reason: command_like_path_not_promoted" in rendered
+    assert "promotion issue path: npm run dev" in rendered
+    assert result.workspace_session is not None
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
 def test_run_pipeline_default_aider_unsafe_expected_path_report_is_consistent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1238,6 +1298,7 @@ def test_run_pipeline_default_aider_large_no_changes_has_actionable_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "false")
     repo = _init_repo(tmp_path / "repo")
     manager = _manager()
     expected_paths = tuple(f"src/module_{index}.js" for index in range(20))
@@ -3762,6 +3823,59 @@ def test_run_pipeline_forced_multipass_defaults_to_aider_filesystem(
     assert filesystem_executor.calls[0].cwd.is_relative_to(
         result.workspace_session.worktree_path
     )
+    assert manager.cleanup(result.workspace_session).cleaned is True
+
+
+def test_run_pipeline_auto_multipass_detects_many_explicit_files_for_aider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SFE_WORKSPACE_WRITE_EXECUTOR", raising=False)
+    monkeypatch.setenv("SFE_WORKSPACE_WRITE_MULTIPASS", "auto")
+    repo = _init_repo(tmp_path / "repo")
+    manager = _manager()
+    explicit_files = tuple(f"src/module_{index}.js" for index in range(12))
+    planner = FakeMultiPassPlanner(
+        _multipass_plan_json(
+            {
+                "first": list(explicit_files[:6]),
+                "second": list(explicit_files[6:]),
+            }
+        )
+    )
+    pass_index = 0
+
+    def mutate(workspace: Path) -> None:
+        nonlocal pass_index
+        batch = explicit_files[:6] if pass_index == 0 else explicit_files[6:]
+        pass_index += 1
+        for relative_path in batch:
+            target = workspace / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("// generated\n", encoding="utf-8")
+
+    filesystem_executor = FakeFilesystemExecutor(mutate)
+
+    result = _pipeline(
+        workspace_manager=manager,
+        filesystem_executor=filesystem_executor,
+        multipass_planner=planner,
+    ).run(
+        RunRequest(
+            workspace_root=repo,
+            task="Create this project structure:\n" + "\n".join(explicit_files),
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_COMPLETED
+    assert result.multi_pass_summary is not None
+    assert result.multi_pass_summary.enabled is True
+    assert len(filesystem_executor.calls) == 2
+    assert filesystem_executor.calls[0].expected_paths == explicit_files[:6]
+    assert filesystem_executor.calls[1].expected_paths == explicit_files[6:]
+    assert set(result.promoted_files) == set(explicit_files)
+    assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 

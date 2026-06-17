@@ -101,6 +101,10 @@ class RealLoopIterationSummary:
     stop_reason: str | None = None
     verifier_provider: str | None = None
     verifier_model: str | None = None
+    verifier_issue_category: str | None = None
+    verifier_issue_reason: str | None = None
+    verifier_schema_validation_reason: str | None = None
+    verifier_raw_answer_preview: str | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +230,8 @@ class RealLoopController:
                         iteration_index=attempt_index,
                         task=current_task,
                         stop_reason=issue.reason if issue is not None else "verifier_failed",
+                        verifier_issue=issue,
+                        verifier_raw_answer=verifier_response.raw_answer,
                     )
                 )
                 return _with_real_loop_summary(
@@ -624,6 +630,8 @@ def _iteration_from_result(
     task: str,
     decision: RealLoopVerifierDecision | None = None,
     stop_reason: str | None = None,
+    verifier_issue: object | None = None,
+    verifier_raw_answer: str | None = None,
 ) -> RealLoopIterationSummary:
     execution_mode = (
         result.execution_mode_decision.execution_mode
@@ -652,9 +660,56 @@ def _iteration_from_result(
         ),
         reason=decision.reason if decision is not None else None,
         stop_reason=stop_reason or (decision.stop_reason if decision is not None else None),
-        verifier_provider=decision.provider_name if decision is not None else None,
-        verifier_model=decision.model if decision is not None else None,
+        verifier_provider=(
+            decision.provider_name
+            if decision is not None
+            else getattr(verifier_issue, "provider_name", None)
+        ),
+        verifier_model=(
+            decision.model
+            if decision is not None
+            else getattr(verifier_issue, "model", None)
+        ),
+        verifier_issue_category=(
+            getattr(verifier_issue, "category", None) if verifier_issue is not None else None
+        ),
+        verifier_issue_reason=(
+            getattr(verifier_issue, "reason", None) if verifier_issue is not None else None
+        ),
+        verifier_schema_validation_reason=_verifier_schema_validation_reason(
+            verifier_issue
+        ),
+        verifier_raw_answer_preview=_verifier_raw_answer_preview(
+            verifier_issue,
+            verifier_raw_answer,
+        ),
     )
+
+
+def _verifier_schema_validation_reason(verifier_issue: object | None) -> str | None:
+    if verifier_issue is None:
+        return None
+    diagnostics = getattr(verifier_issue, "diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        return None
+    value = diagnostics.get("schema_validation_reason")
+    return value if isinstance(value, str) else None
+
+
+def _verifier_raw_answer_preview(
+    verifier_issue: object | None,
+    raw_answer: str | None,
+) -> str | None:
+    if verifier_issue is not None:
+        diagnostics = getattr(verifier_issue, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            value = diagnostics.get("raw_answer_preview")
+            if isinstance(value, str):
+                return value
+    if raw_answer is None:
+        return None
+    preview = " ".join(raw_answer.replace("\x00", "").split())
+    return preview[:500]
 
 
 def _terminal_status_for_decision(decision: RealLoopVerifierDecision) -> str | None:

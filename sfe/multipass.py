@@ -14,6 +14,24 @@ from typing import Any
 DEFAULT_MULTIPASS_MODE = "auto"
 DEFAULT_MULTIPASS_MAX_PASSES: int | None = None
 DEFAULT_MULTIPASS_MAX_FILES_PER_PASS = 10
+MULTIPASS_FILE_MENTION_EXTENSIONS = (
+    "css",
+    "html",
+    "js",
+    "json",
+    "jsx",
+    "md",
+    "mjs",
+    "ts",
+    "tsx",
+    "txt",
+)
+MULTIPASS_FILE_MENTION_RE = re.compile(
+    r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:"
+    + "|".join(MULTIPASS_FILE_MENTION_EXTENSIONS)
+    + r")",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -345,4 +363,21 @@ def _looks_like_large_workspace_write(task: str) -> bool:
                 return True
         except ValueError:
             continue
+    if len(_explicit_file_mentions(task)) > DEFAULT_MULTIPASS_MAX_FILES_PER_PASS:
+        return True
     return False
+
+
+def _explicit_file_mentions(task: str) -> tuple[str, ...]:
+    seen: set[str] = set()
+    mentions: list[str] = []
+    for match in MULTIPASS_FILE_MENTION_RE.finditer(task):
+        mention = match.group(0)
+        normalized = mention.replace("\\", "/")
+        if "/" not in normalized and normalized.casefold() in {"next.js", "three.js"}:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        mentions.append(normalized)
+    return tuple(mentions)

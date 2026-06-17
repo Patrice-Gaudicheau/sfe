@@ -477,6 +477,14 @@ def _serialize_real_loop_iteration(iteration: object) -> dict[str, Any]:
         ],
         "reason": _safe_diagnostic_value(getattr(iteration, "reason", None)),
         "stop_reason": getattr(iteration, "stop_reason", None),
+        "verifier_issue_category": getattr(iteration, "verifier_issue_category", None),
+        "verifier_issue_reason": getattr(iteration, "verifier_issue_reason", None),
+        "verifier_schema_validation_reason": _safe_diagnostic_value(
+            getattr(iteration, "verifier_schema_validation_reason", None)
+        ),
+        "verifier_raw_answer_preview": _safe_diagnostic_value(
+            getattr(iteration, "verifier_raw_answer_preview", None)
+        ),
     }
 
 

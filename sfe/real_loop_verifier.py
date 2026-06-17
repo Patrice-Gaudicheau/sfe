@@ -110,6 +110,7 @@ class RealLoopVerifierIssue:
     provider_name: str | None = None
     model: str | None = None
     provider_calls_made: int = 0
+    diagnostics: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,10 @@ class ConfiguredLLMRealLoopVerifier:
                     provider_name=self.provider_name,
                     model=self.model,
                     provider_calls_made=1,
+                    diagnostics={
+                        "schema_validation_reason": exc.reason,
+                        "raw_answer_preview": _safe_verifier_output_preview(answer),
+                    },
                 ),
                 raw_answer=answer,
             )
@@ -598,6 +603,19 @@ def _validate_verdict_contract(decision: RealLoopVerifierDecision) -> None:
                 "invalid_verifier_response",
                 f"{decision.verdict} verdict requires stop_reason",
             )
+
+
+def _safe_verifier_output_preview(output: str, limit: int = 500) -> str:
+    preview = " ".join(output.replace("\x00", "").split())
+    preview = _redact_secret_like(preview)
+    return preview[:limit]
+
+
+def _redact_secret_like(text: str) -> str:
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("api_key", "apikey", "token", "secret")):
+        return "[redacted]"
+    return text
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:

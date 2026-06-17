@@ -190,6 +190,18 @@ EXPECTED_WORKSPACE_WRITE_NON_PATH_NAMES = frozenset(
         "vite",
     }
 )
+COMMAND_LIKE_PROMOTION_FIRST_TOKENS = frozenset(
+    {
+        "composer",
+        "make",
+        "npm",
+        "npx",
+        "pnpm",
+        "pytest",
+        "python",
+        "yarn",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -3943,6 +3955,19 @@ def _capture_actual_workspace_changes(
             return PromotionBaseline(
                 issue=RunIssue("promotion", "internal_path_not_promoted", relative_path)
             )
+        command_like_reason = _command_like_promotion_path_reason(relative_path)
+        if command_like_reason is not None:
+            return PromotionBaseline(
+                issue=RunIssue(
+                    "promotion",
+                    "command_like_path_not_promoted",
+                    relative_path,
+                    diagnostics={
+                        "rejection_reason": command_like_reason,
+                        "changed_path": relative_path,
+                    },
+                )
+            )
         worktree_target = active_root / destination_relative
         source_target = source_root / destination_relative
         deleted = "D" in status_code and not worktree_target.exists()
@@ -4086,6 +4111,33 @@ def _validate_actual_change_target(
     return None
 
 
+def _command_like_promotion_path_reason(relative_path: str) -> str | None:
+    normalized = relative_path.strip()
+    if normalized != relative_path or "/" in normalized or "\\" in normalized:
+        return None
+    if not any(char.isspace() for char in normalized):
+        return None
+    tokens = normalized.split()
+    if not tokens:
+        return None
+    first = tokens[0].casefold()
+    if first not in COMMAND_LIKE_PROMOTION_FIRST_TOKENS:
+        return None
+    if first in {"npm", "pnpm", "yarn"} and len(tokens) >= 2:
+        return f"{first}_{tokens[1].casefold()}_command"
+    if first == "npx" and len(tokens) >= 2:
+        return "npx_command"
+    if first == "make" and len(tokens) >= 2:
+        return "make_command"
+    if first == "composer" and len(tokens) >= 2:
+        return "composer_command"
+    if first == "pytest":
+        return "pytest_command"
+    if first == "python" and "-m" in tokens and "pytest" in tokens:
+        return "python_pytest_command"
+    return None
+
+
 def _workspace_boundary_issue(
     *,
     offending_paths: tuple[str, ...],
@@ -4218,6 +4270,19 @@ def _capture_promotion_baseline(
         if _is_internal_promotion_path(relative_path):
             return PromotionBaseline(
                 issue=RunIssue("promotion", "internal_path_not_promoted", relative_path)
+            )
+        command_like_reason = _command_like_promotion_path_reason(relative_path)
+        if command_like_reason is not None:
+            return PromotionBaseline(
+                issue=RunIssue(
+                    "promotion",
+                    "command_like_path_not_promoted",
+                    relative_path,
+                    diagnostics={
+                        "rejection_reason": command_like_reason,
+                        "changed_path": relative_path,
+                    },
+                )
             )
         source_target = (source_root / relative_path).resolve()
         worktree_target = (worktree_root / relative_path).resolve()

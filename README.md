@@ -590,13 +590,13 @@ debugging or rollback.
 
 Large `workspace_write` scaffold tasks can use core multi-pass execution.
 `SFE_WORKSPACE_WRITE_MULTIPASS=auto` enables a cautious heuristic for large
-project/scaffold requests, `true` forces multi-pass for validation or testing,
-and `false` preserves single-pass behavior. Multi-pass asks the Router for a
-strict JSON batch plan, validates that plan before execution, then asks the
-filesystem executor to make one batch of workspace changes with an explicit
-`allowed_files` list. The default guardrails reject invalid plans, batches that
-exceed a numeric `SFE_MULTIPASS_MAX_PASSES` cap when configured (`auto` by
-default) or
+project/scaffold requests or tasks that list many explicit target files, `true`
+forces multi-pass for validation or testing, and `false` preserves single-pass
+behavior. Multi-pass asks the Router for a strict JSON batch plan, validates
+that plan before execution, then asks the filesystem executor to make one batch
+of workspace changes with an explicit `allowed_files` list. The default
+guardrails reject invalid plans, batches that exceed a numeric
+`SFE_MULTIPASS_MAX_PASSES` cap when configured (`auto` by default) or
 `SFE_MULTIPASS_MAX_FILES_PER_PASS` (default `10`). `allowed_files` is planning
 guidance and report metadata by default; actual changes that touch additional
 files inside the destination directory are reported as warnings rather than
@@ -604,6 +604,10 @@ rejected. Any actual changed path outside the destination directory rejects the
 run with a diagnostic listing the offending paths. This improves large scaffold
 reliability but does not implement automatic resume after a failed pass; the
 run report indicates whether a manual resume is plausible.
+
+When the Aider filesystem executor receives a large editable file list, it may
+also split that list across several Aider commands. That is executor-level
+chunking inside a pass and is reported separately from SFE multi-pass.
 
 `SFE_MULTIPASS_PLANNER_MODEL` is deprecated and ignored. Multi-pass planning now
 uses the configured Router provider/model, such as `SFE_PROVIDER_ROUTER`,

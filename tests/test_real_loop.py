@@ -180,6 +180,77 @@ def test_verifier_provider_prefers_explicit_verifier_provider_and_model() -> Non
     assert provider.calls[0]["model"] == "loop-model"
 
 
+def test_verifier_needs_retry_without_correction_objective_has_diagnostics() -> None:
+    payload = _decision_payload(
+        "needs_retry",
+        retry_worthwhile=True,
+        detected_issues=["Missing status panel"],
+        executor_retry_task="Add the missing status panel.",
+    )
+    provider = FakeProvider(json.dumps(payload))
+    verifier = create_configured_real_loop_verifier(
+        environ={
+            "SFE_PROVIDER_VERIFIER": "openai",
+            "OPENAI_API_KEY": "fixture-key",
+            "SFE_OPENAI_VERIFIER_MODEL": "verifier-model",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+
+    response = verifier.verify(_verifier_request())
+
+    assert response.decision is None
+    assert response.issue is not None
+    assert response.issue.reason == "needs_retry verdict requires correction_objective"
+    assert response.issue.diagnostics is not None
+    assert (
+        response.issue.diagnostics["schema_validation_reason"]
+        == "needs_retry verdict requires correction_objective"
+    )
+    assert '"verdict": "needs_retry"' in str(
+        response.issue.diagnostics["raw_answer_preview"]
+    )
+
+
+def test_real_loop_report_includes_verifier_failure_preview(tmp_path: Path) -> None:
+    payload = _decision_payload(
+        "needs_retry",
+        retry_worthwhile=True,
+        detected_issues=["Missing status panel"],
+        executor_retry_task="Add the missing status panel.",
+    )
+    provider = FakeProvider(json.dumps(payload))
+    verifier = create_configured_real_loop_verifier(
+        environ={
+            "SFE_PROVIDER_VERIFIER": "openai",
+            "OPENAI_API_KEY": "fixture-key",
+            "SFE_OPENAI_VERIFIER_MODEL": "verifier-model",
+        },
+        provider_factories={"openai": lambda: provider},
+    )
+    result = _run_result(tmp_path, "index.html")
+    controller = RealLoopController(
+        config=RealLoopConfig(mode="true"),
+        verifier=verifier,
+    )
+
+    final = controller.run(
+        initial_result=result,
+        original_task="Create app files",
+        run_attempt=lambda task, session: pytest.fail("retry should not run"),
+        route_correction_task=lambda task: pytest.fail("route should not run"),
+    )
+    rendered = render_run_result(final)
+
+    assert final.real_loop_summary.real_loop_status == "verifier_failed"
+    assert (
+        "iteration 1 verifier schema reason: "
+        "needs_retry verdict requires correction_objective"
+    ) in rendered
+    assert "iteration 1 verifier raw preview:" in rendered
+    assert '"verdict": "needs_retry"' in rendered
+
+
 def test_real_loop_passes_first_attempt(tmp_path: Path) -> None:
     result = _run_result(tmp_path, "index.html")
     controller = RealLoopController(

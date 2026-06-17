@@ -615,6 +615,9 @@ def _render_real_loop_debug_lines(result: RunResult) -> list[str]:
                 f"  iteration {index} progress: {_display_value(getattr(iteration, 'progress_since_previous_iteration', None))}",
                 f"  iteration {index} retry worthwhile: {_display_bool(getattr(iteration, 'retry_worthwhile', None))}",
                 f"  iteration {index} stop reason: {_display_value(getattr(iteration, 'stop_reason', None))}",
+                f"  iteration {index} verifier issue: {_display_value(getattr(iteration, 'verifier_issue_reason', None))}",
+                f"  iteration {index} verifier schema reason: {_display_value(getattr(iteration, 'verifier_schema_validation_reason', None))}",
+                f"  iteration {index} verifier raw preview: {_display_value(getattr(iteration, 'verifier_raw_answer_preview', None))}",
             ]
         )
     return lines

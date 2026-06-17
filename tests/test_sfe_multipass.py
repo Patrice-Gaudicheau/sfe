@@ -57,6 +57,13 @@ def test_multipass_heuristic_detects_large_scaffold() -> None:
     assert should_use_multipass("Créer une app complète avec 20 fichiers", config)
 
 
+def test_multipass_heuristic_detects_many_explicit_files() -> None:
+    config = MultiPassConfig(mode="auto")
+    task = "\n".join(f"src/module_{index}.js" for index in range(12))
+
+    assert should_use_multipass(task, config)
+
+
 def test_multipass_heuristic_leaves_small_task_single_pass() -> None:
     config = MultiPassConfig(mode="auto")
 

@@ -58,7 +58,8 @@ SFE_MULTIPASS_MAX_FILES_PER_PASS=10
 
 `SFE_WORKSPACE_WRITE_MULTIPASS` accepts:
 
-- `auto`: use a cautious heuristic for large project/scaffold requests.
+- `auto`: use a cautious heuristic for large project/scaffold requests or
+  tasks that list many explicit target files.
 - `true`: force multi-pass, useful for validation and heavy scaffolds.
 - `false`: keep normal single-pass behavior.
 
@@ -77,6 +78,12 @@ It no longer uses hunk/preimage validation, patch repair, or LLM-reviewed
 full-file replacement fallback as a blocking promotion gate. This is a
 deliberate reliability tradeoff: fewer false failures, with the safety boundary
 enforced at filesystem scope.
+
+Aider command splitting is separate from SFE multi-pass. When the Aider
+filesystem executor receives a large editable file list, it may invoke Aider in
+smaller command chunks inside one SFE pass. Run reports expose this as
+filesystem/Aider command metadata, while `multi-pass` refers only to the
+Router-planned SFE batch workflow.
 
 `SFE_MULTIPASS_PLANNER_MODEL` is deprecated and ignored. Existing `.env` files
 containing it still load, but the value no longer influences planning. Configure
