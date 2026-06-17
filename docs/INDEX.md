@@ -172,6 +172,8 @@ read as current top-level project status.
   historical generated Markdown report snapshots moved out of tracked `logs/`.
 - [alibaba_provider_history.md](alibaba_provider_history.md): rollup for
   Alibaba/Qwen historical integration notes.
+- [history/providers/codexcli/](history/providers/codexcli/README.md):
+  rollup for CodexCLI provider history and retained benchmark notes.
 
 ## Terms And Caveats
 
