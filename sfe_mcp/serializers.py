@@ -87,6 +87,16 @@ def serialize_run_result(
             "initial_commit_hash": result.git_initial_commit_hash,
             "init_warning": result.git_init_warning,
         },
+        "auto_commit": {
+            "enabled": result.auto_commit_enabled,
+            "status": result.auto_commit_status,
+            "hash": result.auto_commit_hash,
+            "skipped_reason": result.auto_commit_skipped_reason,
+            "failure_reason": result.auto_commit_failure_reason,
+            "stderr_preview": _safe_diagnostic_value(
+                result.auto_commit_stderr_preview
+            ),
+        },
         "executor_provider": result.executor_provider,
         "real_loop": _serialize_real_loop_summary(result),
         "warnings": list(result.warnings),
@@ -109,6 +119,12 @@ def _serialize_run_issue(issue: Any) -> dict[str, Any]:
         serialized["diagnostics"] = _safe_workspace_write_executor_diagnostics(
             diagnostics
         )
+    if issue.category == "auto_commit" and isinstance(diagnostics, dict):
+        serialized["diagnostics"] = {
+            key: _safe_diagnostic_value(value)
+            for key, value in diagnostics.items()
+            if key in {"stderr_preview", "stdout_preview"}
+        }
     return serialized
 
 
@@ -282,6 +298,14 @@ def serialize_session_error(error_category: str | None) -> dict[str, Any]:
             "auto_initialized": False,
             "initial_commit_hash": None,
             "init_warning": None,
+        },
+        "auto_commit": {
+            "enabled": True,
+            "status": "skipped",
+            "hash": None,
+            "skipped_reason": "not_attempted",
+            "failure_reason": None,
+            "stderr_preview": None,
         },
         "real_loop": None,
         "warnings": [],

@@ -202,6 +202,7 @@ COMMAND_LIKE_PROMOTION_FIRST_TOKENS = frozenset(
         "yarn",
     }
 )
+AUTO_COMMIT_MESSAGE = "SFE workspace_write promotion"
 
 
 @dataclass(frozen=True)
@@ -260,6 +261,17 @@ class PromotionResult:
     status: str
     promoted_files: tuple[str, ...] = ()
     issue: RunIssue | None = None
+
+
+@dataclass(frozen=True)
+class AutoCommitResult:
+    enabled: bool = True
+    status: str = "skipped"
+    commit_hash: str | None = None
+    skipped_reason: str | None = "not_attempted"
+    failure_reason: str | None = None
+    stderr_preview: str | None = None
+    stdout_preview: str | None = None
 
 
 @dataclass(frozen=True)
@@ -329,6 +341,12 @@ class RunResult:
     git_auto_init: bool = False
     git_initial_commit_hash: str | None = None
     git_init_warning: str | None = None
+    auto_commit_enabled: bool = True
+    auto_commit_status: str = "skipped"
+    auto_commit_hash: str | None = None
+    auto_commit_skipped_reason: str | None = "not_attempted"
+    auto_commit_failure_reason: str | None = None
+    auto_commit_stderr_preview: str | None = None
     promotion_status: str = "skipped"
     promotion_applied: bool = False
     promoted_files: tuple[str, ...] = ()
@@ -869,40 +887,43 @@ class RunPipeline:
             "SFE: promotion completed",
             promoted_file_count=len(promotion_result.promoted_files),
         )
-        return RunResult(
-            status=RUN_STATUS_COMPLETED,
-            execution_mode_decision=execution_mode_decision,
-            workspace_session=session,
-            active_workspace=active_workspace,
-            worktree_created=created,
-            discovery_result=discovery_result,
-            dry_run_result=dry_run_result,
-            patch_result=patch_result,
-            patch_generated=proposal is not None,
-            patch_applied=bool(apply_result and apply_result.applied),
-            patch_summary=patch_summary,
-            changed_files=changed_files,
-            selected_source_refs=selected_source_refs,
-            executor_provider=_executor_provider(patch_result),
-            warnings=tuple(
-                dict.fromkeys(
-                    (
-                        *_warnings_for_summary_and_proposal(patch_summary, proposal),
-                        *_warnings_for_rejected_artifacts(rejected_artifacts),
+        return _with_auto_commit_after_promotion(
+            RunResult(
+                status=RUN_STATUS_COMPLETED,
+                execution_mode_decision=execution_mode_decision,
+                workspace_session=session,
+                active_workspace=active_workspace,
+                worktree_created=created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=patch_result,
+                patch_generated=proposal is not None,
+                patch_applied=bool(apply_result and apply_result.applied),
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                selected_source_refs=selected_source_refs,
+                executor_provider=_executor_provider(patch_result),
+                warnings=tuple(
+                    dict.fromkeys(
+                        (
+                            *_warnings_for_summary_and_proposal(patch_summary, proposal),
+                            *_warnings_for_rejected_artifacts(rejected_artifacts),
+                        )
                     )
-                )
+                ),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+                promotion_status=promotion_result.status,
+                promotion_applied=promotion_result.status == "applied",
+                promoted_files=promotion_result.promoted_files,
+                rejected_artifacts=rejected_artifacts,
+                patch_proposal_diagnostics=patch_proposal_diagnostics,
+                patch_hunk_count_normalization=(
+                    proposal.hunk_count_normalization if proposal is not None else None
+                ),
             ),
-            git_auto_init=git_preparation.auto_initialized,
-            git_initial_commit_hash=git_preparation.initial_commit_hash,
-            git_init_warning=git_preparation.warning,
-            promotion_status=promotion_result.status,
-            promotion_applied=promotion_result.status == "applied",
-            promoted_files=promotion_result.promoted_files,
-            rejected_artifacts=rejected_artifacts,
-            patch_proposal_diagnostics=patch_proposal_diagnostics,
-            patch_hunk_count_normalization=(
-                proposal.hunk_count_normalization if proposal is not None else None
-            ),
+            session,
         )
 
     def _run_workspace_write_filesystem(
@@ -1139,37 +1160,40 @@ class RunPipeline:
             "SFE: promotion completed",
             promoted_file_count=len(promotion_result.promoted_files),
         )
-        return RunResult(
-            status=RUN_STATUS_COMPLETED,
-            execution_mode_decision=execution_mode_decision,
-            workspace_session=session,
-            active_workspace=active_workspace,
-            worktree_created=worktree_created,
-            discovery_result=discovery_result,
-            dry_run_result=dry_run_result,
-            patch_result=None,
-            patch_generated=False,
-            patch_applied=False,
-            patch_summary=patch_summary,
-            changed_files=changed_files,
-            selected_source_refs=selected_source_refs,
-            executor_provider=fs_result.executor_name,
-            git_auto_init=git_preparation.auto_initialized,
-            git_initial_commit_hash=git_preparation.initial_commit_hash,
-            git_init_warning=git_preparation.warning,
-            promotion_status=promotion_result.status,
-            promotion_applied=promotion_result.status == "applied",
-            promoted_files=promotion_result.promoted_files,
-            filesystem_result=fs_result,
-            rejected_artifacts=rejected_artifacts,
-            warnings=tuple(
-                dict.fromkeys(
-                    (
-                        *_warnings_for_summary(patch_summary),
-                        *_warnings_for_rejected_artifacts(rejected_artifacts),
+        return _with_auto_commit_after_promotion(
+            RunResult(
+                status=RUN_STATUS_COMPLETED,
+                execution_mode_decision=execution_mode_decision,
+                workspace_session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=None,
+                patch_generated=False,
+                patch_applied=False,
+                patch_summary=patch_summary,
+                changed_files=changed_files,
+                selected_source_refs=selected_source_refs,
+                executor_provider=fs_result.executor_name,
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+                promotion_status=promotion_result.status,
+                promotion_applied=promotion_result.status == "applied",
+                promoted_files=promotion_result.promoted_files,
+                filesystem_result=fs_result,
+                rejected_artifacts=rejected_artifacts,
+                warnings=tuple(
+                    dict.fromkeys(
+                        (
+                            *_warnings_for_summary(patch_summary),
+                            *_warnings_for_rejected_artifacts(rejected_artifacts),
+                        )
                     )
-                )
+                ),
             ),
+            session,
         )
 
     def _run_workspace_write_multipass(
@@ -1658,34 +1682,37 @@ class RunPipeline:
             "SFE: promotion completed",
             promoted_file_count=len(all_promoted_files),
         )
-        return RunResult(
-            status=RUN_STATUS_COMPLETED,
-            execution_mode_decision=execution_mode_decision,
-            workspace_session=session,
-            active_workspace=active_workspace,
-            worktree_created=worktree_created,
-            discovery_result=discovery_result,
-            dry_run_result=dry_run_result,
-            patch_result=latest_patch_result,
-            patch_generated=True,
-            patch_applied=True,
-            patch_summary=aggregate_summary,
-            changed_files=aggregate_summary.paths if aggregate_summary else (),
-            selected_source_refs=selected_source_refs,
-            executor_provider=_executor_provider(latest_patch_result),
-            warnings=tuple(
-                dict.fromkeys(
-                    (*_warnings_for_summary(aggregate_summary), *multi_pass_warnings)
-                )
+        return _with_auto_commit_after_promotion(
+            RunResult(
+                status=RUN_STATUS_COMPLETED,
+                execution_mode_decision=execution_mode_decision,
+                workspace_session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=latest_patch_result,
+                patch_generated=True,
+                patch_applied=True,
+                patch_summary=aggregate_summary,
+                changed_files=aggregate_summary.paths if aggregate_summary else (),
+                selected_source_refs=selected_source_refs,
+                executor_provider=_executor_provider(latest_patch_result),
+                warnings=tuple(
+                    dict.fromkeys(
+                        (*_warnings_for_summary(aggregate_summary), *multi_pass_warnings)
+                    )
+                ),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+                promotion_status="applied" if all_promoted_files else "skipped",
+                promotion_applied=bool(all_promoted_files),
+                promoted_files=tuple(all_promoted_files),
+                patch_hunk_count_normalization=latest_hunk_normalization,
+                multi_pass_summary=multi_pass_summary,
             ),
-            git_auto_init=git_preparation.auto_initialized,
-            git_initial_commit_hash=git_preparation.initial_commit_hash,
-            git_init_warning=git_preparation.warning,
-            promotion_status="applied" if all_promoted_files else "skipped",
-            promotion_applied=bool(all_promoted_files),
-            promoted_files=tuple(all_promoted_files),
-            patch_hunk_count_normalization=latest_hunk_normalization,
-            multi_pass_summary=multi_pass_summary,
+            session,
         )
 
     def _run_workspace_write_multipass_filesystem(
@@ -2220,39 +2247,42 @@ class RunPipeline:
             "SFE: promotion completed",
             promoted_file_count=len(all_promoted_files),
         )
-        return RunResult(
-            status=RUN_STATUS_COMPLETED,
-            execution_mode_decision=execution_mode_decision,
-            workspace_session=session,
-            active_workspace=active_workspace,
-            worktree_created=worktree_created,
-            discovery_result=discovery_result,
-            dry_run_result=dry_run_result,
-            patch_result=None,
-            patch_generated=False,
-            patch_applied=False,
-            patch_summary=aggregate_summary,
-            changed_files=aggregate_summary.paths if aggregate_summary else (),
-            selected_source_refs=selected_source_refs,
-            executor_provider=(
-                latest_filesystem_result.executor_name
-                if latest_filesystem_result is not None
-                else AIDER_EXECUTOR_NAME
+        return _with_auto_commit_after_promotion(
+            RunResult(
+                status=RUN_STATUS_COMPLETED,
+                execution_mode_decision=execution_mode_decision,
+                workspace_session=session,
+                active_workspace=active_workspace,
+                worktree_created=worktree_created,
+                discovery_result=discovery_result,
+                dry_run_result=dry_run_result,
+                patch_result=None,
+                patch_generated=False,
+                patch_applied=False,
+                patch_summary=aggregate_summary,
+                changed_files=aggregate_summary.paths if aggregate_summary else (),
+                selected_source_refs=selected_source_refs,
+                executor_provider=(
+                    latest_filesystem_result.executor_name
+                    if latest_filesystem_result is not None
+                    else AIDER_EXECUTOR_NAME
+                ),
+                warnings=tuple(
+                    dict.fromkeys(
+                        (*_warnings_for_summary(aggregate_summary), *multi_pass_warnings)
+                    )
+                ),
+                git_auto_init=git_preparation.auto_initialized,
+                git_initial_commit_hash=git_preparation.initial_commit_hash,
+                git_init_warning=git_preparation.warning,
+                promotion_status="applied" if all_promoted_files else "skipped",
+                promotion_applied=bool(all_promoted_files),
+                promoted_files=tuple(all_promoted_files),
+                multi_pass_summary=multi_pass_summary,
+                filesystem_result=latest_filesystem_result,
+                rejected_artifacts=tuple(all_rejected_artifacts),
             ),
-            warnings=tuple(
-                dict.fromkeys(
-                    (*_warnings_for_summary(aggregate_summary), *multi_pass_warnings)
-                )
-            ),
-            git_auto_init=git_preparation.auto_initialized,
-            git_initial_commit_hash=git_preparation.initial_commit_hash,
-            git_init_warning=git_preparation.warning,
-            promotion_status="applied" if all_promoted_files else "skipped",
-            promotion_applied=bool(all_promoted_files),
-            promoted_files=tuple(all_promoted_files),
-            multi_pass_summary=multi_pass_summary,
-            filesystem_result=latest_filesystem_result,
-            rejected_artifacts=tuple(all_rejected_artifacts),
+            session,
         )
 
     def _emit_progress(
@@ -3541,7 +3571,13 @@ def _expected_workspace_write_paths_from_task(
     for match in EXPECTED_WORKSPACE_WRITE_UNSAFE_FILE_RE.finditer(task):
         if not _unsafe_file_mention_has_path_boundary(task, match.start()):
             continue
+        if _file_mention_is_embedded_in_identifier(task, match.start(), match.end()):
+            continue
         if _file_mention_is_inside_url(task, match.start()):
+            continue
+        if _file_mention_is_inside_stack_trace_line(task, match.start()):
+            continue
+        if _file_mention_is_inside_terminal_tree_line(task, match.start()):
             continue
         candidate = _normalize_expected_workspace_write_path(match.group("path"))
         issue = _validate_expected_workspace_write_path(
@@ -3554,7 +3590,13 @@ def _expected_workspace_write_paths_from_task(
     paths: list[str] = []
     seen: set[str] = set()
     for match in EXPECTED_WORKSPACE_WRITE_FILE_RE.finditer(task):
+        if _file_mention_is_embedded_in_identifier(task, match.start(), match.end()):
+            continue
         if _file_mention_is_inside_url(task, match.start()):
+            continue
+        if _file_mention_is_inside_stack_trace_line(task, match.start()):
+            continue
+        if _file_mention_is_inside_terminal_tree_line(task, match.start()):
             continue
         candidate = _normalize_expected_workspace_write_path(match.group("path"))
         if not candidate or candidate in seen:
@@ -3580,6 +3622,58 @@ def _unsafe_file_mention_has_path_boundary(task: str, start: int) -> bool:
         return True
     previous = task[start - 1]
     return not (previous.isalnum() or previous in {"_", ".", "-"})
+
+
+def _file_mention_is_embedded_in_identifier(task: str, start: int, end: int) -> bool:
+    previous = task[start - 1] if start > 0 else ""
+    next_char = task[end] if end < len(task) else ""
+    return (
+        bool(previous and (previous.isalnum() or previous == "_"))
+        or bool(next_char and (next_char.isalnum() or next_char == "_"))
+    )
+
+
+def _file_mention_is_inside_stack_trace_line(task: str, start: int) -> bool:
+    line = _line_containing_offset(task, start).strip()
+    lowered = line.lower()
+    if lowered.startswith(
+        (
+            "at ",
+            "file \"",
+            "traceback ",
+            "caused by:",
+        )
+    ):
+        return True
+    if "traceback (most recent call last)" in lowered:
+        return True
+    if re.search(
+        r"\b(?:at|in)\s+\S+\.(?:js|ts|tsx|jsx|py|php|rb|go|java|rs)(?::\d+)+",
+        line,
+        re.IGNORECASE,
+    ):
+        return True
+    return (
+        re.search(
+            r"\S+\.(?:js|ts|tsx|jsx|py|php|rb|go|java|rs):\d+(?::\d+)?",
+            line,
+            re.IGNORECASE,
+        )
+        is not None
+    )
+
+
+def _file_mention_is_inside_terminal_tree_line(task: str, start: int) -> bool:
+    line = _line_containing_offset(task, start).lstrip()
+    return line.startswith(("├──", "└──", "│", "├─", "└─", "|--", "`--", "+--"))
+
+
+def _line_containing_offset(text: str, offset: int) -> str:
+    line_start = text.rfind("\n", 0, offset) + 1
+    line_end = text.find("\n", offset)
+    if line_end == -1:
+        line_end = len(text)
+    return text[line_start:line_end]
 
 
 def _file_mention_is_prose_constraint(
@@ -4057,6 +4151,12 @@ def _warnings_for_rejected_artifacts(
     return ("promotion_rejected_artifacts",)
 
 
+def _warnings_for_auto_commit(auto_commit: AutoCommitResult) -> tuple[str, ...]:
+    if auto_commit.status == "failed":
+        return ("auto_commit_failed",)
+    return ()
+
+
 def _promotion_rejected_artifact(
     path: str,
     *,
@@ -4064,6 +4164,136 @@ def _promotion_rejected_artifact(
     action: str = "ignored",
 ) -> RejectedPromotionArtifact:
     return RejectedPromotionArtifact(path=path, reason=reason, action=action)
+
+
+def _with_auto_commit_after_promotion(
+    result: RunResult,
+    session: WorkspaceSession,
+) -> RunResult:
+    auto_commit = _auto_commit_after_promotion(
+        session,
+        promoted_files=result.promoted_files,
+    )
+    updated = _with_auto_commit_result(result, auto_commit)
+    if auto_commit.status != "failed":
+        return updated
+    issue = RunIssue(
+        "auto_commit",
+        auto_commit.failure_reason or "git_commit_failed",
+        diagnostics={
+            "stderr_preview": auto_commit.stderr_preview,
+            "stdout_preview": auto_commit.stdout_preview,
+        },
+    )
+    return replace(
+        updated,
+        status=RUN_STATUS_FAILED,
+        issue=issue,
+    )
+
+
+def _with_auto_commit_result(
+    result: RunResult,
+    auto_commit: AutoCommitResult,
+) -> RunResult:
+    return replace(
+        result,
+        auto_commit_enabled=auto_commit.enabled,
+        auto_commit_status=auto_commit.status,
+        auto_commit_hash=auto_commit.commit_hash,
+        auto_commit_skipped_reason=auto_commit.skipped_reason,
+        auto_commit_failure_reason=auto_commit.failure_reason,
+        auto_commit_stderr_preview=auto_commit.stderr_preview,
+        warnings=tuple(
+            dict.fromkeys(
+                (
+                    *result.warnings,
+                    *_warnings_for_auto_commit(auto_commit),
+                )
+            )
+        ),
+    )
+
+
+def _auto_commit_after_promotion(
+    session: WorkspaceSession,
+    *,
+    promoted_files: tuple[str, ...],
+) -> AutoCommitResult:
+    if not promoted_files:
+        return AutoCommitResult(skipped_reason="no_useful_valid_changes")
+    source_root = session.source_path.resolve()
+    safe_paths: list[str] = []
+    for path in promoted_files:
+        relative = Path(path)
+        if relative.is_absolute() or ".." in relative.parts:
+            return AutoCommitResult(
+                status="failed",
+                skipped_reason=None,
+                failure_reason="unsafe_promoted_path",
+                stderr_preview=f"unsafe promoted path: {path}",
+            )
+        safe_paths.append(relative.as_posix())
+    add = _git(source_root, "add", "--", *safe_paths)
+    if add.returncode != 0:
+        return AutoCommitResult(
+            status="failed",
+            skipped_reason=None,
+            failure_reason="git_add_failed",
+            stderr_preview=_safe_command_preview(add.stderr),
+            stdout_preview=_safe_command_preview(add.stdout),
+        )
+    staged = _git(source_root, "diff", "--cached", "--quiet", "--", *safe_paths)
+    if staged.returncode == 0:
+        return AutoCommitResult(skipped_reason="no_staged_changes")
+    if staged.returncode not in {0, 1}:
+        return AutoCommitResult(
+            status="failed",
+            skipped_reason=None,
+            failure_reason="git_diff_cached_failed",
+            stderr_preview=_safe_command_preview(staged.stderr),
+            stdout_preview=_safe_command_preview(staged.stdout),
+        )
+    commit = _git(
+        source_root,
+        "-c",
+        "user.name=SFE",
+        "-c",
+        "user.email=sfe@example.invalid",
+        "commit",
+        "-m",
+        AUTO_COMMIT_MESSAGE,
+    )
+    if commit.returncode != 0:
+        return AutoCommitResult(
+            status="failed",
+            skipped_reason=None,
+            failure_reason="git_commit_failed",
+            stderr_preview=_safe_command_preview(commit.stderr),
+            stdout_preview=_safe_command_preview(commit.stdout),
+        )
+    head = _git(source_root, "rev-parse", "--short", "HEAD")
+    if head.returncode != 0:
+        return AutoCommitResult(
+            status="failed",
+            skipped_reason=None,
+            failure_reason="git_commit_hash_failed",
+            stderr_preview=_safe_command_preview(head.stderr),
+            stdout_preview=_safe_command_preview(head.stdout),
+        )
+    return AutoCommitResult(
+        status="committed",
+        commit_hash=head.stdout.strip() or None,
+        skipped_reason=None,
+    )
+
+
+def _safe_command_preview(output: str, limit: int = 500) -> str:
+    preview = " ".join(output.replace("\x00", "").split())
+    lowered = preview.lower()
+    if any(marker in lowered for marker in ("api_key", "apikey", "authorization", "token")):
+        return "[redacted]"
+    return preview[:limit]
 
 
 def _cleanup_rejected_promotion_artifacts(
@@ -4083,14 +4313,21 @@ def _cleanup_rejected_promotion_artifacts(
                 artifact.path,
                 root=active_root,
             )
-            removed = (
-                _remove_rejected_artifact_if_safe(
-                    artifact.path,
-                    root=source_root,
+            source_target = source_root / artifact.path
+            source_tracked = False
+            if _source_artifact_is_tracked(source_root, artifact.path):
+                source_tracked = True
+                if source_target.exists():
+                    action = "ignored_tracked_source_artifact"
+            else:
+                removed = (
+                    _remove_rejected_artifact_if_safe(
+                        artifact.path,
+                        root=source_root,
+                    )
+                    or removed
                 )
-                or removed
-            )
-            if removed:
+            if removed and not source_tracked:
                 action = "removed"
         cleaned.append(
             RejectedPromotionArtifact(
@@ -4100,6 +4337,20 @@ def _cleanup_rejected_promotion_artifacts(
             )
         )
     return tuple(cleaned)
+
+
+def _source_artifact_is_tracked(source_root: Path, path: str) -> bool:
+    relative = Path(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        return False
+    result = _git(
+        source_root,
+        "ls-files",
+        "--error-unmatch",
+        "--",
+        relative.as_posix(),
+    )
+    return result.returncode == 0
 
 
 def _rejected_artifact_safe_to_remove(artifact: RejectedPromotionArtifact) -> bool:

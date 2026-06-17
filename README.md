@@ -330,7 +330,8 @@ vendored into SFE; install it externally and keep it on `PATH`. In all cases,
 SFE enforces one safety boundary: every created, modified, or deleted path must
 be inside the selected destination directory before changes are promoted. Aider
 may create commits inside the SFE-controlled worktree, but SFE promotes only
-the final validated file state back to the selected source destination; the
+the final validated file state back to the selected source destination and then
+creates one local source-repo commit named `SFE workspace_write promotion`. The
 user source history does not receive Aider's micro-commits directly. If the
 selected workspace is not yet a Git repository, `workspace_write` can
 initialize a local snapshot first; it does not create a remote, push, run

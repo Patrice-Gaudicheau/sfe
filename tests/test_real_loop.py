@@ -88,6 +88,24 @@ def test_parse_real_loop_verifier_accepts_all_terminal_verdicts() -> None:
         assert decision.executor_retry_task is None
 
 
+def test_parse_real_loop_verifier_accepts_pass_without_stop_reason() -> None:
+    decision = parse_real_loop_verifier_json(
+        json.dumps(_decision_payload("pass", stop_reason=None))
+    )
+
+    assert decision.verdict == "pass"
+    assert decision.stop_reason is None
+
+
+def test_parse_real_loop_verifier_accepts_completed_as_pass_without_stop_reason() -> None:
+    decision = parse_real_loop_verifier_json(
+        json.dumps(_decision_payload("completed", stop_reason=None))
+    )
+
+    assert decision.verdict == "pass"
+    assert decision.stop_reason is None
+
+
 def test_parse_real_loop_verifier_accepts_fenced_needs_retry() -> None:
     payload = _decision_payload(
         "needs_retry",

@@ -206,7 +206,12 @@ def make_run_result(
     patch_result: ExecutionResult | None = None,
     multi_pass_summary: MultiPassRunSummary | None = None,
     rejected_artifacts: tuple[RejectedPromotionArtifact, ...] = (),
+    auto_commit_status: str | None = None,
+    auto_commit_hash: str | None = None,
 ) -> RunResult:
+    resolved_auto_commit_status = auto_commit_status or (
+        "committed" if status == RUN_STATUS_COMPLETED else "skipped"
+    )
     return RunResult(
         status=status,
         issue=issue,
@@ -239,6 +244,13 @@ def make_run_result(
         patch_result=patch_result,
         multi_pass_summary=multi_pass_summary,
         rejected_artifacts=rejected_artifacts,
+        auto_commit_status=resolved_auto_commit_status,
+        auto_commit_hash=(
+            auto_commit_hash if resolved_auto_commit_status == "committed" else None
+        ),
+        auto_commit_skipped_reason=(
+            None if resolved_auto_commit_status == "committed" else "not_attempted"
+        ),
     )
 
 
@@ -364,6 +376,8 @@ def test_run_without_target_or_task_failure_is_surfaced() -> None:
     assert result["changed_files"] == []
     assert result["rejected_artifacts"] == []
     assert result["promotion"]["status"] == "skipped"
+    assert result["auto_commit"]["status"] == "skipped"
+    assert result["auto_commit"]["skipped_reason"] == "not_attempted"
     assert result["progress"] == []
     assert session.calls == [("run", None)]
 
@@ -655,6 +669,14 @@ def test_run_output_is_structured_and_omits_sensitive_payload_material() -> None
         "status": "applied",
         "applied": True,
         "issue": None,
+    }
+    assert result["auto_commit"] == {
+        "enabled": True,
+        "status": "committed",
+        "hash": None,
+        "skipped_reason": None,
+        "failure_reason": None,
+        "stderr_preview": None,
     }
     rendered = repr(result)
     assert "SECRET_FILE_CONTENT" not in rendered

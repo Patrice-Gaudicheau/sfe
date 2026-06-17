@@ -732,10 +732,18 @@ def test_run_pipeline_creates_worktree_applies_patch_and_promotes(tmp_path: Path
     assert result.promotion_status == "applied"
     assert result.promotion_applied is True
     assert result.promoted_files == ("context.txt",)
+    assert result.auto_commit_enabled is True
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert result.changed_files == ("context.txt",)
     assert result.patch_summary is not None
     assert result.patch_summary.modified_paths == ("context.txt",)
     assert (repo / "context.txt").read_text(encoding="utf-8") == "new context\n"
+    assert _git(repo, "status", "--short").stdout.strip() == ""
+    assert (
+        _git(repo, "log", "-1", "--pretty=%s").stdout.strip()
+        == run_pipeline_module.AUTO_COMMIT_MESSAGE
+    )
     assert (result.workspace_session.worktree_path / "context.txt").read_text(
         encoding="utf-8"
     ) == "new context\n"
@@ -782,6 +790,76 @@ def test_run_pipeline_workspace_write_emits_minimal_progress_events(tmp_path: Pa
     assert manager.cleanup(result.workspace_session).cleaned is True
 
 
+def test_run_pipeline_auto_commit_failure_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    original_git = run_pipeline_module._git
+
+    def fake_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        if (
+            args[:5]
+            == (
+                "-c",
+                "user.name=SFE",
+                "-c",
+                "user.email=sfe@example.invalid",
+                "commit",
+            )
+        ):
+            return subprocess.CompletedProcess(
+                ["git", *args],
+                1,
+                "",
+                "simulated commit failure\n",
+            )
+        return original_git(cwd, *args)
+
+    monkeypatch.setattr(run_pipeline_module, "_git", fake_git)
+
+    result = _pipeline().run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "auto_commit"
+    assert result.issue.reason == "git_commit_failed"
+    assert result.auto_commit_status == "failed"
+    assert result.auto_commit_failure_reason == "git_commit_failed"
+    assert result.auto_commit_stderr_preview == "simulated commit failure"
+    assert result.issue.diagnostics is not None
+    assert result.issue.diagnostics["stderr_preview"] == "simulated commit failure"
+    assert "auto_commit_failed" in result.warnings
+
+
+def test_run_pipeline_dirty_source_repo_still_refuses_before_auto_commit(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "context.txt").write_text("dirty before run\n", encoding="utf-8")
+
+    result = _pipeline().run(
+        RunRequest(
+            workspace_root=repo,
+            task="Patch context",
+            workspace_policy=WorkspaceIsolationPolicy(worktree_parent=tmp_path / "worktrees"),
+        )
+    )
+
+    assert result.status == RUN_STATUS_FAILED
+    assert result.issue is not None
+    assert result.issue.category == "dirty_source_repo"
+    assert result.issue.reason == "dirty_source_refused_by_policy"
+    assert result.auto_commit_status == "skipped"
+    assert result.auto_commit_skipped_reason == "not_attempted"
+
+
 def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
     tmp_path: Path,
 ) -> None:
@@ -807,7 +885,9 @@ def test_run_pipeline_auto_initializes_non_git_workspace_then_uses_worktree(
     assert _git(workspace, "remote", "-v").stdout.strip() == ""
     assert ".sfe-worktrees/stale.txt" not in _git(workspace, "ls-files").stdout
     assert (workspace / "context.txt").read_text(encoding="utf-8") == "new context\n"
-    assert _git(workspace, "status", "--short").stdout.strip() == "M context.txt"
+    assert _git(workspace, "status", "--short").stdout.strip() == ""
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert result.workspace_session is not None
     assert result.workspace_session.worktree_path.parent == workspace / ".sfe-worktrees"
     assert (result.workspace_session.worktree_path / "context.txt").read_text(
@@ -879,9 +959,12 @@ def test_run_pipeline_accepts_direct_created_modified_and_deleted_files_inside_d
     assert result.changed_files == ("context.txt", "obsolete.txt", "created.txt")
     assert result.promoted_files == ("context.txt", "obsolete.txt", "created.txt")
     assert result.promotion_status == "applied"
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert (repo / "context.txt").read_text(encoding="utf-8") == "directly modified\n"
     assert (repo / "created.txt").read_text(encoding="utf-8") == "directly created\n"
     assert not (repo / "obsolete.txt").exists()
+    assert _git(repo, "status", "--short").stdout.strip() == ""
 
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
@@ -1026,6 +1109,8 @@ def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
     assert result.issue is not None
     assert result.issue.category == "workspace_write_executor"
     assert result.issue.reason == "no_changes"
+    assert result.auto_commit_status == "skipped"
+    assert result.auto_commit_skipped_reason == "not_attempted"
     assert result.issue.diagnostics is not None
     assert result.issue.diagnostics["expected_paths"] == (
         "index.html",
@@ -1154,9 +1239,40 @@ def test_expected_workspace_write_paths_do_not_include_tree_output_prefixes(
         tmp_path,
     )
 
-    assert result == ("README.md", "styles.css", "src/main.js")
+    assert result == ("src/main.js",)
     assert "├── README.md" not in result
     assert "└── styles.css" not in result
+
+
+def test_expected_workspace_write_paths_ignore_stack_trace_file_mentions(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "\n".join(
+            [
+                "Fix this trace while creating the real source file:",
+                "Error: boom",
+                "    at init (main.js:12:3)",
+                "    at App (src/core/App.js:4:1)",
+                '  File "app.py", line 2, in <module>',
+                "src/main.js",
+            ]
+        ),
+        tmp_path,
+    )
+
+    assert result == ("src/main.js",)
+
+
+def test_expected_workspace_write_paths_ignore_identifier_extension_fragments(
+    tmp_path: Path,
+) -> None:
+    result = run_pipeline_module._expected_workspace_write_paths_from_task(
+        "Call await RAPIER.init(); create src/main.js.",
+        tmp_path,
+    )
+
+    assert result == ("src/main.js",)
 
 
 def test_expected_workspace_write_paths_reject_explicit_absolute_path(
@@ -1275,6 +1391,10 @@ def test_run_pipeline_default_aider_rejects_command_like_created_path_but_promot
     assert result.rejected_artifacts[0].path == "npm run dev"
     assert result.rejected_artifacts[0].reason == "command_like_path"
     assert result.rejected_artifacts[0].action == "removed"
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
+    assert _git(repo, "status", "--short").stdout.strip() == ""
+    assert "npm run dev" not in _git(repo, "ls-tree", "-r", "--name-only", "HEAD").stdout
     assert "promotion_rejected_artifacts" in result.warnings
     rendered = render_run_result(result)
     assert "rejected artifacts: npm run dev (command_like_path, action=removed)" in rendered
@@ -1324,6 +1444,9 @@ def test_run_pipeline_default_aider_rejects_tree_output_artifacts_but_promotes_v
     assert result.rejected_artifacts[0].path == tree_path
     assert result.rejected_artifacts[0].reason == "terminal_tree_artifact"
     assert result.rejected_artifacts[0].action == "removed"
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
+    assert _git(repo, "status", "--short").stdout.strip() == ""
     rendered = render_run_result(result)
     assert f"{tree_path} (terminal_tree_artifact, action=removed)" in rendered
     assert tree_path not in result.promoted_files
@@ -1361,11 +1484,14 @@ def test_run_pipeline_default_aider_removes_existing_tree_output_artifact_from_d
 
     assert result.status == RUN_STATUS_COMPLETED
     assert result.promoted_files == ("index.html",)
-    assert not (repo / artifact_path).exists()
+    assert (repo / artifact_path).exists()
     assert result.rejected_artifacts
     assert result.rejected_artifacts[0].path == artifact_path
     assert result.rejected_artifacts[0].reason == "terminal_tree_artifact"
-    assert result.rejected_artifacts[0].action == "removed"
+    assert result.rejected_artifacts[0].action == "ignored_tracked_source_artifact"
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
+    assert _git(repo, "status", "--short").stdout.strip() == ""
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -1451,6 +1577,9 @@ def test_run_pipeline_default_aider_rejects_unsafe_artifact_paths_but_promotes_v
     assert result.rejected_artifacts
     assert result.rejected_artifacts[0].path == unsafe_path
     assert result.rejected_artifacts[0].reason == reason
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
+    assert _git(repo, "status", "--short").stdout.strip() == ""
     assert "promotion_rejected_artifacts" in result.warnings
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
@@ -1843,9 +1972,12 @@ def test_run_pipeline_promotes_committed_worktree_changes_relative_to_source_hea
     assert set(result.changed_files) == {"context.txt", "created.txt", "obsolete.txt"}
     assert set(result.promoted_files) == {"context.txt", "created.txt", "obsolete.txt"}
     assert result.promotion_status == "applied"
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert (repo / "context.txt").read_text(encoding="utf-8") == "committed modified\n"
     assert (repo / "created.txt").read_text(encoding="utf-8") == "committed created\n"
     assert not (repo / "obsolete.txt").exists()
+    assert _git(repo, "status", "--short").stdout.strip() == ""
 
     assert result.workspace_session is not None
     assert (
@@ -1883,8 +2015,11 @@ def test_run_pipeline_default_aider_promotes_committed_worktree_changes(
 
     assert result.status == RUN_STATUS_COMPLETED
     assert set(result.promoted_files) == {"context.txt", "aider-created.txt"}
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert (repo / "context.txt").read_text(encoding="utf-8") == "committed by fake aider\n"
     assert (repo / "aider-created.txt").read_text(encoding="utf-8") == "created\n"
+    assert _git(repo, "status", "--short").stdout.strip() == ""
     assert result.workspace_session is not None
     assert manager.cleanup(result.workspace_session).cleaned is True
 
@@ -4070,8 +4205,11 @@ def test_run_pipeline_forced_multipass_continues_when_later_pass_only_rejects_ar
     assert result.status == RUN_STATUS_COMPLETED
     assert result.issue is None
     assert result.promoted_files == ("index.html",)
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert (repo / "index.html").read_text(encoding="utf-8") == "<h1>Hello</h1>\n"
     assert not (repo / "npm run dev").exists()
+    assert _git(repo, "status", "--short").stdout.strip() == ""
     assert result.rejected_artifacts
     assert result.rejected_artifacts[0].path == "npm run dev"
     assert result.rejected_artifacts[0].reason == "command_like_path"
@@ -4237,8 +4375,11 @@ def test_run_pipeline_forced_multipass_aider_captures_committed_changes(
         "docs": ("README.md",),
     }
     assert set(result.promoted_files) == {"index.html", "README.md"}
+    assert result.auto_commit_status == "committed"
+    assert result.auto_commit_hash
     assert (repo / "index.html").read_text(encoding="utf-8") == "committed html\n"
     assert (repo / "README.md").read_text(encoding="utf-8") == "committed docs\n"
+    assert _git(repo, "status", "--short").stdout.strip() == ""
     assert result.workspace_session is not None
     assert (
         _git(result.workspace_session.worktree_path, "status", "--porcelain")

@@ -335,6 +335,11 @@ def render_run_result_normal(result: RunResult) -> str:
         *_render_real_loop_normal_lines(result),
         f"  multi-pass: {_yes_no(result.multi_pass_summary is not None and result.multi_pass_summary.enabled)}",
         f"  promoted files: {_format_string_list(list(result.promoted_files))}",
+        f"  auto commit: {_yes_no(getattr(result, 'auto_commit_enabled', True))}",
+        "  auto commit status: "
+        f"{_display_value(getattr(result, 'auto_commit_status', None))}",
+        "  auto commit hash: "
+        f"{_display_value(getattr(result, 'auto_commit_hash', None))}",
         f"  modified relative paths: {_format_string_list(list(summary.modified_paths) if summary else [])}",
         f"  created relative paths: {_format_string_list(list(summary.created_paths) if summary else [])}",
     ]
@@ -418,6 +423,17 @@ def render_run_result_debug(result: RunResult, *, launch_cwd: Path | None = None
         f"  git auto-init: {_yes_no(result.git_auto_init)}",
         f"  git initial commit: {result.git_initial_commit_hash or 'none'}",
         f"  git init warning: {result.git_init_warning or 'none'}",
+        f"  auto commit: {_yes_no(getattr(result, 'auto_commit_enabled', True))}",
+        "  auto commit status: "
+        f"{_display_value(getattr(result, 'auto_commit_status', None))}",
+        "  auto commit hash: "
+        f"{_display_value(getattr(result, 'auto_commit_hash', None))}",
+        "  auto commit skipped reason: "
+        f"{_display_value(getattr(result, 'auto_commit_skipped_reason', None))}",
+        "  auto commit failure reason: "
+        f"{_display_value(getattr(result, 'auto_commit_failure_reason', None))}",
+        "  auto commit stderr preview: "
+        f"{_display_value(getattr(result, 'auto_commit_stderr_preview', None))}",
         f"  discovery mode: {_display_value(discovery.discovery_mode if discovery is not None else None)}",
         f"  discovery candidates: {discovery.candidate_count if discovery is not None else 0}",
         f"  selected source refs: {_format_string_list(list(result.selected_source_refs))}",

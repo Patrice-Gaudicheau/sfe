@@ -52,7 +52,7 @@ from sfe.provider_progress import ProviderCallIdleTimeoutError
 
 
 REAL_LOOP_VERIFIER_SCHEMA_VERSION = "sfe.real_loop.governor.v1"
-REAL_LOOP_VERDICTS = frozenset({"pass", "needs_retry", "blocked", "abort"})
+REAL_LOOP_VERDICTS = frozenset({"pass", "completed", "needs_retry", "blocked", "abort"})
 REAL_LOOP_CONFIDENCE_LEVELS = frozenset({"low", "medium", "high"})
 REAL_LOOP_PROGRESS_LEVELS = frozenset({"none", "minor", "meaningful", "unknown"})
 DEFAULT_REAL_LOOP_VERIFIER_MAX_TOKENS = 1600
@@ -504,6 +504,8 @@ def _parse_real_loop_verifier_object(payload: Any) -> RealLoopVerifierDecision:
             "verifier schema_version was invalid",
         )
     verdict = _required_string(payload, "verdict")
+    if verdict == "completed":
+        verdict = "pass"
     confidence = _required_string(payload, "confidence")
     progress = _required_string(payload, "progress_since_previous_iteration")
     if verdict not in REAL_LOOP_VERDICTS:
@@ -566,11 +568,6 @@ def _validate_verdict_contract(decision: RealLoopVerifierDecision) -> None:
             raise RealLoopVerifierError(
                 "invalid_verifier_response",
                 "pass verdict cannot request retry",
-            )
-        if not decision.stop_reason:
-            raise RealLoopVerifierError(
-                "invalid_verifier_response",
-                "pass verdict requires stop_reason",
             )
         return
     if decision.verdict == "needs_retry":

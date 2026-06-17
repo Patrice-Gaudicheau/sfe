@@ -4784,6 +4784,9 @@ def test_tui_run_report_after_workspace_write_run_does_not_execute_again(
     assert "execution-mode router provider: fake-execution-mode-router" in report_output
     assert "patch generated: yes" in report_output
     assert "promotion: applied" in report_output
+    assert "auto commit: yes" in report_output
+    assert "auto commit status: committed" in report_output
+    assert run_git(repo, "status", "--short").stdout.strip() == ""
     assert app.workspace_session is not None
     cleanup = app.workspace_manager.cleanup(app.workspace_session)
     assert cleanup.cleaned is True
