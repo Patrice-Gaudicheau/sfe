@@ -20,24 +20,35 @@
   <img src="https://img.shields.io/badge/Provider-CodexCLI-334155?style=flat-square" alt="Provider: CodexCLI">
 </p>
 
-**SFE** is an open-source infrastructure that separates context selection from task execution. Instead of sending every request as one large flat prompt, SFE routes the task, selects authoritative context, and exposes only that bounded context to the executor.
+**SFE** is an open-source runtime architecture that separates context selection
+from task execution for LLM workflows. Instead of sending every request as one
+large flat prompt, SFE routes the task, selects authoritative context, and
+exposes only that bounded subset to the executor.
 
-This separation enables a simple model-allocation pattern: a stronger model can think, route, and select context, while a cheaper or specialized model executes against that reduced context.  
-SFE can also **Loop**: keep working on the original task, check the result, and retry instead of stopping at the first answer.
+This separation enables two complementary cost levers. First, input-token
+exposure is reduced by selecting a smaller, task-relevant context. Second,
+output-token cost can be lowered by delegating execution to a cheaper or more
+specialized model once the context is already narrow. A stronger model can
+handle routing and selection while a lighter model executes against the reduced
+input. Multiple providers (OpenAI, Anthropic, Google Gemini, Alibaba/Qwen,
+Ollama, Lemonade, CodexCLI) can be mixed within a single workflow.
 
-For technical founders, AI infrastructure teams, and research engineers running repeated API-heavy workflows, SFE provides:
+SFE can also **Loop**: after a write attempt, a verifier model checks the
+result against the original task and can issue targeted retries instead of
+stopping at the first answer.
 
-- **Bounded Context Exposure:** Reduces repeated input-token exposure by selecting smaller, authoritative executor contexts.
-- **Architectural Role Separation:** Splits Discoverer, Router, and Executor into independent roles, allowing distinct models for each.
-- **Multi-Provider Workflows:** Mix and match OpenAI, Anthropic, Qwen, DeepSeek-compatible endpoints, Ollama, or Lemonade within a single workflow.
-- **Dollar-Cost Optimization:** Treat cost as a model-allocation problem. Route with a strong reasoning model and execute with a smaller, cheaper, or specialized model.
-- **Controlled Execution Surfaces:** Support local iterative workspace-write **loops** through a local TUI or integrate via the built-in MCP server.
+The routing step has a fixed cost. SFE is most relevant when avoided context is
+large enough, or when authority conflicts and audit requirements justify that
+overhead. For short prompts and simple tasks, the benefit may not outweigh the
+cost.
 
-*Note: SFE is an experimental research prototype. It does not claim to make models more intelligent, nor does it guarantee universal token savings. The evidence here is early, mostly synthetic, and benchmark-specific. Treat results as a technical prototype signal, not production readiness. See [Limitations](#limitations) for details.*
+*SFE is an experimental research prototype. It does not make models more
+intelligent and does not guarantee universal token savings. See
+[Limitations](#limitations).*
 
-## Install
+## Install and Setup
 
-From a terminal, clone SFE into your home directory and run the conservative installer:
+This project is dependency-light and targets Python 3.10+. Clone and install:
 
 ```bash
 cd ~
@@ -47,24 +58,60 @@ make install
 source .venv/bin/activate
 ```
 
-`make install` creates or reuses `.venv`, installs SFE locally in editable mode,
-and checks the external Aider CLI used by normal `workspace_write` runs. It
-does not run aggressive system upgrades. Once the environment is active,
-continue with the Quick Start below.
+`make install` is conservative by design: it checks for `python3` first and
+falls back to `python`, reuses an existing `.venv`, installs SFE in editable
+mode, and checks for the external Aider CLI used by normal `workspace_write`
+flows. It does not run `apt upgrade`, `brew upgrade`, or other global upgrade
+commands. On Debian, Ubuntu, and WSL it can offer, after explicit confirmation,
+to install missing packages such as `python3-venv` or `pipx`. For automation,
+you can opt in to auto-confirmation with `SFE_INSTALL_ASSUME_YES=1 make install`.
+Existing Aider installs stay conservative: upgrades still require an
+interactive confirmation or `SFE_INSTALL_ALLOW_UPDATES=1`.
 
-## Quick Start: TUI or MCP
+If you prefer manual Python setup, the equivalent core steps are:
 
-Configure at least one provider before using the TUI or MCP server:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+If Aider is missing, `make install` follows the documented Ubuntu/Debian/WSL
+`pipx install aider-chat` path when it can prompt, and otherwise fails safely
+with the same commands so the next step is explicit.
+
+### Provider Configuration
+
+Copy `.env.example` to `.env` and fill in at least one provider. `.env` is
+gitignored and must not be committed.
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in at least one provider configuration in `.env`. `SFE_PROVIDER` is the
-simplest starting point for local use. Advanced users can split runtime roles
-with `SFE_PROVIDER_ROUTER`, `SFE_PROVIDER_DISCOVERY`, and
-`SFE_PROVIDER_EXECUTOR`. See [Setup](#setup) and [Provider Support](#provider-support)
-below for the provider-specific variables.
+`SFE_PROVIDER` is the default provider for all pipeline roles. To allocate
+different models to different stages, override with:
+
+- `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR` for routing and execution.
+- `SFE_PROVIDER_DISCOVERY` for context discovery (falls back to
+  `SFE_PROVIDER_ROUTER`, then `SFE_PROVIDER`, then the surface default).
+
+Each provider has role-specific model variables, for example
+`SFE_OPENAI_ROUTER_MODEL` and `SFE_OPENAI_EXECUTOR_MODEL`. Discovery model
+variables are provider-specific (`SFE_OPENAI_DISCOVERY_MODEL`,
+`SFE_LEMONADE_DISCOVERY_MODEL`, `SFE_CODEXCLI_DISCOVERY_MODEL`) and fall back
+to the existing router/shared model variables when absent. Google discovery uses
+`SFE_GOOGLE_DISCOVERY_MODEL` with `SFE_GOOGLE_MODEL` as its fallback. Ollama
+discovery uses `SFE_OLLAMA_DISCOVERY_MODEL` with `SFE_OLLAMA_ROUTER_MODEL` and
+`SFE_OLLAMA_MODEL` as fallbacks.
+
+This role-level configuration enables Router/Executor model separation: a
+strong router can be paired with a cheaper or more specialized executor when
+the selected context is narrow enough and the configured provider supports the
+required task. See [Provider Support](#provider-support) below for
+provider-specific variables and benchmark configuration.
+
+## Quick Start: TUI or MCP
 
 To start the local TUI:
 
@@ -86,6 +133,8 @@ the task, select context, and execute the appropriate mode. For write tasks,
 SFE uses its workspace-write path and mechanical boundaries. For read-only or
 answer tasks, SFE can answer without mutating the workspace.
 
+### Real Loop
+
 For supported local `workspace_write` runs, SFE can run a bounded **Real Loop**:
 after a completed write attempt, a configured verifier/governor model compares
 the final workspace state with the original task. It can mark the task as
@@ -95,55 +144,72 @@ Retries use a supervisor-generated correction task focused only on missing or
 failed requirements. This is LLM-based verification, not a deterministic
 correctness guarantee.
 
+### MCP
+
 For MCP clients, use the local SFE MCP server instead of the TUI. The current
 client setup notes cover both
 [Antigravity](docs/sfe_mcp_client_setup.md#antigravity-setup) and
 [Codex App](docs/sfe_mcp_client_setup.md#codex-app-setup-with-the-form);
 they also show the expected MCP tool flow and local STDIO process shape.
 
-For the current product doctrine, start with `docs/sfe_product_doctrine.md`. In short: SFE core is the routing/context engine; the TUI is the current local user-facing control surface; filesystem/worktree execution is the developer mode inside `workspace_write`; benchmarks are the experimental evidence and architectural feedback loop.
+## Where To Start
 
-## Core Engineering Signal
+New technical reviewers should start with `docs/INDEX.md`. It gives a compact
+map of the benchmark families, runner categories, current high-overlap status,
+and the recommended reading path.
+
+For the current local user-facing workflow, read
+`docs/sfe_product_doctrine.md`, `docs/tui_v0_1_user_guide.md`, and
+`docs/current_architecture_status.md`.
+
+For the current high-overlap methodology, read
+`docs/high_overlap_diagnostic_bucketing_notes.md` and
+`docs/high_overlap_history.md`.
+
+## Motivation and Audience
+
+Long-context LLM calls can waste budget by repeatedly sending irrelevant,
+obsolete, or non-authoritative context. Large prompts often mix user intent,
+constraints, background facts, distractors, prior decisions, and execution
+instructions in one context window, making runs harder to audit and spending
+tokens on information that is irrelevant to the next model call.
+
+SFE explores whether an external routing layer can reduce that exposure while
+keeping source selection auditable and enabling role-based model allocation.
+Specifically, it tests whether an external controller can:
+
+- keep richer structured state outside the model prompt;
+- activate only the zones needed for the current task;
+- route work to a role/provider with an explicit contract;
+- compare full-context baselines against reduced spatial execution payloads.
+
+The repository preserves full-context baseline comparisons, selected-context
+executor runs, selector-only checks, and selected-vs-full comparisons.
+
+SFE targets teams that operate API-heavy long-context workloads, build
+provider-routing or proxy systems, handle authority conflicts across documents
+and policies, or need auditable context governance. It is also relevant to
+teams handling compliance or audit-sensitive assistant workflows, to technical
+investors evaluating context-governance infrastructure, and to LLM
+infrastructure architects exploring model-allocation patterns.
+
+The design is selective by intent: context size, authority-conflict density,
+token budget, and audit requirements should determine when SFE activates.
+It is not meant to wrap every prompt.
+
+## Benchmark Summary
 
 Across protocol-aligned OpenAI and Anthropic campaigns, selected-context
 reduction patterns were nearly identical. A narrower Alibaba/Qwen replay also
 completed selected benchmark families, including one live structural
-baseline-vs-spatial comparison. Router-inclusive gains were modest on standard
-context, then increased sharply as context grew.
+baseline-vs-spatial comparison. The useful signal is the amortization pattern:
+router-inclusive gains were modest on standard context, then increased sharply
+as context grew.
 
-The useful signal is the amortization pattern, not a claim of universal
-activation. Structural 50k+ observations reached 84.08% OpenAI and 83.63%
-Anthropic router-inclusive reduction, with a single-run Alibaba/Qwen structural
-observation at 83.57%. These remain controlled benchmark observations.
-
-## Why This Matters
-
-Long-context LLM calls can waste budget by repeatedly sending irrelevant,
-obsolete, partial, or non-authoritative context. SFE explores whether context
-exposure can be reduced before execution while keeping source selection
-auditable.
-
-The same architecture can spend reasoning budget where it is most strategic:
-on routing and context selection. Once the executor context is clean and
-bounded, execution can often be delegated to a smaller, cheaper, or more
-code-specialized model, subject to task difficulty and provider support. SFE
-therefore attacks cost on two axes: input-token exposure reduction through
-selected context, and output-token dollar-cost reduction through executor
-model/provider choice.
-
-The repository preserves full-context baseline comparisons, selected-context
-executor runs, selector-only checks, and selected-vs-full comparisons. The
-intended activation model is selective, not always-on: SFE is most relevant
-when context size, authority conflicts, or audit requirements can justify the
-routing overhead.
-
-## Multi-Provider Performance Snapshot
-
-Protocol-aligned controlled OpenAI, Anthropic, and Alibaba/Qwen observations
-across four context-intensity tiers. Alibaba/Qwen `standard`, `practical`, and
-`high_context` rows use `repeat=3`, `selection_mode=both`, and
-`max_tokens=240`; the `structural` row remains a single live
-baseline-vs-spatial comparison.
+Protocol-aligned controlled observations across four context-intensity tiers.
+Alibaba/Qwen `standard`, `practical`, and `high_context` rows use `repeat=3`,
+`selection_mode=both`, and `max_tokens=240`; the `structural` row is a single
+live baseline-vs-spatial comparison.
 
 | Tier | OpenAI selected reduction | OpenAI router-inclusive reduction | Anthropic selected reduction | Anthropic router-inclusive reduction | Alibaba/Qwen selected reduction | Alibaba/Qwen router-inclusive reduction |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -152,8 +218,8 @@ baseline-vs-spatial comparison.
 | `high_context` [20k-50k tokens] | 91.11% | 73.38% | 91.02% | 72.02% | 90.98% | 72.34% |
 | `structural` [50k+ tokens] | 94.16% | 84.08% | 93.94% | 83.63% | 94.11% | 83.57% |
 
-Selected reduction means executor-visible context reduction. Router-inclusive
-reduction includes selector/router overhead. The standard tier shows router
+*Selected reduction* means executor-visible context reduction. *Router-inclusive
+reduction* includes selector/router overhead. The standard tier shows router
 overhead clearly; larger tiers show better amortization. Anthropic structural
 required `600` seconds of provider-call pacing because of provider
 input-token-per-minute limits. Alibaba/Qwen calls used the benchmark-only
@@ -162,30 +228,48 @@ the `standard`, `practical`, and `high_context` rows are repeat-3 observations,
 while the `structural` row is a single live baseline-vs-spatial comparison, not
 a repeat campaign.
 
+In the large/contextual benchmark, `spatial_fixture` means oracle-style
+selection of the known relevant block and should be read as an upper bound on
+executor context reduction. `spatial_router` means the selector chose the block
+before execution. Executor context reduction excludes router cost;
+router-inclusive or end-to-end reduction includes selector overhead.
+
+Lemonade remains useful as a local-provider result and historical benchmark
+path. It is no longer the only current headline for token-reduction behavior.
+
 These are controlled observations, not statistical proof and not production
-commitments. See `docs/provider_comparison_summary.md` for the cross-provider
-OpenAI/Anthropic summary, `docs/token_cost_metrics.md` for OpenAI token
-accounting details, and `docs/alibaba_structural_50k_comparison_note.md` plus
+commitments. They should not be presented as general proof that SFE improves
+answer quality, reasoning, or model intelligence. See
+`docs/provider_comparison_summary.md` for the cross-provider OpenAI/Anthropic
+summary, `docs/token_cost_metrics.md` for OpenAI token accounting details, and
+`docs/alibaba_structural_50k_comparison_note.md` plus
 `docs/alibaba_large_contextual_missing_tiers.md` and
 `docs/alibaba_comparable_benchmark_runs.md` for the current Alibaba/Qwen
 observations.
 
-## Operational Relevance
+## Architecture
 
-SFE may be commercially relevant when avoided context is large enough to
-amortize routing cost. Current areas of interest include:
+### Code Layout
 
-- API-heavy long-context workflows.
-- Provider integration research.
-- Token budget control and context exposure reduction.
-- Auditable routing decisions.
-- Authority conflicts between documents, versions, policies, or governance
-  sources.
-- Provider-routing and context-budget policies.
-- Enterprise assistant workflows where full-context prompting is expensive or
-  hard to audit.
+The current repository has these layers:
 
-## Router/Executor Model Separation
+- `sfe/`: core SFE routing/context engine helpers, including provider
+  selection, execution-mode routing, LLM-driven workspace discovery, bounded
+  execution plumbing, validation support, and Git Worktree workspace isolation.
+- `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
+- `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
+- `providers/`: minimal benchmark provider adapters, including Lemonade,
+  OpenAI API, Alibaba/Qwen, and native Anthropic Messages API paths.
+- `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
+- `sfe_tui/`: current local user-facing TUI surface using `DirectBackend`.
+
+The architecture boundary is:
+
+```text
+Discoverer -> Router -> Executor
+```
+
+### Role Separation
 
 SFE treats Discoverer, Router, and Executor as separate runtime roles rather
 than assuming that every step must use one provider or one model. The Router is
@@ -205,113 +289,7 @@ distinctive architectural advantage relative to many LLM workflow tools that
 bind selection and execution to one model path. It remains a design capability,
 not a guarantee that every smaller executor model will preserve task quality.
 
-## The Amortization Hypothesis
-
-Routing has a fixed cost. SFE is not intended to activate on every prompt, and
-short or simple prompts may not benefit. The project is most relevant when
-avoided context is large enough, or when authority and audit requirements
-justify routing.
-
-Selective activation is therefore central to the design: context size,
-authority-conflict density, token budget, and audit requirements should decide
-when SFE is used.
-
-## Who This Is For
-
-- AI platform teams.
-- LLM infrastructure architects.
-- Teams building proxies or provider-routing systems.
-- Teams operating API-heavy long-context workloads.
-- Teams handling authority conflicts, policy documents, governance,
-  compliance, or audit-sensitive assistant workflows.
-- Technical investors evaluating context-governance infrastructure.
-
-## Project Status
-
-This repository is a technical prototype and experimental research-grade
-infrastructure. It is open source under the Apache License 2.0. Forks,
-benchmarks, integrations, issues, and pull requests are welcome when they follow
-the project rules and keep claims grounded in the current evidence.
-
-## License
-
-SFE is open source under the Apache License 2.0. You may use, copy, modify,
-distribute, fork, and build on the project under the terms of that license.
-
-Commercial use is permitted under Apache-2.0. Paid support, consulting,
-integration help, hosted deployments, or private enterprise work may be offered
-separately, but they are not required for using, forking, modifying, or
-distributing the project under the license.
-
-This project is experimental research-grade infrastructure. It is provided
-without warranties or production, safety, security, reliability, or fitness
-claims. See `LICENSE` for the full license text.
-
-## Contributions
-
-Contributions are welcome. Please open issues or pull requests for bug fixes,
-documentation improvements, benchmark additions, provider integrations, and
-focused design changes.
-
-By contributing, you agree that your contribution will be provided under the
-Apache License 2.0. Contributions should include clear rationale, tests or
-reproduction steps where practical, and must not add unsupported production,
-safety, security, reliability, or fitness claims.
-
-## Where To Start
-
-New technical reviewers should start with `docs/INDEX.md`. It gives a compact
-map of the benchmark families, runner categories, current high-overlap status,
-and the recommended reading path.
-
-For the current local user-facing workflow, read
-`docs/sfe_product_doctrine.md`, `docs/tui_v0_1_user_guide.md`, and
-`docs/current_architecture_status.md`.
-
-For the current high-overlap methodology, read
-`docs/high_overlap_diagnostic_bucketing_notes.md` and
-`docs/high_overlap_history.md`.
-
-## High-Overlap Fixture Status
-
-The high-overlap fixture-expansion phase is complete for three authority-gap
-fixtures:
-
-- Aurelia: scope authority conflict.
-- Borealis: deprecated memo vs active implementation notice.
-- Cassini: policy exception vs active policy.
-
-Their deterministic tests pass. Limited local OpenAI selector, executor, and
-selected-vs-full comparison observations were clean for these fixtures, but
-full-context execution also passed. The useful signal is controlled local
-non-regression, not general reliability or a broad quality claim.
-
-## Problem
-
-Large prompts often mix user intent, constraints, background facts, distractors, prior decisions, and execution instructions in one context window. That can make runs harder to audit and can spend tokens on information that is irrelevant to the next model call.
-
-SFE explores whether an external controller can:
-
-- keep richer structured state outside the model prompt;
-- activate only the zones needed for the current task;
-- route work to a role/provider with an explicit contract;
-- compare full-context baselines against reduced spatial execution payloads.
-
-The tradeoff is that routing and orchestration have fixed costs. SFE only looks promising when context reduction or role separation can amortize that overhead.
-
-## Architecture
-
-At a high level, the current repository has these layers:
-
-- `sfe/`: core SFE routing/context engine helpers, including provider
-  selection, execution-mode routing, LLM-driven workspace discovery, bounded
-  execution plumbing, validation support, and Git Worktree workspace isolation.
-- `cognitive_map/`: deterministic workspace scaffolding with zones, fragments, activation levels, and handoff rules.
-- `router/`: mock and LLM-backed routing contracts that classify tasks and choose execution roles.
-- `providers/`: minimal benchmark provider adapters, including Lemonade,
-  OpenAI API, Alibaba/Qwen, and native Anthropic Messages API paths.
-- `runtime/`: benchmark runners, report generation, logging, and smoke-test entry points.
-- `sfe_tui/`: current local user-facing TUI surface using `DirectBackend`.
+### TUI Workflow
 
 SFE is not primarily a Git patch assistant. The current local TUI surface uses
 `DirectBackend` and follows:
@@ -323,43 +301,65 @@ SFE is not primarily a Git patch assistant. The current local TUI surface uses
 
 Quotes around `/task` text are optional. `/run` first asks the core
 execution-mode router how to resolve the task.
+
 `console_output` produces a natural-language answer in the TUI with no Git
 preparation, worktree, patch, or workspace mutation. `workspace_write` uses the
 existing discovery, context-routing, Aider-backed filesystem executor, and
 isolated worktree pipeline for creating, modifying, or deleting workspace
-files. Aider is required for normal `workspace_write` execution and is not
-vendored into SFE; install it externally and keep it on `PATH`. In all cases,
+files. `external_action` is recognized as outside-workspace work, but is not
+implemented yet and fails cleanly.
+
+For TUI workspace-write context selection, the Discoverer is core workspace
+discovery in `sfe/discovery.py`, backed by the dedicated discovery router in
+`sfe/discovery_router.py`. `/discover` scans the selected workspace, builds a
+metadata-only workspace map, asks the configured discovery router which files
+to inspect, and then locally revalidates selected paths before loading them.
+`/discover` does not write files, run shell commands, initialize Git, or expose
+raw file contents in diagnostics. The `/dry-run` context preview is a
+provider-free local lexical preview and makes zero provider calls. `/ask` calls
+the configured executor only after routing selected context.
+
+Historical and debug commands such as `/discover`, `/dry-run`, `/patch`,
+`/apply-patch`, `/isolate`, and `/review-worktree` remain available, but are
+hidden from the default help. Separate router-review calls are used by the
+advanced `/apply-patch` and `/review-worktree` flows; these are semantic LLM
+reviews, not formal security proofs and are not mandatory for `/run`. Manual
+`/files` context loading remains available for debug/design work, but it is not
+the normal human-facing TUI workflow.
+
+### Workspace Write and Aider
+
+The `workspace_write` mode delegates filesystem modifications to an external
+writer (currently Aider) running inside an SFE-controlled Git worktree. Aider
+is required for normal `workspace_write` execution and is not vendored into
+SFE; install it externally and keep it on `PATH`.
+
 SFE enforces one safety boundary: every created, modified, or deleted path must
 be inside the selected destination directory before changes are promoted. Aider
 may create commits inside the SFE-controlled worktree, but SFE promotes only
 the final validated file state back to the selected source destination and then
 creates one local source-repo commit named `SFE workspace_write promotion`. The
-user source history does not receive Aider's micro-commits directly. If the
-selected workspace is not yet a Git repository, `workspace_write` can
+user source history does not receive Aider's micro-commits directly.
+
+If the selected workspace is not yet a Git repository, `workspace_write` can
 initialize a local snapshot first; it does not create a remote, push, run
 syntax checks, run tests or lint, require diff inspection, require human
-approval, or require router review. `external_action` is recognized as
-outside-workspace work, but is not implemented yet and fails cleanly.
-Historical and debug commands such as
-`/discover`, `/dry-run`, `/patch`, `/apply-patch`, `/isolate`, and
-`/review-worktree` remain available, but are hidden from the default help.
+approval, or require router review.
 
-SFE's current product doctrine is intentionally narrow: it is a context routing
-and token reduction layer. It is meant to send the executor less context, but
+SFE's product doctrine is intentionally narrow: it is a context routing and
+token reduction layer. It is meant to send the executor less context, but
 better selected context, and to bound writes mechanically with Git/worktree
 isolation when a workspace write is selected. It is not meant to make the model
 smarter, replace code review, control every executor response, or require
 mandatory diff inspection, human approval, syntax checks, tests, or lint before
 the worktree apply step.
 
-### Aider Workspace Writer
-
 Normal `workspace_write` execution uses Aider by default for both single-pass
 and multi-pass runs. `SFE_WORKSPACE_WRITE_EXECUTOR` does not need to be set for
 normal use. Set `SFE_WORKSPACE_WRITE_EXECUTOR=text` only for legacy/debug
 rollback to the older `SFE_FILE` or strict Git-diff text transport.
 
-Recommended Ubuntu, Debian, and WSL installation:
+Recommended Ubuntu, Debian, and WSL Aider installation:
 
 ```bash
 sudo apt update
@@ -385,30 +385,11 @@ never falls back to router model settings for Aider; if no safe
 Aider-compatible executor model can be selected, `workspace_write` fails closed
 with a `missing_aider_model` diagnostic.
 
-The architecture boundary is:
+See `docs/aider_filesystem_executor_integration.md` for architecture details
+and `docs/aider_env_bridge.md` for the secret-safe environment bridge and
+model selection policy.
 
-```text
-Discoverer -> Router -> Executor
-```
-
-For TUI workspace-write context selection today, the Discoverer is core
-workspace discovery in `sfe/discovery.py`, backed by the dedicated discovery
-router in `sfe/discovery_router.py`. `/discover` scans the selected workspace,
-builds a metadata-only workspace map, asks the configured discovery router which
-files to inspect, and then locally revalidates selected paths before loading
-them. The `/dry-run` context preview is still a provider-free local lexical
-preview, and the Executor is the configured executor behind `DirectBackend`.
-Separate router-review calls are used by the advanced `/apply-patch` and
-`/review-worktree` flows; these are semantic LLM reviews, not formal security
-proofs and are not mandatory for `/run`. `/discover` does not write files, run
-shell commands, initialize Git, or expose raw file contents in diagnostics.
-`/dry-run` still makes zero provider calls. `/ask` calls the configured executor
-only after routing selected context.
-
-Manual `/files` context loading remains available for debug/design work, but it
-is not the normal human-facing TUI workflow.
-
-The benchmark execution pattern remains:
+### Benchmark Execution Pattern
 
 1. Load a task and available context.
 2. Route or select the relevant role/context block.
@@ -440,58 +421,6 @@ The benchmark execution pattern remains:
   wrong context, or a context block that omits information needed for the task.
 - Local observation: a result from a local run in a specific environment; it is
   not a statistical or general reliability claim.
-
-## Setup
-
-This project is dependency-light and targets Python 3.10+.
-
-```bash
-make install
-source .venv/bin/activate
-```
-
-`make install` is conservative by design: it checks for `python3` first and
-falls back to `python`, reuses an existing `.venv`, installs SFE in editable
-mode, and checks for the external Aider CLI used by normal `workspace_write`
-flows. It does not run `apt upgrade`, `brew upgrade`, or other global upgrade
-commands. On Debian, Ubuntu, and WSL it can offer, after explicit confirmation,
-to install missing packages such as `python3-venv` or `pipx`. For automation,
-you can opt in to auto-confirmation with `SFE_INSTALL_ASSUME_YES=1 make install`.
-Existing Aider installs stay conservative: upgrades still require an
-interactive confirmation or `SFE_INSTALL_ALLOW_UPDATES=1`.
-
-If you prefer to do the Python setup manually, the equivalent core steps are:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-```
-
-Copy `.env.example` to `.env` for local provider configuration. `.env` is ignored and must not be committed.
-Use `SFE_PROVIDER` as the canonical provider selector for SFE surfaces,
-including the TUI.
-For SFE runtime roles, `SFE_PROVIDER_ROUTER` and `SFE_PROVIDER_EXECUTOR`
-optionally override `SFE_PROVIDER`; when either is absent or blank, SFE falls
-back to `SFE_PROVIDER` and then the surface default. Discovery routing can be
-overridden separately with `SFE_PROVIDER_DISCOVERY`; blank or absent discovery
-provider falls back to `SFE_PROVIDER_ROUTER`, then `SFE_PROVIDER`, then the
-surface default. Discovery model variables are provider-specific, for example
-`SFE_OPENAI_DISCOVERY_MODEL`, `SFE_LEMONADE_DISCOVERY_MODEL`, and
-`SFE_CODEXCLI_DISCOVERY_MODEL`, and fall back to the existing router/shared
-model variables when absent. Google discovery uses `SFE_GOOGLE_DISCOVERY_MODEL`
-with `SFE_GOOGLE_MODEL` as its fallback. Ollama discovery uses
-`SFE_OLLAMA_DISCOVERY_MODEL` with `SFE_OLLAMA_ROUTER_MODEL` and
-`SFE_OLLAMA_MODEL` as fallbacks.
-
-This role-level provider configuration is what enables Router/Executor model
-separation: a strong router can be paired with a cheaper or more specialized
-executor when the selected context is narrow enough and the configured provider
-supports the required task.
-
-If Aider is missing, `make install` follows the documented Ubuntu/Debian/WSL
-`pipx install aider-chat` path when it can prompt, and otherwise fails safely
-with the same commands so the next step is explicit.
 
 ## Minimal Verification
 
@@ -809,37 +738,19 @@ python runtime/run_cognitive_map_real_benchmark.py --model "$SFE_EXECUTOR_MODEL"
 
 Generated logs, JSONL streams, SQLite files, and benchmark outputs are written under `logs/` by default and are ignored.
 
-## Current Benchmark Signal
+## High-Overlap Fixture Status
 
-The strongest current cross-provider signal comes from protocol-aligned OpenAI
-and Anthropic large/contextual campaigns. Both show nearly identical
-selected-context reduction patterns, and both show router-inclusive savings
-increasing with context size. Alibaba/Qwen now has repeat-3 `standard`,
-`practical`, and `high_context` observations using the same large/contextual
-fixtures, plus a separate single-run structural baseline-vs-spatial comparison.
+The high-overlap fixture-expansion phase is complete for three authority-gap
+fixtures:
 
-Structural 50k+ observations are clean in the current controlled runs:
+- Aurelia: scope authority conflict.
+- Borealis: deprecated memo vs active implementation notice.
+- Cassini: policy exception vs active policy.
 
-- OpenAI: 94.16% selected reduction and 84.08% router-inclusive reduction.
-- Anthropic: 93.94% selected reduction and 83.63% router-inclusive reduction,
-  with `600` seconds provider-call pacing for structural because of Anthropic
-  input-token-per-minute limits.
-- Alibaba/Qwen: 94.11% selected reduction and 83.57% router-inclusive
-  reduction in one live structural baseline-vs-spatial comparison, with Qwen
-  thinking disabled for token accounting.
-
-Lemonade remains useful as a local-provider result and historical benchmark
-path. It is no longer the only current headline for token-reduction behavior.
-
-In the large/contextual benchmark, `spatial_fixture` means oracle-style
-selection of the known relevant block and should be read as an upper bound on
-executor context reduction. `spatial_router` means the selector chose the block
-before execution. Executor context reduction excludes router cost;
-router-inclusive or end-to-end reduction includes selector overhead.
-
-These numbers are useful for deciding what to test next. They should not be
-presented as general proof that SFE improves answer quality, reasoning, or
-model intelligence.
+Their deterministic tests pass. Limited local OpenAI selector, executor, and
+selected-vs-full comparison observations were clean for these fixtures, but
+full-context execution also passed. The useful signal is controlled local
+non-regression, not general reliability or a broad quality claim.
 
 ## Documentation
 
@@ -900,3 +811,35 @@ model intelligence.
   policy.
 - Broad production workloads, tool-using agents, multi-tenant systems, and
   long-running real user traffic are not validated yet.
+
+## Project Status
+
+This repository is a technical prototype and experimental research-grade
+infrastructure. It is open source under the Apache License 2.0. Forks,
+benchmarks, integrations, issues, and pull requests are welcome when they follow
+the project rules and keep claims grounded in the current evidence.
+
+## License
+
+SFE is open source under the Apache License 2.0. You may use, copy, modify,
+distribute, fork, and build on the project under the terms of that license.
+
+Commercial use is permitted under Apache-2.0. Paid support, consulting,
+integration help, hosted deployments, or private enterprise work may be offered
+separately, but they are not required for using, forking, modifying, or
+distributing the project under the license.
+
+This project is experimental research-grade infrastructure. It is provided
+without warranties or production, safety, security, reliability, or fitness
+claims. See `LICENSE` for the full license text.
+
+## Contributions
+
+Contributions are welcome. Please open issues or pull requests for bug fixes,
+documentation improvements, benchmark additions, provider integrations, and
+focused design changes.
+
+By contributing, you agree that your contribution will be provided under the
+Apache License 2.0. Contributions should include clear rationale, tests or
+reproduction steps where practical, and must not add unsupported production,
+safety, security, reliability, or fitness claims.

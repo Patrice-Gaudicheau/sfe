@@ -148,6 +148,11 @@ are not part of the tracked GitHub documentation. Current tracked docs should
 be used for public architecture, setup, TUI/MCP, provider, and benchmark
 interpretation.
 
+Historical TUI notes retained for test-backed context:
+
+- [history/tui/tui_direct_backend_strategy.md](history/tui/tui_direct_backend_strategy.md)
+- [history/tui/tui_readonly_ask_milestone.md](history/tui/tui_readonly_ask_milestone.md)
+
 ## Terms And Caveats
 
 - Deterministic tests validate fixture logic without live provider calls.
