@@ -27,7 +27,7 @@ exec $SHELL -l
 ## Install SFE
 
 ```bash
-git clone git@github.com:Patrice-Gaudicheau/sfe.git
+git clone https://github.com/Patrice-Gaudicheau/sfe.git
 cd sfe
 make install
 make doctor

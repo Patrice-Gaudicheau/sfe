@@ -18,9 +18,7 @@
   <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-CodexCLI-334155?style=flat-square" alt="Provider: CodexCLI"></a>
 </p>
 
-SFE is a context-routing layer for safer agentic coding workflows. It selects
-relevant project context, routes execution modes, and isolates filesystem
-changes in Git worktrees before promotion.
+SFE is a context-routing layer for AI-assisted coding. It selects relevant project context, routes execution modes, and isolates filesystem changes in Git worktrees before promotion.
 
 Instead of sending broad project context into every coding call, SFE narrows the
 executor prompt to the files and constraints that matter for the current task.
@@ -60,7 +58,7 @@ Requirements:
 - Aider for normal write runs: `pipx install aider-chat`
 
 ```bash
-git clone git@github.com:Patrice-Gaudicheau/sfe.git
+git clone https://github.com/Patrice-Gaudicheau/sfe.git
 cd sfe
 make install
 source .venv/bin/activate
