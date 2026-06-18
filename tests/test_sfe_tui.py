@@ -8499,13 +8499,13 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
 
 
 def test_public_docs_cover_current_tui_runtime_and_safety_path() -> None:
-    index = (PROJECT_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
-    install = (PROJECT_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
-    usage = (PROJECT_ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8")
-    architecture = (PROJECT_ROOT / "docs" / "ARCHITECTURE.md").read_text(
+    index = (PROJECT_ROOT / "docs" / "10_INDEX.md").read_text(encoding="utf-8")
+    install = (PROJECT_ROOT / "docs" / "20_INSTALL.md").read_text(encoding="utf-8")
+    usage = (PROJECT_ROOT / "docs" / "30_USAGE.md").read_text(encoding="utf-8")
+    architecture = (PROJECT_ROOT / "docs" / "50_ARCHITECTURE.md").read_text(
         encoding="utf-8"
     )
-    benchmarks = (PROJECT_ROOT / "docs" / "BENCHMARKS.md").read_text(
+    benchmarks = (PROJECT_ROOT / "docs" / "60_BENCHMARKS.md").read_text(
         encoding="utf-8"
     )
     combined_public_docs = "\n".join((index, install, usage, architecture, benchmarks))

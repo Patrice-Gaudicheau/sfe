@@ -5,12 +5,12 @@ workflows. These docs are intentionally short and focused on current usage.
 
 ## Start Here
 
-1. [Install](INSTALL.md)
-2. [Usage](USAGE.md)
-3. [Configuration](CONFIGURATION.md)
-4. [Architecture](ARCHITECTURE.md)
-5. [Benchmarks](BENCHMARKS.md)
-6. [FAQ](FAQ.md)
+1. [Install](20_INSTALL.md)
+2. [Usage](30_USAGE.md)
+3. [Configuration](40_CONFIGURATION.md)
+4. [Architecture](50_ARCHITECTURE.md)
+5. [Benchmarks](60_BENCHMARKS.md)
+6. [FAQ](70_FAQ.md)
 
 ## What Belongs Here
 

@@ -1,17 +1,35 @@
-# Spatial Field Engine
+<p align="center">
+  <img src="assets/202606152310_github.jpg" alt="Spatial Field Engine">
+</p>
 
-![Spatial Field Engine](assets/202606152310_github.jpg)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="docs/30_USAGE.md"><img src="https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg" alt="Interface: TUI + MCP"></a>
+</p>
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
-[![Interface: TUI + MCP](https://img.shields.io/badge/Interface-TUI%20%2B%20MCP-6f42c1.svg)](docs/USAGE.md)
+<p align="center">
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-OpenAI-412991?style=flat-square" alt="Provider: OpenAI"></a>
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-Anthropic-D97757?style=flat-square" alt="Provider: Anthropic"></a>
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-Google-4285F4?style=flat-square" alt="Provider: Google"></a>
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-Alibaba-FF6A00?style=flat-square" alt="Provider: Alibaba"></a>
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-Ollama-111111?style=flat-square" alt="Provider: Ollama"></a>
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-Lemonade-F59E0B?style=flat-square" alt="Provider: Lemonade"></a>
+  <a href="docs/40_CONFIGURATION.md"><img src="https://img.shields.io/badge/Provider-CodexCLI-334155?style=flat-square" alt="Provider: CodexCLI"></a>
+</p>
 
-Spatial Field Engine is a context-routing layer for safer agentic coding
-workflows. It selects relevant project context, routes execution modes, and
-isolates filesystem changes in Git worktrees before promotion.
+SFE is a context-routing layer for safer agentic coding workflows. It selects
+relevant project context, routes execution modes, and isolates filesystem
+changes in Git worktrees before promotion.
 
-SFE is for developers who want an agentic coding workflow with clearer context
-selection and stricter filesystem boundaries than a direct model call.
+Instead of sending broad project context into every coding call, SFE narrows the
+executor prompt to the files and constraints that matter for the current task.
+On selected benchmark fixtures, SFE reduced executor input tokens by up to 90%
+compared with full-context baselines.
+
+Second, output-token cost can be lowered by delegating execution to a cheaper
+or more specialized model once the context is already narrow. Savings depend on
+task shape, provider behavior, and model choices.
 
 ## What SFE Does
 
@@ -136,7 +154,7 @@ SFE_PROVIDER_EXECUTOR=anthropic
 For Aider-backed writes, set `SFE_AIDER_MODEL` if your executor model name is
 not already a valid Aider/LiteLLM model name.
 
-See [Configuration](docs/CONFIGURATION.md) for provider variables and local
+See [Configuration](docs/40_CONFIGURATION.md) for provider variables and local
 provider notes.
 
 ## Benchmarks
@@ -148,17 +166,17 @@ fixed cost.
 
 These results are not a production guarantee, not a universal token-savings
 claim, and not evidence that SFE should wrap every prompt. See
-[Benchmarks](docs/BENCHMARKS.md) for the cautious summary.
+[Benchmarks](docs/60_BENCHMARKS.md) for the cautious summary.
 
 ## Documentation
 
-- [Install](docs/INSTALL.md)
-- [Usage](docs/USAGE.md)
-- [Configuration](docs/CONFIGURATION.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Benchmarks](docs/BENCHMARKS.md)
-- [FAQ](docs/FAQ.md)
-- [Documentation index](docs/INDEX.md)
+- [Install](docs/20_INSTALL.md)
+- [Usage](docs/30_USAGE.md)
+- [Configuration](docs/40_CONFIGURATION.md)
+- [Architecture](docs/50_ARCHITECTURE.md)
+- [Benchmarks](docs/60_BENCHMARKS.md)
+- [FAQ](docs/70_FAQ.md)
+- [Documentation index](docs/10_INDEX.md)
 
 ## Current Status And Limitations
 

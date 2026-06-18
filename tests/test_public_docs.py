@@ -8,13 +8,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DOCS_ROOT = PROJECT_ROOT / "docs"
 
 PUBLIC_DOCS = {
-    "ARCHITECTURE.md",
-    "BENCHMARKS.md",
-    "CONFIGURATION.md",
-    "FAQ.md",
-    "INDEX.md",
-    "INSTALL.md",
-    "USAGE.md",
+    "10_INDEX.md",
+    "20_INSTALL.md",
+    "30_USAGE.md",
+    "40_CONFIGURATION.md",
+    "50_ARCHITECTURE.md",
+    "60_BENCHMARKS.md",
+    "70_FAQ.md",
 }
 
 PUBLIC_TEXT_FILES = (
