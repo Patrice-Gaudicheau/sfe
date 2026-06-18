@@ -11,9 +11,9 @@ Please keep contributions narrow enough to review. Include a clear rationale,
 tests or reproduction steps where practical, and any relevant benchmark or
 provider configuration details.
 
-SFE is experimental research-grade infrastructure. Contributions must keep
-claims sober and evidence-based, and must not add unsupported production,
-safety, security, reliability, or fitness claims.
+SFE is an evolving local developer tool. Contributions must keep public claims
+sober and evidence-based, and must not add unsupported production, safety,
+security, reliability, or fitness claims.
 
 Do not include secrets, credentials, private API keys, raw logs with sensitive
 data, private customer or user data, or proprietary third-party material that

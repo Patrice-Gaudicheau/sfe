@@ -7953,7 +7953,7 @@ def test_local_segment_router_includes_explicitly_named_existing_app_files() -> 
         ContextSegment(
             id="ctx_readme",
             source_ref="app/README.md",
-            text="# NoteKeeper",
+            text="# Demo App",
             approx_size=12,
             approx_tokens=3,
         ),
@@ -8498,21 +8498,25 @@ def test_dry_run_renders_router_preview_metadata_safely(tmp_path) -> None:
     assert str(tmp_path) not in rendered
 
 
-def test_docs_mention_direct_backend_as_canonical_tui_path() -> None:
+def test_public_docs_cover_current_tui_runtime_and_safety_path() -> None:
     index = (PROJECT_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
-    architecture = (
-        PROJECT_ROOT / "docs" / "current_architecture_status.md"
-    ).read_text(encoding="utf-8")
-    guide = (PROJECT_ROOT / "docs" / "tui_v0_1_user_guide.md").read_text(
+    install = (PROJECT_ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+    usage = (PROJECT_ROOT / "docs" / "USAGE.md").read_text(encoding="utf-8")
+    architecture = (PROJECT_ROOT / "docs" / "ARCHITECTURE.md").read_text(
         encoding="utf-8"
     )
-    combined_public_docs = "\n".join((index, architecture, guide))
+    benchmarks = (PROJECT_ROOT / "docs" / "BENCHMARKS.md").read_text(
+        encoding="utf-8"
+    )
+    combined_public_docs = "\n".join((index, install, usage, architecture, benchmarks))
 
-    assert "current local user-facing" in combined_public_docs
-    assert "DirectBackend" in combined_public_docs
-    assert "`local_lexical_preview`" in combined_public_docs
-    assert "`/ask` uses `DirectBackend`" in architecture
-    assert "`/dry-run` makes no executor/provider call" in guide
-    assert "tui_direct_backend_strategy.md" not in index
-    assert "tui_readonly_ask_milestone.md" not in index
-    assert "history/tui/" not in index
+    assert "These docs are intentionally short" in index
+    assert "The installer does not silently run global package-manager commands" in install
+    assert "`/run-report` shows diagnostics from the previous run" in usage
+    assert "The TUI `/run` command and the MCP server share the same runtime path" in architecture
+    assert "Path checks reject absolute paths" in architecture
+    assert "controlled benchmark observations" in benchmarks
+    assert "not production guarantees" in benchmarks
+    assert "tui_direct_backend_strategy.md" not in combined_public_docs
+    assert "tui_readonly_ask_milestone.md" not in combined_public_docs
+    assert "history/tui/" not in combined_public_docs

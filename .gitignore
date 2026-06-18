@@ -16,16 +16,24 @@ dist/
 !.env.example
 
 # Logs
-logs/*
-!logs/.gitkeep
+logs/
 *.log
 *.out
 
-# Local databases and generated benchmark streams
+# Local databases
 *.sqlite
 *.sqlite3
 *.db
-*.jsonl
+
+# Generated local artifacts
+.sfe-worktrees/
+.tmp/
+tmp/
+*.tmp
+*.temp
+logs/**/*.jsonl
+.tmp/**/*.jsonl
+tmp/**/*.jsonl
 
 # OS/editor noise
 .DS_Store
@@ -33,12 +41,6 @@ Thumbs.db
 
 # Local CLI artifacts
 .antigravitycli/
-
-# Local-only historical/demo material
-docs/history/
-docs/publications/
-examples/NoteKeeper/
-examples/SolarSystem3D/
 
 # Photoshop source files
 *.psd
