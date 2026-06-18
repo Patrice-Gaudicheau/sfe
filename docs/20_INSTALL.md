@@ -58,7 +58,7 @@ command is attempted.
 `make doctor` checks the local setup and reports missing pieces without
 changing files. Makefile targets use the project virtualenv automatically.
 
-## Manual Install
+## Advanced Manual Install
 
 ```bash
 python -m venv .venv
@@ -66,7 +66,7 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Use this if you want to manage all prerequisites yourself.
+Use this only if you want to manage all prerequisites yourself.
 
 Activating `.venv` is optional when you use the Makefile targets. Use it only
 when running Python commands directly.

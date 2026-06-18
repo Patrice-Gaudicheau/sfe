@@ -71,17 +71,6 @@ never overwrites an existing `.env`. If Aider is missing, the installer can
 install it with `pipx install aider-chat` after confirmation, or you can run
 that command manually. Makefile targets use the project virtualenv automatically.
 
-Manual local install:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-```
-
-Activating `.venv` is optional when you use the Makefile targets. Use it only
-when running Python commands directly.
-
 ## First Run
 
 Configure a provider by editing `.env`, uncommenting one `SFE_PROVIDER`, and
