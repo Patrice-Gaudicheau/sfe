@@ -22,10 +22,11 @@ SFE is a context-routing layer for AI-assisted coding. It selects relevant proje
 
 Instead of sending broad project context into every coding call, SFE narrows the
 executor prompt to the files and constraints that matter for the current task.
-On selected benchmark fixtures, SFE **reduced executor input tokens by up to 90%**
+On selected benchmark fixtures, SFE significantly reduced executor input tokens
 compared with full-context baselines.
 
-Second, **output-token** cost can be lowered by delegating execution to a **cheaper model** or more specialized model once the context is already narrow. Savings depend on
+Output-token cost can also be lowered by delegating execution to a cheaper or
+more specialized model once the context is already narrow. Savings depend on
 task shape, provider behavior, and model choices.
 
 ## SFE: Context Control for AI Coding
@@ -63,7 +64,7 @@ flowchart TB
 ## What SFE Does
 
 - Builds a compact project map and selects task-relevant files.
-- Routes a task to read-only answers, isolated code changes, or safe refusal when the request is outside the local workspace.
+- Routes a task to read-only answers or isolated code changes. Tasks outside the local workspace are rejected.
 - Runs write tasks in isolated Git worktrees before promoting changes.
 - Uses Aider as the default external writer for normal `workspace_write` runs.
 - Exposes the same runtime through a local TUI and an MCP server.
@@ -139,7 +140,7 @@ Workspace: /path/to/your/project
 3. Discovery selects a bounded set of relevant files.
 4. For write tasks, SFE creates or reuses an isolated Git worktree.
 5. The configured writer runs inside that isolated workspace.
-6. SFE promotes accepted changes back to the source repository.
+6. SFE promotes the resulting changes back to the source repository.
 
 ## Safety Model
 
