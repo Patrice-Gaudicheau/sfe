@@ -38,7 +38,7 @@ flowchart TB
     M --> D["Find relevant files<br/>and constraints"]
     D --> B["Bounded working context"]
     B --> E["Executor edits files"]
-    E --> V["Real Loop verifies"]
+    E --> V["Verify result"]
 
     V -->|passes| OK["Completed run"]
     V -->|needs retry| R["Targeted retry task"]
