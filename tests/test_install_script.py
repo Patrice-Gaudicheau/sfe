@@ -363,6 +363,72 @@ def test_doctor_reports_missing_components_without_crashing(tmp_path: Path) -> N
     assert "[missing]  .env" in result.stdout
 
 
+def test_doctor_reports_sfe_models_before_aider_config(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "SFE_PROVIDER=openai",
+                "SFE_OPENAI_ROUTER_MODEL=gpt-5.4-mini",
+                "SFE_OPENAI_DISCOVERY_MODEL=gpt-5.4-mini",
+                "SFE_OPENAI_EXECUTOR_MODEL=gpt-5.4",
+                "OPENAI_API_KEY=SECRET_VALUE_THAT_MUST_NOT_LEAK",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("SFE_")
+        and key
+        not in {
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "ALIBABA_API_KEY",
+        }
+    }
+    env.update(
+        {
+            "SFE_DOCTOR_ENV_PATH": str(env_path),
+            "SFE_DOCTOR_VENV_DIR": str(tmp_path / "missing-venv"),
+            "SFE_DOCTOR_AIDER_BIN": "aider-does-not-exist",
+        }
+    )
+
+    result = subprocess.run(
+        ["/bin/sh", str(DOCTOR_SCRIPT)],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Provider config" in result.stdout
+    assert "SFE models" in result.stdout
+    assert "Aider config" in result.stdout
+    assert result.stdout.index("Provider config") < result.stdout.index("SFE models")
+    assert result.stdout.index("SFE models") < result.stdout.index("Aider config")
+    assert "provider source: SFE_PROVIDER=openai" in result.stdout
+    assert "router provider: openai" in result.stdout
+    assert "router model: gpt-5.4-mini" in result.stdout
+    assert "router model source: SFE_OPENAI_ROUTER_MODEL" in result.stdout
+    assert "discovery provider: openai" in result.stdout
+    assert "discovery model: gpt-5.4-mini" in result.stdout
+    assert "discovery model source: SFE_OPENAI_DISCOVERY_MODEL" in result.stdout
+    assert "executor provider: openai" in result.stdout
+    assert "executor model: gpt-5.4" in result.stdout
+    assert "executor model source: SFE_OPENAI_EXECUTOR_MODEL" in result.stdout
+    assert "selected model: gpt-5.4" in result.stdout
+    assert "model source: SFE_OPENAI_EXECUTOR_MODEL=gpt-5.4" in result.stdout
+    assert "SECRET_VALUE_THAT_MUST_NOT_LEAK" not in result.stdout
+    assert "OPENAI_API_KEY=" not in result.stdout
+
+
 def test_doctor_warns_when_codexcli_lacks_aider_provider(tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(

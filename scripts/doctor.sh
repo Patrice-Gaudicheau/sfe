@@ -159,6 +159,253 @@ check_provider() {
     fi
 }
 
+render_status_details() {
+    output=$1
+    state=warn
+    detail="unable to inspect provider config"
+    details=
+    while IFS='	' read -r kind first rest; do
+        if [ "$kind" = "STATE" ]; then
+            state=$first
+            detail=$rest
+        elif [ "$kind" = "DETAIL" ]; then
+            details="${details}${first}
+"
+        fi
+    done <<EOF
+$output
+EOF
+
+    status "$state" "$2" "$detail"
+    if [ -n "$details" ]; then
+        printf "%s" "$details" | while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            printf "           %-24s %s\n" "" "$line"
+        done
+    fi
+}
+
+check_sfe_models() {
+    if [ -z "${PYTHON_FOR_DOCTOR:-}" ]; then
+        status "warn" "SFE models" "Python unavailable; skipped"
+        return 0
+    fi
+
+    output=$(
+        SFE_DOCTOR_ENV_PATH="$ENV_PATH" "$PYTHON_FOR_DOCTOR" <<'PY' 2>/dev/null
+import os
+
+from providers.alibaba import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_ALIBABA_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as DEFAULT_ALIBABA_ROUTER_MODEL,
+)
+from providers.anthropic import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_ANTHROPIC_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as DEFAULT_ANTHROPIC_ROUTER_MODEL,
+)
+from providers.codexcli import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_CODEXCLI_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as DEFAULT_CODEXCLI_ROUTER_MODEL,
+)
+from providers.google import DEFAULT_MODEL as DEFAULT_GOOGLE_MODEL
+from providers.ollama import DEFAULT_MODEL as DEFAULT_OLLAMA_MODEL
+from providers.openai_api import (
+    DEFAULT_EXECUTOR_MODEL as DEFAULT_OPENAI_EXECUTOR_MODEL,
+    DEFAULT_ROUTER_MODEL as DEFAULT_OPENAI_ROUTER_MODEL,
+)
+from sfe.discovery_router import DEFAULT_LEMONADE_DISCOVERY_MODEL
+from sfe.env import load_repo_env
+from sfe.execution_mode_router import DEFAULT_LEMONADE_EXECUTION_MODE_ROUTER_MODEL
+from sfe.provider_config import (
+    CODEXCLI_SFE_PROVIDER,
+    OLLAMA_SFE_PROVIDER,
+    SFE_PROVIDER_ENV,
+    SFE_PROVIDER_DISCOVERY_ENV,
+    SFE_PROVIDER_EXECUTOR_ENV,
+    SFE_PROVIDER_ROUTER_ENV,
+    normalize_provider_name,
+    resolve_sfe_discovery_provider,
+    resolve_sfe_executor_provider,
+    resolve_sfe_provider,
+    resolve_sfe_router_provider,
+)
+from sfe_tui.executors import DEFAULT_LEMONADE_EXECUTOR_MODEL
+
+
+def env_value(name):
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return raw.strip()
+
+
+def display(raw):
+    return "unknown" if raw is None else str(raw)
+
+
+def first_env(names):
+    for name in names:
+        value = env_value(name)
+        if value is not None:
+            return value, name
+    return None, None
+
+
+def provider_source(role_env_name):
+    role_value = env_value(role_env_name)
+    if role_value is not None:
+        return role_env_name, role_value
+    shared_value = env_value(SFE_PROVIDER_ENV)
+    if shared_value is not None:
+        return SFE_PROVIDER_ENV, shared_value
+    return "default", "openai"
+
+
+def discovery_provider_source():
+    discovery_value = env_value(SFE_PROVIDER_DISCOVERY_ENV)
+    if discovery_value is not None:
+        return SFE_PROVIDER_DISCOVERY_ENV, discovery_value
+    return provider_source(SFE_PROVIDER_ROUTER_ENV)
+
+
+MODEL_RULES = {
+    "router": {
+        "openai": (("SFE_OPENAI_ROUTER_MODEL",), DEFAULT_OPENAI_ROUTER_MODEL),
+        "openai-compatible": (("SFE_OPENAI_ROUTER_MODEL",), DEFAULT_OPENAI_ROUTER_MODEL),
+        CODEXCLI_SFE_PROVIDER: (
+            ("SFE_CODEXCLI_ROUTER_MODEL",),
+            DEFAULT_CODEXCLI_ROUTER_MODEL,
+        ),
+        "lemonade": (
+            ("SFE_ROUTER_MODEL", "SFE_LEMONADE_MODEL"),
+            DEFAULT_LEMONADE_EXECUTION_MODE_ROUTER_MODEL,
+        ),
+        "alibaba": (("SFE_ALIBABA_ROUTER_MODEL",), DEFAULT_ALIBABA_ROUTER_MODEL),
+        "anthropic": (
+            ("SFE_ANTHROPIC_ROUTER_MODEL",),
+            DEFAULT_ANTHROPIC_ROUTER_MODEL,
+        ),
+        OLLAMA_SFE_PROVIDER: (
+            ("SFE_OLLAMA_ROUTER_MODEL", "SFE_OLLAMA_MODEL"),
+            DEFAULT_OLLAMA_MODEL,
+        ),
+    },
+    "discovery": {
+        "openai": (
+            ("SFE_OPENAI_DISCOVERY_MODEL", "SFE_OPENAI_ROUTER_MODEL"),
+            DEFAULT_OPENAI_ROUTER_MODEL,
+        ),
+        "openai-compatible": (
+            ("SFE_OPENAI_DISCOVERY_MODEL", "SFE_OPENAI_ROUTER_MODEL"),
+            DEFAULT_OPENAI_ROUTER_MODEL,
+        ),
+        CODEXCLI_SFE_PROVIDER: (
+            ("SFE_CODEXCLI_DISCOVERY_MODEL", "SFE_CODEXCLI_ROUTER_MODEL"),
+            DEFAULT_CODEXCLI_ROUTER_MODEL,
+        ),
+        "lemonade": (
+            ("SFE_LEMONADE_DISCOVERY_MODEL", "SFE_ROUTER_MODEL", "SFE_LEMONADE_MODEL"),
+            DEFAULT_LEMONADE_DISCOVERY_MODEL,
+        ),
+        "alibaba": (
+            ("SFE_ALIBABA_DISCOVERY_MODEL", "SFE_ALIBABA_ROUTER_MODEL"),
+            DEFAULT_ALIBABA_ROUTER_MODEL,
+        ),
+        "anthropic": (
+            ("SFE_ANTHROPIC_DISCOVERY_MODEL", "SFE_ANTHROPIC_ROUTER_MODEL"),
+            DEFAULT_ANTHROPIC_ROUTER_MODEL,
+        ),
+        "google": (
+            ("SFE_GOOGLE_DISCOVERY_MODEL", "SFE_GOOGLE_MODEL"),
+            DEFAULT_GOOGLE_MODEL,
+        ),
+        OLLAMA_SFE_PROVIDER: (
+            (
+                "SFE_OLLAMA_DISCOVERY_MODEL",
+                "SFE_OLLAMA_ROUTER_MODEL",
+                "SFE_OLLAMA_MODEL",
+            ),
+            DEFAULT_OLLAMA_MODEL,
+        ),
+    },
+    "executor": {
+        "openai": (("SFE_OPENAI_EXECUTOR_MODEL",), DEFAULT_OPENAI_EXECUTOR_MODEL),
+        "openai-compatible": (
+            ("SFE_OPENAI_EXECUTOR_MODEL",),
+            DEFAULT_OPENAI_EXECUTOR_MODEL,
+        ),
+        CODEXCLI_SFE_PROVIDER: (
+            ("SFE_CODEXCLI_EXECUTOR_MODEL",),
+            DEFAULT_CODEXCLI_EXECUTOR_MODEL,
+        ),
+        "lemonade": (
+            ("SFE_LEMONADE_EXECUTOR_MODEL", "SFE_LEMONADE_MODEL", "SFE_EXECUTOR_MODEL"),
+            DEFAULT_LEMONADE_EXECUTOR_MODEL,
+        ),
+        "alibaba": (("SFE_ALIBABA_EXECUTOR_MODEL",), DEFAULT_ALIBABA_EXECUTOR_MODEL),
+        "anthropic": (
+            ("SFE_ANTHROPIC_EXECUTOR_MODEL",),
+            DEFAULT_ANTHROPIC_EXECUTOR_MODEL,
+        ),
+        "google": (("SFE_GOOGLE_MODEL",), DEFAULT_GOOGLE_MODEL),
+        OLLAMA_SFE_PROVIDER: (
+            ("SFE_OLLAMA_EXECUTOR_MODEL", "SFE_OLLAMA_MODEL"),
+            DEFAULT_OLLAMA_MODEL,
+        ),
+    },
+}
+
+
+def model_summary(role, provider):
+    rules = MODEL_RULES[role].get(provider)
+    if rules is None:
+        return None, None
+    names, default = rules
+    value, source = first_env(names)
+    if value is not None:
+        return value, source
+    return default, "default"
+
+
+load_repo_env(os.environ["SFE_DOCTOR_ENV_PATH"])
+try:
+    shared_provider = resolve_sfe_provider(default="openai")
+    roles = (
+        ("router", resolve_sfe_router_provider(default="openai"), provider_source(SFE_PROVIDER_ROUTER_ENV)),
+        (
+            "discovery",
+            resolve_sfe_discovery_provider(default="openai"),
+            discovery_provider_source(),
+        ),
+        (
+            "executor",
+            resolve_sfe_executor_provider(default="openai"),
+            provider_source(SFE_PROVIDER_EXECUTOR_ENV),
+        ),
+    )
+except ValueError as exc:
+    print(f"STATE\twarn\t{exc}")
+    raise SystemExit(0)
+
+shared_source = provider_source(SFE_PROVIDER_ENV)
+print(f"STATE\tok\tprovider {shared_provider}")
+print(f"DETAIL\tprovider source: {shared_source[0]}={normalize_provider_name(shared_source[1])}")
+for role, provider, source in roles:
+    print(f"DETAIL\t{role} provider: {provider}")
+    print(f"DETAIL\t{role} provider source: {source[0]}={normalize_provider_name(source[1])}")
+    model, model_source = model_summary(role, provider)
+    if model is not None:
+        print(f"DETAIL\t{role} model: {display(model)}")
+        print(f"DETAIL\t{role} model source: {display(model_source)}")
+PY
+    ) || {
+        status "warn" "SFE models" "unable to inspect SFE provider config"
+        return 0
+    }
+
+    render_status_details "$output" "SFE models"
+}
+
 check_aider_config() {
     if [ -z "${PYTHON_FOR_DOCTOR:-}" ]; then
         status "warn" "Aider config" "Python unavailable; skipped"
@@ -211,28 +458,7 @@ PY
         return 0
     }
 
-    state=warn
-    detail="unable to inspect Aider provider config"
-    details=
-    while IFS='	' read -r kind first rest; do
-        if [ "$kind" = "STATE" ]; then
-            state=$first
-            detail=$rest
-        elif [ "$kind" = "DETAIL" ]; then
-            details="${details}${first}
-"
-        fi
-    done <<EOF
-$output
-EOF
-
-    status "$state" "Aider config" "$detail"
-    if [ -n "$details" ]; then
-        printf "%s" "$details" | while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            printf "           %-24s %s\n" "" "$line"
-        done
-    fi
+    render_status_details "$output" "Aider config"
 }
 
 log_header() {
@@ -248,6 +474,7 @@ check_command "Git" "$GIT_BIN" "install Git for repository workflows"
 check_command "Aider" "$AIDER_BIN" "pipx install aider-chat"
 check_env_file
 check_provider
+check_sfe_models
 check_aider_config
 
 printf "\n%s\n" "Doctor completed. Missing items above are next steps, not installer failures."
