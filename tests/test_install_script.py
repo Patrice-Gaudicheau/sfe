@@ -363,6 +363,106 @@ def test_doctor_reports_missing_components_without_crashing(tmp_path: Path) -> N
     assert "[missing]  .env" in result.stdout
 
 
+def test_doctor_warns_when_codexcli_lacks_aider_provider(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "SFE_PROVIDER=codexcli",
+                "OPENAI_API_KEY=SECRET_VALUE_THAT_MUST_NOT_LEAK",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("SFE_")
+        and key
+        not in {
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "ALIBABA_API_KEY",
+        }
+    }
+    env.update(
+        {
+            "SFE_DOCTOR_ENV_PATH": str(env_path),
+            "SFE_DOCTOR_VENV_DIR": str(tmp_path / "missing-venv"),
+            "SFE_DOCTOR_AIDER_BIN": "aider-does-not-exist",
+        }
+    )
+
+    result = subprocess.run(
+        ["/bin/sh", str(DOCTOR_SCRIPT)],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[warn]" in result.stdout
+    assert "Aider config" in result.stdout
+    assert "unsupported_aider_provider" in result.stdout
+    assert "provider source: SFE_PROVIDER=codexcli" in result.stdout
+    assert "Aider cannot use CodexCLI as its LLM backend." in result.stdout
+    assert "SECRET_VALUE_THAT_MUST_NOT_LEAK" not in result.stdout
+    assert "OPENAI_API_KEY=" not in result.stdout
+
+
+def test_doctor_reports_missing_aider_env_names_only(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            [
+                "SFE_PROVIDER=lemonade",
+                "SFE_AIDER_PROVIDER=lemonade",
+                "SFE_LEMONADE_BASE_URL=http://secret-local-host.invalid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("SFE_")
+        and key
+        not in {
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "ALIBABA_API_KEY",
+        }
+    }
+    env.update(
+        {
+            "SFE_DOCTOR_ENV_PATH": str(env_path),
+            "SFE_DOCTOR_VENV_DIR": str(tmp_path / "missing-venv"),
+        }
+    )
+
+    result = subprocess.run(
+        ["/bin/sh", str(DOCTOR_SCRIPT)],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[warn]" in result.stdout
+    assert "Aider config" in result.stdout
+    assert "missing variables: SFE_AIDER_MODEL" in result.stdout
+    assert "openai/Gemma-4-E4B-it-GGUF" in result.stdout
+    assert "http://secret-local-host.invalid" not in result.stdout
+
+
 @pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
 def test_makefile_declares_install_target() -> None:
     result = subprocess.run(

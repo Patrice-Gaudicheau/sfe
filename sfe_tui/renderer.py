@@ -948,6 +948,13 @@ def _render_aider_bridge_diagnostics(diagnostics: dict[str, object]) -> list[str
         "  filesystem bridge provider source: "
         f"{_display_value(diagnostics.get('provider_source_env_var'))}="
         f"{_display_value(diagnostics.get('provider_source_value'))}",
+        "  filesystem bridge model: "
+        f"{_display_value(diagnostics.get('selected_model'))}",
+        "  filesystem bridge model source: "
+        f"{_display_value(diagnostics.get('model_source_env_var'))}="
+        f"{_display_value(diagnostics.get('model_source_value'))}",
+        "  filesystem bridge missing variables: "
+        f"{_format_diagnostic_list(diagnostics.get('missing_variables'))}",
     ]
     ignored_env_var = diagnostics.get("ignored_provider_env_var")
     if ignored_env_var is not None:
@@ -955,6 +962,18 @@ def _render_aider_bridge_diagnostics(diagnostics: dict[str, object]) -> list[str
             "  filesystem bridge ignored provider source: "
             f"{_display_value(ignored_env_var)}="
             f"{_display_value(diagnostics.get('ignored_provider_value'))}"
+        )
+    codexcli_note = diagnostics.get("codexcli_aider_note")
+    if codexcli_note is not None:
+        lines.append(
+            "  filesystem bridge note: "
+            f"{_display_value(codexcli_note)}"
+        )
+    model_guidance = diagnostics.get("model_guidance")
+    if model_guidance is not None:
+        lines.append(
+            "  filesystem bridge model guidance: "
+            f"{_display_value(model_guidance)}"
         )
     return lines
 

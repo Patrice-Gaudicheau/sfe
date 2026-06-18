@@ -49,8 +49,19 @@ Normal `workspace_write` runs use Aider by default:
 SFE_WORKSPACE_WRITE_EXECUTOR=aider
 ```
 
-Leave the variable unset for the default. Set `SFE_AIDER_MODEL` when your SFE
-executor model name is not already a valid Aider/LiteLLM model name.
+Leave the variable unset for the default. Aider cannot use CodexCLI as its LLM
+backend. If `SFE_PROVIDER=codexcli`, set `SFE_AIDER_PROVIDER` to an
+Aider-compatible provider such as `openai`, `anthropic`, `google`, `alibaba`,
+`lemonade`, or `ollama`.
+
+`SFE_AIDER_MODEL` is the explicit model override passed to Aider/LiteLLM. Set it
+when your SFE executor model name is not already a valid Aider/LiteLLM model
+name. For Lemonade, the model may need the OpenAI-compatible prefix:
+
+```env
+SFE_AIDER_PROVIDER=lemonade
+SFE_AIDER_MODEL=openai/Gemma-4-E4B-it-GGUF
+```
 
 The legacy text transport remains available for rollback or debugging:
 

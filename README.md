@@ -148,8 +148,11 @@ SFE_PROVIDER_DISCOVERY=openai
 SFE_PROVIDER_EXECUTOR=anthropic
 ```
 
-For Aider-backed writes, set `SFE_AIDER_MODEL` if your executor model name is
-not already a valid Aider/LiteLLM model name.
+For Aider-backed writes, set `SFE_AIDER_PROVIDER` when SFE itself uses
+`codexcli`; Aider cannot use CodexCLI as its LLM backend. Set
+`SFE_AIDER_MODEL` when your executor model name is not already a valid
+Aider/LiteLLM model name, for example `openai/Gemma-4-E4B-it-GGUF` for
+Lemonade.
 
 See [Configuration](docs/40_CONFIGURATION.md) for provider variables and local
 provider notes.

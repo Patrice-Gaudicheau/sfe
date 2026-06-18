@@ -159,6 +159,82 @@ check_provider() {
     fi
 }
 
+check_aider_config() {
+    if [ -z "${PYTHON_FOR_DOCTOR:-}" ]; then
+        status "warn" "Aider config" "Python unavailable; skipped"
+        return 0
+    fi
+
+    output=$(
+        SFE_DOCTOR_ENV_PATH="$ENV_PATH" "$PYTHON_FOR_DOCTOR" <<'PY' 2>/dev/null
+import os
+
+from sfe.aider_env_bridge import resolve_aider_env_bridge
+from sfe.env import load_repo_env
+
+
+def display(raw):
+    return "unknown" if raw is None else str(raw)
+
+
+load_repo_env(os.environ["SFE_DOCTOR_ENV_PATH"])
+result = resolve_aider_env_bridge()
+diagnostics = result.diagnostics
+state = "ok" if result.ok else "warn"
+detail = (
+    f"provider {result.provider_name}"
+    if result.ok
+    else f"{result.error_category or 'aider_env_bridge_failed'}"
+)
+print(f"STATE\t{state}\t{detail}")
+print(
+    "DETAIL\tprovider source: "
+    f"{display(diagnostics.get('provider_source_env_var'))}="
+    f"{display(diagnostics.get('provider_source_value'))}"
+)
+print(f"DETAIL\tselected model: {display(result.selected_model)}")
+model_source = diagnostics.get("model_source_env_var")
+model_value = diagnostics.get("model_source_value")
+print(f"DETAIL\tmodel source: {display(model_source)}={display(model_value)}")
+missing = tuple(result.missing_variables)
+if missing:
+    print(f"DETAIL\tmissing variables: {', '.join(missing)}")
+note = diagnostics.get("codexcli_aider_note")
+if note:
+    print(f"DETAIL\tnote: {note}")
+guidance = diagnostics.get("model_guidance")
+if guidance:
+    print(f"DETAIL\tmodel guidance: {guidance}")
+PY
+    ) || {
+        status "warn" "Aider config" "unable to inspect Aider provider config"
+        return 0
+    }
+
+    state=warn
+    detail="unable to inspect Aider provider config"
+    details=
+    while IFS='	' read -r kind first rest; do
+        if [ "$kind" = "STATE" ]; then
+            state=$first
+            detail=$rest
+        elif [ "$kind" = "DETAIL" ]; then
+            details="${details}${first}
+"
+        fi
+    done <<EOF
+$output
+EOF
+
+    status "$state" "Aider config" "$detail"
+    if [ -n "$details" ]; then
+        printf "%s" "$details" | while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            printf "           %-24s %s\n" "" "$line"
+        done
+    fi
+}
+
 log_header() {
     printf "%s\n" "SFE doctor"
     printf "%s\n" "----------"
@@ -172,5 +248,6 @@ check_command "Git" "$GIT_BIN" "install Git for repository workflows"
 check_command "Aider" "$AIDER_BIN" "pipx install aider-chat"
 check_env_file
 check_provider
+check_aider_config
 
 printf "\n%s\n" "Doctor completed. Missing items above are next steps, not installer failures."

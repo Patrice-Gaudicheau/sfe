@@ -21,6 +21,15 @@ SFE_AIDER_PROVIDER_ENV = "SFE_AIDER_PROVIDER"
 SFE_AIDER_MODEL_ENV = "SFE_AIDER_MODEL"
 SFE_AIDER_WEAK_MODEL_ENV = "SFE_AIDER_WEAK_MODEL"
 SFE_AIDER_TIMEOUT_SECONDS_ENV = "SFE_AIDER_TIMEOUT_SECONDS"
+CODEXCLI_AIDER_NOTE = (
+    "Aider cannot use CodexCLI as its LLM backend. Set SFE_AIDER_PROVIDER "
+    "to openai, anthropic, google, alibaba, lemonade, or ollama."
+)
+OPENAI_COMPATIBLE_MODEL_GUIDANCE = (
+    "For Lemonade and other OpenAI-compatible Aider providers, the model may "
+    "need the LiteLLM/OpenAI-compatible prefix, for example "
+    "openai/Gemma-4-E4B-it-GGUF."
+)
 
 
 @dataclass(frozen=True)
@@ -81,10 +90,11 @@ def resolve_aider_env_bridge(
             diagnostics_extra=provider_diagnostics,
         )
 
-    selected_model = _resolve_model(provider_name, env)
+    selected_model, model_diagnostics = _resolve_model(provider_name, env)
     selected_weak_model = _env_value(env, SFE_AIDER_WEAK_MODEL_ENV)
     aider_env: dict[str, str] = {}
     missing: list[str] = []
+    diagnostics_extra = {**provider_diagnostics, **model_diagnostics}
 
     if provider_name == "openai":
         _require_env(env, "OPENAI_API_KEY", missing, aider_env, "OPENAI_API_KEY")
@@ -147,7 +157,7 @@ def resolve_aider_env_bridge(
             selected_timeout_seconds=timeout_result,
             missing_variables=(),
             error_category="unsupported_aider_provider",
-            diagnostics_extra=provider_diagnostics,
+            diagnostics_extra={**diagnostics_extra, **_codexcli_aider_diagnostics()},
         )
     else:
         return _result(
@@ -158,11 +168,13 @@ def resolve_aider_env_bridge(
             selected_timeout_seconds=timeout_result,
             missing_variables=(),
             error_category="unsupported_aider_provider",
-            diagnostics_extra=provider_diagnostics,
+            diagnostics_extra=diagnostics_extra,
         )
 
     missing_variables = _dedupe(missing)
     error_category = _error_category_for_missing(missing_variables)
+    if missing_variables and provider_name in {"openai-compatible", "alibaba", "lemonade"}:
+        diagnostics_extra["model_guidance"] = OPENAI_COMPATIBLE_MODEL_GUIDANCE
     return _result(
         provider_name=provider_name,
         aider_env=aider_env,
@@ -171,7 +183,7 @@ def resolve_aider_env_bridge(
         selected_timeout_seconds=timeout_result,
         missing_variables=missing_variables,
         error_category=error_category,
-        diagnostics_extra=provider_diagnostics,
+        diagnostics_extra=diagnostics_extra,
     )
 
 
@@ -199,17 +211,42 @@ def write_temporary_aider_env_file(
                 os.close(fd)
 
 
-def _resolve_model(provider_name: str, env: Mapping[str, str]) -> str | None:
+def _resolve_model(
+    provider_name: str,
+    env: Mapping[str, str],
+) -> tuple[str | None, dict[str, object]]:
     explicit = _env_value(env, SFE_AIDER_MODEL_ENV)
     if explicit is not None:
-        return explicit
+        return explicit, {
+            "model_source_env_var": SFE_AIDER_MODEL_ENV,
+            "model_source_value": explicit,
+        }
     if provider_name == "openai":
-        return _env_value(env, "SFE_OPENAI_EXECUTOR_MODEL")
+        return _model_from_env(env, "SFE_OPENAI_EXECUTOR_MODEL")
     if provider_name == "anthropic":
-        return _env_value(env, "SFE_ANTHROPIC_EXECUTOR_MODEL")
+        return _model_from_env(env, "SFE_ANTHROPIC_EXECUTOR_MODEL")
     if provider_name == "google":
-        return _env_value(env, "SFE_GOOGLE_MODEL")
-    return None
+        return _model_from_env(env, "SFE_GOOGLE_MODEL")
+    return None, {
+        "model_source_env_var": None,
+        "model_source_value": None,
+    }
+
+
+def _model_from_env(
+    env: Mapping[str, str],
+    name: str,
+) -> tuple[str | None, dict[str, object]]:
+    value = _env_value(env, name)
+    if value is None:
+        return None, {
+            "model_source_env_var": None,
+            "model_source_value": None,
+        }
+    return value, {
+        "model_source_env_var": name,
+        "model_source_value": value,
+    }
 
 
 def _resolve_aider_provider(
@@ -237,17 +274,11 @@ def _resolve_aider_provider(
                 "provider_source_env_var": SFE_PROVIDER_EXECUTOR_ENV,
                 "provider_source_value": executor_provider,
             }
-        fallback_result = _resolve_non_codexcli_aider_fallback(env)
-        if isinstance(fallback_result, str):
-            return fallback_result
-        provider, diagnostics = fallback_result
-        diagnostics.update(
-            {
-                "ignored_provider_env_var": SFE_PROVIDER_EXECUTOR_ENV,
-                "ignored_provider_value": executor_provider,
-            }
-        )
-        return provider, diagnostics
+        return provider, {
+            "provider_source_env_var": SFE_PROVIDER_EXECUTOR_ENV,
+            "provider_source_value": executor_provider,
+            **_codexcli_aider_diagnostics(),
+        }
 
     return _resolve_non_codexcli_aider_fallback(env)
 
@@ -266,15 +297,21 @@ def _resolve_non_codexcli_aider_fallback(
                 "provider_source_env_var": SFE_PROVIDER_ENV,
                 "provider_source_value": shared_provider,
             }
-        return "openai", {
-            "provider_source_env_var": "default",
-            "provider_source_value": "openai",
-            "ignored_provider_env_var": SFE_PROVIDER_ENV,
-            "ignored_provider_value": shared_provider,
+        return provider, {
+            "provider_source_env_var": SFE_PROVIDER_ENV,
+            "provider_source_value": shared_provider,
+            **_codexcli_aider_diagnostics(),
         }
     return "openai", {
         "provider_source_env_var": "default",
         "provider_source_value": "openai",
+    }
+
+
+def _codexcli_aider_diagnostics() -> dict[str, object]:
+    return {
+        "codexcli_aider_unsupported": True,
+        "codexcli_aider_note": CODEXCLI_AIDER_NOTE,
     }
 
 

@@ -68,12 +68,34 @@ def test_aider_model_overrides_provider_model() -> None:
     assert result.ok
     assert result.provider_name == "anthropic"
     assert result.selected_model == "aider/main-model"
+    assert result.diagnostics["model_source_env_var"] == "SFE_AIDER_MODEL"
+    assert result.diagnostics["model_source_value"] == "aider/main-model"
 
 
-def test_codexcli_executor_provider_does_not_select_aider_provider() -> None:
+def test_aider_provider_overrides_executor_and_shared_provider() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_AIDER_PROVIDER": "openai",
+            "SFE_PROVIDER_EXECUTOR": "anthropic",
+            "SFE_PROVIDER": "google",
+            "SFE_AIDER_MODEL": "gpt-fixture",
+            "OPENAI_API_KEY": "fixture-openai-key",
+            "ANTHROPIC_API_KEY": "fixture-anthropic-key",
+            "GOOGLE_API_KEY": "fixture-google-key",
+        }
+    )
+
+    assert result.ok
+    assert result.provider_name == "openai"
+    assert result.diagnostics["provider_source_env_var"] == "SFE_AIDER_PROVIDER"
+    assert result.diagnostics["provider_source_value"] == "openai"
+
+
+def test_codexcli_executor_provider_without_aider_provider_fails_closed() -> None:
     result = resolve_aider_env_bridge(
         {
             "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_PROVIDER": "openai",
             "SFE_AIDER_MODEL": "gpt-5.4-mini",
             "SFE_OPENAI_EXECUTOR_MODEL": "gpt-5.4-mini",
             "SFE_CODEXCLI_EXECUTOR_MODEL": "gpt-5.4",
@@ -81,21 +103,24 @@ def test_codexcli_executor_provider_does_not_select_aider_provider() -> None:
         }
     )
 
-    assert result.ok
-    assert result.provider_name == "openai"
-    assert result.selected_model == "gpt-5.4-mini"
-    assert result.aider_env == {"OPENAI_API_KEY": "fixture-openai-key"}
-    assert result.diagnostics["provider_source_env_var"] == "default"
-    assert result.diagnostics["provider_source_value"] == "openai"
-    assert result.diagnostics["ignored_provider_env_var"] == "SFE_PROVIDER_EXECUTOR"
-    assert result.diagnostics["ignored_provider_value"] == "codexcli"
+    assert not result.ok
+    assert result.provider_name == "codexcli"
+    assert result.error_category == "unsupported_aider_provider"
+    assert result.selected_model is None
+    assert result.aider_env == {}
+    assert result.diagnostics["provider_source_env_var"] == "SFE_PROVIDER_EXECUTOR"
+    assert result.diagnostics["provider_source_value"] == "codexcli"
+    assert result.diagnostics["codexcli_aider_unsupported"] is True
+    assert "Aider cannot use CodexCLI" in str(
+        result.diagnostics["codexcli_aider_note"]
+    )
 
 
-def test_codexcli_shared_provider_does_not_select_aider_provider() -> None:
+def test_codexcli_sfe_provider_can_use_explicit_aider_provider() -> None:
     result = resolve_aider_env_bridge(
         {
             "SFE_PROVIDER": "codexcli",
-            "SFE_PROVIDER_EXECUTOR": "codexcli",
+            "SFE_AIDER_PROVIDER": "openai",
             "SFE_AIDER_MODEL": "gpt-5.4-mini",
             "OPENAI_API_KEY": "fixture-openai-key",
         }
@@ -103,9 +128,26 @@ def test_codexcli_shared_provider_does_not_select_aider_provider() -> None:
 
     assert result.ok
     assert result.provider_name == "openai"
-    assert result.selected_model == "gpt-5.4-mini"
-    assert result.diagnostics["ignored_provider_env_var"] == "SFE_PROVIDER_EXECUTOR"
-    assert result.diagnostics["ignored_provider_value"] == "codexcli"
+    assert result.aider_env == {"OPENAI_API_KEY": "fixture-openai-key"}
+    assert result.diagnostics["provider_source_env_var"] == "SFE_AIDER_PROVIDER"
+    assert result.diagnostics["provider_source_value"] == "openai"
+
+
+def test_codexcli_shared_provider_without_aider_provider_fails_closed() -> None:
+    result = resolve_aider_env_bridge(
+        {
+            "SFE_PROVIDER": "codexcli",
+            "SFE_AIDER_MODEL": "gpt-5.4-mini",
+            "OPENAI_API_KEY": "fixture-openai-key",
+        }
+    )
+
+    assert not result.ok
+    assert result.provider_name == "codexcli"
+    assert result.error_category == "unsupported_aider_provider"
+    assert result.diagnostics["provider_source_env_var"] == "SFE_PROVIDER"
+    assert result.diagnostics["provider_source_value"] == "codexcli"
+    assert result.diagnostics["codexcli_aider_unsupported"] is True
 
 
 def test_provider_specific_model_fallbacks() -> None:
@@ -132,8 +174,13 @@ def test_provider_specific_model_fallbacks() -> None:
     )
 
     assert openai.selected_model == "openai-model"
+    assert openai.diagnostics["model_source_env_var"] == "SFE_OPENAI_EXECUTOR_MODEL"
     assert anthropic.selected_model == "claude-fixture"
+    assert anthropic.diagnostics["model_source_env_var"] == (
+        "SFE_ANTHROPIC_EXECUTOR_MODEL"
+    )
     assert google.selected_model == "gemini-fixture"
+    assert google.diagnostics["model_source_env_var"] == "SFE_GOOGLE_MODEL"
 
 
 def test_openai_executor_provider_model_is_used_without_aider_override() -> None:
@@ -243,6 +290,9 @@ def test_alibaba_lemonade_and_ollama_require_explicit_aider_model() -> None:
     assert alibaba.error_category == "missing_aider_model"
     assert lemonade.error_category == "missing_aider_model"
     assert ollama.error_category == "missing_aider_model"
+    assert "openai/Gemma-4-E4B-it-GGUF" in str(
+        lemonade.diagnostics["model_guidance"]
+    )
 
 
 def test_alibaba_maps_to_openai_compatible_when_model_is_explicit() -> None:
@@ -291,6 +341,10 @@ def test_explicit_codexcli_aider_provider_is_unsupported_with_source() -> None:
     assert result.aider_env == {}
     assert result.diagnostics["provider_source_env_var"] == "SFE_AIDER_PROVIDER"
     assert result.diagnostics["provider_source_value"] == "codexcli"
+    assert result.diagnostics["codexcli_aider_unsupported"] is True
+    assert "Aider cannot use CodexCLI" in str(
+        result.diagnostics["codexcli_aider_note"]
+    )
 
 
 def test_timeout_parsing_accepts_positive_and_rejects_invalid() -> None:

@@ -1054,6 +1054,15 @@ def test_run_pipeline_aider_bridge_failure_report_shows_provider_source(
                 "provider_name": "codexcli",
                 "provider_source_env_var": "SFE_AIDER_PROVIDER",
                 "provider_source_value": "codexcli",
+                "selected_model": None,
+                "model_source_env_var": None,
+                "model_source_value": None,
+                "missing_variables": ("SFE_AIDER_PROVIDER",),
+                "codexcli_aider_note": (
+                    "Aider cannot use CodexCLI as its LLM backend. Set "
+                    "SFE_AIDER_PROVIDER to openai, anthropic, google, "
+                    "alibaba, lemonade, or ollama."
+                ),
                 "error_category": "unsupported_aider_provider",
             },
         },
@@ -1075,6 +1084,10 @@ def test_run_pipeline_aider_bridge_failure_report_shows_provider_source(
         "filesystem bridge provider source: SFE_AIDER_PROVIDER=codexcli"
         in rendered
     )
+    assert "filesystem bridge model: unknown" in rendered
+    assert "filesystem bridge model source: unknown=unknown" in rendered
+    assert "filesystem bridge missing variables: SFE_AIDER_PROVIDER" in rendered
+    assert "filesystem bridge note: Aider cannot use CodexCLI as its LLM backend." in rendered
 
 
 def test_run_pipeline_default_aider_no_changes_fails_with_diagnostics(
