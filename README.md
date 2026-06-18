@@ -28,6 +28,41 @@ compared with full-context baselines.
 Second, **output-token** cost can be lowered by delegating execution to a **cheaper model** or more specialized model once the context is already narrow. Savings depend on
 task shape, provider behavior, and model choices.
 
+## SFE: Context Control for AI Coding
+
+SFE avoids the big noisy prompt. It routes the task, selects a bounded relevant context, executes against that context, then verifies the result through a controlled loop.
+
+```mermaid
+flowchart TB
+    %% Compact SFE diagram for GitHub README
+
+    T["User task"] --> R["Router<br/>chooses mode"]
+    R --> D["Discovery<br/>selects context"]
+    W["Full workspace<br/>not sent as-is"] --> D
+    D --> C["Bounded relevant<br/>context only"]
+    C --> E["Executor<br/>modifies files"]
+    E --> V["Real Loop Verifier<br/>checks result"]
+
+    V -->|pass| OK["Completed"]
+    V -->|retry| RT["Targeted retry"]
+    RT --> E
+    V -->|stop| STOP["Stopped<br/>with reason"]
+
+    X["Classic agent<br/>big noisy prompt"] --> Y["SFE<br/>bounded context<br/>verified loop"]
+
+    classDef problem fill:#fff1f2,stroke:#e11d48,stroke-width:2px,color:#3b0a0a
+    classDef core fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#0f172a
+    classDef context fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#052e1a
+    classDef loop fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#3b2600
+    classDef success fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#052e16
+
+    class T,R,D,E,V,Y core
+    class W,C context
+    class RT loop
+    class OK success
+    class X,STOP problem
+```
+
 ## What SFE Does
 
 - Builds a compact project map and selects task-relevant files.
