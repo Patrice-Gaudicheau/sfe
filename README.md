@@ -30,37 +30,34 @@ task shape, provider behavior, and model choices.
 
 ## SFE: Context Control for AI Coding
 
-SFE avoids the big noisy prompt. It routes the task, selects a bounded relevant context, executes against that context, then verifies the result through a controlled loop.
+SFE turns a coding request into a controlled run. It routes the task, selects the relevant files and constraints, gives the executor a bounded working context, and verifies the result before completing.
 
 ```mermaid
 flowchart TB
-    %% Compact SFE diagram for GitHub README
+    T["User task"] --> M["Route task"]
+    M --> D["Find relevant files<br/>and constraints"]
+    D --> B["Bounded working context"]
+    B --> E["Executor edits files"]
+    E --> V["Real Loop verifies"]
 
-    T["User task"] --> R["Router<br/>chooses mode"]
-    R --> D["Discovery<br/>selects context"]
-    W["Full workspace<br/>not sent as-is"] --> D
-    D --> C["Bounded relevant<br/>context only"]
-    C --> E["Executor<br/>modifies files"]
-    E --> V["Real Loop Verifier<br/>checks result"]
+    V -->|passes| OK["Completed run"]
+    V -->|needs retry| R["Targeted retry task"]
+    R --> E
+    V -->|no progress| S["Stop with clear reason"]
 
-    V -->|pass| OK["Completed"]
-    V -->|retry| RT["Targeted retry"]
-    RT --> E
-    V -->|stop| STOP["Stopped<br/>with reason"]
-
-    X["Classic agent<br/>big noisy prompt"] --> Y["SFE<br/>bounded context<br/>verified loop"]
-
-    classDef problem fill:#fff1f2,stroke:#e11d48,stroke-width:2px,color:#3b0a0a
-    classDef core fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#0f172a
+    classDef input fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
+    classDef control fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#0f172a
     classDef context fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#052e1a
     classDef loop fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#3b2600
     classDef success fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#052e16
+    classDef stop fill:#fff1f2,stroke:#e11d48,stroke-width:2px,color:#3b0a0a
 
-    class T,R,D,E,V,Y core
-    class W,C context
-    class RT loop
+    class T input
+    class M,D,V control
+    class B,E context
+    class R loop
     class OK success
-    class X,STOP problem
+    class S stop
 ```
 
 ## What SFE Does
