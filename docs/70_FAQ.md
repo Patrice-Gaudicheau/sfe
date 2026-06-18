@@ -8,7 +8,9 @@ task, selects context, isolates the workspace, and then delegates writing.
 ## Can I use SFE without Aider?
 
 Yes for read-only usage, provider experiments, and some legacy/debug paths. For
-normal `workspace_write` runs, install Aider.
+normal `workspace_write` runs, install Aider. `make install` can offer to run
+`pipx install aider-chat` after confirmation, and `make doctor` reports whether
+Aider is available.
 
 ## Does SFE push changes?
 

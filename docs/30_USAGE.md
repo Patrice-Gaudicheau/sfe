@@ -7,6 +7,7 @@ SFE can be used through the local TUI or the local MCP server.
 Start the TUI:
 
 ```bash
+make doctor
 make sfe-tui
 ```
 
@@ -32,7 +33,8 @@ Common commands:
 
 When `/run` routes a task to `workspace_write`, SFE uses the configured writer
 inside an isolated Git worktree. Aider is the default writer for normal write
-runs.
+runs. If write runs fail before execution, run `make doctor` and check the
+Aider and provider lines first.
 
 Review the resulting Git diff before publishing or pushing changes.
 

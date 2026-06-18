@@ -10,7 +10,11 @@ ASSUME_YES=${SFE_INSTALL_ASSUME_YES:-0}
 ALLOW_UPDATES=${SFE_INSTALL_ALLOW_UPDATES:-0}
 DRY_RUN=${SFE_INSTALL_DRY_RUN:-0}
 SKIP_AIDER=${SFE_INSTALL_SKIP_AIDER:-0}
+INSTALL_AIDER=${SFE_INSTALL_AIDER:-0}
+INSTALL_PIPX=${SFE_INSTALL_PIPX:-0}
 VENV_DIR=${SFE_INSTALL_VENV_DIR:-.venv}
+ENV_PATH=${SFE_INSTALL_ENV_PATH:-.env}
+ENV_EXAMPLE_PATH=${SFE_INSTALL_ENV_EXAMPLE_PATH:-.env.example}
 PYTHON_BIN_OVERRIDE=${SFE_INSTALL_PYTHON_BIN:-}
 AIDER_BIN=${SFE_INSTALL_AIDER_BIN:-aider}
 PIPX_BIN=${SFE_INSTALL_PIPX_BIN:-pipx}
@@ -19,6 +23,7 @@ OS_ID_OVERRIDE=${SFE_INSTALL_OS_ID:-}
 OS_LIKE_OVERRIDE=${SFE_INSTALL_OS_LIKE:-}
 PROC_VERSION_OVERRIDE=${SFE_INSTALL_PROC_VERSION:-}
 PYTHON_BIN_RESOLVED=
+PIPX_BIN_RESOLVED=
 
 log() {
     printf "%s\n" "$*"
@@ -62,6 +67,29 @@ confirm() {
         return 0
     fi
     if ! can_prompt; then
+        return 1
+    fi
+    printf "%s [y/N] " "$prompt"
+    read -r answer || return 1
+    case "$answer" in
+        y|Y|yes|YES)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+confirm_or_enabled() {
+    opt_in_value=$1
+    opt_in_name=$2
+    prompt=$3
+    if is_enabled "$opt_in_value"; then
+        log "$prompt [auto-yes via $opt_in_name=1]"
+        return 0
+    fi
+    if ! can_interactively_prompt; then
         return 1
     fi
     printf "%s [y/N] " "$prompt"
@@ -330,6 +358,33 @@ install_project_dependencies() {
     run_cmd "$venv_python" -m pip install --disable-pip-version-check -e .
 }
 
+ensure_git_available() {
+    git_path=$(find_command git)
+    if [ -n "$git_path" ]; then
+        log "Found Git at $git_path."
+        return 0
+    fi
+
+    warn "Git is not currently available on PATH."
+    log "SFE can still be installed, but normal repository workflows need Git."
+    log "Install Git and rerun \`make doctor\` before using workspace-write runs."
+}
+
+ensure_env_file() {
+    if [ -e "$ENV_PATH" ]; then
+        log "Keeping existing $ENV_PATH file unchanged."
+        return 0
+    fi
+
+    if [ ! -f "$ENV_EXAMPLE_PATH" ]; then
+        warn "$ENV_EXAMPLE_PATH was not found, so $ENV_PATH was not created."
+        return 0
+    fi
+
+    log "Creating $ENV_PATH from $ENV_EXAMPLE_PATH."
+    run_cmd cp "$ENV_EXAMPLE_PATH" "$ENV_PATH"
+}
+
 create_venv() {
     python_bin=$1
     log "+ $python_bin -m venv $VENV_DIR"
@@ -407,22 +462,12 @@ PY
 
 show_aider_help() {
     log "Aider is not currently available on PATH."
-    log "SFE's normal workspace_write flow expects an external Aider install."
-    if is_debian_like || is_wsl; then
-        log "Recommended commands:"
-        log "  pipx install aider-chat"
-        log "  aider --version"
-        log "  which aider"
-        log "If pipx is missing, install it first with:"
-        log "  sudo apt install pipx"
-        log "If ~/.local/bin is not on PATH yet, run:"
-        log "  pipx ensurepath"
-        log "  exec \$SHELL -l"
-    else
-        log "Recommended commands:"
-        log "  pipx install aider-chat"
-        log "  aider --version"
-    fi
+    log "Aider is required for normal SFE workspace_write runs."
+    log "Recommended command:"
+    log "  pipx install aider-chat"
+    log "If ~/.local/bin is not on PATH yet after installation, run:"
+    log "  pipx ensurepath"
+    log "  exec \$SHELL -l"
 }
 
 verify_aider_on_path() {
@@ -435,7 +480,45 @@ verify_aider_on_path() {
         return 0
     fi
     warn "Aider may have installed into a directory that is not on PATH yet."
-    die "Run \`pipx ensurepath\`, open a new shell, and rerun make install."
+    log "Run \`pipx ensurepath\`, open a new shell, and rerun \`make doctor\`."
+    return 1
+}
+
+continue_without_aider() {
+    log "Continuing without Aider."
+    log "Next step for normal workspace_write runs:"
+    log "  pipx install aider-chat"
+    log "Then run:"
+    log "  make doctor"
+}
+
+ensure_pipx_available_for_aider() {
+    PIPX_BIN_RESOLVED=
+    pipx_path=$(find_command "$PIPX_BIN")
+    if [ -n "$pipx_path" ]; then
+        PIPX_BIN_RESOLVED=$pipx_path
+        return 0
+    fi
+
+    log "pipx is not currently available on PATH."
+    log "pipx is the recommended way to install Aider without changing this repository's virtual environment."
+    log "Suggested command:"
+    log "  $PYTHON_BIN -m pip install --user pipx"
+
+    if confirm_or_enabled "$INSTALL_PIPX" "SFE_INSTALL_PIPX" "Install pipx now with \`$PYTHON_BIN -m pip install --user pipx\`?"; then
+        run_cmd "$PYTHON_BIN" -m pip install --user pipx
+        pipx_path=$(find_command "$PIPX_BIN")
+        if [ -n "$pipx_path" ]; then
+            PIPX_BIN_RESOLVED=$pipx_path
+            return 0
+        fi
+        warn "pipx was installed or requested, but '$PIPX_BIN' is not currently on PATH."
+        log "Run \`$PYTHON_BIN -m pipx ensurepath\`, open a new shell, and rerun \`make doctor\`."
+        return 1
+    fi
+
+    log "Leaving pipx uninstalled."
+    return 1
 }
 
 ensure_aider() {
@@ -458,46 +541,22 @@ ensure_aider() {
 
     show_aider_help
 
-    pipx_path=$(find_command "$PIPX_BIN")
-    if [ -n "$pipx_path" ]; then
-        if ! can_prompt; then
-            die "Aider is missing and this session is non-interactive, so no pipx install command was run."
-        fi
-        if ! confirm "Install Aider now with \`$PIPX_BIN install aider-chat\`?"; then
-            die "Aider was left uninstalled. Install it later or rerun with SFE_INSTALL_SKIP_AIDER=1 if you only need the Python package."
-        fi
-        run_cmd "$pipx_path" install aider-chat
-        verify_aider_on_path
+    ensure_pipx_available_for_aider || true
+    pipx_path=$PIPX_BIN_RESOLVED
+    if [ -z "$pipx_path" ]; then
+        continue_without_aider
         return 0
     fi
 
-    if ! is_debian_like && ! is_wsl; then
-        die "pipx is not available. Install pipx, then rerun make install."
-    fi
-
-    if ! can_prompt; then
-        die "pipx and Aider are missing, and this session is non-interactive, so no system install command was run."
-    fi
-
-    if ! confirm "Install pipx now with \`sudo apt install pipx\` so Aider can be installed cleanly?"; then
-        die "pipx was left uninstalled. Install pipx and Aider manually, then rerun make install."
-    fi
-
-    if ! install_apt_packages pipx; then
-        die "pipx could not be installed."
-    fi
-
-    pipx_path=$(find_command "$PIPX_BIN")
-    if [ -z "$pipx_path" ]; then
-        die "pipx still was not found after installation. Open a new shell if PATH changed, then rerun make install."
-    fi
-
-    if ! confirm "Install Aider now with \`$PIPX_BIN install aider-chat\`?"; then
-        die "Aider was left uninstalled. Install it later or rerun with SFE_INSTALL_SKIP_AIDER=1 if you only need the Python package."
+    if ! confirm_or_enabled "$INSTALL_AIDER" "SFE_INSTALL_AIDER" "Install Aider now with \`$PIPX_BIN install aider-chat\`?"; then
+        continue_without_aider
+        return 0
     fi
 
     run_cmd "$pipx_path" install aider-chat
-    verify_aider_on_path
+    if ! verify_aider_on_path; then
+        continue_without_aider
+    fi
 }
 
 ensure_python_available
@@ -510,9 +569,11 @@ if [ -n "$MINIMUM_PYTHON" ]; then
 fi
 check_python_version "$PYTHON_BIN" "$MINIMUM_PYTHON"
 
+ensure_git_available
 ensure_venv "$PYTHON_BIN"
 VENV_PYTHON=$(venv_python_path "$VENV_DIR")
 install_project_dependencies "$VENV_PYTHON"
+ensure_env_file
 ensure_aider
 
 log "SFE install completed."

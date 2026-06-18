@@ -309,7 +309,12 @@ def _resolve_positive_seconds(
     env_name: str,
     default: float,
 ) -> float:
-    raw: float | str = explicit if explicit is not None else os.getenv(env_name, default)
+    if explicit is not None:
+        raw: float | str = explicit
+    else:
+        raw = os.getenv(env_name)
+        if raw is None or raw.strip() == "":
+            raw = default
     return _positive_seconds(raw, env_name)
 
 

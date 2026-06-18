@@ -11,6 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sfe.provider_progress import (
+    DEFAULT_PROVIDER_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_PROVIDER_INTERNAL_HEARTBEAT_SECONDS,
     ProviderCallIdleTimeoutError,
     ProviderCallSupervisor,
     collect_progress_events,
@@ -102,6 +104,19 @@ def test_real_provider_progress_resets_idle_supervision() -> None:
         supervisor.check_idle()
 
     assert events[-1].kind == "idle_timeout"
+
+
+def test_blank_timeout_environment_values_use_defaults(monkeypatch) -> None:
+    monkeypatch.setenv("SFE_PROVIDER_IDLE_TIMEOUT_SECONDS", "")
+    monkeypatch.setenv("SFE_PROVIDER_INTERNAL_HEARTBEAT_SECONDS", "")
+
+    supervisor = ProviderCallSupervisor(provider="fake")
+
+    assert supervisor.idle_timeout_seconds == DEFAULT_PROVIDER_IDLE_TIMEOUT_SECONDS
+    assert (
+        supervisor.internal_heartbeat_seconds
+        == DEFAULT_PROVIDER_INTERNAL_HEARTBEAT_SECONDS
+    )
 
 
 def test_idle_timeout_error_reports_no_provider_output_diagnostics() -> None:

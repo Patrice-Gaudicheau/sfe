@@ -34,8 +34,7 @@ task shape, provider behavior, and model choices.
 ## What SFE Does
 
 - Builds a compact project map and selects task-relevant files.
-- Routes a task to answer-only, workspace-write, or unsupported-external-action
-  modes.
+- Routes a task to read-only answers, isolated code changes, or safe refusal when the request is outside the local workspace.
 - Runs write tasks in isolated Git worktrees before promoting changes.
 - Uses Aider as the default external writer for normal `workspace_write` runs.
 - Exposes the same runtime through a local TUI and an MCP server.
@@ -44,10 +43,14 @@ task shape, provider behavior, and model choices.
 
 Aider is the writer. SFE is the routing and guard layer around it.
 
+Aider already has its own repository map and token controls. SFE does not replace
+that. It adds a pre-execution layer that selects task-specific context, chooses
+the execution mode, and prepares an isolated Git worktree before Aider writes.
+
 Run Aider directly when you already know the files, scope, and write mode. Use
-SFE when you want the tool to select context first, keep read-only answers away
-from write paths, isolate filesystem changes, and produce a compact run report
-before you decide what to keep.
+SFE when you want context selection, model-role separation, read/write routing,
+isolated filesystem changes, and a compact run report before deciding what to
+keep.
 
 ## Quick Install
 
@@ -61,13 +64,15 @@ Requirements:
 git clone git@github.com:Patrice-Gaudicheau/sfe.git
 cd sfe
 make install
+make doctor
 source .venv/bin/activate
 ```
 
 `make install` installs SFE locally in `.venv` with `pip install -e .`. It
-reuses an existing `.venv`. If Python, `python3-venv`, `pipx`, or Aider are
-missing, the script prints the needed commands and only runs external install
-commands after clear confirmation or explicit opt-in environment variables.
+reuses an existing `.venv`, creates `.env` from `.env.example` when needed, and
+never overwrites an existing `.env`. If Aider is missing, the installer can
+install it with `pipx install aider-chat` after confirmation, or you can run
+that command manually.
 
 Manual local install:
 
@@ -79,14 +84,9 @@ python -m pip install -e .
 
 ## First Run
 
-Configure a provider:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`, uncomment one `SFE_PROVIDER`, and fill the required key or local
-provider URL.
+Configure a provider by editing `.env`, uncommenting one `SFE_PROVIDER`, and
+filling the required key or local provider URL. `make doctor` reports whether a
+provider appears configured.
 
 Start the TUI:
 
