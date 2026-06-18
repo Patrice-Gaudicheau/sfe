@@ -61,15 +61,15 @@ Requirements:
 git clone https://github.com/Patrice-Gaudicheau/sfe.git
 cd sfe
 make install
-source .venv/bin/activate
 make doctor
+make sfe-tui
 ```
 
 `make install` installs SFE locally in `.venv` with `pip install -e .`. It
 reuses an existing `.venv`, creates `.env` from `.env.example` when needed, and
 never overwrites an existing `.env`. If Aider is missing, the installer can
 install it with `pipx install aider-chat` after confirmation, or you can run
-that command manually.
+that command manually. Makefile targets use the project virtualenv automatically.
 
 Manual local install:
 
@@ -78,6 +78,9 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
+
+Activating `.venv` is optional when you use the Makefile targets. Use it only
+when running Python commands directly.
 
 ## First Run
 

@@ -31,7 +31,7 @@ git clone https://github.com/Patrice-Gaudicheau/sfe.git
 cd sfe
 make install
 make doctor
-source .venv/bin/activate
+make sfe-tui
 ```
 
 `make install`:
@@ -56,7 +56,7 @@ installer prints a Debian/Ubuntu command suggestion and asks before any `apt`
 command is attempted.
 
 `make doctor` checks the local setup and reports missing pieces without
-changing files.
+changing files. Makefile targets use the project virtualenv automatically.
 
 ## Manual Install
 
@@ -67,6 +67,9 @@ python -m pip install -e .
 ```
 
 Use this if you want to manage all prerequisites yourself.
+
+Activating `.venv` is optional when you use the Makefile targets. Use it only
+when running Python commands directly.
 
 ## Installer Options
 
