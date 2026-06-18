@@ -24,11 +24,10 @@ changes in Git worktrees before promotion.
 
 Instead of sending broad project context into every coding call, SFE narrows the
 executor prompt to the files and constraints that matter for the current task.
-On selected benchmark fixtures, SFE reduced executor input tokens by up to 90%
+On selected benchmark fixtures, SFE **reduced input tokens by up to 90%**
 compared with full-context baselines.
 
-Second, output-token cost can be lowered by delegating execution to a cheaper
-or more specialized model once the context is already narrow. Savings depend on
+Second, **output-token** cost can be lowered by delegating execution to a **cheaper model** or more specialized model once the context is already narrow. Savings depend on
 task shape, provider behavior, and model choices.
 
 ## What SFE Does
