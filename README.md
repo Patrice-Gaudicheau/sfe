@@ -24,7 +24,7 @@ changes in Git worktrees before promotion.
 
 Instead of sending broad project context into every coding call, SFE narrows the
 executor prompt to the files and constraints that matter for the current task.
-On selected benchmark fixtures, SFE **reduced input tokens by up to 90%**
+On selected benchmark fixtures, SFE **reduced executor input tokens by up to 90%**
 compared with full-context baselines.
 
 Second, **output-token** cost can be lowered by delegating execution to a **cheaper model** or more specialized model once the context is already narrow. Savings depend on
@@ -63,8 +63,8 @@ Requirements:
 git clone git@github.com:Patrice-Gaudicheau/sfe.git
 cd sfe
 make install
-make doctor
 source .venv/bin/activate
+make doctor
 ```
 
 `make install` installs SFE locally in `.venv` with `pip install -e .`. It
@@ -125,7 +125,7 @@ SFE is a local developer tool, not a sandbox boundary.
 
 It does provide practical guardrails:
 
-- write tasks run through the `workspace_write` path;
+- write tasks run through the isolated `workspace_write` path;
 - source changes are prepared in `.sfe-worktrees/` before promotion;
 - absolute paths, parent traversal, and internal repository paths are rejected;
 - `.env` and common secret-like files are excluded from normal context loading;
