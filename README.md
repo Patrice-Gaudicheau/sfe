@@ -82,6 +82,25 @@ SFE when you want context selection, model-role separation, read/write routing,
 isolated filesystem changes, and a compact run report before deciding what to
 keep.
 
+## Benchmark snapshot
+
+On controlled benchmark fixtures, SFE showed stronger amortization as context
+size increased.
+
+Router-inclusive input reduction observed:
+
+| Tier | OpenAI | Anthropic | Alibaba/Qwen |
+| --- | ---: | ---: | ---: |
+| `standard` [2k-5k tokens] | 21.71% | 19.09% | 19.77% |
+| `practical` [10k-20k tokens] | 63.40% | 62.01% | 62.29% |
+| `high_context` [20k-50k tokens] | 73.38% | 72.02% | 72.34% |
+| `structural` [50k+ tokens] | 84.08% | 83.63% | 83.57% |
+
+These are controlled observations, not production guarantees.
+
+See [Benchmarks](docs/60_BENCHMARKS.md) for the full provider table,
+executor-visible reductions, and claim boundary.
+
 ## Quick Install
 
 Requirements:
