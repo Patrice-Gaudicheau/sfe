@@ -201,17 +201,6 @@ Lemonade.
 See [Configuration](docs/40_CONFIGURATION.md) for provider variables and local
 provider notes.
 
-## Benchmarks
-
-Controlled benchmark observations show that selected executor context can be
-smaller than full-context baselines on selected fixtures, especially as project
-context grows. Router-inclusive savings are lower because routing has its own
-fixed cost.
-
-These results are not a production guarantee, not a universal token-savings
-claim, and not evidence that SFE should wrap every prompt. See
-[Benchmarks](docs/60_BENCHMARKS.md) for the cautious summary.
-
 ## Documentation
 
 - [Install](docs/20_INSTALL.md)
