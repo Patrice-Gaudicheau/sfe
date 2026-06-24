@@ -36,6 +36,12 @@ inside an isolated Git worktree. Aider is the default writer for normal write
 runs. If write runs fail before execution, run `make doctor` and check the
 Aider and provider lines first.
 
+When Real Loop is enabled and a verifier is available, completed write runs may
+show Real Loop status lines in the result. `/run-report` includes the verifier
+verdict, attempt count, retry-worthiness, stop reason, and per-iteration
+diagnostics. A retry, when allowed, is a targeted correction task and counts
+toward `SFE_REAL_LOOP_MAX_ITERATIONS`.
+
 Review the resulting Git diff before publishing or pushing changes.
 
 ## Answer Tasks

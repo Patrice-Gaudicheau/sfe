@@ -13,6 +13,7 @@ PUBLIC_DOCS = {
     "30_USAGE.md",
     "40_CONFIGURATION.md",
     "50_ARCHITECTURE.md",
+    "55_REAL_LOOP.md",
     "60_BENCHMARKS.md",
     "70_FAQ.md",
 }

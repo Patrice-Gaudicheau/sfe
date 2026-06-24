@@ -66,6 +66,7 @@ flowchart TB
 - Builds a compact project map and selects task-relevant files.
 - Routes a task to read-only answers or isolated code changes. Tasks outside the local workspace are rejected.
 - Runs write tasks in isolated Git worktrees before promoting changes.
+- Can verify completed write runs with bounded Real Loop retries when a verifier is available.
 - Uses Aider as the default external writer for normal `workspace_write` runs.
 - Exposes the same runtime through a local TUI and an MCP server.
 
@@ -161,6 +162,34 @@ Workspace: /path/to/your/project
 5. The configured writer runs inside that isolated workspace.
 6. SFE promotes the resulting changes back to the source repository.
 
+## Real Loop
+
+Real Loop is SFE's bounded verifier path for completed `/run` `workspace_write`
+attempts. After a write run completes, SFE can ask a verifier whether the
+workspace state satisfies the original task. If the verifier reports an
+incomplete or incorrect result and provides a useful correction, SFE may run a
+narrower retry task instead of repeating the original request.
+
+Real Loop does not keep retrying indefinitely. It is limited by
+`SFE_REAL_LOOP_MAX_ITERATIONS`, which counts the original write attempt plus any
+retries. SFE stops on verifier pass, blocked or abort verdicts, no meaningful
+progress, duplicate retry task, repeated failure, a failed retry attempt, or the
+configured attempt limit.
+
+```mermaid
+flowchart LR
+    E["Executor result"] --> V["Verifier"]
+    V -->|pass| C["Complete"]
+    V -->|needs retry| R["Targeted retry task"]
+    R --> E
+    V -->|retry cap, no progress,<br/>duplicate retry, or blocked| S["Stop with reason"]
+```
+
+Real Loop is a guard and recovery path, not a guarantee that the final code is
+correct. Review the final diff before keeping, committing, or publishing changes.
+
+See [Real Loop](docs/55_REAL_LOOP.md) for the current behavior and configuration.
+
 ## Safety Model
 
 SFE is a local developer tool, not a sandbox boundary.
@@ -207,6 +236,7 @@ provider notes.
 - [Usage](docs/30_USAGE.md)
 - [Configuration](docs/40_CONFIGURATION.md)
 - [Architecture](docs/50_ARCHITECTURE.md)
+- [Real Loop](docs/55_REAL_LOOP.md)
 - [Benchmarks](docs/60_BENCHMARKS.md)
 - [FAQ](docs/70_FAQ.md)
 - [Documentation index](docs/10_INDEX.md)
